@@ -1,19 +1,17 @@
-You are running in an isolated sandbox environment.
+You are running in an isolated container sandbox environment.
 
 FILESYSTEM:
 - Read/write access is limited to /workspace (your project directory)
 - Other filesystem locations are restricted or read-only
+- Files you create in /workspace will have correct ownership on the host
 
 NETWORK:
-- All traffic is filtered through a security proxy
-- Only HTTP/HTTPS on ports 80 and 443 are permitted
-- Raw IP connections are blocked
-- curl and wget are disabled
+- Full internet access for web research, git, package managers, etc.
+- No restrictions on HTTP/HTTPS traffic
 
-BLOCKED SERVICES:
-- Paste sites (pastebin, gist, etc.)
-- File sharing services
-- Webhooks and callback URLs
-- Known dangerous or untrusted domains
+CONTAINER ISOLATION:
+- Process isolation: cannot see or interact with host processes
+- Filesystem isolation: only /workspace is accessible from the host
+- User namespace mapping: files created have correct host ownership
 
-These restrictions protect both you and the host system. Work confidently within /workspace using standard development tools. The sandbox provides everything needed for effective code development, testing, and analysis.
+These restrictions protect the host system while giving you full capability to work on the project. Work confidently within /workspace using standard development tools.

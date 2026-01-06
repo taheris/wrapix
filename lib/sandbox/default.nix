@@ -2,23 +2,17 @@
 
 let
   profiles = import ./profiles.nix { inherit pkgs; };
-  blocklist = import ./blocklist.nix;
   claudePackage = pkgs.claude-code;
-  squidConfig = import ./squid.nix { inherit pkgs blocklist; };
   systemPrompt = ./sandbox-prompt.txt;
 
   mkImage = profile: import ./image.nix {
-    inherit pkgs profile claudePackage squidConfig;
+    inherit pkgs profile claudePackage;
   };
 
   isLinux = builtins.elem system [ "x86_64-linux" "aarch64-linux" ];
   isDarwin = system == "aarch64-darwin";
 
-  linuxSandbox = import ./linux {
-    inherit pkgs;
-    initImage = import ./linux/init-image.nix { inherit pkgs; };
-  };
-
+  linuxSandbox = import ./linux { inherit pkgs; };
   darwinSandbox = import ./darwin { inherit pkgs; };
 
   mkSandbox = profile:
