@@ -15,16 +15,16 @@ let
   linuxSandbox = import ./linux { inherit pkgs; };
   darwinSandbox = import ./darwin { inherit pkgs; };
 
-  mkSandbox = profile:
+  mkSandbox = { profile, deployKey ? null }:
     if isLinux then
       linuxSandbox.mkSandbox {
-        inherit profile;
+        inherit profile deployKey;
         profileImage = mkImage profile;
         entrypoint = import ./linux/entrypoint.nix { inherit pkgs systemPrompt; };
       }
     else if isDarwin then
       darwinSandbox.mkSandbox {
-        inherit profile;
+        inherit profile deployKey;
         profileImage = mkImage profile;
         entrypoint = import ./darwin/entrypoint.nix { inherit pkgs systemPrompt; };
       }

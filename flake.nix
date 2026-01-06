@@ -26,15 +26,15 @@
 
         # Ready-to-run sandboxes
         packages = {
-          default = sandboxLib.mkSandbox sandboxLib.profiles.base;
-          wrapix = sandboxLib.mkSandbox sandboxLib.profiles.base;
-          wrapix-rust = sandboxLib.mkSandbox sandboxLib.profiles.rust;
+          default = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+          wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+          wrapix-rust = sandboxLib.mkSandbox { profile = sandboxLib.profiles.rust; };
         };
 
         devShells.default = sandboxLib.mkDevShell {
           packages = with pkgs; [
+            gh
             podman
-            slirp4netns
           ];
         };
 

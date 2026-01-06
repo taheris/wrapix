@@ -40,6 +40,12 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts
 
+    # Git config with SSH command that uses deploy key if DEPLOY_KEY_NAME is set
+    cat > etc/gitconfig << 'GITCONFIG'
+[core]
+    sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
+GITCONFIG
+
     # macOS entrypoint script (for VM use with user creation)
     cat > entrypoint.sh << 'MACOSENTRY'
 #!/bin/bash
