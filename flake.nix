@@ -4,17 +4,19 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    beads.url = "github:steveyegge/beads";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, beads }:
     flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
         };
-        sandboxLib = import ./lib { inherit pkgs system; };
-        testLib = import ./lib/tests { inherit pkgs system; };
+        beadsPackage = beads.packages.${system}.default;
+        sandboxLib = import ./lib { inherit pkgs system beadsPackage; };
+        testLib = import ./lib/tests { inherit pkgs system beadsPackage; };
       in {
         # Library functions for customization
         lib = {

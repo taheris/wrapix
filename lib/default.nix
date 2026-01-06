@@ -1,8 +1,8 @@
-{ pkgs, system }:
+{ pkgs, system, beadsPackage }:
 
 let
   sandbox = import ./sandbox { inherit pkgs system; };
-  profiles = import ./sandbox/profiles.nix { inherit pkgs; };
+  profiles = import ./sandbox/profiles.nix { inherit pkgs beadsPackage; };
 in {
   mkSandbox = profile: sandbox.mkSandbox profile;
 

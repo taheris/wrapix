@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, beadsPackage }:
 
 let
   # Base packages included in ALL profiles
@@ -29,6 +29,7 @@ let
     diffutils
     procps
     rsync
+    beadsPackage
   ];
 
   # Required mounts for ALL profiles
