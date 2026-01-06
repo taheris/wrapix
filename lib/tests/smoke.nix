@@ -1,10 +1,10 @@
 # Smoke tests - pure Nix tests that don't require Podman runtime
-{ pkgs, system }:
+{ pkgs, system, beadsPackage }:
 
 let
   inherit (pkgs) bash claude-code runCommandLocal;
 
-  profiles = import ../sandbox/profiles.nix { inherit pkgs; };
+  profiles = import ../sandbox/profiles.nix { inherit pkgs beadsPackage; };
 
   baseImage = import ../sandbox/image.nix {
     inherit pkgs;
@@ -12,7 +12,7 @@ let
     claudePackage = claude-code;
   };
 
-  sandboxLib = import ../default.nix { inherit pkgs system; };
+  sandboxLib = import ../default.nix { inherit pkgs system beadsPackage; };
   wrapix = sandboxLib.mkSandbox sandboxLib.profiles.base;
 
 in {
