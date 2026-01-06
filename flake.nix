@@ -29,7 +29,10 @@
         };
 
         devShells.default = sandboxLib.mkDevShell {
-          packages = with pkgs; [ podman ];
+          packages = with pkgs; [
+            podman
+            slirp4netns
+          ];
         };
       }
     );

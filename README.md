@@ -53,16 +53,8 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 
 ## Requirements
 
-### Linux
-
-- Podman (rootless)
-- slirp4netns
-- User namespaces enabled
-- subuid/subgid configured:
-  ```
-  # /etc/subuid and /etc/subgid
-  myuser:100000:65536
-  ```
+- [Nix](https://nixos.org/) with flakes enabled
+- [direnv](https://direnv.net/) (automatically provisions Podman, slirp4netns, and other dependencies)
 
 ### macOS
 
