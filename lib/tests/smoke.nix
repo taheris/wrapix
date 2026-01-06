@@ -2,14 +2,17 @@
 { pkgs, system }:
 
 let
+  inherit (builtins) elem hasAttr throw;
+  inherit (pkgs) bash claude-code runCommandLocal;
+
   blocklist = import ../sandbox/blocklist.nix;
   squidConfig = import ../sandbox/squid.nix { inherit pkgs blocklist; };
   profiles = import ../sandbox/profiles.nix { inherit pkgs; };
-  claudePackage = pkgs.claude-code;
 
   baseImage = import ../sandbox/image.nix {
-    inherit pkgs claudePackage squidConfig;
+    inherit pkgs squidConfig;
     profile = profiles.base;
+    claudePackage = claude-code;
   };
 
   initImage = import ../sandbox/linux/init-image.nix { inherit pkgs; };
@@ -19,7 +22,7 @@ let
 
 in {
   # Verify OCI images build and are valid tar archives
-  image-builds = pkgs.runCommandLocal "smoke-image-builds" {} ''
+  image-builds = runCommandLocal "smoke-image-builds" {} ''
     echo "Checking base image..."
     test -f ${baseImage}
     tar -tf ${baseImage} >/dev/null
@@ -33,27 +36,27 @@ in {
   '';
 
   # Verify blocklist structure is valid
-  blocklist = pkgs.runCommandLocal "smoke-blocklist" {} ''
+  blocklist = runCommandLocal "smoke-blocklist" {} ''
     echo "Verifying blocklist categories..."
-    ${if builtins.hasAttr "pastebin_sites" blocklist then "" else builtins.throw "Missing pastebin_sites"}
-    ${if builtins.hasAttr "file_sharing" blocklist then "" else builtins.throw "Missing file_sharing"}
-    ${if builtins.hasAttr "url_shorteners" blocklist then "" else builtins.throw "Missing url_shorteners"}
-    ${if builtins.hasAttr "webhook_sites" blocklist then "" else builtins.throw "Missing webhook_sites"}
-    ${if builtins.hasAttr "code_execution" blocklist then "" else builtins.throw "Missing code_execution"}
-    ${if builtins.hasAttr "risky_tlds" blocklist then "" else builtins.throw "Missing risky_tlds"}
-    ${if builtins.hasAttr "allDomains" blocklist then "" else builtins.throw "Missing allDomains"}
+    ${if hasAttr "pastebin_sites" blocklist then "" else throw "Missing pastebin_sites"}
+    ${if hasAttr "file_sharing" blocklist then "" else throw "Missing file_sharing"}
+    ${if hasAttr "url_shorteners" blocklist then "" else throw "Missing url_shorteners"}
+    ${if hasAttr "webhook_sites" blocklist then "" else throw "Missing webhook_sites"}
+    ${if hasAttr "code_execution" blocklist then "" else throw "Missing code_execution"}
+    ${if hasAttr "risky_tlds" blocklist then "" else throw "Missing risky_tlds"}
+    ${if hasAttr "allDomains" blocklist then "" else throw "Missing allDomains"}
 
     echo "Verifying expected domains are blocked..."
-    ${if builtins.elem "pastebin.com" blocklist.allDomains then "" else builtins.throw "pastebin.com not blocked"}
-    ${if builtins.elem "transfer.sh" blocklist.allDomains then "" else builtins.throw "transfer.sh not blocked"}
-    ${if builtins.elem "webhook.site" blocklist.allDomains then "" else builtins.throw "webhook.site not blocked"}
+    ${if elem "pastebin.com" blocklist.allDomains then "" else throw "pastebin.com not blocked"}
+    ${if elem "transfer.sh" blocklist.allDomains then "" else throw "transfer.sh not blocked"}
+    ${if elem "webhook.site" blocklist.allDomains then "" else throw "webhook.site not blocked"}
 
     echo "Blocklist validation passed"
     mkdir $out
   '';
 
   # Verify squid config files are generated
-  squid-config = pkgs.runCommandLocal "smoke-squid-config" {} ''
+  squid-config = runCommandLocal "smoke-squid-config" {} ''
     echo "Checking squid config files..."
     test -f ${squidConfig}/etc/squid/squid.conf
     test -f ${squidConfig}/etc/squid/blocklist.acl
@@ -70,8 +73,8 @@ in {
   '';
 
   # Verify wrapix script has valid bash syntax
-  script-syntax = pkgs.runCommandLocal "smoke-script-syntax" {
-    nativeBuildInputs = [ pkgs.bash ];
+  script-syntax = runCommandLocal "smoke-script-syntax" {
+    nativeBuildInputs = [ bash ];
   } ''
     echo "Checking bash syntax..."
     bash -n ${wrapix}/bin/wrapix
