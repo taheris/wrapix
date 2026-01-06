@@ -1,7 +1,8 @@
 # Linux kernel for Apple Containerization framework on arm64
 #
-# Builds a minimal kernel with VirtIO support required for running
-# Linux VMs under Apple's Containerization framework.
+# On Darwin, we cannot cross-compile the kernel due to toolchain limitations.
+# Instead, we provide a stub that will fail at runtime with a helpful message.
+# Users need to build the kernel on a Linux machine and provide it separately.
 #
 # Requirements:
 # - Kernel 6.12+ for full VIRTIO_FS support
@@ -13,6 +14,8 @@
 let
   version = "6.12.6";
   majorVersion = "6";
+
+  isDarwin = pkgs.stdenv.isDarwin;
 
   # Kernel configuration for Apple Containerization
   # Based on arm64 defconfig with VirtIO additions for Containerization framework
@@ -384,60 +387,83 @@ let
     CONFIG_EFI_STUB=y
   '';
 
-  # Build the kernel from source
-  kernel = pkgs.linuxManualConfig {
-    inherit version;
+  # Kernel source (extracted to avoid circular dependency with configfile)
+  kernelSrc = pkgs.fetchurl {
+    url = "https://cdn.kernel.org/pub/linux/kernel/v${majorVersion}.x/linux-${version}.tar.xz";
+    hash = "sha256-1FCrIV3k4fi7heD0IWdg+jP9AktFJrFE9M4NkBKynJ4=";
+  };
 
-    src = pkgs.fetchurl {
-      url = "https://cdn.kernel.org/pub/linux/kernel/v${majorVersion}.x/linux-${version}.tar.xz";
-      hash = "sha256-6p5k3hhBT1AJe1Fz6uWkSX5IIXHl6kIbKRNmWGZL43Y=";
-    };
-
-    # Start from arm64 defconfig and merge our custom config
+in
+if isDarwin then
+  # On Darwin, cross-compiling the Linux kernel is not supported due to
+  # toolchain limitations (elfutils, binutils, etc. are Linux-only).
+  # Provide a stub that gives a helpful error at runtime.
+  pkgs.runCommand "wrapix-darwin-kernel-stub" {} ''
+    mkdir -p $out
+    cat > $out/vmlinux << 'EOF'
+#!/bin/sh
+echo "ERROR: Darwin kernel support requires a pre-built kernel."
+echo ""
+echo "Cross-compiling the Linux kernel on macOS is not currently supported."
+echo "To use wrapix on Darwin, you have two options:"
+echo ""
+echo "1. Build the kernel on a Linux machine and copy it to ~/.wrapix/vmlinux"
+echo "2. Use a remote Nix builder with Linux support"
+echo ""
+echo "See: https://github.com/taheris/wrapix/docs/darwin-setup.md"
+exit 1
+EOF
+    chmod +x $out/vmlinux
+  ''
+else
+  # On Linux, build the kernel normally
+  let
+    # Generate kernel config using host tools
     configfile = pkgs.runCommand "kernel-config" {
-      nativeBuildInputs = [ pkgs.flex pkgs.bison pkgs.perl ];
+      nativeBuildInputs = [ pkgs.stdenv.cc pkgs.flex pkgs.bison pkgs.perl pkgs.gnumake ];
     } ''
-      tar -xf ${kernel.src} --strip-components=1 -C .
+      tar -xf ${kernelSrc} --strip-components=1 -C .
       cp ${kernelConfig} .config
 
-      # Generate full config using olddefconfig to fill in missing options
-      make ARCH=arm64 CROSS_COMPILE=${pkgs.stdenv.cc.targetPrefix} olddefconfig
+      # Generate full config using olddefconfig
+      make ARCH=arm64 olddefconfig
 
       cp .config $out
     '';
 
-    # Target arm64
-    extraMeta.platforms = [ "aarch64-darwin" "aarch64-linux" ];
+    # Build the kernel
+    kernel = pkgs.linuxManualConfig {
+      inherit version configfile;
+      src = kernelSrc;
+      extraMeta.platforms = [ "aarch64-linux" "x86_64-linux" ];
+      allowImportFromDerivation = true;
+    };
+  in
+  # Export the kernel Image file
+  pkgs.stdenv.mkDerivation {
+    pname = "wrapix-darwin-kernel";
+    version = version;
 
-    allowImportFromDerivation = true;
-  };
+    src = kernel;
+    dontBuild = true;
+    dontConfigure = true;
 
-in
-# Export the kernel Image file
-pkgs.stdenv.mkDerivation {
-  pname = "wrapix-darwin-kernel";
-  version = version;
+    installPhase = ''
+      mkdir -p $out
+      # The kernel Image is what Apple Containerization expects
+      if [ -f arch/arm64/boot/Image ]; then
+        cp arch/arm64/boot/Image $out/vmlinux
+      elif [ -f vmlinux ]; then
+        cp vmlinux $out/vmlinux
+      else
+        echo "Error: Could not find kernel image"
+        exit 1
+      fi
+    '';
 
-  src = kernel;
-  dontBuild = true;
-  dontConfigure = true;
-
-  installPhase = ''
-    mkdir -p $out
-    # The kernel Image is what Apple Containerization expects
-    if [ -f arch/arm64/boot/Image ]; then
-      cp arch/arm64/boot/Image $out/vmlinux
-    elif [ -f vmlinux ]; then
-      cp vmlinux $out/vmlinux
-    else
-      echo "Error: Could not find kernel image"
-      exit 1
-    fi
-  '';
-
-  meta = with pkgs.lib; {
-    description = "Linux kernel for Apple Containerization framework";
-    license = licenses.gpl2;
-    platforms = [ "aarch64-darwin" "aarch64-linux" ];
-  };
-}
+    meta = with pkgs.lib; {
+      description = "Linux kernel for Apple Containerization framework";
+      license = licenses.gpl2;
+      platforms = [ "aarch64-linux" "x86_64-linux" ];
+    };
+  }
