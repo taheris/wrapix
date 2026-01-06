@@ -62,6 +62,22 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 - Apple Silicon (M1/M2/M3/M4)
 - Xcode 26 CLI tools
 
+## Git Push from Sandbox
+
+The sandbox uses repo-specific deploy keys for secure git push. This keeps your personal SSH keys outside the container.
+
+```bash
+# Run once per repo (from host, not sandbox)
+./scripts/setup-deploy-key owner/repo
+```
+
+This generates an ed25519 key scoped to that single repository, adds it to GitHub with write access, and configures SSH to use it.
+
+**Why deploy keys?**
+- Your personal `~/.ssh` keys stay on the host, never enter the container
+- Each deploy key only works for one repository
+- If compromised, revoke it without affecting other access
+
 ## License
 
 MIT

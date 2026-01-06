@@ -29,6 +29,7 @@ let
     diffutils
     procps
     rsync
+    openssh
     beadsPackage
   ];
 
@@ -38,6 +39,9 @@ let
     { source = "~/.claude.json"; dest = "~/.claude.json"; mode = "rw"; optional = true; }
     { source = "~/.claude.json.backup"; dest = "~/.claude.json.backup"; mode = "rw"; optional = true; }
     { source = "~/.config/git"; dest = "~/.config/git"; mode = "ro"; }
+    # SSH deploy keys (repo-specific, not personal keys) - see scripts/setup-deploy-key
+    { source = "~/.ssh/config"; dest = "~/.ssh/config"; mode = "ro"; optional = true; }
+    { source = "~/.ssh/deploy_keys"; dest = "~/.ssh/deploy_keys"; mode = "ro"; optional = true; }
   ];
 
   # Environment variables for ALL profiles

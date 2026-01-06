@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+#
+# Setup a repo-specific deploy key for secure git push from sandboxed environments.
+#
+# Usage: setup-deploy-key owner/repo
+#
+# This script:
+#   1. Generates an ed25519 key pair scoped to a single repository
+#   2. Adds the public key to GitHub as a deploy key (with write access)
+#   3. Configures SSH to use this key via a host alias
+#   4. Updates the repo's remote URL to use the alias
+#
+# The result is a deploy key that:
+#   - Only works for this specific repository
+#   - Can be safely mounted read-only into containers
+#   - Is separate from your personal SSH keys
+#
+
+set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+Usage: setup-deploy-key <owner/repo> [options]
+
+Setup a repo-specific deploy key for secure git push from sandboxes.
+
+Arguments:
+    owner/repo    GitHub repository (e.g., taheris/wrapix)
+
+Options:
+    -h, --help    Show this help message
+    -f, --force   Overwrite existing key
+
+Example:
+    setup-deploy-key taheris/wrapix
+    cd ~/projects/wrapix
+    setup-deploy-key taheris/wrapix  # Also updates remote in current dir
+EOF
+    exit 0
+}
+
+# Parse arguments
+FORCE=false
+REPO=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help) usage ;;
+        -f|--force) FORCE=true; shift ;;
+        -*) die "unknown option: $1" ;;
+        *)
+            [[ -z "$REPO" ]] || die "unexpected argument: $1"
+            REPO="$1"
+            shift
+            ;;
+    esac
+done
+
+[[ -n "$REPO" ]] || die "missing required argument: owner/repo"
+[[ "$REPO" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || die "invalid repo format: $REPO (expected owner/repo)"
+
+# Check dependencies
+command -v gh >/dev/null || die "gh CLI not found - install from https://cli.github.com"
+command -v ssh-keygen >/dev/null || die "ssh-keygen not found"
+gh auth status >/dev/null 2>&1 || die "gh CLI not authenticated - run 'gh auth login'"
+
+OWNER="${REPO%/*}"
+REPO_NAME="${REPO#*/}"
+HOST_ALIAS="github.com-${OWNER}-${REPO_NAME}"
+KEY_DIR="$HOME/.ssh/deploy_keys/${OWNER}/${REPO_NAME}"
+KEY_PATH="${KEY_DIR}/id_ed25519"
+SSH_CONFIG="$HOME/.ssh/config"
+
+echo "Setting up deploy key for $REPO"
+echo
+
+# Step 1: Generate key pair
+if [[ -f "$KEY_PATH" ]]; then
+    if [[ "$FORCE" == true ]]; then
+        echo "Removing existing key (--force)"
+        rm -f "$KEY_PATH" "$KEY_PATH.pub"
+    else
+        die "key already exists: $KEY_PATH (use --force to overwrite)"
+    fi
+fi
+
+echo "Generating ed25519 key pair..."
+mkdir -p "$KEY_DIR"
+chmod 700 "$KEY_DIR"
+ssh-keygen -t ed25519 -f "$KEY_PATH" -N "" -C "deploy-key-${REPO}" >/dev/null
+chmod 600 "$KEY_PATH"
+chmod 644 "$KEY_PATH.pub"
+echo "  Created: $KEY_PATH"
+
+# Step 2: Add to GitHub
+echo
+echo "Adding deploy key to GitHub..."
+
+# Remove existing deploy key with same name if present
+EXISTING_KEY_ID=$(gh repo deploy-key list -R "$REPO" --json id,title \
+    | jq -r ".[] | select(.title == \"wrapix-sandbox\") | .id" 2>/dev/null || true)
+
+if [[ -n "$EXISTING_KEY_ID" ]]; then
+    echo "  Removing existing 'wrapix-sandbox' deploy key..."
+    gh repo deploy-key delete "$EXISTING_KEY_ID" -R "$REPO"
+fi
+
+gh repo deploy-key add "$KEY_PATH.pub" -R "$REPO" -t "wrapix-sandbox" -w
+echo "  Added public key with write access"
+
+# Step 3: Configure SSH
+echo
+echo "Configuring SSH..."
+
+# Ensure .ssh directory exists
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+touch "$SSH_CONFIG"
+chmod 600 "$SSH_CONFIG"
+
+# Remove existing config block for this host alias
+if grep -q "^Host ${HOST_ALIAS}$" "$SSH_CONFIG" 2>/dev/null; then
+    echo "  Updating existing SSH config for $HOST_ALIAS"
+    # Remove the block (Host line through next Host line or EOF)
+    sed -i.bak "/^Host ${HOST_ALIAS}$/,/^Host /{/^Host ${HOST_ALIAS}$/d;/^Host /!d}" "$SSH_CONFIG"
+    rm -f "$SSH_CONFIG.bak"
+fi
+
+# Add new config block
+cat >> "$SSH_CONFIG" <<EOF
+
+Host ${HOST_ALIAS}
+    HostName github.com
+    User git
+    IdentityFile ${KEY_PATH}
+    IdentitiesOnly yes
+EOF
+echo "  Added SSH config for host alias: $HOST_ALIAS"
+
+# Step 4: Update remote URL if in a git repo for this project
+echo
+if [[ -d .git ]] && git remote get-url origin 2>/dev/null | grep -q "$REPO"; then
+    NEW_URL="git@${HOST_ALIAS}:${REPO}.git"
+    git remote set-url origin "$NEW_URL"
+    echo "Updated origin remote to: $NEW_URL"
+else
+    echo "To use this deploy key, set your remote URL to:"
+    echo "  git remote set-url origin git@${HOST_ALIAS}:${REPO}.git"
+fi
+
+echo
+echo "Done! Deploy key configured for $REPO"
+echo
+echo "Files created:"
+echo "  Private key: $KEY_PATH"
+echo "  Public key:  $KEY_PATH.pub"
+echo "  SSH config:  $SSH_CONFIG (host alias: $HOST_ALIAS)"
