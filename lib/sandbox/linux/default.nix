@@ -42,7 +42,13 @@ let
 
 in
 {
-  mkSandbox = { profile, profileImage, entrypoint }:
+  mkSandbox = { profile, profileImage, entrypoint, deployKey ? null }:
+    let
+      # If deployKey is null, default to basename of project dir at runtime
+      deployKeyExpr = if deployKey != null
+        then ''"${deployKey}"''
+        else ''$(basename "$PROJECT_DIR")'';
+    in
     pkgs.writeShellScriptBin "wrapix" ''
   set -euo pipefail
 
@@ -53,6 +59,15 @@ in
   # Build volume args from profile
   VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
   ${mkMountLines profile}
+
+  # Mount deploy key for this repo (see scripts/setup-deploy-key)
+  DEPLOY_KEY_NAME=${deployKeyExpr}
+  DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+  DEPLOY_KEY_ARGS=""
+  if [ -f "$DEPLOY_KEY" ]; then
+    VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
+    DEPLOY_KEY_ARGS="-e DEPLOY_KEY_NAME=$DEPLOY_KEY_NAME"
+  fi
 
   # Mount .beads tracked files only (not gitignored runtime files like db, socket, daemon)
   # This prevents container bd from interfering with host daemon's SQLite connection
@@ -71,6 +86,7 @@ in
     --userns=keep-id \
     --entrypoint /bin/bash \
     $VOLUME_ARGS \
+    $DEPLOY_KEY_ARGS \
     -e "HOME=/home/$USER" \
     -e "ANTHROPIC_API_KEY=''${ANTHROPIC_API_KEY:-}" \
     -e "WRAPIX_PROMPT=$WRAPIX_PROMPT" \
