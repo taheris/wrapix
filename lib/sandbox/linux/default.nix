@@ -20,8 +20,8 @@
   }
   trap cleanup EXIT SIGINT SIGTERM
 
-  # Create pod with isolated network
-  podman pod create --name "$POD_NAME" --network=slirp4netns
+  # Create pod with isolated network and user namespace mapping
+  podman pod create --name "$POD_NAME" --network=slirp4netns --userns=keep-id
 
   # Init container: set up iptables, exit
   podman run --rm --pod "$POD_NAME" --cap-add=NET_ADMIN docker-archive:${initImage}
@@ -37,7 +37,7 @@
   done
 
   # Claude container: completely unprivileged
-  exec podman run --rm -it --pod "$POD_NAME" --userns=keep-id \
+  exec podman run --rm -it --pod "$POD_NAME" \
     -v "$PROJECT_DIR:/workspace:rw" \
     -v "$HOME/.claude:/home/$USER/.claude:rw" \
     -v "$HOME/.claude.json:/home/$USER/.claude.json:rw" \

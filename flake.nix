@@ -14,6 +14,7 @@
           config.allowUnfree = true;
         };
         sandboxLib = import ./lib { inherit pkgs system; };
+        testLib = import ./lib/tests { inherit pkgs system; };
       in {
         # Library functions for customization
         lib = {
@@ -34,6 +35,9 @@
             slirp4netns
           ];
         };
+
+        # Tests via `nix flake check`
+        checks = testLib.checks;
       }
     );
 }
