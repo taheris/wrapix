@@ -11,22 +11,22 @@
 ## Linux: 3-Container Pod
 
 ```
-┌─ Podman Pod (shared network namespace) ─────────────────────┐
-│                                                             │
-│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐   │
-│  │    Init     │   │    Squid    │   │     Claude      │   │
-│  │  container  │   │   sidecar   │   │    container    │   │
-│  │             │   │             │   │                 │   │
-│  │ • NET_ADMIN │   │ • no caps   │   │ • no caps       │   │
-│  │ • iptables  │   │ • port 3128 │   │ • --userns=keep │   │
-│  │ • exits     │   │ • blocklist │   │ • interactive   │   │
-│  └─────────────┘   └─────────────┘   └─────────────────┘   │
-│         │                 ▲                   │             │
-│         │    iptables     │    all traffic    │             │
-│         └────redirects────┴───────────────────┘             │
-│                                                             │
-│  Network: slirp4netns (isolated from host)                  │
-└─────────────────────────────────────────────────────────────┘
+┌─ Podman Pod (shared network namespace) ─────────────────────────┐
+│                                                                 │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐        │
+│  │    Init     │   │    Squid    │   │     Claude      │        │
+│  │  container  │   │   sidecar   │   │    container    │        │
+│  │             │   │             │   │                 │        │
+│  │ • NET_ADMIN │   │ • no caps   │   │ • no caps       │        │
+│  │ • iptables  │   │ • port 3128 │   │ • --userns=keep │        │
+│  │ • exits     │   │ • blocklist │   │ • interactive   │        │
+│  └─────────────┘   └─────────────┘   └─────────────────┘        │
+│         │                 ▲                   │                 │
+│         │    iptables     │    all traffic    │                 │
+│         └────redirects────┴───────────────────┘                 │
+│                                                                 │
+│  Network: slirp4netns (isolated from host)                      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Why 3 containers?** Security separation. The Claude container never has capabilities - even if compromised, it cannot modify iptables rules.
@@ -34,23 +34,23 @@
 ## macOS: Single VM
 
 ```
-┌─ macOS Host ────────────────────────────────────────────────┐
-│                                                             │
-│  ┌─ Linux VM (Virtualization.framework) ─────────────────┐  │
-│  │                                                       │  │
-│  │  /entrypoint.sh (runs as root, then drops privs):     │  │
-│  │    1. iptables rules (transparent proxy)              │  │
-│  │    2. Start Squid (blocklist filtering)               │  │
-│  │    3. Create user matching host UID                   │  │
-│  │    4. Drop to user, exec Claude                       │  │
-│  │                                                       │  │
-│  │  /workspace ──► virtio-fs mount (project dir)         │  │
-│  │  ~/.cargo/registry ──► virtio-fs mount (ro, cache)    │  │
-│  │                                                       │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  Swift CLI orchestrates VM via Apple Containerization       │
-└─────────────────────────────────────────────────────────────┘
+┌─ macOS Host ─────────────────────────────────────────────────┐
+│                                                              │
+│  ┌─ Linux VM (Virtualization.framework) ──────────────────┐  │
+│  │                                                        │  │
+│  │  /entrypoint.sh (runs as root, then drops privs):      │  │
+│  │    1. iptables rules (transparent proxy)               │  │
+│  │    2. Start Squid (blocklist filtering)                │  │
+│  │    3. Create user matching host UID                    │  │
+│  │    4. Drop to user, exec Claude                        │  │
+│  │                                                        │  │
+│  │  /workspace ──► virtio-fs mount (project dir)          │  │
+│  │  ~/.cargo/registry ──► virtio-fs mount (ro, cache)     │  │
+│  │                                                        │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  Swift CLI orchestrates VM via Apple Containerization        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **Why single entrypoint?** VMs provide strong isolation already. No need for container separation inside VM - simpler architecture.

@@ -17,11 +17,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for design details and security model.
 # Base sandbox in current directory
 nix run github:taheris/wrapix
 
-# Language-specific profile
+# Rust profile
 nix run github:taheris/wrapix#wrapix-rust ~/myproject
-nix run github:taheris/wrapix#wrapix-go ~/myproject
-nix run github:taheris/wrapix#wrapix-python ~/myproject
-nix run github:taheris/wrapix#wrapix-js ~/myproject
 ```
 
 ## Profiles
@@ -30,11 +27,6 @@ nix run github:taheris/wrapix#wrapix-js ~/myproject
 |---------|----------|--------------|
 | base | git, ripgrep, fd, jq, vim | - |
 | rust | rustc, cargo, rust-analyzer | ~/.cargo/{registry,git} |
-| go | go, gopls | ~/go/pkg/mod |
-| python | python, pip, poetry | ~/.cache/{pip,pypoetry,uv} |
-| js | node, npm, yarn, bun | ~/.npm, ~/.yarn, ~/.bun |
-| nix | nix, alejandra | - |
-| devops | docker-cli, kubectl, terraform | ~/.kube, ~/.aws |
 
 ## Custom Profiles
 

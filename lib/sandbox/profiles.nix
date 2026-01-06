@@ -71,45 +71,4 @@ in {
     env = { CARGO_HOME = "/tmp/cargo"; };
   };
 
-  go = mkProfile {
-    name = "go";
-    packages = with pkgs; [ go gopls ];
-    mounts = [
-      { source = "~/go/pkg/mod"; dest = "~/go/pkg/mod"; mode = "ro"; optional = true; }
-    ];
-  };
-
-  python = mkProfile {
-    name = "python";
-    packages = with pkgs; [ python3 python3Packages.pip ];
-    mounts = [
-      { source = "~/.cache/pip"; dest = "~/.cache/pip"; mode = "ro"; optional = true; }
-      { source = "~/.cache/pypoetry"; dest = "~/.cache/pypoetry"; mode = "ro"; optional = true; }
-      { source = "~/.cache/uv"; dest = "~/.cache/uv"; mode = "ro"; optional = true; }
-    ];
-  };
-
-  js = mkProfile {
-    name = "js";
-    packages = with pkgs; [ nodejs yarn ];
-    mounts = [
-      { source = "~/.npm"; dest = "~/.npm"; mode = "ro"; optional = true; }
-      { source = "~/.yarn"; dest = "~/.yarn"; mode = "ro"; optional = true; }
-      { source = "~/.bun"; dest = "~/.bun"; mode = "ro"; optional = true; }
-    ];
-  };
-
-  nix = mkProfile {
-    name = "nix";
-    packages = with pkgs; [ nix alejandra ];
-  };
-
-  devops = mkProfile {
-    name = "devops";
-    packages = with pkgs; [ docker-client kubectl terraform ];
-    mounts = [
-      { source = "~/.kube"; dest = "~/.kube"; mode = "ro"; optional = true; }
-      { source = "~/.aws"; dest = "~/.aws"; mode = "ro"; optional = true; }
-    ];
-  };
 }
