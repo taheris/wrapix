@@ -35,6 +35,7 @@ pkgs.dockerTools.buildLayeredImage {
 
   extraCommands = ''
     mkdir -p tmp home root var/run
+    chmod 1777 tmp
 
     # Set up hosts file (fakeNss handles passwd/group)
     mkdir -p etc
