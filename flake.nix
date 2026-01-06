@@ -23,11 +23,6 @@
           default = sandboxLib.mkSandbox sandboxLib.profiles.base;
           wrapix = sandboxLib.mkSandbox sandboxLib.profiles.base;
           wrapix-rust = sandboxLib.mkSandbox sandboxLib.profiles.rust;
-          wrapix-go = sandboxLib.mkSandbox sandboxLib.profiles.go;
-          wrapix-python = sandboxLib.mkSandbox sandboxLib.profiles.python;
-          wrapix-js = sandboxLib.mkSandbox sandboxLib.profiles.js;
-          wrapix-nix = sandboxLib.mkSandbox sandboxLib.profiles.nix;
-          wrapix-devops = sandboxLib.mkSandbox sandboxLib.profiles.devops;
         };
 
         devShells.default = sandboxLib.mkDevShell {
