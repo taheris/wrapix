@@ -66,12 +66,29 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 
 The sandbox uses repo-specific deploy keys for secure git push. This keeps your personal SSH keys outside the container.
 
+### Setup
+
+Run *one* of the following (on the host, not in sandbox).
+
 ```bash
-# Run once per repo (from host, not sandbox)
-./scripts/setup-deploy-key owner/repo
+./scripts/setup-deploy-key           # Uses repo name as key name
+./scripts/setup-deploy-key mykey     # Custom key name
 ```
 
-This generates an ed25519 key scoped to that single repository, adds it to GitHub with write access, and configures SSH to use it.
+This generates an ed25519 key scoped to this repo, adds it to GitHub with write access, and configures SSH to use it.
+
+### Configure Sandbox
+
+Pass `deployKey` to `mkSandbox` to mount the key:
+
+```nix
+{
+  packages.x86_64-linux.my-sandbox = wrLib.mkSandbox {
+    profile = wrLib.profiles.rust;
+    deployKey = "myproject";  # Matches key name from setup
+  };
+}
+```
 
 **Why deploy keys?**
 - Your personal `~/.ssh` keys stay on the host, never enter the container
