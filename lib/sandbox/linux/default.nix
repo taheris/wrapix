@@ -24,11 +24,11 @@
   podman pod create --name "$POD_NAME" --network=slirp4netns
 
   # Init container: set up iptables, exit
-  podman run --rm --pod "$POD_NAME" --cap-add=NET_ADMIN ${initImage}
+  podman run --rm --pod "$POD_NAME" --cap-add=NET_ADMIN docker-archive:${initImage}
 
   # Squid sidecar: blocklist filtering
   podman run --detach --pod "$POD_NAME" --name "''${POD_NAME}-squid" \
-    ${profileImage} squid -f /etc/squid/squid.conf -N
+    docker-archive:${profileImage} squid -f /etc/squid/squid.conf -N
 
   # Wait for Squid to be ready
   for i in {1..50}; do
@@ -43,6 +43,6 @@
     -v "$HOME/.claude.json:/home/$USER/.claude.json:rw" \
     -v "$HOME/.config/git:/home/$USER/.config/git:ro" \
     -e "ANTHROPIC_API_KEY=''${ANTHROPIC_API_KEY:-}" \
-    ${profileImage} ${entrypoint}/bin/wrapix-entrypoint
+    docker-archive:${profileImage} ${entrypoint}/bin/wrapix-entrypoint
   '';
 }

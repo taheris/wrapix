@@ -6,6 +6,9 @@
 # - Squid proxy and its configuration
 # - CA certificates for HTTPS
 # - macOS entrypoint script for VM use
+#
+# Layer ordering: stable packages first, frequently-changing packages last.
+# This maximizes layer cache hits across rebuilds and profiles.
 { pkgs, profile, claudePackage, squidConfig }:
 
 pkgs.dockerTools.buildLayeredImage {
@@ -37,10 +40,10 @@ pkgs.dockerTools.buildLayeredImage {
   ] ++ (profile.packages or []);
 
   extraCommands = ''
-    mkdir -p etc tmp home root
+    mkdir -p tmp home root var/run var/log/squid var/spool/squid
 
-    # Set up passwd and hosts
-    echo "root:x:0:0:root:/root:/bin/bash" > etc/passwd
+    # Set up hosts file (fakeNss handles passwd/group)
+    mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts
 
     # macOS entrypoint script (for VM use with iptables + Squid + user creation)
