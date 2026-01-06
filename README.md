@@ -4,10 +4,10 @@ Cross-platform sandbox for Claude Code.
 
 ## Overview
 
-A secure sandbox for running Claude Code on Linux and macOS. Network access is filtered through an iptables-enforced transparent proxy that blocks known exfiltration vectors while allowing legitimate development work.
+A secure sandbox for running Claude Code on Linux and macOS. Container isolation provides filesystem and process protection while allowing full network access for web research and development.
 
-- **Linux**: Podman rootless containers (3-container pod pattern)
-- **macOS**: Apple Containerization framework (lightweight VMs)
+- **Linux**: Podman rootless container with user namespace mapping
+- **macOS**: Apple Containerization framework (lightweight VM)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for design details and security model.
 
@@ -23,9 +23,9 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 
 ## Profiles
 
-| Profile | Packages | Cache Mounts |
-|---------|----------|--------------|
-| base | git, ripgrep, fd, jq, vim | - |
+| Profile | Additional Packages | Cache Mounts |
+|---------|---------------------|--------------|
+| base | git, ripgrep, fd, jq, vim, jujutsu, etc. | - |
 | rust | rustc, cargo, rust-analyzer | ~/.cargo/{registry,git} |
 
 ## Custom Profiles
