@@ -4,7 +4,7 @@
 
 {
   # TODO: Add NixOS VM tests for:
-  # - pod-orchestration: Verify pod creation with --userns=keep-id works
-  # - proxy-blocking: Verify Squid blocks pastebin.com, allows github.com
-  # - network-isolation: Verify iptables rules redirect traffic correctly
+  # - container-start: Verify container starts with pasta network
+  # - filesystem-isolation: Verify only /workspace is accessible
+  # - user-namespace: Verify files created have correct host ownership
 }

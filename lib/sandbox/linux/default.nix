@@ -1,48 +1,37 @@
-# Linux sandbox implementation using Podman pod orchestration
+# Linux sandbox implementation using a single container
 #
-# Creates a 3-container pod:
-# 1. Init container (NET_ADMIN cap, sets iptables, exits)
-# 2. Squid sidecar (runs continuously, filters traffic)
-# 3. Claude container (unprivileged, interactive)
+# Container isolation provides:
+# - Filesystem isolation (only /workspace is accessible)
+# - Process isolation (can't see/interact with host processes)
+# - User namespace mapping (files created have correct host ownership)
+#
+# Network is open for web research - container isolation is the security boundary.
 
-{ pkgs, initImage }:
+{ pkgs }:
 
+let
+  systemPrompt = builtins.readFile ../sandbox-prompt.txt;
+in
 {
   mkSandbox = { profile, profileImage, entrypoint }:
     pkgs.writeShellScriptBin "wrapix" ''
   set -euo pipefail
 
   PROJECT_DIR="''${1:-$(pwd)}"
-  POD_NAME="wrapix-$$"
 
-  cleanup() {
-    podman pod rm -f "$POD_NAME" 2>/dev/null || true
-  }
-  trap cleanup EXIT SIGINT SIGTERM
-
-  # Create pod with isolated network and user namespace mapping
-  podman pod create --name "$POD_NAME" --network=slirp4netns --userns=keep-id
-
-  # Init container: set up iptables, exit
-  podman run --rm --pod "$POD_NAME" --cap-add=NET_ADMIN docker-archive:${initImage}
-
-  # Squid sidecar: blocklist filtering
-  podman run --detach --pod "$POD_NAME" --name "''${POD_NAME}-squid" \
-    docker-archive:${profileImage} squid -f /etc/squid/squid.conf -N
-
-  # Wait for Squid to be ready
-  for i in {1..50}; do
-    podman exec "''${POD_NAME}-squid" squid -k check 2>/dev/null && break
-    sleep 0.1
-  done
-
-  # Claude container: completely unprivileged
-  exec podman run --rm -it --pod "$POD_NAME" \
+  WRAPIX_PROMPT='${systemPrompt}'
+  exec podman run --rm -it \
+    --network=pasta \
+    --userns=keep-id \
+    --entrypoint /bin/bash \
     -v "$PROJECT_DIR:/workspace:rw" \
     -v "$HOME/.claude:/home/$USER/.claude:rw" \
     -v "$HOME/.claude.json:/home/$USER/.claude.json:rw" \
     -v "$HOME/.config/git:/home/$USER/.config/git:ro" \
     -e "ANTHROPIC_API_KEY=''${ANTHROPIC_API_KEY:-}" \
-    docker-archive:${profileImage} ${entrypoint}/bin/wrapix-entrypoint
+    -e "WRAPIX_PROMPT=$WRAPIX_PROMPT" \
+    -w /workspace \
+    docker-archive:${profileImage} \
+    -c 'claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"'
   '';
 }
