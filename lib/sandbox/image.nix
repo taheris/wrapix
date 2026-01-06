@@ -42,6 +42,9 @@ pkgs.dockerTools.buildLayeredImage {
 
     # Git config with SSH command that uses deploy key if DEPLOY_KEY_NAME is set
     cat > etc/gitconfig << 'GITCONFIG'
+[user]
+    name = Wrapix Sandbox
+    email = sandbox@wrapix.dev
 [core]
     sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
 GITCONFIG
