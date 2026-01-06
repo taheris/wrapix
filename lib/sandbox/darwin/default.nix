@@ -42,7 +42,7 @@ let
     );
 
 in {
-  mkSandbox = { profile, profileImage, entrypoint }:
+  mkSandbox = { profile, profileImage, entrypoint, deployKey ? null }:
     pkgs.writeShellScriptBin "wrapix" ''
       set -euo pipefail
 
