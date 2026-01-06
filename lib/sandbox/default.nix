@@ -3,7 +3,7 @@
 let
   profiles = import ./profiles.nix { inherit pkgs; };
   blocklist = import ./blocklist.nix;
-  claudePackage = import ./claude-package.nix { inherit pkgs; };
+  claudePackage = pkgs.claude-code;
   squidConfig = import ./squid.nix { inherit pkgs blocklist; };
   systemPrompt = ./sandbox-prompt.txt;
 
