@@ -19,7 +19,7 @@ let
     initImage = import ./linux/init-image.nix { inherit pkgs; };
   };
 
-  # darwinSandbox = import ./darwin { inherit pkgs; };  # Phase 2
+  darwinSandbox = import ./darwin { inherit pkgs; };
 
   mkSandbox = profile:
     if isLinux then
@@ -29,7 +29,11 @@ let
         entrypoint = import ./linux/entrypoint.nix { inherit pkgs systemPrompt; };
       }
     else if isDarwin then
-      throw "macOS support coming in Phase 2"
+      darwinSandbox.mkSandbox {
+        inherit profile;
+        profileImage = mkImage profile;
+        entrypoint = import ./darwin/entrypoint.nix { inherit pkgs systemPrompt; };
+      }
     else
       throw "Unsupported system: ${system}";
 
