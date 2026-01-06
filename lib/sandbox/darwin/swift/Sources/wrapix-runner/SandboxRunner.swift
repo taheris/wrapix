@@ -24,6 +24,9 @@ struct SandboxRunner: AsyncParsableCommand {
     @Option(name: .long, help: "Number of CPUs (default: half of available)")
     var cpus: Int?
 
+    @Option(name: .long, parsing: .upToNextOption, help: "Mounts in source:dest format")
+    var mount: [String] = []
+
     func run() async throws {
         let kernel = Kernel(path: URL(fileURLWithPath: kernelPath))
 
@@ -50,14 +53,18 @@ struct SandboxRunner: AsyncParsableCommand {
                 )
             )
 
-            // Mount Claude config
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
-            config.mounts.append(
-                Mount.share(
-                    source: homeDir.appendingPathComponent(".claude"),
-                    destination: "/home/\(NSUserName())/.claude"
+            // Process mounts from command line
+            for mountSpec in mount {
+                let parts = mountSpec.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+
+                let source = URL(fileURLWithPath: parts[0])
+                guard FileManager.default.fileExists(atPath: source.path) else { continue }
+
+                config.mounts.append(
+                    Mount.share(source: source, destination: parts[1])
                 )
-            )
+            }
 
             // Run entrypoint
             config.process.arguments = ["/entrypoint.sh"]

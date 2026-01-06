@@ -33,8 +33,9 @@ let
 
   # Required mounts for ALL profiles
   baseMounts = [
-    { source = "~/.claude"; dest = "~/.claude"; mode = "rw"; }
-    { source = "~/.claude.json"; dest = "~/.claude.json"; mode = "rw"; }
+    { source = "~/.claude"; dest = "~/.claude"; mode = "rw"; optional = true; }
+    { source = "~/.claude.json"; dest = "~/.claude.json"; mode = "rw"; optional = true; }
+    { source = "~/.claude.json.backup"; dest = "~/.claude.json.backup"; mode = "rw"; optional = true; }
     { source = "~/.config/git"; dest = "~/.config/git"; mode = "ro"; }
   ];
 

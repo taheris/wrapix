@@ -23,6 +23,24 @@ let
   # Build the kernel
   kernel = import ./kernel.nix { inherit pkgs; };
 
+  # Convert ~ paths to shell expressions
+  expandPath = path:
+    if builtins.substring 0 2 path == "~/"
+    then ''$HOME/${builtins.substring 2 (builtins.stringLength path) path}''
+    else path;
+
+  # Convert destination ~ paths to container home
+  expandDest = path:
+    if builtins.substring 0 2 path == "~/"
+    then ''/home/$USER/${builtins.substring 2 (builtins.stringLength path) path}''
+    else path;
+
+  # Generate mount args from profile
+  mkMountArgs = profile:
+    builtins.concatStringsSep " \\\n        " (
+      map (m: ''--mount "${expandPath m.source}:${expandDest m.dest}"'') profile.mounts
+    );
+
 in {
   mkSandbox = { profile, profileImage, entrypoint }:
     pkgs.writeShellScriptBin "wrapix" ''
@@ -37,6 +55,7 @@ in {
       exec ${swiftCli}/bin/wrapix-runner \
         "$PROJECT_DIR" \
         --image-path "$IMAGE_TAR" \
-        --kernel-path ${kernel}/vmlinux
+        --kernel-path ${kernel}/vmlinux \
+        ${mkMountArgs profile}
     '';
 }
