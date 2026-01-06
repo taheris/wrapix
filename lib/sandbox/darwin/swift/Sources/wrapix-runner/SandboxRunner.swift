@@ -18,8 +18,11 @@ struct SandboxRunner: AsyncParsableCommand {
     @Option(name: .long, help: "Path to Linux kernel")
     var kernelPath: String
 
-    @Option(name: .long, help: "Memory in GB")
-    var memory: Int = 8
+    @Option(name: .long, help: "Memory in GB (default: 4)")
+    var memory: Int = 4
+
+    @Option(name: .long, help: "Number of CPUs (default: half of available)")
+    var cpus: Int?
 
     func run() async throws {
         let kernel = Kernel(path: URL(fileURLWithPath: kernelPath))
@@ -32,8 +35,11 @@ struct SandboxRunner: AsyncParsableCommand {
         // Load OCI image
         let imageURL = URL(fileURLWithPath: imagePath)
 
+        // Default to half of available CPUs for efficiency
+        let cpuCount = cpus ?? max(2, ProcessInfo.processInfo.processorCount / 2)
+
         let container = try await manager.create("wrapix") { config in
-            config.cpus = ProcessInfo.processInfo.processorCount
+            config.cpus = cpuCount
             config.memoryInBytes = UInt64(memory) * 1024 * 1024 * 1024
 
             // Mount project directory
