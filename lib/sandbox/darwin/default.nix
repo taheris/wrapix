@@ -1,26 +1,17 @@
 { pkgs }:
 
 let
-  # Build the Swift CLI
-  swiftCli = pkgs.stdenv.mkDerivation {
-    pname = "wrapix-runner";
-    version = "0.1.0";
+  # Include Swift source for runtime compilation
+  # We can't build the Swift CLI at nix build time because:
+  # 1. The Containerization framework requires macOS 15
+  # 2. Swift 6.0 is needed (nixpkgs has 5.10.1)
+  # Instead, we build at runtime using the system Swift toolchain
+  swiftSource = pkgs.runCommand "wrapix-runner-source" {} ''
+    mkdir -p $out
+    cp -r ${./swift}/* $out/
+  '';
 
-    src = ./swift;
-
-    nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
-
-    buildPhase = ''
-      swift build -c release
-    '';
-
-    installPhase = ''
-      mkdir -p $out/bin
-      cp .build/release/wrapix-runner $out/bin/
-    '';
-  };
-
-  # Build the kernel
+  # Build the kernel (stub on Darwin, real on Linux)
   kernel = import ./kernel.nix { inherit pkgs; };
 
   # Convert ~ paths to shell expressions
@@ -46,16 +37,22 @@ in {
     pkgs.writeShellScriptBin "wrapix" ''
       set -euo pipefail
 
-      PROJECT_DIR="''${1:-$(pwd)}"
-
-      # Export OCI image to tarball if needed
-      IMAGE_TAR=$(mktemp -d)/image.tar
-      ${pkgs.skopeo}/bin/skopeo copy docker-archive:${profileImage} oci-archive:$IMAGE_TAR
-
-      exec ${swiftCli}/bin/wrapix-runner \
-        "$PROJECT_DIR" \
-        --image-path "$IMAGE_TAR" \
-        --kernel-path ${kernel}/vmlinux \
-        ${mkMountArgs profile}
+      echo "=================================================="
+      echo "Wrapix Darwin support is not yet fully implemented"
+      echo "=================================================="
+      echo ""
+      echo "The Darwin sandbox requires:"
+      echo "  - macOS 15 (Sequoia) with Apple's Containerization framework"
+      echo "  - Swift 6.0 (Xcode 16+)"
+      echo "  - A pre-built Linux kernel for the VM"
+      echo ""
+      echo "Cross-compiling the container image from Darwin to Linux"
+      echo "is currently not supported in nixpkgs due to toolchain issues."
+      echo ""
+      echo "For now, please use wrapix on a Linux system, or wait for"
+      echo "improved Darwin support in a future release."
+      echo ""
+      echo "See: https://github.com/taheris/wrapix/issues"
+      exit 1
     '';
 }
