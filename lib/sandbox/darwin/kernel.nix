@@ -73,17 +73,20 @@ in
 pkgs.stdenv.mkDerivation {
   pname = "wrapix-darwin-kernel";
   inherit version;
-  src = kernel;
+  dontUnpack = true;
   dontBuild = true;
   dontConfigure = true;
   installPhase = ''
     mkdir -p $out
-    if [ -f arch/arm64/boot/Image ]; then
-      cp arch/arm64/boot/Image $out/vmlinux
-    elif [ -f vmlinux ]; then
-      cp vmlinux $out/vmlinux
+    if [ -f ${kernel}/Image ]; then
+      cp ${kernel}/Image $out/vmlinux
+    elif [ -f ${kernel}/vmlinuz ]; then
+      cp ${kernel}/vmlinuz $out/vmlinux
+    elif [ -f ${kernel}/bzImage ]; then
+      cp ${kernel}/bzImage $out/vmlinux
     else
-      echo "Error: Could not find kernel image"
+      echo "Error: Could not find kernel image in ${kernel}"
+      ls -la ${kernel}/ || true
       exit 1
     fi
   '';
