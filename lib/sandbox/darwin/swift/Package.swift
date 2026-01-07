@@ -6,15 +6,16 @@ let package = Package(
     platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/apple/containerization", from: "0.1.0"),
     ],
     targets: [
         .executableTarget(
             name: "wrapix-runner",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Containerization", package: "containerization"),
             ],
             linkerSettings: [
-                .linkedFramework("Containerization"),
                 .linkedFramework("Virtualization"),
             ]
         ),
