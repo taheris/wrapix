@@ -14,6 +14,16 @@
   claudePackage,
 }:
 
+let
+  # Git config as a separate derivation (avoids permission issues with extraCommands)
+  gitConfig = pkgs.writeTextDir "etc/gitconfig" ''
+    [user]
+        name = Wrapix Sandbox
+        email = sandbox@wrapix.dev
+    [core]
+        sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
+  '';
+in
 pkgs.dockerTools.buildLayeredImage {
   name = "wrapix-${profile.name}";
   tag = "latest";
@@ -35,6 +45,9 @@ pkgs.dockerTools.buildLayeredImage {
 
     # CA certificates
     pkgs.cacert
+
+    # Git config
+    gitConfig
   ]
   ++ (profile.packages or [ ]);
 
@@ -45,15 +58,6 @@ pkgs.dockerTools.buildLayeredImage {
         # Set up hosts file (fakeNss handles passwd/group)
         mkdir -p etc
         echo "127.0.0.1 localhost" > etc/hosts
-
-        # Git config with SSH command that uses deploy key if DEPLOY_KEY_NAME is set
-        cat > etc/gitconfig << 'GITCONFIG'
-    [user]
-        name = Wrapix Sandbox
-        email = sandbox@wrapix.dev
-    [core]
-        sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
-    GITCONFIG
 
         # macOS entrypoint script (for VM use with user creation)
         cat > entrypoint.sh << 'MACOSENTRY'
