@@ -50,40 +50,52 @@ if isLinux then
       hash = "sha256-1FCrIV3k4fi7heD0IWdg+jP9AktFJrFE9M4NkBKynJ4=";
     };
 
-    configfile = pkgs.runCommand "kernel-config" {
-      nativeBuildInputs = [ pkgs.stdenv.cc pkgs.flex pkgs.bison pkgs.perl pkgs.gnumake ];
-    } ''
-      tar -xf ${kernelSrc} --strip-components=1 -C .
-      cp ${kernelConfig} .config
-      make ARCH=arm64 olddefconfig
-      cp .config $out
-    '';
+    configfile =
+      pkgs.runCommand "kernel-config"
+        {
+          nativeBuildInputs = [
+            pkgs.stdenv.cc
+            pkgs.flex
+            pkgs.bison
+            pkgs.perl
+            pkgs.gnumake
+          ];
+        }
+        ''
+          tar -xf ${kernelSrc} --strip-components=1 -C .
+          cp ${kernelConfig} .config
+          make ARCH=arm64 olddefconfig
+          cp .config $out
+        '';
 
     kernel = pkgs.linuxManualConfig {
       inherit version configfile;
       src = kernelSrc;
-      extraMeta.platforms = [ "aarch64-linux" "x86_64-linux" ];
+      extraMeta.platforms = [
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
       allowImportFromDerivation = true;
     };
   in
-    pkgs.stdenv.mkDerivation {
-      pname = "wrapix-darwin-kernel";
-      inherit version;
-      src = kernel;
-      dontBuild = true;
-      dontConfigure = true;
-      installPhase = ''
-        mkdir -p $out
-        if [ -f arch/arm64/boot/Image ]; then
-          cp arch/arm64/boot/Image $out/vmlinux
-        elif [ -f vmlinux ]; then
-          cp vmlinux $out/vmlinux
-        else
-          echo "Error: Could not find kernel image"
-          exit 1
-        fi
-      '';
-    }
+  pkgs.stdenv.mkDerivation {
+    pname = "wrapix-darwin-kernel";
+    inherit version;
+    src = kernel;
+    dontBuild = true;
+    dontConfigure = true;
+    installPhase = ''
+      mkdir -p $out
+      if [ -f arch/arm64/boot/Image ]; then
+        cp arch/arm64/boot/Image $out/vmlinux
+      elif [ -f vmlinux ]; then
+        cp vmlinux $out/vmlinux
+      else
+        echo "Error: Could not find kernel image"
+        exit 1
+      fi
+    '';
+  }
 else
   # On Darwin, provide a script that explains how to get the kernel
   pkgs.writeScriptBin "wrapix-kernel-stub" ''

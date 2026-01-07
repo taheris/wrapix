@@ -13,7 +13,8 @@ let
   swiftToolchain = import ./swift-toolchain.nix { inherit pkgs; };
   swiftSource = ./swift;
 
-in pkgs.stdenv.mkDerivation {
+in
+pkgs.stdenv.mkDerivation {
   pname = "wrapix-runner";
   version = "0.1.0";
 
@@ -46,7 +47,10 @@ in pkgs.stdenv.mkDerivation {
     description = "Run Claude Code in a sandboxed container on macOS";
     homepage = "https://github.com/taheris/wrapix";
     license = licenses.mit;
-    platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+    platforms = [
+      "aarch64-darwin"
+      "x86_64-darwin"
+    ];
     mainProgram = "wrapix-runner";
   };
 }
