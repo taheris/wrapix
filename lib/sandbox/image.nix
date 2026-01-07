@@ -8,7 +8,11 @@
 #
 # Layer ordering: stable packages first, frequently-changing packages last.
 # This maximizes layer cache hits across rebuilds and profiles.
-{ pkgs, profile, claudePackage }:
+{
+  pkgs,
+  profile,
+  claudePackage,
+}:
 
 pkgs.dockerTools.buildLayeredImage {
   name = "wrapix-${profile.name}";
@@ -24,44 +28,45 @@ pkgs.dockerTools.buildLayeredImage {
     # Core utilities
     pkgs.coreutils
     pkgs.bash
-    pkgs.shadow  # for useradd/su
+    pkgs.shadow # for useradd/su
 
     # Claude Code
     claudePackage
 
     # CA certificates
     pkgs.cacert
-  ] ++ (profile.packages or []);
+  ]
+  ++ (profile.packages or [ ]);
 
   extraCommands = ''
-    mkdir -p tmp home root var/run
-    chmod 1777 tmp
+        mkdir -p tmp home root var/run
+        chmod 1777 tmp
 
-    # Set up hosts file (fakeNss handles passwd/group)
-    mkdir -p etc
-    echo "127.0.0.1 localhost" > etc/hosts
+        # Set up hosts file (fakeNss handles passwd/group)
+        mkdir -p etc
+        echo "127.0.0.1 localhost" > etc/hosts
 
-    # Git config with SSH command that uses deploy key if DEPLOY_KEY_NAME is set
-    cat > etc/gitconfig << 'GITCONFIG'
-[user]
-    name = Wrapix Sandbox
-    email = sandbox@wrapix.dev
-[core]
-    sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
-GITCONFIG
+        # Git config with SSH command that uses deploy key if DEPLOY_KEY_NAME is set
+        cat > etc/gitconfig << 'GITCONFIG'
+    [user]
+        name = Wrapix Sandbox
+        email = sandbox@wrapix.dev
+    [core]
+        sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
+    GITCONFIG
 
-    # macOS entrypoint script (for VM use with user creation)
-    cat > entrypoint.sh << 'MACOSENTRY'
-#!/bin/bash
-set -euo pipefail
+        # macOS entrypoint script (for VM use with user creation)
+        cat > entrypoint.sh << 'MACOSENTRY'
+    #!/bin/bash
+    set -euo pipefail
 
-# Create user matching host UID/username
-useradd -u "$HOST_UID" -m "$HOST_USER" 2>/dev/null || true
+    # Create user matching host UID/username
+    useradd -u "$HOST_UID" -m "$HOST_USER" 2>/dev/null || true
 
-# Drop privileges and run Claude Code
-exec su - "$HOST_USER" -c "cd /workspace && claude"
-MACOSENTRY
-    chmod +x entrypoint.sh
+    # Drop privileges and run Claude Code
+    exec su - "$HOST_USER" -c "cd /workspace && claude"
+    MACOSENTRY
+        chmod +x entrypoint.sh
   '';
 
   config = {

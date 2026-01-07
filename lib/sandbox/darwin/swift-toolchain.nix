@@ -18,7 +18,8 @@ let
     hash = "sha256-we2Ez1QyhsVJyqzMR+C0fYxhw8j+284SBd7cvr52Aag=";
   };
 
-in pkgs.stdenv.mkDerivation {
+in
+pkgs.stdenv.mkDerivation {
   pname = "swift-toolchain-bin";
   inherit version;
 
@@ -83,6 +84,9 @@ in pkgs.stdenv.mkDerivation {
     description = "Swift ${version} toolchain for macOS";
     homepage = "https://swift.org";
     license = licenses.asl20;
-    platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+    platforms = [
+      "aarch64-darwin"
+      "x86_64-darwin"
+    ];
   };
 }

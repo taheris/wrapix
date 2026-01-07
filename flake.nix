@@ -3,43 +3,66 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
     beads.url = "github:steveyegge/beads";
   };
 
-  outputs = { self, nixpkgs, flake-utils, beads }:
-    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        };
-        beadsPackage = beads.packages.${system}.default;
-        sandboxLib = import ./lib { inherit pkgs system beadsPackage; };
-        testLib = import ./lib/tests { inherit pkgs system beadsPackage; };
-      in {
-        # Library functions for customization
-        lib = {
-          inherit (sandboxLib) mkSandbox mkDevShell deriveProfile;
-          profiles = sandboxLib.profiles;
-        };
+  outputs =
+    inputs@{ nixpkgs, flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
 
-        # Ready-to-run sandboxes
-        packages = {
-          default = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
-          wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
-          wrapix-rust = sandboxLib.mkSandbox { profile = sandboxLib.profiles.rust; };
-        };
+      perSystem =
+        {
+          pkgs,
+          system,
+          inputs',
+          ...
+        }:
+        let
+          sandboxLib = import ./lib { inherit pkgs system; };
+          testLib = import ./lib/tests {
+            inherit pkgs system;
+            src = ./.;
+          };
+        in
+        {
+          _module.args.pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+            overlays = [ (final: prev: { beads = inputs'.beads.packages.default; }) ];
+          };
 
-        devShells.default = sandboxLib.mkDevShell {
-          packages = with pkgs; [
-            gh
-            podman
-          ];
-        };
+          # Library functions for customization
+          legacyPackages.lib = {
+            inherit (sandboxLib) mkSandbox mkDevShell deriveProfile;
+            profiles = sandboxLib.profiles;
+          };
 
-        # Tests via `nix flake check`
-        checks = testLib.checks;
-      }
-    );
+          # Ready-to-run sandboxes
+          packages = {
+            default = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+            wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+            wrapix-rust = sandboxLib.mkSandbox { profile = sandboxLib.profiles.rust; };
+          };
+
+          devShells.default = sandboxLib.mkDevShell {
+            packages = with pkgs; [
+              gh
+              nixfmt-rfc-style
+              podman
+            ];
+          };
+
+          # Formatter for `nix fmt`
+          formatter = pkgs.nixfmt-rfc-style;
+
+          # Tests via `nix flake check`
+          checks = testLib.checks;
+        };
+    };
 }
