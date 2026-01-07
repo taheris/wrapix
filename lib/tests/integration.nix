@@ -3,46 +3,54 @@
 { pkgs, system }:
 
 let
+  # Use pkgs.hello as stand-in for beads and claude-code in tests
+  testPkgs = pkgs.extend (final: prev: { beads = pkgs.hello; });
+
   # Build the sandbox image for tests
-  profiles = import ../sandbox/profiles.nix { inherit pkgs; beadsPackage = pkgs.hello; };
+  profiles = import ../sandbox/profiles.nix { pkgs = testPkgs; };
   testImage = import ../sandbox/image.nix {
-    inherit pkgs;
+    pkgs = testPkgs;
     profile = profiles.base;
-    claudePackage = pkgs.hello;  # Use hello as a stand-in for claude-code in tests
+    claudePackage = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
   };
 
   # Common VM configuration for all tests
-  commonModule = { config, pkgs, ... }: {
-    virtualisation = {
-      podman.enable = true;
-      # Allocate enough resources for container tests
-      memorySize = 2048;
-      diskSize = 4096;
-      cores = 2;
+  commonModule =
+    { config, pkgs, ... }:
+    {
+      virtualisation = {
+        podman.enable = true;
+        # Allocate enough resources for container tests
+        memorySize = 2048;
+        diskSize = 4096;
+        cores = 2;
+      };
+
+      # Enable pasta network mode for rootless containers
+      environment.systemPackages = with pkgs; [
+        podman
+        slirp4netns
+      ];
+
+      # Allow rootless containers
+      users.users.testuser = {
+        isNormalUser = true;
+        uid = 1000;
+        extraGroups = [ "wheel" ];
+      };
     };
 
-    # Enable pasta network mode for rootless containers
-    environment.systemPackages = with pkgs; [
-      podman
-      slirp4netns
-    ];
-
-    # Allow rootless containers
-    users.users.testuser = {
-      isNormalUser = true;
-      uid = 1000;
-      extraGroups = [ "wheel" ];
-    };
-  };
-
-in {
+in
+{
   # Test 1: Verify container starts with pasta network
   container-start = pkgs.testers.nixosTest {
     name = "wrapix-container-start";
 
-    nodes.machine = { config, pkgs, ... }: {
-      imports = [ commonModule ];
-    };
+    nodes.machine =
+      { config, pkgs, ... }:
+      {
+        imports = [ commonModule ];
+      };
 
     testScript = ''
       machine.wait_for_unit("multi-user.target")
@@ -55,21 +63,24 @@ in {
 
       # Run container with pasta network and verify it starts
       # We use a simple command to verify the container runs
+      # Override entrypoint since we're testing container basics, not the entrypoint
       result = machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "-w /workspace "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"echo container-started && hostname\"'"
+        "-c \"echo container-started\"'"
       )
       assert "container-started" in result, f"Container failed to start: {result}"
 
       # Verify network connectivity (pasta mode provides network access)
       result = machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"cat /etc/hosts | grep localhost\"'"
+        "-c \"cat /etc/hosts | grep localhost\"'"
       )
       assert "localhost" in result, f"Network not configured: {result}"
     '';
@@ -79,9 +90,11 @@ in {
   filesystem-isolation = pkgs.testers.nixosTest {
     name = "wrapix-filesystem-isolation";
 
-    nodes.machine = { config, pkgs, ... }: {
-      imports = [ commonModule ];
-    };
+    nodes.machine =
+      { config, pkgs, ... }:
+      {
+        imports = [ commonModule ];
+      };
 
     testScript = ''
       machine.wait_for_unit("multi-user.target")
@@ -99,31 +112,34 @@ in {
       # Verify workspace IS accessible
       result = machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "-w /workspace "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"cat /workspace/testfile.txt\"'"
+        "-c \"cat /workspace/testfile.txt\"'"
       )
       assert "workspace-content" in result, f"Workspace not accessible: {result}"
 
       # Verify host filesystem is NOT accessible (container should not see /tmp/host-secret.txt)
       # The file exists on host at /tmp/host-secret.txt but container's /tmp is isolated
-      result = machine.execute(
+      exit_code, output = machine.execute(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"cat /tmp/host-secret.txt 2>&1\"'"
+        "-c \"cat /tmp/host-secret.txt 2>&1\"'"
       )
       # Should fail because /tmp/host-secret.txt doesn't exist in container
-      assert result[0] != 0 or "host-secret" not in result[1], \
-        f"Container should not access host /tmp: {result}"
+      assert exit_code != 0 or "host-secret" not in output, \
+        f"Container should not access host /tmp: exit_code={exit_code}, output={output}"
 
       # Verify container cannot access host /etc/passwd content
       container_passwd = machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"cat /etc/passwd\"'"
+        "-c \"cat /etc/passwd\"'"
       )
       # Container uses fakeNss, should not have host users
       assert "testuser" not in container_passwd or "nobody" in container_passwd, \
@@ -135,9 +151,11 @@ in {
   user-namespace = pkgs.testers.nixosTest {
     name = "wrapix-user-namespace";
 
-    nodes.machine = { config, pkgs, ... }: {
-      imports = [ commonModule ];
-    };
+    nodes.machine =
+      { config, pkgs, ... }:
+      {
+        imports = [ commonModule ];
+      };
 
     testScript = ''
       machine.wait_for_unit("multi-user.target")
@@ -151,10 +169,11 @@ in {
       # Create a file inside the container
       machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "-w /workspace "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"echo created-in-container > /workspace/container-file.txt\"'"
+        "-c \"echo created-in-container > /workspace/container-file.txt\"'"
       )
 
       # Verify the file exists on host
@@ -171,10 +190,11 @@ in {
       # Create a subdirectory and verify ownership propagates
       machine.succeed(
         "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
+        "--entrypoint /bin/bash "
         "-v /tmp/workspace:/workspace:rw "
         "-w /workspace "
         "docker-archive:${testImage} "
-        "/bin/bash -c \"mkdir -p /workspace/subdir && echo nested > /workspace/subdir/nested.txt\"'"
+        "-c \"mkdir -p /workspace/subdir && echo nested > /workspace/subdir/nested.txt\"'"
       )
 
       # Verify subdirectory ownership
