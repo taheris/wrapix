@@ -5,7 +5,7 @@
 #
 # Requirements:
 # - macOS 26+ (for Containerization framework)
-# - Xcode 26+ or Swift 6.2+ (to build wrapix-runner)
+# - Xcode 26+ (required for Containerization framework in SDK)
 # - A Linux remote builder (to build the container image and kernel)
 
 { pkgs }:
@@ -18,9 +18,6 @@ let
     mkdir -p $out
     cp -r ${./swift}/* $out/
   '';
-
-  # Swift toolchain from swift.org (fallback if Xcode not available)
-  swiftToolchain = import ./swift-toolchain.nix { inherit pkgs; };
 
   # Linux kernel for the VM (built on Linux remote builder)
   kernel = import ./kernel.nix { inherit pkgs; };
@@ -82,21 +79,21 @@ in
         echo "Building wrapix-runner..."
         mkdir -p "$WRAPIX_DIR/build"
 
-        # Copy source to build directory
+        # Copy source to build directory (make writable for future updates)
+        chmod -R +w "$WRAPIX_DIR/build/wrapix-runner" 2>/dev/null || true
         rm -rf "$WRAPIX_DIR/build/wrapix-runner"
         cp -r "$SWIFT_SOURCE" "$WRAPIX_DIR/build/wrapix-runner"
+        chmod -R +w "$WRAPIX_DIR/build/wrapix-runner"
         cd "$WRAPIX_DIR/build/wrapix-runner"
 
-        # Try Xcode first, then fall back to swift.org toolchain
-        if xcrun --find swift &>/dev/null; then
+        # Try Xcode first (use /usr/bin/xcrun to bypass Nix wrapper)
+        # The Containerization framework requires Xcode 26+ SDK
+        if /usr/bin/xcrun --find swift &>/dev/null; then
           echo "Using Xcode Swift..."
-          swift build -c release
-        elif [ -x "${swiftToolchain}/bin/swift" ]; then
-          echo "Using swift.org toolchain..."
-          "${swiftToolchain}/bin/swift" build -c release \
-            -Xswiftc -sdk -Xswiftc "$(xcrun --show-sdk-path)"
+          /usr/bin/xcrun swift build -c release
         else
-          echo "Error: Swift not found. Install Xcode 26+ or ensure swift.org toolchain is available."
+          echo "Error: Xcode 26+ is required to build wrapix-runner."
+          echo "The Containerization framework is only available in the Xcode SDK."
           exit 1
         fi
 
