@@ -1,5 +1,5 @@
 # Darwin sandbox using Apple Containerization framework (macOS 26+)
-{ pkgs }:
+{ pkgs, linuxPkgs }:
 
 let
   systemPrompt = builtins.readFile ../sandbox-prompt.txt;
@@ -7,7 +7,8 @@ let
     mkdir -p $out
     cp -r ${./swift}/* $out/
   '';
-  kernel = import ./kernel.nix { inherit pkgs; };
+  # Build kernel using Linux packages (via remote builder on Darwin)
+  kernel = import ./kernel.nix { pkgs = linuxPkgs; };
 
   expandPath =
     path:

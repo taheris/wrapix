@@ -33,7 +33,7 @@ let
     };
 
   linuxSandbox = import ./linux { inherit pkgs; };
-  darwinSandbox = import ./darwin { inherit pkgs; };
+  darwinSandbox = import ./darwin { inherit pkgs linuxPkgs; };
 
   mkSandbox =
     {
