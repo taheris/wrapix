@@ -224,16 +224,16 @@ struct SandboxRunner: AsyncParsableCommand {
             }
 
             // Configure NAT networking using VZNATNetworkDeviceAttachment
-            // Note: Full internet access requires vmnet with Apple Developer certificate.
-            // With ad-hoc signing, only gateway connectivity is available.
+            // Full internet access works with ad-hoc signing.
+            // Note: Gateway IP doesn't provide DNS forwarding, so use public DNS servers.
             config.interfaces.append(
                 try NATInterface(
                     ipv4Address: CIDRv4("192.168.64.2/24"),
                     ipv4Gateway: IPv4Address("192.168.64.1")
                 )
             )
-            // Use gateway as DNS
-            config.dns = .init(nameservers: ["192.168.64.1"])
+            // Use public DNS (gateway doesn't provide DNS forwarding)
+            config.dns = .init(nameservers: ["1.1.1.1"])
 
             // Run custom command if provided, otherwise run entrypoint
             if command.isEmpty {
