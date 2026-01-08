@@ -8,6 +8,5 @@ pkgs.writeShellScriptBin "wrapix-entrypoint" ''
 
   exec claude \
     --dangerously-skip-permissions \
-    --disallowedTools "Bash(curl:*),Bash(wget:*)" \
     --append-system-prompt "$PROMPT"
 ''
