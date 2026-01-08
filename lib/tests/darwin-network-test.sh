@@ -62,42 +62,58 @@ else
 fi
 echo ""
 
-# External connectivity tests (informational - requires vmnet with Apple Developer cert)
+# External connectivity tests (informational - VZNATNetworkDeviceAttachment only routes ICMP)
 echo "=== External Connectivity Tests (informational) ==="
-echo "Note: Full internet access requires vmnet with Apple Developer certificate."
+echo "Note: VZNATNetworkDeviceAttachment only routes ICMP, not TCP/UDP."
+echo "      Full internet requires vmnet with Apple Developer certificate."
 echo ""
 
-# Test 5: DNS resolution (informational)
-echo "Test 5: DNS resolution (cloudflare.com)"
-if getent hosts cloudflare.com >/dev/null 2>&1; then
-  echo "  INFO: DNS resolution works"
-  getent hosts cloudflare.com
-elif ping -c 1 -W 3 cloudflare.com >/dev/null 2>&1; then
-  echo "  INFO: DNS resolution works (via ping)"
+# Test 5: Direct IP connectivity via ICMP (verifies NAT routing works)
+echo "Test 5: ICMP connectivity (ping 1.1.1.1)"
+if ping -c 2 -W 5 1.1.1.1 >/dev/null 2>&1; then
+  echo "  PASS: External IP reachable via ICMP"
 else
-  echo "  INFO: DNS resolution not available (expected without vmnet)"
+  echo "  FAIL: Cannot reach external IP 1.1.1.1"
+  ping -c 2 -W 5 1.1.1.1 2>&1 || true
+  FAILED=1
 fi
 echo ""
 
-# Test 6: External connectivity (informational)
-echo "Test 6: External HTTPS connectivity"
+# Test 5b: TCP connectivity (informational - expected to fail without vmnet)
+echo "Test 5b: TCP connectivity (curl http://1.1.1.1)"
 if command -v curl >/dev/null 2>&1; then
-  if curl -sS --connect-timeout 5 --max-time 10 -o /dev/null https://cloudflare.com 2>/dev/null; then
-    echo "  INFO: HTTPS connectivity works"
+  if curl -sS --connect-timeout 5 --max-time 10 -o /dev/null http://1.1.1.1 2>/dev/null; then
+    echo "  INFO: TCP connectivity works (vmnet available)"
   else
-    echo "  INFO: HTTPS not available (expected without vmnet)"
+    echo "  INFO: TCP blocked (expected without vmnet)"
   fi
 else
-  echo "  INFO: curl not available"
+  echo "  SKIP: curl not available"
 fi
 echo ""
 
-# Test 7: Direct IP connectivity (informational)
-echo "Test 7: Direct IP connectivity (1.1.1.1)"
-if ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
-  echo "  INFO: External IP reachable"
+# Test 6: DNS resolution (informational - expected to fail without vmnet)
+echo "Test 6: DNS resolution (cloudflare.com)"
+if getent hosts cloudflare.com >/dev/null 2>&1; then
+  echo "  INFO: DNS resolution works (vmnet available)"
+  getent hosts cloudflare.com
+elif ping -c 1 -W 3 cloudflare.com >/dev/null 2>&1; then
+  echo "  INFO: DNS resolution works (vmnet available)"
 else
-  echo "  INFO: External IP not reachable (expected without vmnet)"
+  echo "  INFO: DNS blocked (expected without vmnet)"
+fi
+echo ""
+
+# Test 7: HTTPS connectivity (informational - expected to fail without vmnet)
+echo "Test 7: External HTTPS connectivity"
+if command -v curl >/dev/null 2>&1; then
+  if curl -sS --connect-timeout 5 --max-time 10 -o /dev/null https://cloudflare.com 2>/dev/null; then
+    echo "  INFO: HTTPS connectivity works (vmnet available)"
+  else
+    echo "  INFO: HTTPS blocked (expected without vmnet)"
+  fi
+else
+  echo "  SKIP: curl not available"
 fi
 echo ""
 
@@ -112,7 +128,7 @@ echo ""
 
 if [ "$FAILED" -eq 0 ]; then
   echo "=== NETWORK TESTS PASSED ==="
-  echo "(Gateway connectivity verified. Full internet requires vmnet with Apple Developer cert.)"
+  echo "(Gateway + ICMP verified. Full internet requires vmnet with Apple Developer cert.)"
   exit 0
 else
   echo "=== NETWORK TESTS FAILED ==="

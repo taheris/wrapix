@@ -224,8 +224,8 @@ struct SandboxRunner: AsyncParsableCommand {
             }
 
             // Configure NAT networking using VZNATNetworkDeviceAttachment
-            // Full internet access works with ad-hoc signing.
-            // Note: Gateway IP doesn't provide DNS forwarding, so use public DNS servers.
+            // WARNING: VZNATNetworkDeviceAttachment only routes ICMP, not TCP/UDP.
+            // Full internet access requires vmnet with Apple Developer certificate.
             config.interfaces.append(
                 try NATInterface(
                     ipv4Address: CIDRv4("192.168.64.2/24"),
