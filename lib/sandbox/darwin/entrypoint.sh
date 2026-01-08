@@ -50,12 +50,13 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
 fi
 
 # Copy modified files/directories back to mount on exit
+# Note: VirtioFS mounts don't support chown/chmod, so we skip owner/group/times preservation
 cleanup() {
     for pair in "${DIR_MOUNT_PAIRS[@]+"${DIR_MOUNT_PAIRS[@]}"}"; do
         src="${pair%%:*}"
         dst="${pair#*:}"
         if [ -d "$dst" ]; then
-            rsync -a --delete "$dst/" "$src/"
+            rsync -rlD --no-owner --no-group --no-times --delete "$dst/" "$src/"
         fi
     done
     for pair in "${FILE_MOUNT_PAIRS[@]+"${FILE_MOUNT_PAIRS[@]}"}"; do

@@ -3,6 +3,7 @@ import Containerization
 import ContainerizationExtras
 import ContainerizationOS
 import Foundation
+import Virtualization
 
 /// Writer that forwards data to a FileHandle (stdout/stderr)
 final class FileHandleWriter: Writer, @unchecked Sendable {
@@ -46,6 +47,183 @@ final class FileHandleReaderStream: ReaderStream, @unchecked Sendable {
     }
 }
 
+/// Network interface using gvproxy for user-mode networking via VZFileHandleNetworkDeviceAttachment.
+/// This provides full TCP/UDP connectivity unlike VZNATNetworkDeviceAttachment (which only routes ICMP).
+struct GvproxyInterface: Interface {
+    var ipv4Address: CIDRv4
+    var ipv4Gateway: IPv4Address?
+    var macAddress: MACAddress?
+
+    /// File handle connected to gvproxy's unixgram socket
+    let networkFileHandle: FileHandle
+
+    init(ipv4Address: CIDRv4, ipv4Gateway: IPv4Address?, macAddress: MACAddress? = nil, networkFileHandle: FileHandle) {
+        self.ipv4Address = ipv4Address
+        self.ipv4Gateway = ipv4Gateway
+        self.macAddress = macAddress
+        self.networkFileHandle = networkFileHandle
+    }
+}
+
+extension GvproxyInterface: VZInterface {
+    func device() throws -> VZVirtioNetworkDeviceConfiguration {
+        let config = VZVirtioNetworkDeviceConfiguration()
+        if let macAddress = self.macAddress {
+            guard let mac = VZMACAddress(string: macAddress.description) else {
+                throw NSError(domain: "GvproxyInterface", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "invalid mac address \(macAddress)"])
+            }
+            config.macAddress = mac
+        }
+        config.attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: networkFileHandle)
+        return config
+    }
+}
+
+/// Manages gvproxy subprocess lifecycle
+final class GvproxyManager {
+    private let process: Process
+    private let socketPath: URL
+    private let vmSocketFd: Int32
+
+    /// File handle for the VM side of the socket pair (to be used with VZFileHandleNetworkDeviceAttachment)
+    let vmFileHandle: FileHandle
+
+    private init(process: Process, socketPath: URL, vmFileHandle: FileHandle, vmSocketFd: Int32) {
+        self.process = process
+        self.socketPath = socketPath
+        self.vmFileHandle = vmFileHandle
+        self.vmSocketFd = vmSocketFd
+    }
+
+    /// Start gvproxy and return a manager instance
+    static func start(gvproxyPath: String, socketDir: URL) throws -> GvproxyManager {
+        let fm = FileManager.default
+        try fm.createDirectory(at: socketDir, withIntermediateDirectories: true)
+
+        // Socket paths for gvproxy
+        let apiSocketPath = socketDir.appendingPathComponent("gvproxy.sock")
+        let vfkitSocketPath = socketDir.appendingPathComponent("vfkit.sock")
+
+        // Remove existing sockets if present
+        try? fm.removeItem(at: apiSocketPath)
+        try? fm.removeItem(at: vfkitSocketPath)
+
+        // Start gvproxy process with vfkit-style unixgram socket
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: gvproxyPath)
+        process.arguments = [
+            "-listen", "unix://\(apiSocketPath.path)",
+            "-listen-vfkit", "unixgram://\(vfkitSocketPath.path)"
+        ]
+        process.environment = ProcessInfo.processInfo.environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        try process.run()
+
+        // Wait for gvproxy to create its socket (with retry)
+        var socketReady = false
+        for _ in 0..<50 {  // Up to 5 seconds
+            usleep(100_000)  // 100ms
+            if fm.fileExists(atPath: vfkitSocketPath.path) {
+                socketReady = true
+                break
+            }
+        }
+
+        guard socketReady else {
+            process.terminate()
+            throw NSError(domain: "GvproxyManager", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "gvproxy failed to create socket at \(vfkitSocketPath.path)"])
+        }
+
+        // Connect to gvproxy's vfkit socket (datagram socket like vfkit)
+        let sock = socket(AF_UNIX, SOCK_DGRAM, 0)
+        guard sock >= 0 else {
+            process.terminate()
+            throw NSError(domain: "GvproxyManager", code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "socket() failed: \(String(cString: strerror(errno)))"])
+        }
+
+        // Bind our socket to a local path (required for datagram sockets so server can reply)
+        let clientSocketPath = socketDir.appendingPathComponent("vm.sock")
+        try? fm.removeItem(at: clientSocketPath)
+
+        var clientAddr = sockaddr_un()
+        clientAddr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutablePointer(to: &clientAddr.sun_path) { ptr in
+            clientSocketPath.path.withCString { cstr in
+                _ = strcpy(UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self), cstr)
+            }
+        }
+
+        let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
+        guard withUnsafePointer(to: &clientAddr, { ptr in
+            bind(sock, UnsafeRawPointer(ptr).assumingMemoryBound(to: sockaddr.self), addrLen)
+        }) == 0 else {
+            close(sock)
+            process.terminate()
+            throw NSError(domain: "GvproxyManager", code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "bind() failed: \(String(cString: strerror(errno)))"])
+        }
+
+        // Connect to gvproxy's socket
+        var serverAddr = sockaddr_un()
+        serverAddr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutablePointer(to: &serverAddr.sun_path) { ptr in
+            vfkitSocketPath.path.withCString { cstr in
+                _ = strcpy(UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self), cstr)
+            }
+        }
+
+        guard withUnsafePointer(to: &serverAddr, { ptr in
+            connect(sock, UnsafeRawPointer(ptr).assumingMemoryBound(to: sockaddr.self), addrLen)
+        }) == 0 else {
+            close(sock)
+            process.terminate()
+            throw NSError(domain: "GvproxyManager", code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "connect() to gvproxy failed: \(String(cString: strerror(errno)))"])
+        }
+
+        // Send vfkit magic handshake "VFKT" (4 ASCII bytes)
+        // This tells gvproxy we're ready to send/receive Ethernet frames
+        let magic = Data("VFKT".utf8)
+        let sent = magic.withUnsafeBytes { ptr in
+            Darwin.write(sock, ptr.baseAddress, 4)
+        }
+        guard sent == 4 else {
+            close(sock)
+            process.terminate()
+            throw NSError(domain: "GvproxyManager", code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "Failed to send vfkit magic handshake"])
+        }
+
+        let vmFileHandle = FileHandle(fileDescriptor: sock, closeOnDealloc: true)
+
+        return GvproxyManager(
+            process: process,
+            socketPath: socketDir,
+            vmFileHandle: vmFileHandle,
+            vmSocketFd: sock
+        )
+    }
+
+    func stop() {
+        process.terminate()
+        process.waitUntilExit()
+
+        // Clean up socket files
+        try? FileManager.default.removeItem(at: socketPath)
+    }
+
+    deinit {
+        if process.isRunning {
+            process.terminate()
+        }
+    }
+}
+
 @main
 struct SandboxRunner: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -77,6 +255,9 @@ struct SandboxRunner: AsyncParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "File mounts in source:dest format (mounted via parent directory)")
     var fileMount: [String] = []
 
+    @Option(name: .long, help: "Path to gvproxy binary for user-mode networking (provides full TCP/UDP)")
+    var gvproxyPath: String?
+
     @Option(name: .long, parsing: .remaining, help: "Custom command to run instead of /entrypoint.sh (for testing)")
     var command: [String] = []
 
@@ -96,6 +277,18 @@ struct SandboxRunner: AsyncParsableCommand {
 
         // Default to half of available CPUs for efficiency
         let cpuCount = cpus ?? max(2, ProcessInfo.processInfo.processorCount / 2)
+
+        // Start gvproxy for user-mode networking (provides full TCP/UDP connectivity)
+        var gvproxyManager: GvproxyManager? = nil
+        if let gvproxyPath = gvproxyPath {
+            let socketDir = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("wrapix-\(ProcessInfo.processInfo.processIdentifier)")
+            gvproxyManager = try GvproxyManager.start(gvproxyPath: gvproxyPath, socketDir: socketDir)
+        }
+
+        defer {
+            gvproxyManager?.stop()
+        }
 
         // Check if we have a TTY for interactive mode
         let hasTTY = isatty(STDIN_FILENO) != 0
@@ -223,17 +416,30 @@ struct SandboxRunner: AsyncParsableCommand {
                 config.process.environmentVariables.append("WRAPIX_FILE_MOUNTS=\(fileMountsEnv)")
             }
 
-            // Configure NAT networking using VZNATNetworkDeviceAttachment
-            // WARNING: VZNATNetworkDeviceAttachment only routes ICMP, not TCP/UDP.
-            // Full internet access requires vmnet with Apple Developer certificate.
-            config.interfaces.append(
-                try NATInterface(
-                    ipv4Address: CIDRv4("192.168.64.2/24"),
-                    ipv4Gateway: IPv4Address("192.168.64.1")
+            // Configure networking
+            if let gvproxyManager = gvproxyManager {
+                // Use gvproxy for full TCP/UDP connectivity
+                // gvproxy defaults: gateway 192.168.127.1, VM IP assigned via DHCP
+                config.interfaces.append(
+                    GvproxyInterface(
+                        ipv4Address: try CIDRv4("192.168.127.2/24"),
+                        ipv4Gateway: try IPv4Address("192.168.127.1"),
+                        networkFileHandle: gvproxyManager.vmFileHandle
+                    )
                 )
-            )
-            // Use public DNS (gateway doesn't provide DNS forwarding)
-            config.dns = .init(nameservers: ["1.1.1.1"])
+                // gvproxy provides DNS at the gateway address
+                config.dns = .init(nameservers: ["192.168.127.1"])
+            } else {
+                // Fallback to NAT networking (WARNING: only routes ICMP, not TCP/UDP)
+                config.interfaces.append(
+                    try NATInterface(
+                        ipv4Address: CIDRv4("192.168.64.2/24"),
+                        ipv4Gateway: IPv4Address("192.168.64.1")
+                    )
+                )
+                // Use public DNS (gateway doesn't provide DNS forwarding)
+                config.dns = .init(nameservers: ["1.1.1.1"])
+            }
 
             // Run custom command if provided, otherwise run entrypoint
             if command.isEmpty {
