@@ -1,7 +1,6 @@
 { pkgs, system }:
 
 let
-  profiles = import ./profiles.nix { inherit pkgs; };
   systemPrompt = ./sandbox-prompt.txt;
 
   isLinux = builtins.elem system [
@@ -21,6 +20,9 @@ let
       }
     else
       pkgs;
+
+  # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
+  profiles = import ./profiles.nix { pkgs = linuxPkgs; };
 
   # Build the container image using Linux packages
   # On Darwin, this will use a remote Linux builder if configured

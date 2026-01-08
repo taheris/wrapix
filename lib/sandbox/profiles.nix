@@ -6,6 +6,7 @@ let
     bash
     beads
     coreutils
+    curl
     diffutils
     fd
     file
@@ -16,6 +17,8 @@ let
     gnused
     gnutar
     gzip
+    iproute2
+    iputils
     jq
     less
     man

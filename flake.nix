@@ -63,6 +63,14 @@
 
           # Tests via `nix flake check`
           checks = testLib.checks;
+
+          # Apps for running tests
+          apps.test-integration = {
+            type = "app";
+            program = "${
+              import ./lib/tests/integration-runner.nix { inherit pkgs system; }
+            }/bin/test-integration";
+          };
         };
     };
 }

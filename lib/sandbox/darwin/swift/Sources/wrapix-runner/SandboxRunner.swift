@@ -223,16 +223,17 @@ struct SandboxRunner: AsyncParsableCommand {
                 config.process.environmentVariables.append("WRAPIX_FILE_MOUNTS=\(fileMountsEnv)")
             }
 
-            // Configure NAT networking (avoids vmnet entitlement requirement)
+            // Configure NAT networking using VZNATNetworkDeviceAttachment
+            // Note: Full internet access requires vmnet with Apple Developer certificate.
+            // With ad-hoc signing, only gateway connectivity is available.
             config.interfaces.append(
                 try NATInterface(
-                    ipv4Address: CIDRv4("10.0.0.2/24"),
-                    ipv4Gateway: IPv4Address("10.0.0.1")
+                    ipv4Address: CIDRv4("192.168.64.2/24"),
+                    ipv4Gateway: IPv4Address("192.168.64.1")
                 )
             )
-
-            // Use public DNS servers (VZ NAT doesn't provide DNS at gateway)
-            config.dns = .init(nameservers: ["1.1.1.1"])
+            // Use gateway as DNS
+            config.dns = .init(nameservers: ["192.168.64.1"])
 
             // Run custom command if provided, otherwise run entrypoint
             if command.isEmpty {

@@ -5,7 +5,6 @@
 
 let
   sandbox = import ./sandbox { inherit pkgs system; };
-  profiles = import ./sandbox/profiles.nix { inherit pkgs; };
 in
 {
   mkSandbox = profile: sandbox.mkSandbox profile;
@@ -33,5 +32,6 @@ in
       '';
     };
 
-  inherit profiles;
+  # Profiles use Linux packages internally - access via sandbox.profiles
+  inherit (sandbox) profiles;
 }
