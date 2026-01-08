@@ -1,5 +1,5 @@
-# Darwin VM mount integration test
-# Tests file and directory mounts work correctly in the VM
+# Darwin VM network integration test
+# Runs actual VM to verify networking works
 #
 # This test will:
 # - Run during `nix flake check` if wrapix infrastructure is set up
@@ -41,14 +41,14 @@ let
   };
 
   # Test script that runs inside the container
-  containerTestScript = ./darwin-mount-test.sh;
+  containerTestScript = ./darwin-network-test.sh;
 
 in
 {
-  # Integration test that runs a VM and tests mounts
+  # Integration test that runs a VM and tests networking
   # Skips gracefully if infrastructure is not available
-  darwin-mount-integration =
-    runCommandLocal "test-darwin-mounts"
+  darwin-network-integration =
+    runCommandLocal "test-darwin-network"
       {
         nativeBuildInputs = [ pkgs.skopeo ];
       }
@@ -77,7 +77,7 @@ in
           exit 0
         fi
 
-        echo "=== Darwin Mount Integration Test ==="
+        echo "=== Darwin Network Integration Test ==="
         echo ""
 
         # Get the real console user
@@ -123,9 +123,13 @@ in
           echo ""
           echo "SKIP: Cannot access containerization storage (running in nix build sandbox)"
           echo ""
-          echo "To run this test manually, use the standalone script:"
-          echo "  nix build .#checks.aarch64-darwin.darwin-mount-integration-script"
-          echo "  ./result/bin/test-darwin-mounts"
+          echo "To run this test manually:"
+          echo "  nix build .#checks.aarch64-darwin.darwin-network-integration"
+          echo "  # Then run outside of nix:"
+          echo "  TEST_IMAGE=wrapix-network-test:latest"
+          echo "  WORKSPACE=\$(mktemp -d)/workspace && mkdir -p \$WORKSPACE"
+          echo "  cp ${containerTestScript} \$WORKSPACE/network-test.sh"
+          echo "  $RUNNER_BIN \$WORKSPACE --image \$TEST_IMAGE --kernel-path $KERNEL_PATH --command /bin/bash /workspace/network-test.sh"
           mkdir -p $out
           exit 0
         fi
@@ -134,7 +138,7 @@ in
         export HOME="$REAL_HOME"
 
         # Check if test image exists or load it
-        TEST_IMAGE="wrapix-mount-test:latest"
+        TEST_IMAGE="wrapix-network-test:latest"
         if ! "$CCTL_BIN" images get "$TEST_IMAGE" >/dev/null 2>&1; then
           echo "Loading test image..."
           OCI_TAR=$(mktemp)
@@ -158,30 +162,13 @@ in
         # Set up test workspace
         WORKSPACE="$TEST_DIR/workspace"
         mkdir -p "$WORKSPACE"
-        echo "workspace-file-content" > "$WORKSPACE/workspace-test.txt"
 
         # Copy the container test script into workspace
-        cp ${containerTestScript} "$WORKSPACE/mount-test.sh"
-        chmod +x "$WORKSPACE/mount-test.sh"
-
-        # Set up test directory mount (simulating ~/.claude)
-        CLAUDE_DIR="$TEST_DIR/claude-config"
-        mkdir -p "$CLAUDE_DIR/mcp"
-        echo '{"test": "settings-value"}' > "$CLAUDE_DIR/settings.json"
-        echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
-
-        # Set up test file mount (simulating ~/.claude.json)
-        CLAUDE_JSON="$TEST_DIR/claude.json"
-        echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON"
+        cp ${containerTestScript} "$WORKSPACE/network-test.sh"
+        chmod +x "$WORKSPACE/network-test.sh"
 
         echo ""
-        echo "Test files created:"
-        echo "  Workspace: $WORKSPACE/workspace-test.txt"
-        echo "  Dir mount: $CLAUDE_DIR/ (with settings.json, mcp/config.json)"
-        echo "  File mount: $CLAUDE_JSON"
-        echo ""
-
-        echo "Running container with test mounts..."
+        echo "Running container with network test..."
         echo ""
 
         # Run the container with our test script
@@ -189,38 +176,19 @@ in
         "$RUNNER_BIN" "$WORKSPACE" \
           --image "$TEST_IMAGE" \
           --kernel-path "$KERNEL_PATH" \
-          --dir-mount "$CLAUDE_DIR:/home/$REAL_USER/.claude" \
-          --file-mount "$CLAUDE_JSON:/home/$REAL_USER/.claude.json" \
-          --command /bin/bash /workspace/mount-test.sh
+          --command /bin/bash /workspace/network-test.sh
         EXIT_CODE=$?
         set -e
 
         echo ""
         echo "Container exit code: $EXIT_CODE"
 
-        # Verify sync-back worked
-        echo ""
-        echo "Verifying sync-back..."
-        if [ -f "$WORKSPACE/container-output.txt" ]; then
-          CONTENT=$(cat "$WORKSPACE/container-output.txt")
-          if [ "$CONTENT" = "container-wrote-this-content" ]; then
-            echo "  PASS: Workspace sync-back worked"
-          else
-            echo "  FAIL: Sync-back content mismatch: $CONTENT"
-            EXIT_CODE=1
-          fi
-        else
-          echo "  FAIL: container-output.txt not synced back"
-          ls -la "$WORKSPACE/"
-          EXIT_CODE=1
-        fi
-
         echo ""
         if [ "$EXIT_CODE" -eq 0 ]; then
-          echo "=== MOUNT INTEGRATION TEST PASSED ==="
+          echo "=== NETWORK INTEGRATION TEST PASSED ==="
           mkdir -p $out
         else
-          echo "=== MOUNT INTEGRATION TEST FAILED ==="
+          echo "=== NETWORK INTEGRATION TEST FAILED ==="
           exit 1
         fi
       '';

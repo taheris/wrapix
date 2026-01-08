@@ -19,6 +19,9 @@ let
   # Darwin mount tests run on all platforms (test logic, not VM)
   darwinMountTests = import ./darwin-mounts.nix { inherit pkgs system; };
 
+  # Darwin network tests run on all platforms (test logic, not VM)
+  darwinNetworkTests = import ./darwin-network.nix { inherit pkgs system; };
+
   # Integration tests require NixOS VM (Linux only with KVM)
   integrationTests = if isLinux then import ./integration.nix { inherit pkgs system; } else { };
 
@@ -27,10 +30,11 @@ let
 
 in
 {
-  checks = smokeTests // darwinMountTests // integrationTests // lintChecks;
+  checks = smokeTests // darwinMountTests // darwinNetworkTests // integrationTests // lintChecks;
   inherit
     smokeTests
     darwinMountTests
+    darwinNetworkTests
     integrationTests
     lintChecks
     ;
