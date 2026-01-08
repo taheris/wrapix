@@ -1,5 +1,6 @@
 import ArgumentParser
 import Containerization
+import ContainerizationExtras
 import Foundation
 
 @main
@@ -19,7 +20,7 @@ struct SandboxRunner: AsyncParsableCommand {
     var kernelPath: String
 
     @Option(name: .long, help: "Initfs image reference")
-    var initfs: String = "ghcr.io/apple/containerization/initfs:latest"
+    var initfs: String = "vminit:latest"
 
     @Option(name: .long, help: "Memory in MB (default: 4096)")
     var memory: Int = 4096
@@ -38,14 +39,25 @@ struct SandboxRunner: AsyncParsableCommand {
 
         var manager = try await ContainerManager(
             kernel: kernel,
-            initfsReference: initfs,
-            network: try ContainerManager.VmnetNetwork()
+            initfsReference: initfs
         )
+
+        // Use unique container name based on PID to allow multiple instances
+        let containerName = "wrapix-\(ProcessInfo.processInfo.processIdentifier)"
 
         // Default to half of available CPUs for efficiency
         let cpuCount = cpus ?? max(2, ProcessInfo.processInfo.processorCount / 2)
 
-        let container = try await manager.create("wrapix", reference: image) { config in
+        // Ensure cleanup on exit
+        defer {
+            try? manager.delete(containerName)
+        }
+
+        let container = try await manager.create(
+            containerName,
+            reference: image,
+            rootfsSizeInBytes: 4 * 1024 * 1024 * 1024  // 4GB rootfs
+        ) { config in
             config.cpus = cpuCount
             config.memoryInBytes = UInt64(memory) * 1024 * 1024
 
@@ -57,28 +69,43 @@ struct SandboxRunner: AsyncParsableCommand {
                 )
             )
 
-            // Process mounts from command line
+            // Process mounts from command line (only directories - files not supported)
             for mountSpec in mount {
                 let parts = mountSpec.split(separator: ":", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { continue }
 
                 let sourcePath = parts[0]
-                guard FileManager.default.fileExists(atPath: sourcePath) else { continue }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory),
+                      isDirectory.boolValue else { continue }
 
                 config.mounts.append(
                     Mount.share(source: sourcePath, destination: parts[1])
                 )
             }
 
-            // Run entrypoint
+            // Configure NAT networking (avoids vmnet entitlement requirement)
+            config.interfaces.append(
+                try NATInterface(
+                    ipv4Address: CIDRv4("10.0.0.2/24"),
+                    ipv4Gateway: IPv4Address("10.0.0.1")
+                )
+            )
+
+            // Use gateway as DNS server (standard NAT setup)
+            config.dns = .init(nameservers: ["10.0.0.1"])
+
+            // Run entrypoint script (creates user, runs claude)
             config.process.arguments = ["/entrypoint.sh"]
             config.process.environmentVariables = [
                 "HOST_UID=\(getuid())",
                 "HOST_USER=\(NSUserName())",
-                "ANTHROPIC_API_KEY=\(ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "")"
+                "ANTHROPIC_API_KEY=\(ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "")",
+                "WRAPIX_PROMPT=\(ProcessInfo.processInfo.environment["WRAPIX_PROMPT"] ?? "")"
             ]
         }
 
+        try await container.create()
         try await container.start()
 
         // Wait for container to exit
