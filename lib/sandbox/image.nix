@@ -34,6 +34,20 @@ let
     root:x:0:
     nogroup:x:65534:
   '';
+
+  # Create a merged environment with all packages for proper PATH
+  allPackages = [
+    pkgs.coreutils
+    pkgs.bash
+    pkgs.util-linux
+    claudePackage
+  ] ++ (profile.packages or [ ]);
+
+  profileEnv = pkgs.buildEnv {
+    name = "wrapix-profile-env";
+    paths = allPackages;
+    pathsToLink = [ "/bin" "/share" "/etc" "/lib" ];
+  };
 in
 pkgs.dockerTools.buildLayeredImage {
   name = "wrapix-${profile.name}";
@@ -46,14 +60,10 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.dockerTools.usrBinEnv
     pkgs.dockerTools.binSh
     pkgs.dockerTools.caCertificates
-    pkgs.coreutils
-    pkgs.bash
-    pkgs.util-linux # for setpriv
-    claudePackage
     pkgs.cacert
     gitConfig
-  ]
-  ++ (profile.packages or [ ]);
+    profileEnv
+  ];
 
   extraCommands = ''
     mkdir -p tmp home root var/run mnt/wrapix/file-mount mnt/wrapix/dir-mount
@@ -68,7 +78,7 @@ pkgs.dockerTools.buildLayeredImage {
 
   config = {
     Env = [
-      "PATH=/bin:/usr/bin"
+      "PATH=${profileEnv}/bin:/bin:/usr/bin"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
     ];
     WorkingDir = "/workspace";
