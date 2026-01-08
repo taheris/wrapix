@@ -157,7 +157,11 @@ in
       PROFILE_IMAGE="wrapix-${profile.name}:latest"
       if ! "$WRAPIX_DATA/bin/cctl" images get "$PROFILE_IMAGE" >/dev/null 2>&1; then
         echo "Loading profile image..."
-        "$WRAPIX_DATA/bin/cctl" images load < ${profileImage}
+        # Convert Docker-format tar to OCI-archive format (cctl expects OCI layout)
+        OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
+        ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$PROFILE_IMAGE"
+        "$WRAPIX_DATA/bin/cctl" images load --input "$OCI_TAR"
+        rm -f "$OCI_TAR"
       fi
 
       # Build mount arguments
