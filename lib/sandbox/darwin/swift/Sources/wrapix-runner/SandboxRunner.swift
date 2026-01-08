@@ -231,8 +231,8 @@ struct SandboxRunner: AsyncParsableCommand {
                 )
             )
 
-            // Use gateway as DNS server (standard NAT setup)
-            config.dns = .init(nameservers: ["10.0.0.1"])
+            // Use public DNS servers (VZ NAT doesn't provide DNS at gateway)
+            config.dns = .init(nameservers: ["1.1.1.1"])
 
             // Run custom command if provided, otherwise run entrypoint
             if command.isEmpty {
