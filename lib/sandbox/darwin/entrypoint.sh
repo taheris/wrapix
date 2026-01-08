@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Add user entry with host UID (passwd is writable at runtime)
-echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/workspace:/bin/bash" >> /etc/passwd
+# Note: home directory must be /home/$HOST_USER to match where we copy .claude.json
+echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/home/$HOST_USER:/bin/bash" >> /etc/passwd
 echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
 
 export USER="$HOST_USER"
@@ -11,6 +12,24 @@ export USER="$HOST_USER"
 mkdir -p "/home/$HOST_USER"
 chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
 export HOME="/home/$HOST_USER"
+
+# Copy directories from mounts with correct ownership
+# VirtioFS maps all files as root, so directories are mounted to staging location
+# and need to be copied with correct permissions
+declare -a DIR_MOUNT_PAIRS
+if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
+    IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
+    for mapping in "${DIR_MOUNTS[@]}"; do
+        src="${mapping%%:*}"
+        dst=$(eval echo "${mapping#*:}")
+        if [ -d "$src" ]; then
+            mkdir -p "$(dirname "$dst")"
+            cp -r "$src" "$dst"
+            chown -R "$HOST_UID:$HOST_UID" "$dst"
+            DIR_MOUNT_PAIRS+=("$src:$dst")
+        fi
+    done
+fi
 
 # Copy files from mounts with correct ownership
 # VirtioFS only supports directory mounts, so files are mounted via parent directory
@@ -30,9 +49,16 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     done
 fi
 
-# Copy modified files back to mount on exit
+# Copy modified files/directories back to mount on exit
 cleanup() {
-    for pair in "${FILE_MOUNT_PAIRS[@]}"; do
+    for pair in "${DIR_MOUNT_PAIRS[@]+"${DIR_MOUNT_PAIRS[@]}"}"; do
+        src="${pair%%:*}"
+        dst="${pair#*:}"
+        if [ -d "$dst" ]; then
+            rsync -a --delete "$dst/" "$src/"
+        fi
+    done
+    for pair in "${FILE_MOUNT_PAIRS[@]+"${FILE_MOUNT_PAIRS[@]}"}"; do
         src="${pair%%:*}"
         dst="${pair#*:}"
         if [ -f "$dst" ]; then
