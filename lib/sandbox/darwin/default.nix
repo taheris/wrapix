@@ -9,6 +9,8 @@ let
   '';
   # Build kernel using Linux packages (via remote builder on Darwin)
   kernel = import ./kernel.nix { pkgs = linuxPkgs; };
+  # gvproxy for user-mode networking (full TCP/UDP connectivity)
+  gvproxy = import ./gvproxy.nix { inherit pkgs; };
 
   expandPath =
     path:
@@ -214,6 +216,7 @@ in
             exec "$RUNNER_BIN" "$PROJECT_DIR" \
               --image "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
               --kernel-path "$KERNEL_PATH" \
+              --gvproxy-path "${gvproxy}/bin/gvproxy" \
               $MOUNT_ARGS
     '';
 }
