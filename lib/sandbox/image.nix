@@ -15,13 +15,23 @@
 }:
 
 let
-  # Git config as a separate derivation (avoids permission issues with extraCommands)
   gitConfig = pkgs.writeTextDir "etc/gitconfig" ''
     [user]
         name = Wrapix Sandbox
         email = sandbox@wrapix.dev
     [core]
         sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
+  '';
+
+  # Base passwd/group (user added at runtime with host UID)
+  passwdFile = pkgs.writeTextDir "etc/passwd" ''
+    root:x:0:0:root:/root:/bin/bash
+    nobody:x:65534:65534:Unprivileged account:/var/empty:/bin/false
+  '';
+
+  groupFile = pkgs.writeTextDir "etc/group" ''
+    root:x:0:
+    nogroup:x:65534:
   '';
 in
 pkgs.dockerTools.buildLayeredImage {
@@ -30,47 +40,42 @@ pkgs.dockerTools.buildLayeredImage {
   maxLayers = 100;
 
   contents = [
-    pkgs.dockerTools.fakeNss
+    passwdFile
+    groupFile
     pkgs.dockerTools.usrBinEnv
     pkgs.dockerTools.binSh
     pkgs.dockerTools.caCertificates
-
-    # Core utilities
     pkgs.coreutils
     pkgs.bash
-    pkgs.shadow # for useradd/su
-
-    # Claude Code
+    pkgs.util-linux # for setpriv
     claudePackage
-
-    # CA certificates
     pkgs.cacert
-
-    # Git config
     gitConfig
-  ]
-  ++ (profile.packages or [ ]);
+  ] ++ (profile.packages or [ ]);
 
   extraCommands = ''
-        mkdir -p tmp home root var/run
-        chmod 1777 tmp
+    mkdir -p tmp home root var/run
+    chmod 1777 tmp
 
-        # Set up hosts file (fakeNss handles passwd/group)
-        mkdir -p etc
-        echo "127.0.0.1 localhost" > etc/hosts
+    mkdir -p etc
+    echo "127.0.0.1 localhost" > etc/hosts
 
-        # macOS entrypoint script (for VM use with user creation)
-        cat > entrypoint.sh << 'MACOSENTRY'
+    cat > entrypoint.sh << 'EOF'
     #!/bin/bash
     set -euo pipefail
 
-    # Create user matching host UID/username
-    useradd -u "$HOST_UID" -m "$HOST_USER" 2>/dev/null || true
+    # Add user entry with host UID (passwd is writable at runtime)
+    echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/workspace:/bin/bash" >> /etc/passwd
+    echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
 
-    # Drop privileges and run Claude Code with system prompt
-    exec su - "$HOST_USER" -c "cd /workspace && claude --dangerously-skip-permissions --append-system-prompt \"\$WRAPIX_PROMPT\""
-    MACOSENTRY
-        chmod +x entrypoint.sh
+    export HOME="/workspace"
+    export USER="$HOST_USER"
+    cd /workspace
+
+    exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+      claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"
+    EOF
+    chmod +x entrypoint.sh
   '';
 
   config = {
