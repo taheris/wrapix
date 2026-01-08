@@ -25,10 +25,10 @@ let
   # Build the container image using Linux packages
   # On Darwin, this will use a remote Linux builder if configured
   mkImage =
-    profile:
+    { profile, entrypointScript }:
     import ./image.nix {
       pkgs = linuxPkgs;
-      inherit profile;
+      inherit profile entrypointScript;
       claudePackage = linuxPkgs.claude-code;
     };
 
@@ -43,16 +43,19 @@ let
     if isLinux then
       linuxSandbox.mkSandbox {
         inherit profile deployKey;
-        profileImage = mkImage profile;
+        profileImage = mkImage {
+          inherit profile;
+          entrypointScript = ./linux/entrypoint.sh;
+        };
         entrypoint = import ./linux/entrypoint.nix { inherit pkgs systemPrompt; };
       }
     else if isDarwin then
-      # On Darwin, use Podman with Linux container image
-      # The image is built using a Linux remote builder
       darwinSandbox.mkSandbox {
         inherit profile deployKey;
-        profileImage = mkImage profile;
-        entrypoint = import ./darwin/entrypoint.nix { inherit pkgs systemPrompt; };
+        profileImage = mkImage {
+          inherit profile;
+          entrypointScript = ./darwin/entrypoint.sh;
+        };
       }
     else
       throw "Unsupported system: ${system}";

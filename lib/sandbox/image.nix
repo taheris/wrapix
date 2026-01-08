@@ -4,7 +4,7 @@
 # - Base packages + profile-specific packages
 # - Claude Code package
 # - CA certificates for HTTPS
-# - macOS entrypoint script for VM use
+# - Platform-specific entrypoint script
 #
 # Layer ordering: stable packages first, frequently-changing packages last.
 # This maximizes layer cache hits across rebuilds and profiles.
@@ -12,6 +12,7 @@
   pkgs,
   profile,
   claudePackage,
+  entrypointScript,
 }:
 
 let
@@ -51,30 +52,17 @@ pkgs.dockerTools.buildLayeredImage {
     claudePackage
     pkgs.cacert
     gitConfig
-  ] ++ (profile.packages or [ ]);
+  ]
+  ++ (profile.packages or [ ]);
 
   extraCommands = ''
-    mkdir -p tmp home root var/run
+    mkdir -p tmp home root var/run mnt/wrapix/file-mount
     chmod 1777 tmp
 
     mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts
 
-    cat > entrypoint.sh << 'EOF'
-    #!/bin/bash
-    set -euo pipefail
-
-    # Add user entry with host UID (passwd is writable at runtime)
-    echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/workspace:/bin/bash" >> /etc/passwd
-    echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
-
-    export HOME="/workspace"
-    export USER="$HOST_USER"
-    cd /workspace
-
-    exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-      claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"
-    EOF
+    cp ${entrypointScript} entrypoint.sh
     chmod +x entrypoint.sh
   '';
 

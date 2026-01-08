@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+# Add user entry with host UID (passwd is writable at runtime)
+echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/workspace:/bin/bash" >> /etc/passwd
+echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
+
+export USER="$HOST_USER"
+
+# Use container-local HOME for Darwin VMs (VirtioFS maps files as root)
+mkdir -p "/home/$HOST_USER"
+chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
+export HOME="/home/$HOST_USER"
+
+# Copy files from mounts with correct ownership
+# VirtioFS only supports directory mounts, so files are mounted via parent directory
+# and need to be copied with correct permissions
+declare -a FILE_MOUNT_PAIRS
+if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
+    IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
+    for mapping in "${MOUNTS[@]}"; do
+        src="${mapping%%:*}"
+        dst=$(eval echo "${mapping#*:}")
+        if [ -f "$src" ]; then
+            mkdir -p "$(dirname "$dst")"
+            cp "$src" "$dst"
+            chown "$HOST_UID:$HOST_UID" "$dst"
+            FILE_MOUNT_PAIRS+=("$src:$dst")
+        fi
+    done
+fi
+
+# Copy modified files back to mount on exit
+cleanup() {
+    for pair in "${FILE_MOUNT_PAIRS[@]}"; do
+        src="${pair%%:*}"
+        dst="${pair#*:}"
+        if [ -f "$dst" ]; then
+            cp "$dst" "$src"
+        fi
+    done
+}
+trap cleanup EXIT
+
+cd /workspace
+
+# Run without exec so trap can fire
+setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+  claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"
+EXIT_CODE=$?
+exit $EXIT_CODE
