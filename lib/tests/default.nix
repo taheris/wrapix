@@ -16,6 +16,9 @@ let
   # Smoke tests run on all platforms
   smokeTests = import ./smoke.nix { inherit pkgs system; };
 
+  # Darwin mount tests run on all platforms (test logic, not VM)
+  darwinMountTests = import ./darwin-mounts.nix { inherit pkgs system; };
+
   # Integration tests require NixOS VM (Linux only with KVM)
   integrationTests = if isLinux then import ./integration.nix { inherit pkgs system; } else { };
 
@@ -24,6 +27,11 @@ let
 
 in
 {
-  checks = smokeTests // integrationTests // lintChecks;
-  inherit smokeTests integrationTests lintChecks;
+  checks = smokeTests // darwinMountTests // integrationTests // lintChecks;
+  inherit
+    smokeTests
+    darwinMountTests
+    integrationTests
+    lintChecks
+    ;
 }

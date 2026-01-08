@@ -164,15 +164,22 @@ in
               cd - > /dev/null
             fi
 
-            # Load profile image if not already present
+            # Load profile image if needed (reload if image hash changed)
             PROFILE_IMAGE="wrapix-${profile.name}:latest"
-            if ! "$WRAPIX_DATA/bin/cctl" images get "$PROFILE_IMAGE" >/dev/null 2>&1; then
+            IMAGE_VERSION_FILE="$WRAPIX_DATA/images/wrapix-${profile.name}.version"
+            CURRENT_IMAGE_HASH="${profileImage}"
+            if ! "$WRAPIX_DATA/bin/cctl" images get "$PROFILE_IMAGE" >/dev/null 2>&1 || \
+               [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
               echo "Loading profile image..."
+              # Delete old image if exists
+              "$WRAPIX_DATA/bin/cctl" images delete "$PROFILE_IMAGE" 2>/dev/null || true
               # Convert Docker-format tar to OCI-archive format (cctl expects OCI layout)
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
               ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$PROFILE_IMAGE"
               "$WRAPIX_DATA/bin/cctl" images load --input "$OCI_TAR"
               rm -f "$OCI_TAR"
+              mkdir -p "$WRAPIX_DATA/images"
+              echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
             fi
 
             # Build mount arguments at runtime (check file vs directory)
