@@ -77,6 +77,9 @@ struct SandboxRunner: AsyncParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "File mounts in source:dest format (mounted via parent directory)")
     var fileMount: [String] = []
 
+    @Option(name: .long, parsing: .remaining, help: "Custom command to run instead of /entrypoint.sh (for testing)")
+    var command: [String] = []
+
     func run() async throws {
         let kernel = Kernel(
             path: URL(fileURLWithPath: kernelPath),
@@ -231,8 +234,12 @@ struct SandboxRunner: AsyncParsableCommand {
             // Use gateway as DNS server (standard NAT setup)
             config.dns = .init(nameservers: ["10.0.0.1"])
 
-            // Run entrypoint script (creates user, runs claude)
-            config.process.arguments = ["/entrypoint.sh"]
+            // Run custom command if provided, otherwise run entrypoint
+            if command.isEmpty {
+                config.process.arguments = ["/entrypoint.sh"]
+            } else {
+                config.process.arguments = command
+            }
             config.process.environmentVariables.append(contentsOf: [
                 "HOST_UID=\(getuid())",
                 "HOST_USER=\(NSUserName())",

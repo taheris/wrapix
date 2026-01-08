@@ -1,281 +1,196 @@
-# Darwin VM mount tests - verify file and directory mount handling
-# These tests validate the entrypoint logic without requiring the actual VM
+# Darwin VM mount integration test
+# Requires: macOS 26+, Xcode, wrapix-runner built
+#
+# Run with:
+#   nix build .#checks.aarch64-darwin.darwin-mount-integration
+#   ./result/bin/test-darwin-mounts
 {
   pkgs,
   system,
 }:
 
 let
-  inherit (pkgs) runCommandLocal writeShellScript;
+  inherit (pkgs) writeShellScriptBin;
   inherit (builtins) elem;
 
   isDarwin = system == "aarch64-darwin";
 
-  # Helper to create a mock entrypoint test environment
-  mockEntrypointTest = writeShellScript "mock-entrypoint-test" ''
+  # Use Linux packages for kernel (requires remote builder on Darwin)
+  linuxPkgs =
+    if isDarwin then
+      import (pkgs.path) {
+        system = "aarch64-linux";
+        config.allowUnfree = true;
+        overlays = pkgs.overlays;
+      }
+    else
+      pkgs;
+
+  # Import kernel from the sandbox module
+  kernel = import ../sandbox/darwin/kernel.nix { pkgs = linuxPkgs; };
+
+  # Build profile image for testing
+  profiles = import ../sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profileImage = import ../sandbox/image.nix {
+    pkgs = linuxPkgs;
+    profile = profiles.base;
+    claudePackage = linuxPkgs.claude-code;
+    entrypointScript = ../sandbox/darwin/entrypoint.sh;
+  };
+
+  # Test script that runs inside the container
+  containerTestScript = ./darwin-mount-test.sh;
+
+  # Integration test script that sets up and runs the VM
+  integrationTest = writeShellScriptBin "test-darwin-mounts" ''
     set -euo pipefail
 
-    # Mock environment variables as the Swift runner would set them
-    export HOST_USER="testuser"
-    export HOST_UID="1000"
-    export WRAPIX_PROMPT="test prompt"
+    # Ensure we're on Darwin
+    if [ "$(uname)" != "Darwin" ]; then
+      echo "SKIP: Darwin-only test"
+      exit 0
+    fi
 
-    # Create mock directory structure
-    export MOCK_ROOT=$(mktemp -d)
-    trap "rm -rf $MOCK_ROOT" EXIT
+    # Check macOS version
+    MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1)
+    if [ "$MACOS_VERSION" -lt 26 ]; then
+      echo "SKIP: Requires macOS 26+ (current: $(sw_vers -productVersion))"
+      exit 0
+    fi
 
-    # Create /etc for passwd
-    mkdir -p "$MOCK_ROOT/etc"
-    touch "$MOCK_ROOT/etc/passwd"
-    touch "$MOCK_ROOT/etc/group"
+    # Check Xcode
+    if [ ! -d "/Applications/Xcode.app" ]; then
+      echo "SKIP: Requires Xcode"
+      exit 0
+    fi
 
-    # Create /home directory
-    mkdir -p "$MOCK_ROOT/home"
+    echo "=== Darwin Mount Integration Test ==="
+    echo ""
 
-    # Create mock mount directories
-    mkdir -p "$MOCK_ROOT/mnt/wrapix/dir-mount/0"
-    mkdir -p "$MOCK_ROOT/mnt/wrapix/file-mount/0"
+    # Find wrapix-runner and cctl
+    XDG_DATA_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}"
+    RUNNER_BIN="$XDG_DATA_HOME/wrapix/bin/wrapix-runner"
+    CCTL_BIN="$XDG_DATA_HOME/wrapix/bin/cctl"
 
-    # Create mock .claude directory content at mount point
-    # In real scenario: ~/.claude is mounted to /mnt/wrapix/dir-mount/0
-    # So content should be directly in dir-mount/0, not nested in .claude
-    mkdir -p "$MOCK_ROOT/mnt/wrapix/dir-mount/0/mcp"
-    echo '{"test": "config"}' > "$MOCK_ROOT/mnt/wrapix/dir-mount/0/settings.json"
-    echo '{"server": "test"}' > "$MOCK_ROOT/mnt/wrapix/dir-mount/0/mcp/config.json"
+    if [ ! -x "$RUNNER_BIN" ]; then
+      echo "ERROR: wrapix-runner not found at $RUNNER_BIN"
+      echo "Run 'nix run .#wrapix-darwin -- .' first to build it"
+      exit 1
+    fi
 
-    # Create mock .claude.json file
-    echo '{"apiKey": "test-key-123", "numStartups": 5}' > "$MOCK_ROOT/mnt/wrapix/file-mount/0/.claude.json"
+    if [ ! -x "$CCTL_BIN" ]; then
+      echo "ERROR: cctl not found at $CCTL_BIN"
+      echo "Run 'nix run .#wrapix-darwin -- .' first to build it"
+      exit 1
+    fi
 
-    "$@"
+    # Kernel path is baked in from Nix
+    KERNEL_PATH="${kernel}/vmlinux"
+
+    if [ ! -f "$KERNEL_PATH" ]; then
+      echo "ERROR: Linux kernel not found at $KERNEL_PATH"
+      echo "Build with remote Linux builder first"
+      exit 1
+    fi
+
+    # Load test image if needed
+    TEST_IMAGE="wrapix-mount-test:latest"
+    if ! "$CCTL_BIN" images get "$TEST_IMAGE" >/dev/null 2>&1; then
+      echo "Loading test image..."
+      OCI_TAR=$(mktemp)
+      ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$TEST_IMAGE"
+      "$CCTL_BIN" images load --input "$OCI_TAR"
+      rm -f "$OCI_TAR"
+    fi
+
+    echo "Found wrapix-runner: $RUNNER_BIN"
+    echo "Found kernel: $KERNEL_PATH"
+    echo "Using image: $TEST_IMAGE"
+    echo ""
+
+    # Create temporary test directory
+    TEST_DIR=$(mktemp -d)
+    trap "rm -rf $TEST_DIR" EXIT
+
+    echo "Test directory: $TEST_DIR"
+
+    # Set up test workspace
+    WORKSPACE="$TEST_DIR/workspace"
+    mkdir -p "$WORKSPACE"
+    echo "workspace-file-content" > "$WORKSPACE/workspace-test.txt"
+
+    # Copy the container test script into workspace
+    cp ${containerTestScript} "$WORKSPACE/mount-test.sh"
+    chmod +x "$WORKSPACE/mount-test.sh"
+
+    # Set up test directory mount (simulating ~/.claude)
+    CLAUDE_DIR="$TEST_DIR/claude-config"
+    mkdir -p "$CLAUDE_DIR/mcp"
+    echo '{"test": "settings-value"}' > "$CLAUDE_DIR/settings.json"
+    echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
+
+    # Set up test file mount (simulating ~/.claude.json)
+    CLAUDE_JSON="$TEST_DIR/claude.json"
+    echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON"
+
+    echo ""
+    echo "Test files created:"
+    echo "  Workspace: $WORKSPACE/workspace-test.txt"
+    echo "  Dir mount: $CLAUDE_DIR/ (with settings.json, mcp/config.json)"
+    echo "  File mount: $CLAUDE_JSON"
+    echo ""
+
+    echo "Running container with test mounts..."
+    echo "Command: $RUNNER_BIN $WORKSPACE --image $TEST_IMAGE --kernel-path $KERNEL_PATH \\"
+    echo "         --dir-mount $CLAUDE_DIR:/home/$USER/.claude \\"
+    echo "         --file-mount $CLAUDE_JSON:/home/$USER/.claude.json \\"
+    echo "         --command /bin/bash /workspace/mount-test.sh"
+    echo ""
+
+    # Run the container with our test script
+    set +e
+    "$RUNNER_BIN" "$WORKSPACE" \
+      --image "$TEST_IMAGE" \
+      --kernel-path "$KERNEL_PATH" \
+      --dir-mount "$CLAUDE_DIR:/home/$USER/.claude" \
+      --file-mount "$CLAUDE_JSON:/home/$USER/.claude.json" \
+      --command /bin/bash /workspace/mount-test.sh
+    EXIT_CODE=$?
+    set -e
+
+    echo ""
+    echo "Container exit code: $EXIT_CODE"
+
+    # Verify sync-back worked
+    echo ""
+    echo "Verifying sync-back..."
+    if [ -f "$WORKSPACE/container-output.txt" ]; then
+      CONTENT=$(cat "$WORKSPACE/container-output.txt")
+      if [ "$CONTENT" = "container-wrote-this-content" ]; then
+        echo "  PASS: Workspace sync-back worked"
+      else
+        echo "  FAIL: Sync-back content mismatch: $CONTENT"
+        EXIT_CODE=1
+      fi
+    else
+      echo "  FAIL: container-output.txt not synced back"
+      ls -la "$WORKSPACE/"
+      EXIT_CODE=1
+    fi
+
+    echo ""
+    if [ "$EXIT_CODE" -eq 0 ]; then
+      echo "=== INTEGRATION TEST PASSED ==="
+    else
+      echo "=== INTEGRATION TEST FAILED ==="
+    fi
+
+    exit $EXIT_CODE
   '';
 
 in
 {
-  # Test 1: Verify directory mount copy logic
-  darwin-dir-mount-copy =
-    runCommandLocal "test-darwin-dir-mount-copy"
-      {
-        nativeBuildInputs = with pkgs; [
-          bash
-          coreutils
-        ];
-      }
-      ''
-        echo "Testing directory mount copy logic..."
-
-        ${mockEntrypointTest} bash -c '
-          # Use MOCK_ROOT for all paths (nix sandbox cannot create /home)
-          export HOME="$MOCK_ROOT/home/testuser"
-          mkdir -p "$HOME"
-
-          # Set up test mount mapping pointing to mock home
-          export WRAPIX_DIR_MOUNTS="$MOCK_ROOT/mnt/wrapix/dir-mount/0:$HOME/.claude"
-
-          # Simulate the entrypoint directory copy logic
-          declare -a DIR_MOUNT_PAIRS
-          if [ -n "''${WRAPIX_DIR_MOUNTS:-}" ]; then
-              IFS="," read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
-              for mapping in "''${DIR_MOUNTS[@]}"; do
-                  src="''${mapping%%:*}"
-                  dst="''${mapping#*:}"
-                  if [ -d "$src" ]; then
-                      mkdir -p "$(dirname "$dst")"
-                      cp -r "$src" "$dst"
-                      # In real entrypoint we would chown here
-                      DIR_MOUNT_PAIRS+=("$src:$dst")
-                  fi
-              done
-          fi
-
-          # Verify the copy worked
-          [ -d "$HOME/.claude" ] || { echo "FAIL: .claude directory not created"; exit 1; }
-          [ -f "$HOME/.claude/settings.json" ] || { echo "FAIL: settings.json not copied"; exit 1; }
-          [ -d "$HOME/.claude/mcp" ] || { echo "FAIL: mcp subdirectory not copied"; exit 1; }
-          [ -f "$HOME/.claude/mcp/config.json" ] || { echo "FAIL: mcp/config.json not copied"; exit 1; }
-
-          # Verify content
-          grep -q "test.*config" "$HOME/.claude/settings.json" || { echo "FAIL: settings.json content wrong"; exit 1; }
-
-          echo "Directory mount copy test PASSED"
-        '
-
-        mkdir $out
-      '';
-
-  # Test 2: Verify file mount copy logic
-  darwin-file-mount-copy =
-    runCommandLocal "test-darwin-file-mount-copy"
-      {
-        nativeBuildInputs = with pkgs; [
-          bash
-          coreutils
-        ];
-      }
-      ''
-        echo "Testing file mount copy logic..."
-
-        ${mockEntrypointTest} bash -c '
-          # Use MOCK_ROOT for all paths (nix sandbox cannot create /home)
-          export HOME="$MOCK_ROOT/home/testuser"
-          mkdir -p "$HOME"
-
-          # Set up test mount mapping pointing to mock home
-          export WRAPIX_FILE_MOUNTS="$MOCK_ROOT/mnt/wrapix/file-mount/0/.claude.json:$HOME/.claude.json"
-
-          # Simulate the entrypoint file copy logic
-          declare -a FILE_MOUNT_PAIRS
-          if [ -n "''${WRAPIX_FILE_MOUNTS:-}" ]; then
-              IFS="," read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
-              for mapping in "''${MOUNTS[@]}"; do
-                  src="''${mapping%%:*}"
-                  dst="''${mapping#*:}"
-                  if [ -f "$src" ]; then
-                      mkdir -p "$(dirname "$dst")"
-                      cp "$src" "$dst"
-                      FILE_MOUNT_PAIRS+=("$src:$dst")
-                  fi
-              done
-          fi
-
-          # Verify the copy worked
-          [ -f "$HOME/.claude.json" ] || { echo "FAIL: .claude.json not created"; exit 1; }
-
-          # Verify content preserved
-          grep -q "test-key-123" "$HOME/.claude.json" || { echo "FAIL: apiKey not preserved"; exit 1; }
-          grep -q "numStartups" "$HOME/.claude.json" || { echo "FAIL: numStartups not preserved"; exit 1; }
-
-          echo "File mount copy test PASSED"
-        '
-
-        mkdir $out
-      '';
-
-  # Test 3: Verify multiple mounts handled correctly
-  darwin-multiple-mounts =
-    runCommandLocal "test-darwin-multiple-mounts"
-      {
-        nativeBuildInputs = with pkgs; [
-          bash
-          coreutils
-        ];
-      }
-      ''
-        echo "Testing multiple mount handling..."
-
-        ${mockEntrypointTest} bash -c '
-          # Use MOCK_ROOT for all paths (nix sandbox cannot create /home)
-          export HOME="$MOCK_ROOT/home/testuser"
-          mkdir -p "$HOME"
-
-          # Create additional mock mounts
-          echo "backup content" > "$MOCK_ROOT/mnt/wrapix/file-mount/0/.claude.json.backup"
-
-          # Set up multiple file mounts (comma-separated) pointing to mock home
-          export WRAPIX_FILE_MOUNTS="$MOCK_ROOT/mnt/wrapix/file-mount/0/.claude.json:$HOME/.claude.json,$MOCK_ROOT/mnt/wrapix/file-mount/0/.claude.json.backup:$HOME/.claude.json.backup"
-
-          # Simulate the entrypoint logic
-          declare -a FILE_MOUNT_PAIRS
-          if [ -n "''${WRAPIX_FILE_MOUNTS:-}" ]; then
-              IFS="," read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
-              count=0
-              for mapping in "''${MOUNTS[@]}"; do
-                  src="''${mapping%%:*}"
-                  dst="''${mapping#*:}"
-                  if [ -f "$src" ]; then
-                      mkdir -p "$(dirname "$dst")"
-                      cp "$src" "$dst"
-                      FILE_MOUNT_PAIRS+=("$src:$dst")
-                      count=$((count + 1))
-                  fi
-              done
-              [ "$count" -eq 2 ] || { echo "FAIL: Expected 2 file mounts, got $count"; exit 1; }
-          fi
-
-          # Verify both files copied
-          [ -f "$HOME/.claude.json" ] || { echo "FAIL: .claude.json not copied"; exit 1; }
-          [ -f "$HOME/.claude.json.backup" ] || { echo "FAIL: .claude.json.backup not copied"; exit 1; }
-
-          echo "Multiple mount test PASSED"
-        '
-
-        mkdir $out
-      '';
-
-  # Test 4: Verify mount with missing source is handled gracefully
-  darwin-missing-mount-source =
-    runCommandLocal "test-darwin-missing-mount"
-      {
-        nativeBuildInputs = with pkgs; [
-          bash
-          coreutils
-        ];
-      }
-      ''
-        echo "Testing missing mount source handling..."
-
-        ${mockEntrypointTest} bash -c '
-          # Use MOCK_ROOT for all paths (nix sandbox cannot create /home)
-          export HOME="$MOCK_ROOT/home/testuser"
-          mkdir -p "$HOME"
-
-          # Point to non-existent file
-          export WRAPIX_FILE_MOUNTS="/nonexistent/path/.claude.json:$HOME/.claude.json"
-
-          # Simulate the entrypoint logic - should not fail, just skip
-          declare -a FILE_MOUNT_PAIRS
-          if [ -n "''${WRAPIX_FILE_MOUNTS:-}" ]; then
-              IFS="," read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
-              for mapping in "''${MOUNTS[@]}"; do
-                  src="''${mapping%%:*}"
-                  dst="''${mapping#*:}"
-                  if [ -f "$src" ]; then
-                      mkdir -p "$(dirname "$dst")"
-                      cp "$src" "$dst"
-                      FILE_MOUNT_PAIRS+=("$src:$dst")
-                  fi
-              done
-          fi
-
-          # Should not have created the file (source didnt exist)
-          [ ! -f "$HOME/.claude.json" ] || { echo "FAIL: File should not exist when source missing"; exit 1; }
-
-          # Array should be empty
-          [ "''${#FILE_MOUNT_PAIRS[@]}" -eq 0 ] || { echo "FAIL: No mounts should have been recorded"; exit 1; }
-
-          echo "Missing mount source test PASSED"
-        '
-
-        mkdir $out
-      '';
-
-  # Test 5: Verify passwd home directory is set correctly
-  darwin-passwd-home =
-    runCommandLocal "test-darwin-passwd-home"
-      {
-        nativeBuildInputs = with pkgs; [
-          bash
-          coreutils
-          gnugrep
-        ];
-      }
-      ''
-        echo "Testing /etc/passwd home directory..."
-
-        # Check that the entrypoint sets the correct home directory in passwd
-        SCRIPT="${../sandbox/darwin/entrypoint.sh}"
-
-        # The passwd entry should use /home/$HOST_USER, not /workspace
-        if grep -q '/workspace:/bin/bash' "$SCRIPT"; then
-          echo "FAIL: /etc/passwd should not use /workspace as home"
-          exit 1
-        fi
-
-        if ! grep -q '/home/\$HOST_USER:/bin/bash' "$SCRIPT"; then
-          echo "FAIL: /etc/passwd should use /home/\$HOST_USER as home"
-          exit 1
-        fi
-
-        echo "Passwd home directory test PASSED"
-        mkdir $out
-      '';
+  # Export the integration test script
+  # Run with: nix build .#checks.aarch64-darwin.darwin-mount-integration && ./result/bin/test-darwin-mounts
+  darwin-mount-integration = integrationTest;
 }
