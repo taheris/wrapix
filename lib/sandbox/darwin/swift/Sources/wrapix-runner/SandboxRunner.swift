@@ -144,22 +144,36 @@ struct SandboxRunner: AsyncParsableCommand {
                 )
             )
 
-            // Process directory mounts from command line
+            // Process directory mounts: mount to staging location, entrypoint copies with correct ownership
+            // (VirtioFS maps all files as root, so we can't mount directly to destination)
+            var dirMountMappings: [String] = []
+            var dirMountIndex = 0
             for mountSpec in dirMount {
                 let parts = mountSpec.split(separator: ":", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { continue }
 
                 let sourcePath = parts[0]
+                let destPath = parts[1]
                 var isDirectory: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory),
                       isDirectory.boolValue else { continue }
 
+                let mountPoint = "/mnt/wrapix/dir-mount/\(dirMountIndex)"
+                dirMountIndex += 1
+
                 config.mounts.append(
-                    Mount.share(source: sourcePath, destination: parts[1])
+                    Mount.share(source: sourcePath, destination: mountPoint)
                 )
+                dirMountMappings.append("\(mountPoint):\(destPath)")
             }
 
-            // Process file mounts: mount parent directories (deduplicated), track symlink mappings
+            // Pass directory mount mappings to entrypoint for copy with correct ownership
+            let dirMountsEnv = dirMountMappings.joined(separator: ",")
+            if !dirMountsEnv.isEmpty {
+                config.process.environmentVariables.append("WRAPIX_DIR_MOUNTS=\(dirMountsEnv)")
+            }
+
+            // Process file mounts: mount parent directories (deduplicated), track mappings
             // Group files by parent directory to avoid duplicate mounts
             var parentDirToMountPoint: [String: String] = [:]
             var fileMountMappings: [String] = []

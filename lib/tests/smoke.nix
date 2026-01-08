@@ -65,4 +65,48 @@ in
         echo "Script syntax validation passed"
         mkdir $out
       '';
+
+  # Verify Darwin entrypoint script syntax and mount handling logic
+  darwin-entrypoint-syntax =
+    runCommandLocal "smoke-darwin-entrypoint"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
+      }
+      ''
+        echo "Checking Darwin entrypoint syntax..."
+        bash -n ${../sandbox/darwin/entrypoint.sh}
+
+        echo "Verifying entrypoint handles mount env vars..."
+        # Test that entrypoint processes WRAPIX_DIR_MOUNTS correctly
+        SCRIPT="${../sandbox/darwin/entrypoint.sh}"
+        grep -q 'WRAPIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_DIR_MOUNTS handling"; exit 1; }
+        grep -q 'WRAPIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_FILE_MOUNTS handling"; exit 1; }
+
+        # Verify cleanup function handles both file and directory mounts
+        grep -q 'DIR_MOUNT_PAIRS' "$SCRIPT" || { echo "Missing DIR_MOUNT_PAIRS"; exit 1; }
+        grep -q 'FILE_MOUNT_PAIRS' "$SCRIPT" || { echo "Missing FILE_MOUNT_PAIRS"; exit 1; }
+
+        # Verify /etc/passwd uses correct home directory
+        grep -q '/home/\$HOST_USER:/bin/bash' "$SCRIPT" || { echo "/etc/passwd should set home to /home/\$HOST_USER"; exit 1; }
+
+        echo "Darwin entrypoint validation passed"
+        mkdir $out
+      '';
+
+  # Verify Linux entrypoint script syntax
+  linux-entrypoint-syntax =
+    runCommandLocal "smoke-linux-entrypoint"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+        echo "Checking Linux entrypoint syntax..."
+        bash -n ${../sandbox/linux/entrypoint.sh}
+
+        echo "Linux entrypoint validation passed"
+        mkdir $out
+      '';
 }
