@@ -1,7 +1,50 @@
 import ArgumentParser
 import Containerization
 import ContainerizationExtras
+import ContainerizationOS
 import Foundation
+
+/// Writer that forwards data to a FileHandle (stdout/stderr)
+final class FileHandleWriter: Writer, @unchecked Sendable {
+    private let handle: FileHandle
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func write(_ data: Data) throws {
+        try handle.write(contentsOf: data)
+    }
+
+    func close() throws {
+        // Don't close stdout/stderr
+    }
+}
+
+/// ReaderStream that reads from a FileHandle (stdin)
+final class FileHandleReaderStream: ReaderStream, @unchecked Sendable {
+    private let handle: FileHandle
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func stream() -> AsyncStream<Data> {
+        AsyncStream { continuation in
+            handle.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    continuation.finish()
+                } else {
+                    continuation.yield(data)
+                }
+            }
+            continuation.onTermination = { _ in
+                self.handle.readabilityHandler = nil
+            }
+        }
+    }
+}
 
 @main
 struct SandboxRunner: AsyncParsableCommand {
@@ -48,6 +91,25 @@ struct SandboxRunner: AsyncParsableCommand {
         // Default to half of available CPUs for efficiency
         let cpuCount = cpus ?? max(2, ProcessInfo.processInfo.processorCount / 2)
 
+        // Check if we have a TTY for interactive mode
+        let hasTTY = isatty(STDIN_FILENO) != 0
+        let terminal: Terminal?
+        let sigwinchStream: AsyncSignalHandler?
+
+        if hasTTY {
+            // Set up terminal for interactive I/O
+            terminal = try Terminal.current
+            try terminal!.setraw()
+            sigwinchStream = AsyncSignalHandler.create(notify: [SIGWINCH])
+        } else {
+            terminal = nil
+            sigwinchStream = nil
+        }
+
+        defer {
+            terminal?.tryReset()
+        }
+
         // Ensure cleanup on exit
         defer {
             try? manager.delete(containerName)
@@ -60,6 +122,16 @@ struct SandboxRunner: AsyncParsableCommand {
         ) { config in
             config.cpus = cpuCount
             config.memoryInBytes = UInt64(memory) * 1024 * 1024
+
+            // Set up I/O based on whether we have a TTY
+            if let terminal = terminal {
+                config.process.setTerminalIO(terminal: terminal)
+            } else {
+                // Pipe mode: forward stdin/stdout/stderr
+                config.process.stdin = FileHandleReaderStream(FileHandle.standardInput)
+                config.process.stdout = FileHandleWriter(FileHandle.standardOutput)
+                config.process.stderr = FileHandleWriter(FileHandle.standardError)
+            }
 
             // Mount project directory
             config.mounts.append(
@@ -97,21 +169,42 @@ struct SandboxRunner: AsyncParsableCommand {
 
             // Run entrypoint script (creates user, runs claude)
             config.process.arguments = ["/entrypoint.sh"]
-            config.process.environmentVariables = [
+            config.process.environmentVariables.append(contentsOf: [
                 "HOST_UID=\(getuid())",
                 "HOST_USER=\(NSUserName())",
                 "ANTHROPIC_API_KEY=\(ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "")",
                 "WRAPIX_PROMPT=\(ProcessInfo.processInfo.environment["WRAPIX_PROMPT"] ?? "")"
-            ]
+            ])
         }
 
         try await container.create()
         try await container.start()
 
-        // Wait for container to exit
-        let exitStatus = try await container.wait()
-        try await container.stop()
+        // Resize to current terminal size if we have a TTY
+        if let terminal = terminal {
+            try? await container.resize(to: try terminal.size)
+        }
 
-        Darwin.exit(exitStatus.exitCode)
+        // Handle resize events and wait for container exit
+        if let sigwinchStream = sigwinchStream, let terminal = terminal {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for await _ in sigwinchStream.signals {
+                        try await container.resize(to: try terminal.size)
+                    }
+                }
+
+                let exitStatus = try await container.wait()
+                group.cancelAll()
+
+                try await container.stop()
+                Darwin.exit(exitStatus.exitCode)
+            }
+        } else {
+            // No TTY - just wait for container to exit
+            let exitStatus = try await container.wait()
+            try await container.stop()
+            Darwin.exit(exitStatus.exitCode)
+        }
     }
 }
