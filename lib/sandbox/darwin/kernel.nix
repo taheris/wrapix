@@ -3,43 +3,25 @@
 # This module expects Linux pkgs to be passed in. On Darwin, the parent module
 # passes linuxPkgs which will build via a remote Linux builder.
 #
-# Requirements:
-# - Kernel 6.12+ for full VIRTIO_FS support
-# - arm64 architecture targeting Apple Silicon
+# Uses the official Apple Containerization kernel config from:
+# https://github.com/apple/containerization/tree/main/kernel
 
 { pkgs }:
 
 let
-  version = "6.12.6";
+  version = "6.14.9";
   majorVersion = "6";
 
-  # Kernel configuration for Apple Containerization (VirtIO-based)
-  kernelConfigText = ''
-    CONFIG_ARM64=y
-    CONFIG_64BIT=y
-    CONFIG_SMP=y
-    CONFIG_VIRTIO=y
-    CONFIG_VIRTIO_PCI=y
-    CONFIG_VIRTIO_BLK=y
-    CONFIG_VIRTIO_NET=y
-    CONFIG_VIRTIO_CONSOLE=y
-    CONFIG_VIRTIO_FS=y
-    CONFIG_FUSE_FS=y
-    CONFIG_NAMESPACES=y
-    CONFIG_CGROUPS=y
-    CONFIG_SECCOMP=y
-    CONFIG_NET=y
-    CONFIG_INET=y
-    CONFIG_EXT4_FS=y
-    CONFIG_OVERLAY_FS=y
-    CONFIG_TMPFS=y
-  '';
-
-  kernelConfig = pkgs.writeText "apple-containerization.config" kernelConfigText;
+  # Fetch the official Apple Containerization kernel config (pinned to commit)
+  containerizationRev = "fc5399e77e5735f59d9eb73b8332af7a3bf0836f";
+  kernelConfig = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/apple/containerization/${containerizationRev}/kernel/config-arm64";
+    hash = "sha256-CwVAjX1fXV6UHYl2d4Dch6LpDi+O8g7G+M8RowN/nzY=";
+  };
 
   kernelSrc = pkgs.fetchurl {
     url = "https://cdn.kernel.org/pub/linux/kernel/v${majorVersion}.x/linux-${version}.tar.xz";
-    hash = "sha256-1FCrIV3k4fi7heD0IWdg+jP9AktFJrFE9M4NkBKynJ4=";
+    hash = "sha256-OQzd4DJxmSWghCcnAZfvVdtOkMCdRU6cNVQVcpLJ82E=";
   };
 
   configfile =
@@ -78,16 +60,6 @@ pkgs.stdenv.mkDerivation {
   dontConfigure = true;
   installPhase = ''
     mkdir -p $out
-    if [ -f ${kernel}/Image ]; then
-      cp ${kernel}/Image $out/vmlinux
-    elif [ -f ${kernel}/vmlinuz ]; then
-      cp ${kernel}/vmlinuz $out/vmlinux
-    elif [ -f ${kernel}/bzImage ]; then
-      cp ${kernel}/bzImage $out/vmlinux
-    else
-      echo "Error: Could not find kernel image in ${kernel}"
-      ls -la ${kernel}/ || true
-      exit 1
-    fi
+    cp ${kernel}/Image $out/vmlinux
   '';
 }

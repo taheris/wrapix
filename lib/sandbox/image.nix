@@ -67,8 +67,8 @@ pkgs.dockerTools.buildLayeredImage {
     # Create user matching host UID/username
     useradd -u "$HOST_UID" -m "$HOST_USER" 2>/dev/null || true
 
-    # Drop privileges and run Claude Code
-    exec su - "$HOST_USER" -c "cd /workspace && claude"
+    # Drop privileges and run Claude Code with system prompt
+    exec su - "$HOST_USER" -c "cd /workspace && claude --dangerously-skip-permissions --append-system-prompt \"\$WRAPIX_PROMPT\""
     MACOSENTRY
         chmod +x entrypoint.sh
   '';
