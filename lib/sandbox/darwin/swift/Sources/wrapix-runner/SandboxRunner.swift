@@ -71,8 +71,11 @@ struct SandboxRunner: AsyncParsableCommand {
     @Option(name: .long, help: "Number of CPUs (default: half of available)")
     var cpus: Int?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Mounts in source:dest format")
-    var mount: [String] = []
+    @Option(name: .long, parsing: .upToNextOption, help: "Directory mounts in source:dest format")
+    var dirMount: [String] = []
+
+    @Option(name: .long, parsing: .upToNextOption, help: "File mounts in source:dest format (mounted via parent directory)")
+    var fileMount: [String] = []
 
     func run() async throws {
         let kernel = Kernel(
@@ -141,8 +144,8 @@ struct SandboxRunner: AsyncParsableCommand {
                 )
             )
 
-            // Process mounts from command line (only directories - files not supported)
-            for mountSpec in mount {
+            // Process directory mounts from command line
+            for mountSpec in dirMount {
                 let parts = mountSpec.split(separator: ":", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { continue }
 
@@ -154,6 +157,53 @@ struct SandboxRunner: AsyncParsableCommand {
                 config.mounts.append(
                     Mount.share(source: sourcePath, destination: parts[1])
                 )
+            }
+
+            // Process file mounts: mount parent directories (deduplicated), track symlink mappings
+            // Group files by parent directory to avoid duplicate mounts
+            var parentDirToMountPoint: [String: String] = [:]
+            var fileMountMappings: [String] = []
+            var mountIndex = 0
+
+            for mountSpec in fileMount {
+                let parts = mountSpec.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+
+                let sourcePath = parts[0]
+                let destPath = parts[1]
+
+                // Verify source file exists
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory),
+                      !isDirectory.boolValue else { continue }
+
+                let sourceURL = URL(fileURLWithPath: sourcePath)
+                let parentDir = sourceURL.deletingLastPathComponent().path
+                let filename = sourceURL.lastPathComponent
+
+                // Get or create mount point for this parent directory
+                let mountPoint: String
+                if let existing = parentDirToMountPoint[parentDir] {
+                    mountPoint = existing
+                } else {
+                    mountPoint = "/mnt/wrapix/file-mount/\(mountIndex)"
+                    parentDirToMountPoint[parentDir] = mountPoint
+                    mountIndex += 1
+
+                    // Mount parent directory to unique mount point
+                    config.mounts.append(
+                        Mount.share(source: parentDir, destination: mountPoint)
+                    )
+                }
+
+                // Track mapping: source_in_mount:destination
+                fileMountMappings.append("\(mountPoint)/\(filename):\(destPath)")
+            }
+
+            // Pass file mount mappings to entrypoint for symlink creation
+            let fileMountsEnv = fileMountMappings.joined(separator: ",")
+            if !fileMountsEnv.isEmpty {
+                config.process.environmentVariables.append("WRAPIX_FILE_MOUNTS=\(fileMountsEnv)")
             }
 
             // Configure NAT networking (avoids vmnet entitlement requirement)
@@ -173,7 +223,8 @@ struct SandboxRunner: AsyncParsableCommand {
                 "HOST_UID=\(getuid())",
                 "HOST_USER=\(NSUserName())",
                 "ANTHROPIC_API_KEY=\(ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "")",
-                "WRAPIX_PROMPT=\(ProcessInfo.processInfo.environment["WRAPIX_PROMPT"] ?? "")"
+                "WRAPIX_PROMPT=\(ProcessInfo.processInfo.environment["WRAPIX_PROMPT"] ?? "")",
+                "WRAPIX_DARWIN_VM=1"  // Signal to entrypoint that we're in Darwin VM mode
             ])
         }
 
