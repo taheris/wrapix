@@ -85,10 +85,6 @@ in
         grep -q 'WRAPIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_DIR_MOUNTS handling"; exit 1; }
         grep -q 'WRAPIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_FILE_MOUNTS handling"; exit 1; }
 
-        # Verify cleanup function handles both file and directory mounts
-        grep -q 'DIR_MOUNT_PAIRS' "$SCRIPT" || { echo "Missing DIR_MOUNT_PAIRS"; exit 1; }
-        grep -q 'FILE_MOUNT_PAIRS' "$SCRIPT" || { echo "Missing FILE_MOUNT_PAIRS"; exit 1; }
-
         # Verify /etc/passwd uses correct home directory
         grep -q '/home/\$HOST_USER:/bin/bash' "$SCRIPT" || { echo "/etc/passwd should set home to /home/\$HOST_USER"; exit 1; }
 

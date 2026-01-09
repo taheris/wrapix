@@ -98,17 +98,21 @@ in
             fi
 
             # Build mount arguments at runtime
-            # VirtioFS maps all files as root, so we use staging locations and copy with correct ownership
-            # VirtioFS also only supports directory mounts, so files are mounted via parent dir
+            # VirtioFS quirks we handle:
+            #   1. Files appear as root-owned - entrypoint copies with correct ownership
+            #   2. Only directory mounts work - files mounted via parent directory
+            #   3. Symlinks pointing outside mount are broken - dereference on host
+            #
+            # Security: We dereference symlinks on the HOST to avoid mounting /nix/store
             MOUNT_ARGS=""
             DIR_MOUNTS=""
             FILE_MOUNTS=""
             MOUNTED_FILE_DIRS=""
             dir_idx=0
             file_idx=0
+
             while IFS=: read -r src dest optional; do
               [ -z "$src" ] && continue
-              # Expand shell variables in paths
               src=$(eval echo "$src")
               dest=$(eval echo "$dest")
 
@@ -119,10 +123,14 @@ in
               fi
 
               if [ -d "$src" ]; then
-                # Directory: mount to staging, track for entrypoint to copy with correct ownership
+                # Dereference symlinks on host to avoid mounting /nix/store
+                host_staging="$WRAPIX_CACHE/mounts/dir$dir_idx"
+                mkdir -p "$host_staging"
+                cp -rL "$src/." "$host_staging/"
+
                 staging="/mnt/wrapix/dir$dir_idx"
                 dir_idx=$((dir_idx + 1))
-                MOUNT_ARGS="$MOUNT_ARGS -v $src:$staging"
+                MOUNT_ARGS="$MOUNT_ARGS -v $host_staging:$staging"
                 [ -n "$DIR_MOUNTS" ] && DIR_MOUNTS="$DIR_MOUNTS,"
                 DIR_MOUNTS="$DIR_MOUNTS$staging:$dest"
               else
@@ -181,9 +189,8 @@ in
             CPUS=$(($(sysctl -n hw.ncpu) / 2))
             [ "$CPUS" -lt 2 ] && CPUS=2
 
-            # Run container with automatic cleanup
-            # Note: -w / overrides image's WorkingDir=/workspace which fails if mount isn't ready
-            # The entrypoint script handles cd /workspace after mounts are available
+            # Run container
+            # Note: -w / because WorkingDir=/workspace fails before mounts are ready
             TTY_ARGS=""
             [ -t 0 ] && TTY_ARGS="-t -i"
 

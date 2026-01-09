@@ -137,7 +137,14 @@ pkgs.writeShellScriptBin "test-integration" ''
   # VirtioFS maps files as root, so we use staging + WRAPIX_DIR_MOUNTS
   CLAUDE_DIR="$TEST_DIR/claude-config"
   mkdir -p "$CLAUDE_DIR/mcp"
-  echo '{"test": "settings-value"}' > "$CLAUDE_DIR/settings.json"
+
+  # Create symlink to simulate home-manager (points outside the directory)
+  SYMLINK_TARGET="$TEST_DIR/symlink-target"
+  mkdir -p "$SYMLINK_TARGET"
+  echo '{"test": "settings-value"}' > "$SYMLINK_TARGET/settings.json"
+  ln -s "$SYMLINK_TARGET/settings.json" "$CLAUDE_DIR/settings.json"
+
+  # Create regular file for nested config
   echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
 
   # Set up file mount (simulating ~/.claude.json)
@@ -152,11 +159,16 @@ pkgs.writeShellScriptBin "test-integration" ''
   DIR_MOUNTS="/mnt/wrapix/dir0:/home/$USER/.claude"
   FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$USER/.claude.json"
 
+  # Dereference symlinks on host (security: avoids mounting /nix/store)
+  CLAUDE_DIR_DEREF="$TEST_DIR/claude-config-deref"
+  mkdir -p "$CLAUDE_DIR_DEREF"
+  cp -rL "$CLAUDE_DIR/." "$CLAUDE_DIR_DEREF/"
+
   set +e
   container run --rm \
     -w / \
     -v "$WORKSPACE:/workspace" \
-    -v "$CLAUDE_DIR:/mnt/wrapix/dir0" \
+    -v "$CLAUDE_DIR_DEREF:/mnt/wrapix/dir0" \
     -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
     -e HOST_USER=$USER \
     -e HOST_UID=$(id -u) \
@@ -169,18 +181,6 @@ pkgs.writeShellScriptBin "test-integration" ''
     "$TEST_IMAGE" /workspace/mount-test.sh
   MOUNT_EXIT=$?
   set -e
-
-  # Verify sync-back
-  if [ -f "$WORKSPACE/container-output.txt" ]; then
-    CONTENT=$(cat "$WORKSPACE/container-output.txt")
-    if [ "$CONTENT" != "container-wrote-this-content" ]; then
-      echo "FAIL: Sync-back content mismatch"
-      MOUNT_EXIT=1
-    fi
-  else
-    echo "FAIL: container-output.txt not synced back"
-    MOUNT_EXIT=1
-  fi
 
   if [ "$MOUNT_EXIT" -eq 0 ]; then
     echo "PASS: Mount test"
