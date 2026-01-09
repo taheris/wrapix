@@ -71,7 +71,7 @@ The sandbox uses repo-specific deploy keys for secure git push. This keeps your 
 Run *one* of the following (on the host, not in sandbox).
 
 ```bash
-./scripts/setup-deploy-key           # Uses repo name as key name
+./scripts/setup-deploy-key           # Uses repo-hostname format (e.g., myrepo-macbook)
 ./scripts/setup-deploy-key mykey     # Custom key name
 ```
 
