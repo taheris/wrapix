@@ -55,8 +55,8 @@ in
       deployKey ? null,
     }:
     let
-      # If deployKey is null, default to basename of project dir at runtime
-      deployKeyExpr = if deployKey != null then ''"${deployKey}"'' else ''$(basename "$PROJECT_DIR")'';
+      # If deployKey is null, default to repo-hostname format at runtime
+      deployKeyExpr = if deployKey != null then ''"${deployKey}"'' else ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
     in
     pkgs.writeShellScriptBin "wrapix" ''
       set -euo pipefail
