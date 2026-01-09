@@ -41,6 +41,65 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### macOS Networking: gvproxy
+
+macOS VMs use [gvproxy](https://github.com/containers/gvisor-tap-vsock) (gvisor-tap-vsock) for full TCP/UDP connectivity:
+
+```
+┌─ macOS Host ─────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  ┌─ gvproxy ─────────────────────┐      ┌─ Linux VM ───────────────────┐ │
+│  │                               │      │                              │ │
+│  │  Userspace network stack      │      │  eth0 (192.168.127.2/24)     │ │
+│  │  (gVisor netstack)            │      │         │                    │ │
+│  │         │                     │      │         ▼                    │ │
+│  │         ▼                     │      │  ┌─────────────────────┐     │ │
+│  │  ┌─────────────────┐          │      │  │ VZFileHandle        │     │ │
+│  │  │ vfkit socket    │◄─────────┼──────┼──│ NetworkDevice       │     │ │
+│  │  │ (unixgram)      │ Ethernet │      │  │ Attachment          │     │ │
+│  │  └────────┬────────┘  frames  │      │  └─────────────────────┘     │ │
+│  │           │                   │      │                              │ │
+│  └───────────┼───────────────────┘      └──────────────────────────────┘ │
+│              │                                                           │
+│              ▼                                                           │
+│       ┌──────────────┐                                                   │
+│       │ macOS Network│ ──────► Internet                                  │
+│       └──────────────┘                                                   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why gvproxy instead of VZNATNetworkDeviceAttachment?**
+
+Apple's `VZNATNetworkDeviceAttachment` has a critical limitation: it only routes ICMP traffic, not TCP or UDP. This means:
+- `ping 1.1.1.1` works ✓
+- `curl https://example.com` fails ✗
+- DNS resolution fails ✗
+
+This appears to be a bug or undocumented limitation in the Virtualization framework. The alternative (`vmnet`) requires an Apple Developer Program certificate to sign the binary with the `com.apple.vm.networking` entitlement.
+
+**gvproxy solution:**
+
+gvproxy provides a userspace network stack (from gVisor) that:
+1. Runs as a host-side daemon
+2. Creates a Unix datagram socket using the "vfkit" protocol
+3. Receives raw Ethernet frames from the VM via `VZFileHandleNetworkDeviceAttachment`
+4. Handles TCP/UDP/ICMP using gVisor's netstack
+5. Proxies traffic through the host's network stack
+
+This gives full internet connectivity without requiring code signing certificates.
+
+### Networking Comparison: macOS vs Linux
+
+| Aspect | Linux (pasta) | macOS (gvproxy) |
+|--------|--------------|-----------------|
+| Network mode | `--network=pasta` (Podman) | gvproxy + VZFileHandle |
+| Technology | passt/pasta userspace TCP/IP | gVisor netstack |
+| Connection | User namespace networking | Unix datagram socket |
+| Protocol | Direct network namespace | vfkit Ethernet frames |
+| Performance | Near-native | Good (userspace overhead) |
+
+Both solutions provide full TCP/UDP/ICMP connectivity without elevated privileges. They achieve this using different userspace networking stacks appropriate to their platform's container/VM technology.
+
 ## Security Model
 
 ### What Container Isolation Provides
