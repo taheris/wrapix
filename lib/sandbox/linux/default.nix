@@ -72,8 +72,8 @@ in
       VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
       ${mkMountLines profile}
 
-      # Mount SSH known_hosts and system prompt
-      VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}:/workspace/.ssh/known_hosts:ro"
+      # Mount SSH known_hosts (as directory since it's from Nix store) and system prompt
+      VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}:/home/$USER/.ssh/known_hosts_dir:ro"
       VOLUME_ARGS="$VOLUME_ARGS -v ${systemPromptFile}:/etc/wrapix-prompt:ro"
 
       # Mount deploy key for this repo (see scripts/setup-deploy-key)
@@ -81,7 +81,7 @@ in
       DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
       DEPLOY_KEY_ARGS=""
       if [ -f "$DEPLOY_KEY" ]; then
-        VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/workspace/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
+        VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
         DEPLOY_KEY_ARGS="-e DEPLOY_KEY_NAME=$DEPLOY_KEY_NAME"
       fi
 
@@ -108,6 +108,22 @@ in
         -e "HOME=/home/$USER" \
         -w /workspace \
         docker-archive:${profileImage} \
-        -c 'claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"'
+        -c '
+          # Set up SSH: copy known_hosts and create config
+          mkdir -p "$HOME/.ssh"
+          [ -f "$HOME/.ssh/known_hosts_dir/known_hosts" ] && cp "$HOME/.ssh/known_hosts_dir/known_hosts" "$HOME/.ssh/known_hosts"
+          if [ -n "''${DEPLOY_KEY_NAME:-}" ] && [ -f "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" ]; then
+            cat > "$HOME/.ssh/config" <<EOF
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile $HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME
+    IdentitiesOnly yes
+EOF
+            chmod 600 "$HOME/.ssh/config"
+          fi
+          chmod 700 "$HOME/.ssh"
+          exec claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"
+        '
     '';
 }
