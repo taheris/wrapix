@@ -36,10 +36,8 @@ chown "$HOST_UID:$HOST_UID" "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
 [ -f "$HOME/.ssh/config" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.ssh/config"
 
-# Copy directories from mounts with correct ownership
-# VirtioFS maps all files as root, so directories are mounted to staging location
-# and need to be copied with correct permissions
-declare -a DIR_MOUNT_PAIRS
+# Copy directories from staging to destination with correct ownership
+# VirtioFS maps files as root, so we copy and fix ownership
 if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
     for mapping in "${DIR_MOUNTS[@]}"; do
@@ -49,15 +47,11 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
             mkdir -p "$(dirname "$dst")"
             cp -r "$src" "$dst"
             chown -R "$HOST_UID:$HOST_UID" "$dst"
-            DIR_MOUNT_PAIRS+=("$src:$dst")
         fi
     done
 fi
 
-# Copy files from mounts with correct ownership
-# VirtioFS only supports directory mounts, so files are mounted via parent directory
-# and need to be copied with correct permissions
-declare -a FILE_MOUNT_PAIRS
+# Copy files from staging to destination with correct ownership
 if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
     for mapping in "${MOUNTS[@]}"; do
@@ -67,35 +61,11 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
             mkdir -p "$(dirname "$dst")"
             cp "$src" "$dst"
             chown "$HOST_UID:$HOST_UID" "$dst"
-            FILE_MOUNT_PAIRS+=("$src:$dst")
         fi
     done
 fi
 
-# Copy modified files/directories back to mount on exit
-# Note: VirtioFS mounts don't support chown/chmod, so we skip owner/group/times preservation
-cleanup() {
-    for pair in "${DIR_MOUNT_PAIRS[@]+"${DIR_MOUNT_PAIRS[@]}"}"; do
-        src="${pair%%:*}"
-        dst="${pair#*:}"
-        if [ -d "$dst" ]; then
-            rsync -rlD --no-owner --no-group --no-times --delete "$dst/" "$src/"
-        fi
-    done
-    for pair in "${FILE_MOUNT_PAIRS[@]+"${FILE_MOUNT_PAIRS[@]}"}"; do
-        src="${pair%%:*}"
-        dst="${pair#*:}"
-        if [ -f "$dst" ]; then
-            cp "$dst" "$src"
-        fi
-    done
-}
-trap cleanup EXIT
-
 cd /workspace
 
-# Run without exec so trap can fire
-setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
   claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix/wrapix-prompt)"
-EXIT_CODE=$?
-exit $EXIT_CODE

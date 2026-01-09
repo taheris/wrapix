@@ -12,6 +12,7 @@ let
     pkgs = testPkgs;
     profile = profiles.base;
     claudePackage = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
+    entrypointScript = ../sandbox/linux/entrypoint.sh;
   };
 
   # Common VM configuration for all tests

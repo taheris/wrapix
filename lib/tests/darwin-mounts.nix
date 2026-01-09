@@ -1,5 +1,6 @@
 # Darwin VM mount integration test
-# Tests file and directory mounts work correctly in the VM
+#
+# Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
 #
 # This test will:
 # - Run during `nix flake check` if container CLI is available
@@ -147,7 +148,14 @@ in
         # VirtioFS maps files as root, so we use staging + WRAPIX_DIR_MOUNTS
         CLAUDE_DIR="$TEST_DIR/claude-config"
         mkdir -p "$CLAUDE_DIR/mcp"
-        echo '{"test": "settings-value"}' > "$CLAUDE_DIR/settings.json"
+
+        # Create symlink to simulate home-manager (points outside the directory)
+        SYMLINK_TARGET="$TEST_DIR/symlink-target"
+        mkdir -p "$SYMLINK_TARGET"
+        echo '{"test": "settings-value"}' > "$SYMLINK_TARGET/settings.json"
+        ln -s "$SYMLINK_TARGET/settings.json" "$CLAUDE_DIR/settings.json"
+
+        # Create regular file for nested config
         echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
 
         # Set up file mount (simulating ~/.claude.json)
@@ -162,22 +170,21 @@ in
         DIR_MOUNTS="/mnt/wrapix/dir0:/home/$REAL_USER/.claude"
         FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$REAL_USER/.claude.json"
 
-        echo ""
-        echo "Test files created:"
-        echo "  Workspace: $WORKSPACE/workspace-test.txt"
-        echo "  Dir mount: $CLAUDE_DIR/ -> /mnt/wrapix/dir0 (staging)"
-        echo "  File mount: $CLAUDE_JSON_DIR/claude.json -> /mnt/wrapix/file0 (staging)"
+        echo "Test setup: symlink in $CLAUDE_DIR -> $SYMLINK_TARGET"
         echo ""
 
-        echo "Running container with test mounts..."
-        echo ""
+        # Dereference symlinks on host (security: avoids mounting /nix/store)
+        CLAUDE_DIR_DEREF="$TEST_DIR/claude-config-deref"
+        mkdir -p "$CLAUDE_DIR_DEREF"
+        cp -rL "$CLAUDE_DIR/." "$CLAUDE_DIR_DEREF/"
 
         # Run the container with our test script
+        # Note: Using dereferenced directory, no /nix/store mount needed
         set +e
         container run --rm \
           -w / \
           -v "$WORKSPACE:/workspace" \
-          -v "$CLAUDE_DIR:/mnt/wrapix/dir0" \
+          -v "$CLAUDE_DIR_DEREF:/mnt/wrapix/dir0" \
           -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
           -e HOST_USER=$REAL_USER \
           -e HOST_UID=$(id -u "$REAL_USER") \
@@ -190,26 +197,6 @@ in
           "$TEST_IMAGE" /workspace/mount-test.sh
         EXIT_CODE=$?
         set -e
-
-        echo ""
-        echo "Container exit code: $EXIT_CODE"
-
-        # Verify sync-back worked
-        echo ""
-        echo "Verifying sync-back..."
-        if [ -f "$WORKSPACE/container-output.txt" ]; then
-          CONTENT=$(cat "$WORKSPACE/container-output.txt")
-          if [ "$CONTENT" = "container-wrote-this-content" ]; then
-            echo "  PASS: Workspace sync-back worked"
-          else
-            echo "  FAIL: Sync-back content mismatch: $CONTENT"
-            EXIT_CODE=1
-          fi
-        else
-          echo "  FAIL: container-output.txt not synced back"
-          ls -la "$WORKSPACE/"
-          EXIT_CODE=1
-        fi
 
         echo ""
         if [ "$EXIT_CODE" -eq 0 ]; then

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Container mount verification test script
 # This runs INSIDE the container to verify mounts are working
+#
+# Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
 set -e
 
 echo "=== Container Mount Verification ==="
@@ -54,16 +56,26 @@ fi
 
 # Test 4: Directory mount staging location
 # VirtioFS maps files as root, so directories are staged and copied
+# Symlinks are dereferenced on HOST before mounting (security)
 echo ""
 echo "Test 4: Directory mount staging"
 if [ -d /mnt/wrapix/dir0 ]; then
   echo "  PASS: Staging directory exists at /mnt/wrapix/dir0"
-  if [ -f /mnt/wrapix/dir0/settings.json ]; then
+  if [ -e /mnt/wrapix/dir0/settings.json ]; then
+    # Verify it's a regular file (symlinks dereferenced on host)
+    if [ -L /mnt/wrapix/dir0/settings.json ]; then
+      echo "  FAIL: settings.json is still a symlink (should be dereferenced on host)"
+      readlink /mnt/wrapix/dir0/settings.json
+      FAILED=1
+    else
+      echo "  PASS: settings.json is a regular file (dereferenced on host)"
+    fi
+    # Verify content is readable
     if grep -q "settings-value" /mnt/wrapix/dir0/settings.json; then
       echo "  PASS: settings.json content correct in staging"
     else
       echo "  FAIL: settings.json content wrong in staging"
-      cat /mnt/wrapix/dir0/settings.json
+      cat /mnt/wrapix/dir0/settings.json 2>&1 || echo "  (failed to read)"
       FAILED=1
     fi
   else
@@ -98,7 +110,7 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     dst=$(echo "$dst" | sed "s|\$USER|$HOST_USER|g")
     if [ -d "$src" ]; then
       mkdir -p "$(dirname "$dst")"
-      cp -r "$src" "$dst"
+      cp -r "$src" "$dst"  # Symlinks already dereferenced on host
       echo "  Copied $src -> $dst"
     fi
   done
@@ -113,6 +125,14 @@ if [ -d "$TEST_HOME/.claude" ]; then
       echo "  FAIL: settings.json content wrong"
       cat "$TEST_HOME/.claude/settings.json"
       FAILED=1
+    fi
+    # Verify it's a regular file (symlinks dereferenced on host before mount)
+    if [ -L "$TEST_HOME/.claude/settings.json" ]; then
+      echo "  FAIL: settings.json is still a symlink"
+      ls -la "$TEST_HOME/.claude/settings.json"
+      FAILED=1
+    else
+      echo "  PASS: settings.json is a regular file"
     fi
   else
     echo "  FAIL: settings.json not found in copy"
@@ -184,11 +204,22 @@ else
   FAILED=1
 fi
 
-# Test 8: Write to workspace (sync-back test)
+# Test 8: Security - /nix/store must NOT be mounted
 echo ""
-echo "Test 8: Write to workspace"
-echo "container-wrote-this-content" > /workspace/container-output.txt
-if [ -f /workspace/container-output.txt ]; then
+echo "Test 8: Security - /nix/store must NOT be mounted"
+if mount | grep -q "/nix/store"; then
+  echo "  FAIL: /nix/store is mounted (security violation)"
+  mount | grep /nix/store
+  FAILED=1
+else
+  echo "  PASS: /nix/store is not mounted"
+fi
+
+# Test 9: Workspace is writable
+echo ""
+echo "Test 9: Workspace is writable"
+echo "test-content" > /workspace/test-output.txt
+if [ -f /workspace/test-output.txt ]; then
   echo "  PASS: Wrote to workspace"
 else
   echo "  FAIL: Could not write to workspace"
