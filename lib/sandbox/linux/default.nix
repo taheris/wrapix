@@ -56,7 +56,11 @@ in
     }:
     let
       # If deployKey is null, default to repo-hostname format at runtime
-      deployKeyExpr = if deployKey != null then ''"${deployKey}"'' else ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
+      deployKeyExpr =
+        if deployKey != null then
+          ''"${deployKey}"''
+        else
+          ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
     in
     pkgs.writeShellScriptBin "wrapix" ''
       set -euo pipefail
@@ -96,10 +100,11 @@ in
         --entrypoint /bin/bash \
         $VOLUME_ARGS \
         $DEPLOY_KEY_ARGS \
-        -e "HOME=/home/$USER" \
         -e "ANTHROPIC_API_KEY=''${ANTHROPIC_API_KEY:-}" \
-        -e "WRAPIX_PROMPT=$WRAPIX_PROMPT" \
         -e "BD_NO_DB=1" \
+        -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+        -e "HOME=/home/$USER" \
+        -e "WRAPIX_PROMPT=$WRAPIX_PROMPT" \
         -w /workspace \
         docker-archive:${profileImage} \
         -c 'claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"'
