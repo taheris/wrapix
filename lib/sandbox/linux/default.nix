@@ -11,6 +11,7 @@
 
 let
   systemPrompt = builtins.readFile ../sandbox-prompt.txt;
+  knownHosts = import ../known-hosts.nix { inherit pkgs; };
 
   # Convert ~ paths to shell expressions
   expandPath =
@@ -73,12 +74,15 @@ in
       VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
       ${mkMountLines profile}
 
+      # Mount SSH known_hosts
+      VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}:/workspace/.ssh/known_hosts:ro"
+
       # Mount deploy key for this repo (see scripts/setup-deploy-key)
       DEPLOY_KEY_NAME=${deployKeyExpr}
       DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
       DEPLOY_KEY_ARGS=""
       if [ -f "$DEPLOY_KEY" ]; then
-        VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
+        VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/workspace/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
         DEPLOY_KEY_ARGS="-e DEPLOY_KEY_NAME=$DEPLOY_KEY_NAME"
       fi
 
