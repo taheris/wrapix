@@ -98,11 +98,14 @@ in
             fi
 
             # Build mount arguments at runtime
-            # VirtioFS only supports directory mounts, so we mount parent dirs for files
+            # VirtioFS maps all files as root, so we use staging locations and copy with correct ownership
+            # VirtioFS also only supports directory mounts, so files are mounted via parent dir
             MOUNT_ARGS=""
+            DIR_MOUNTS=""
             FILE_MOUNTS=""
-            MOUNTED_DIRS=""
-            mount_idx=0
+            MOUNTED_FILE_DIRS=""
+            dir_idx=0
+            file_idx=0
             while IFS=: read -r src dest optional; do
               [ -z "$src" ] && continue
               # Expand shell variables in paths
@@ -116,15 +119,19 @@ in
               fi
 
               if [ -d "$src" ]; then
-                # Directory: mount directly
-                MOUNT_ARGS="$MOUNT_ARGS -v $src:$dest"
+                # Directory: mount to staging, track for entrypoint to copy with correct ownership
+                staging="/mnt/wrapix/dir$dir_idx"
+                dir_idx=$((dir_idx + 1))
+                MOUNT_ARGS="$MOUNT_ARGS -v $src:$staging"
+                [ -n "$DIR_MOUNTS" ] && DIR_MOUNTS="$DIR_MOUNTS,"
+                DIR_MOUNTS="$DIR_MOUNTS$staging:$dest"
               else
                 # File: mount parent dir to staging (dedup), track for entrypoint to copy
                 parent_dir=$(dirname "$src")
                 file_name=$(basename "$src")
                 # Check if parent already mounted
                 staging=""
-                for entry in $MOUNTED_DIRS; do
+                for entry in $MOUNTED_FILE_DIRS; do
                   dir="''${entry%%=*}"
                   path="''${entry#*=}"
                   if [ "$dir" = "$parent_dir" ]; then
@@ -133,10 +140,10 @@ in
                   fi
                 done
                 if [ -z "$staging" ]; then
-                  staging="/mnt/wrapix/file$mount_idx"
-                  mount_idx=$((mount_idx + 1))
+                  staging="/mnt/wrapix/file$file_idx"
+                  file_idx=$((file_idx + 1))
                   MOUNT_ARGS="$MOUNT_ARGS -v $parent_dir:$staging"
-                  MOUNTED_DIRS="$MOUNTED_DIRS $parent_dir=$staging"
+                  MOUNTED_FILE_DIRS="$MOUNTED_FILE_DIRS $parent_dir=$staging"
                 fi
                 [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
                 FILE_MOUNTS="$FILE_MOUNTS$staging/$file_name:$dest"
@@ -161,6 +168,7 @@ in
             # Build environment arguments
             ENV_ARGS=""
             ENV_ARGS="$ENV_ARGS -e BD_NO_DB=1"
+            [ -n "$DIR_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_DIR_MOUNTS=$DIR_MOUNTS"
             [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
             ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
             ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"

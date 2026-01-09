@@ -143,21 +143,30 @@ in
         cp ${containerTestScript} "$WORKSPACE/mount-test.sh"
         chmod +x "$WORKSPACE/mount-test.sh"
 
-        # Set up test directory mount (simulating ~/.claude)
+        # Set up directory mount (simulating ~/.claude)
+        # VirtioFS maps files as root, so we use staging + WRAPIX_DIR_MOUNTS
         CLAUDE_DIR="$TEST_DIR/claude-config"
         mkdir -p "$CLAUDE_DIR/mcp"
         echo '{"test": "settings-value"}' > "$CLAUDE_DIR/settings.json"
         echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
 
-        # Set up test file mount (simulating ~/.claude.json)
-        CLAUDE_JSON="$TEST_DIR/claude.json"
-        echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON"
+        # Set up file mount (simulating ~/.claude.json)
+        # VirtioFS only supports directory mounts, so we mount parent dir to staging
+        CLAUDE_JSON_DIR="$TEST_DIR/claude-json"
+        mkdir -p "$CLAUDE_JSON_DIR"
+        echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON_DIR/claude.json"
+
+        # Build mount environment variables in same format as production:
+        # DIR_MOUNTS:  /staging/path:/destination/path
+        # FILE_MOUNTS: /staging/path/filename:/destination/path
+        DIR_MOUNTS="/mnt/wrapix/dir0:/home/$REAL_USER/.claude"
+        FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$REAL_USER/.claude.json"
 
         echo ""
         echo "Test files created:"
         echo "  Workspace: $WORKSPACE/workspace-test.txt"
-        echo "  Dir mount: $CLAUDE_DIR/ (with settings.json, mcp/config.json)"
-        echo "  File mount: $CLAUDE_JSON"
+        echo "  Dir mount: $CLAUDE_DIR/ -> /mnt/wrapix/dir0 (staging)"
+        echo "  File mount: $CLAUDE_JSON_DIR/claude.json -> /mnt/wrapix/file0 (staging)"
         echo ""
 
         echo "Running container with test mounts..."
@@ -168,12 +177,14 @@ in
         container run --rm \
           -w / \
           -v "$WORKSPACE:/workspace" \
-          -v "$CLAUDE_DIR:/home/$REAL_USER/.claude" \
-          -v "$CLAUDE_JSON:/home/$REAL_USER/.claude.json" \
+          -v "$CLAUDE_DIR:/mnt/wrapix/dir0" \
+          -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
           -e HOST_USER=$REAL_USER \
           -e HOST_UID=$(id -u "$REAL_USER") \
           -e WRAPIX_PROMPT="test" \
           -e BD_NO_DB=1 \
+          -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
+          -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
           --network default \
           --entrypoint /bin/bash \
           "$TEST_IMAGE" /workspace/mount-test.sh

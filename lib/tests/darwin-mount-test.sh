@@ -6,8 +6,13 @@ set -e
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"
 echo "HOME: $HOME"
+echo "HOST_USER: ${HOST_USER:-not set}"
 echo "PWD: $(pwd)"
 echo ""
+
+# Derive the test home directory from HOST_USER
+# (we bypass entrypoint with --entrypoint /bin/bash, so HOME is not set up)
+TEST_HOME="/home/${HOST_USER:-testuser}"
 
 FAILED=0
 
@@ -48,58 +53,140 @@ else
 fi
 
 # Test 4: Directory mount staging location
+# VirtioFS maps files as root, so directories are staged and copied
 echo ""
 echo "Test 4: Directory mount staging"
-if [ -d /mnt/wrapix/dir/0 ]; then
-  echo "  PASS: Staging directory exists"
-  if [ -f /mnt/wrapix/dir/0/settings.json ]; then
-    if grep -q "settings-value" /mnt/wrapix/dir/0/settings.json; then
-      echo "  PASS: settings.json content correct"
+if [ -d /mnt/wrapix/dir0 ]; then
+  echo "  PASS: Staging directory exists at /mnt/wrapix/dir0"
+  if [ -f /mnt/wrapix/dir0/settings.json ]; then
+    if grep -q "settings-value" /mnt/wrapix/dir0/settings.json; then
+      echo "  PASS: settings.json content correct in staging"
     else
-      echo "  FAIL: settings.json content wrong"
-      cat /mnt/wrapix/dir/0/settings.json
+      echo "  FAIL: settings.json content wrong in staging"
+      cat /mnt/wrapix/dir0/settings.json
       FAILED=1
     fi
   else
-    echo "  FAIL: settings.json not in staging"
-    ls -la /mnt/wrapix/dir/0/ || true
+    echo "  FAIL: settings.json not found in staging"
+    ls -la /mnt/wrapix/dir0/ || true
     FAILED=1
   fi
-  if [ -f /mnt/wrapix/dir/0/mcp/config.json ]; then
-    echo "  PASS: Nested mcp/config.json exists"
+  if [ -f /mnt/wrapix/dir0/mcp/config.json ]; then
+    echo "  PASS: Nested mcp/config.json exists in staging"
   else
-    echo "  FAIL: mcp/config.json not in staging"
-    ls -laR /mnt/wrapix/dir/0/ || true
+    echo "  FAIL: mcp/config.json not found in staging"
+    ls -laR /mnt/wrapix/dir0/ || true
     FAILED=1
   fi
 else
-  echo "  FAIL: Staging directory /mnt/wrapix/dir/0 not found"
+  echo "  FAIL: Staging directory /mnt/wrapix/dir0 not found"
   ls -la /mnt/wrapix/ 2>/dev/null || echo "  /mnt/wrapix does not exist"
   FAILED=1
 fi
 
-# Test 5: File mount staging location
+# Test 5: Directory copy from staging to destination
+# Note: We bypass entrypoint for testing, so manually simulate the copy
 echo ""
-echo "Test 5: File mount staging"
-# File mounts go through parent directory
-if ls /mnt/wrapix/file/*/claude.json 2>/dev/null; then
-  FILE_PATH=$(ls /mnt/wrapix/file/*/claude.json 2>/dev/null | head -1)
-  if grep -q "test-api-key-12345" "$FILE_PATH"; then
-    echo "  PASS: claude.json content correct at $FILE_PATH"
+echo "Test 5: Directory copy from staging to destination"
+if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
+  # Parse WRAPIX_DIR_MOUNTS and copy directories (simulating entrypoint behavior)
+  IFS=',' read -ra MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
+  for mapping in "${MOUNTS[@]}"; do
+    src="${mapping%%:*}"
+    dst="${mapping#*:}"
+    # Expand $USER in dst path
+    dst=$(echo "$dst" | sed "s|\$USER|$HOST_USER|g")
+    if [ -d "$src" ]; then
+      mkdir -p "$(dirname "$dst")"
+      cp -r "$src" "$dst"
+      echo "  Copied $src -> $dst"
+    fi
+  done
+fi
+
+if [ -d "$TEST_HOME/.claude" ]; then
+  echo "  PASS: Directory copied to $TEST_HOME/.claude"
+  if [ -f "$TEST_HOME/.claude/settings.json" ]; then
+    if grep -q "settings-value" "$TEST_HOME/.claude/settings.json"; then
+      echo "  PASS: settings.json content correct"
+    else
+      echo "  FAIL: settings.json content wrong"
+      cat "$TEST_HOME/.claude/settings.json"
+      FAILED=1
+    fi
   else
-    echo "  FAIL: claude.json content wrong"
-    cat "$FILE_PATH"
+    echo "  FAIL: settings.json not found in copy"
+    ls -la "$TEST_HOME/.claude/" || true
+    FAILED=1
+  fi
+  if [ -f "$TEST_HOME/.claude/mcp/config.json" ]; then
+    echo "  PASS: Nested mcp/config.json exists in copy"
+  else
+    echo "  FAIL: mcp/config.json not found in copy"
+    ls -laR "$TEST_HOME/.claude/" || true
     FAILED=1
   fi
 else
-  echo "  FAIL: claude.json not found in file mount staging"
-  ls -laR /mnt/wrapix/file/ 2>/dev/null || echo "  /mnt/wrapix/file-mount does not exist"
+  echo "  FAIL: Directory not copied to $TEST_HOME/.claude"
+  ls -la "$TEST_HOME/" 2>/dev/null || true
   FAILED=1
 fi
 
-# Test 6: Write to workspace (sync-back test)
+# Test 6: File mount staging location
+# VirtioFS only supports directory mounts, so files are staged via parent dir
 echo ""
-echo "Test 6: Write to workspace"
+echo "Test 6: File mount staging"
+if [ -f /mnt/wrapix/file0/claude.json ]; then
+  if grep -q "test-api-key-12345" /mnt/wrapix/file0/claude.json; then
+    echo "  PASS: claude.json content correct at /mnt/wrapix/file0/claude.json"
+  else
+    echo "  FAIL: claude.json content wrong"
+    cat /mnt/wrapix/file0/claude.json
+    FAILED=1
+  fi
+else
+  echo "  FAIL: claude.json not found at /mnt/wrapix/file0/"
+  ls -la /mnt/wrapix/ 2>/dev/null || echo "  /mnt/wrapix does not exist"
+  FAILED=1
+fi
+
+# Test 7: File copy from staging to destination
+# Note: We bypass entrypoint for testing, so manually simulate the copy
+echo ""
+echo "Test 7: File copy from staging to destination"
+if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
+  # Parse WRAPIX_FILE_MOUNTS and copy files (simulating entrypoint behavior)
+  IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
+  for mapping in "${MOUNTS[@]}"; do
+    src="${mapping%%:*}"
+    dst="${mapping#*:}"
+    # Expand $USER in dst path
+    dst=$(echo "$dst" | sed "s|\$USER|$HOST_USER|g")
+    if [ -f "$src" ]; then
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+      echo "  Copied $src -> $dst"
+    fi
+  done
+fi
+
+if [ -f "$TEST_HOME/.claude.json" ]; then
+  if grep -q "test-api-key-12345" "$TEST_HOME/.claude.json"; then
+    echo "  PASS: claude.json copied to $TEST_HOME/.claude.json"
+  else
+    echo "  FAIL: claude.json content wrong at destination"
+    cat "$TEST_HOME/.claude.json"
+    FAILED=1
+  fi
+else
+  echo "  FAIL: claude.json not copied to $TEST_HOME/.claude.json"
+  ls -la "$TEST_HOME/" 2>/dev/null || true
+  FAILED=1
+fi
+
+# Test 8: Write to workspace (sync-back test)
+echo ""
+echo "Test 8: Write to workspace"
 echo "container-wrote-this-content" > /workspace/container-output.txt
 if [ -f /workspace/container-output.txt ]; then
   echo "  PASS: Wrote to workspace"
