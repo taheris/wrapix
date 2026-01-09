@@ -8,7 +8,7 @@
 let
   isDarwin = system == "aarch64-darwin";
 
-  # Use Linux packages for kernel (requires remote builder on Darwin)
+  # Use Linux packages for building the container image (requires remote builder on Darwin)
   linuxPkgs =
     if isDarwin then
       import (pkgs.path) {
@@ -19,9 +19,6 @@ let
     else
       pkgs;
 
-  # Import kernel from the sandbox module
-  kernel = import ../sandbox/darwin/kernel.nix { pkgs = linuxPkgs; };
-
   # Build profile image for testing
   profiles = import ../sandbox/profiles.nix { pkgs = linuxPkgs; };
   profileImage = import ../sandbox/image.nix {
@@ -30,12 +27,6 @@ let
     claudePackage = linuxPkgs.claude-code;
     entrypointScript = ../sandbox/darwin/entrypoint.sh;
   };
-
-  # Swift source for runner (triggers rebuild when changed)
-  swiftSource = pkgs.runCommand "wrapix-runner-source" { } ''
-    mkdir -p $out
-    cp -r ${../sandbox/darwin/swift}/* $out/
-  '';
 
   # Test scripts that run inside the container
   networkTestScript = ./darwin-network-test.sh;
@@ -58,67 +49,34 @@ pkgs.writeShellScriptBin "test-integration" ''
     exit 1
   fi
 
-  # Check Xcode
-  if [ ! -d "/Applications/Xcode.app" ]; then
-    echo "ERROR: Requires Xcode"
-    exit 1
-  fi
-
   echo "=== Darwin Integration Tests ==="
   echo ""
 
-  # XDG directories
-  XDG_DATA_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}"
+  # Ensure container system is running
+  if ! container system status >/dev/null 2>&1; then
+    echo "Starting container system..."
+    container system start
+    sleep 2
+  fi
+
+  TEST_IMAGE="wrapix-integration-test:latest"
   XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
-  WRAPIX_DATA="$XDG_DATA_HOME/wrapix"
   WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
-  RUNNER_BIN="$WRAPIX_DATA/bin/wrapix-runner"
-  CCTL_BIN="$WRAPIX_DATA/bin/cctl"
-  KERNEL_PATH="${kernel}/vmlinux"
+  mkdir -p "$WRAPIX_CACHE"
 
-  # Rebuild wrapix-runner if source changed
-  RUNNER_VERSION_FILE="$WRAPIX_DATA/bin/wrapix-runner.version"
-  CURRENT_SOURCE_HASH="${swiftSource}"
-  if [ ! -x "$RUNNER_BIN" ] || [ ! -f "$RUNNER_VERSION_FILE" ] || [ "$(cat "$RUNNER_VERSION_FILE")" != "$CURRENT_SOURCE_HASH" ]; then
-    echo "Building wrapix-runner..."
-    XCODE_SWIFT="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
-    XCODE_SDK="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-
-    mkdir -p "$WRAPIX_CACHE"
-    rm -rf "$WRAPIX_CACHE/wrapix-runner"
-    cp -r "${swiftSource}" "$WRAPIX_CACHE/wrapix-runner"
-    chmod -R +w "$WRAPIX_CACHE/wrapix-runner"
-    cd "$WRAPIX_CACHE/wrapix-runner"
-
-    # Clean environment to avoid Nix SDK conflicts
-    env -i HOME="$HOME" USER="$USER" TMPDIR="''${TMPDIR:-/tmp}" \
-      PATH="/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin" \
-      DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
-      SDKROOT="$XCODE_SDK" \
-      "$XCODE_SWIFT" build -c release
-
-    mkdir -p "$WRAPIX_DATA/bin"
-    cp .build/release/wrapix-runner "$RUNNER_BIN"
-    codesign --force --sign - --timestamp=none --entitlements=vz.entitlements "$RUNNER_BIN"
-    echo "$CURRENT_SOURCE_HASH" > "$RUNNER_VERSION_FILE"
-    echo "wrapix-runner built successfully"
-    cd - > /dev/null
+  # Load test image
+  echo "Loading test image..."
+  container image delete "$TEST_IMAGE" 2>/dev/null || true
+  OCI_TAR="$WRAPIX_CACHE/integration-test-image.tar"
+  ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
+  LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
+  LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
+  if [ -n "$LOADED_REF" ]; then
+    container image tag "$LOADED_REF" "$TEST_IMAGE"
   fi
+  rm -f "$OCI_TAR"
 
-  if [ ! -x "$CCTL_BIN" ]; then
-    echo "ERROR: cctl not found at $CCTL_BIN"
-    echo "Run 'nix run . -- .' first to build it"
-    exit 1
-  fi
-
-  if [ ! -f "$KERNEL_PATH" ]; then
-    echo "ERROR: Linux kernel not found at $KERNEL_PATH"
-    echo "Build with remote Linux builder first"
-    exit 1
-  fi
-
-  echo "Using runner: $RUNNER_BIN"
-  echo "Using kernel: $KERNEL_PATH"
+  echo "Using container CLI for tests"
   echo ""
 
   FAILED=0
@@ -130,16 +88,6 @@ pkgs.writeShellScriptBin "test-integration" ''
   echo "Running: Network Integration Test"
   echo "----------------------------------------"
 
-  TEST_IMAGE="wrapix-integration-test:latest"
-
-  # Always reload the image to pick up any changes
-  echo "Loading test image..."
-  "$CCTL_BIN" images delete "$TEST_IMAGE" 2>/dev/null || true
-  OCI_TAR=$(mktemp)
-  ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$TEST_IMAGE"
-  "$CCTL_BIN" images load --input "$OCI_TAR"
-  rm -f "$OCI_TAR"
-
   TEST_DIR=$(mktemp -d)
   trap "rm -rf $TEST_DIR" EXIT
 
@@ -149,10 +97,16 @@ pkgs.writeShellScriptBin "test-integration" ''
   chmod +x "$WORKSPACE/network-test.sh"
 
   set +e
-  "$RUNNER_BIN" "$WORKSPACE" \
-    --image "$TEST_IMAGE" \
-    --kernel-path "$KERNEL_PATH" \
-    --command /bin/bash /workspace/network-test.sh
+  container run --rm \
+    -w / \
+    -v "$WORKSPACE:/workspace" \
+    -e HOST_USER=$USER \
+    -e HOST_UID=$(id -u) \
+    -e WRAPIX_PROMPT="test" \
+    -e BD_NO_DB=1 \
+    --network default \
+    --entrypoint /bin/bash \
+    "$TEST_IMAGE" /workspace/network-test.sh
   NETWORK_EXIT=$?
   set -e
 
@@ -171,9 +125,6 @@ pkgs.writeShellScriptBin "test-integration" ''
   echo "Running: Mount Integration Test"
   echo "----------------------------------------"
 
-  # Reuse the same image from network test
-  MOUNT_IMAGE="$TEST_IMAGE"
-
   rm -rf "$TEST_DIR"
   TEST_DIR=$(mktemp -d)
   WORKSPACE="$TEST_DIR/workspace"
@@ -191,12 +142,18 @@ pkgs.writeShellScriptBin "test-integration" ''
   echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON"
 
   set +e
-  "$RUNNER_BIN" "$WORKSPACE" \
-    --image "$MOUNT_IMAGE" \
-    --kernel-path "$KERNEL_PATH" \
-    --dir-mount "$CLAUDE_DIR:/home/$USER/.claude" \
-    --file-mount "$CLAUDE_JSON:/home/$USER/.claude.json" \
-    --command /bin/bash /workspace/mount-test.sh
+  container run --rm \
+    -w / \
+    -v "$WORKSPACE:/workspace" \
+    -v "$CLAUDE_DIR:/home/$USER/.claude" \
+    -v "$CLAUDE_JSON:/home/$USER/.claude.json" \
+    -e HOST_USER=$USER \
+    -e HOST_UID=$(id -u) \
+    -e WRAPIX_PROMPT="test" \
+    -e BD_NO_DB=1 \
+    --network default \
+    --entrypoint /bin/bash \
+    "$TEST_IMAGE" /workspace/mount-test.sh
   MOUNT_EXIT=$?
   set -e
 
