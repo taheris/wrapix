@@ -50,30 +50,30 @@ fi
 # Test 4: Directory mount staging location
 echo ""
 echo "Test 4: Directory mount staging"
-if [ -d /mnt/wrapix/dir-mount/0 ]; then
+if [ -d /mnt/wrapix/dir/0 ]; then
   echo "  PASS: Staging directory exists"
-  if [ -f /mnt/wrapix/dir-mount/0/settings.json ]; then
-    if grep -q "settings-value" /mnt/wrapix/dir-mount/0/settings.json; then
+  if [ -f /mnt/wrapix/dir/0/settings.json ]; then
+    if grep -q "settings-value" /mnt/wrapix/dir/0/settings.json; then
       echo "  PASS: settings.json content correct"
     else
       echo "  FAIL: settings.json content wrong"
-      cat /mnt/wrapix/dir-mount/0/settings.json
+      cat /mnt/wrapix/dir/0/settings.json
       FAILED=1
     fi
   else
     echo "  FAIL: settings.json not in staging"
-    ls -la /mnt/wrapix/dir-mount/0/ || true
+    ls -la /mnt/wrapix/dir/0/ || true
     FAILED=1
   fi
-  if [ -f /mnt/wrapix/dir-mount/0/mcp/config.json ]; then
+  if [ -f /mnt/wrapix/dir/0/mcp/config.json ]; then
     echo "  PASS: Nested mcp/config.json exists"
   else
     echo "  FAIL: mcp/config.json not in staging"
-    ls -laR /mnt/wrapix/dir-mount/0/ || true
+    ls -laR /mnt/wrapix/dir/0/ || true
     FAILED=1
   fi
 else
-  echo "  FAIL: Staging directory /mnt/wrapix/dir-mount/0 not found"
+  echo "  FAIL: Staging directory /mnt/wrapix/dir/0 not found"
   ls -la /mnt/wrapix/ 2>/dev/null || echo "  /mnt/wrapix does not exist"
   FAILED=1
 fi
@@ -82,8 +82,8 @@ fi
 echo ""
 echo "Test 5: File mount staging"
 # File mounts go through parent directory
-if ls /mnt/wrapix/file-mount/*/claude.json 2>/dev/null; then
-  FILE_PATH=$(ls /mnt/wrapix/file-mount/*/claude.json 2>/dev/null | head -1)
+if ls /mnt/wrapix/file/*/claude.json 2>/dev/null; then
+  FILE_PATH=$(ls /mnt/wrapix/file/*/claude.json 2>/dev/null | head -1)
   if grep -q "test-api-key-12345" "$FILE_PATH"; then
     echo "  PASS: claude.json content correct at $FILE_PATH"
   else
@@ -93,7 +93,7 @@ if ls /mnt/wrapix/file-mount/*/claude.json 2>/dev/null; then
   fi
 else
   echo "  FAIL: claude.json not found in file mount staging"
-  ls -laR /mnt/wrapix/file-mount/ 2>/dev/null || echo "  /mnt/wrapix/file-mount does not exist"
+  ls -laR /mnt/wrapix/file/ 2>/dev/null || echo "  /mnt/wrapix/file-mount does not exist"
   FAILED=1
 fi
 

@@ -66,7 +66,7 @@ pkgs.dockerTools.buildLayeredImage {
   ];
 
   extraCommands = ''
-    mkdir -p tmp home root var/run mnt/wrapix/file-mount mnt/wrapix/dir-mount
+    mkdir -p tmp home root var/run mnt/wrapix/file mnt/wrapix/dir
     chmod 1777 tmp
 
     mkdir -p etc
