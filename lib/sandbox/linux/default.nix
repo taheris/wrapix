@@ -100,7 +100,6 @@ in
         --entrypoint /bin/bash \
         $VOLUME_ARGS \
         $DEPLOY_KEY_ARGS \
-        -e "ANTHROPIC_API_KEY=''${ANTHROPIC_API_KEY:-}" \
         -e "BD_NO_DB=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
         -e "HOME=/home/$USER" \
