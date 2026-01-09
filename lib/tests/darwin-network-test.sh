@@ -43,7 +43,12 @@ echo ""
 echo "Test 3: DNS configuration (/etc/resolv.conf)"
 if [ -f /etc/resolv.conf ]; then
   cat /etc/resolv.conf
-  echo "  PASS: resolv.conf exists"
+  # Verify explicit DNS servers are configured (Tailscale MagicDNS + Cloudflare)
+  if grep -q "100.100.100.100" /etc/resolv.conf || grep -q "1.1.1.1" /etc/resolv.conf; then
+    echo "  PASS: resolv.conf has explicit DNS servers"
+  else
+    echo "  PASS: resolv.conf exists (using vmnet DNS)"
+  fi
 else
   echo "  FAIL: /etc/resolv.conf not found"
   FAILED=1
