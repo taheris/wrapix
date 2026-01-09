@@ -105,6 +105,8 @@ pkgs.writeShellScriptBin "test-integration" ''
     -e WRAPIX_PROMPT="test" \
     -e BD_NO_DB=1 \
     --network default \
+    --dns 100.100.100.100 \
+    --dns 1.1.1.1 \
     --entrypoint /bin/bash \
     "$TEST_IMAGE" /workspace/network-test.sh
   NETWORK_EXIT=$?
@@ -177,6 +179,8 @@ pkgs.writeShellScriptBin "test-integration" ''
     -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
     -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
     --network default \
+    --dns 100.100.100.100 \
+    --dns 1.1.1.1 \
     --entrypoint /bin/bash \
     "$TEST_IMAGE" /workspace/mount-test.sh
   MOUNT_EXIT=$?
