@@ -104,6 +104,19 @@ in
             #   3. Symlinks pointing outside mount are broken - dereference on host
             #
             # Security: We dereference symlinks on the HOST to avoid mounting /nix/store
+            # Use PID-based staging to allow multiple concurrent containers
+            # Clean up stale staging dirs from previous runs (PIDs that no longer exist)
+            mkdir -p "$WRAPIX_CACHE/mounts"
+            for stale_dir in "$WRAPIX_CACHE/mounts"/*; do
+              [ -d "$stale_dir" ] || continue
+              stale_pid=$(basename "$stale_dir")
+              if ! kill -0 "$stale_pid" 2>/dev/null; then
+                rm -rf "$stale_dir"
+              fi
+            done
+            STAGING_ROOT="$WRAPIX_CACHE/mounts/$$"
+            mkdir -p "$STAGING_ROOT"
+            trap 'rm -rf "$STAGING_ROOT"' EXIT
             MOUNT_ARGS=""
             DIR_MOUNTS=""
             FILE_MOUNTS=""
@@ -124,7 +137,7 @@ in
 
               if [ -d "$src" ]; then
                 # Dereference symlinks on host to avoid mounting /nix/store
-                host_staging="$WRAPIX_CACHE/mounts/dir$dir_idx"
+                host_staging="$STAGING_ROOT/dir$dir_idx"
                 mkdir -p "$host_staging"
                 cp -rL "$src/." "$host_staging/"
 
