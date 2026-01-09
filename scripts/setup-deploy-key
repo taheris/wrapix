@@ -18,7 +18,7 @@ for arg in "$@"; do
     case $arg in
         -h|--help)
             echo "Usage: setup-deploy-key [keyname] [-f|--force]"
-            echo "  keyname: Name for the deploy key (default: repo name)"
+            echo "  keyname: Name for the deploy key (default: repo-hostname)"
             echo "  -f:      Overwrite existing key"
             exit 0
             ;;
@@ -33,7 +33,8 @@ done
 ORIGIN_URL=$(git remote get-url origin 2>/dev/null) || die "no origin remote found"
 [[ "$ORIGIN_URL" =~ github\.com[:/]([^/]+/[^/.]+)(\.git)?$ ]] || die "not a GitHub repo: $ORIGIN_URL"
 REPO="${BASH_REMATCH[1]}"
-KEYNAME="${KEYNAME:-${REPO#*/}}"
+HOSTNAME=$(hostname -s 2>/dev/null || hostname)
+KEYNAME="${KEYNAME:-${REPO#*/}-${HOSTNAME}}"
 
 # Check dependencies
 command -v gh >/dev/null || die "gh CLI required"
