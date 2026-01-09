@@ -3,8 +3,21 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-parts.url = "github:hercules-ci/flake-parts";
-    beads.url = "github:steveyegge/beads";
+
+    beads = {
+      url = "github:steveyegge/beads";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+
+    beads-viewer = {
+      url = "github:Dicklesworthstone/beads_viewer";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -34,7 +47,12 @@
           _module.args.pkgs = import nixpkgs {
             inherit system;
             config.allowUnfree = true;
-            overlays = [ (final: prev: { beads = inputs'.beads.packages.default; }) ];
+            overlays = [
+              (final: prev: {
+                beads = inputs'.beads.packages.default;
+                beads-viewer = inputs'.beads-viewer.packages.default;
+              })
+            ];
           };
 
           # Library functions for customization
@@ -52,6 +70,8 @@
 
           devShells.default = sandboxLib.mkDevShell {
             packages = with pkgs; [
+              beads
+              beads-viewer
               gh
               nixfmt-rfc-style
               podman
