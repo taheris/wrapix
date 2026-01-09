@@ -449,7 +449,6 @@ struct SandboxRunner: AsyncParsableCommand {
                 config.process.arguments = command
             }
             config.process.environmentVariables.append(contentsOf: [
-                "ANTHROPIC_API_KEY=\(ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "")",
                 "BD_NO_DB=1",
                 "CLAUDE_CODE_OAUTH_TOKEN=\(ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"] ?? "")",
                 "HOST_UID=\(getuid())",
