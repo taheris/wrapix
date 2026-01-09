@@ -14,8 +14,9 @@ chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
 export HOME="/home/$HOST_USER"
 
 # Set up SSH configuration
-# Note: known_hosts is bind-mounted from Nix store
+# Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
 mkdir -p "$HOME/.ssh"
+[ -f "$HOME/.ssh/known_hosts_dir/known_hosts" ] && cp "$HOME/.ssh/known_hosts_dir/known_hosts" "$HOME/.ssh/known_hosts"
 
 # Configure SSH to use deploy key if available (Darwin mounts to /home/$USER/.ssh/deploy_keys/)
 if [ -d "$HOME/.ssh/deploy_keys" ] && [ -n "$(ls -A $HOME/.ssh/deploy_keys 2>/dev/null)" ]; then
@@ -95,6 +96,6 @@ cd /workspace
 
 # Run without exec so trap can fire
 setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-  claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"
+  claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix/wrapix-prompt)"
 EXIT_CODE=$?
 exit $EXIT_CODE

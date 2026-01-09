@@ -32,4 +32,4 @@ chmod 700 "$HOME/.ssh"
 cd /workspace
 
 exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-  claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"
+  claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"

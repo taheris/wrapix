@@ -10,7 +10,7 @@
 { pkgs }:
 
 let
-  systemPrompt = builtins.readFile ../sandbox-prompt.txt;
+  systemPromptFile = pkgs.writeText "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
 
   # Convert ~ paths to shell expressions
@@ -68,14 +68,13 @@ in
 
       PROJECT_DIR="''${1:-$(pwd)}"
 
-      WRAPIX_PROMPT='${systemPrompt}'
-
       # Build volume args from profile
       VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
       ${mkMountLines profile}
 
-      # Mount SSH known_hosts
+      # Mount SSH known_hosts and system prompt
       VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}:/workspace/.ssh/known_hosts:ro"
+      VOLUME_ARGS="$VOLUME_ARGS -v ${systemPromptFile}:/etc/wrapix-prompt:ro"
 
       # Mount deploy key for this repo (see scripts/setup-deploy-key)
       DEPLOY_KEY_NAME=${deployKeyExpr}
@@ -107,9 +106,8 @@ in
         -e "BD_NO_DB=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
         -e "HOME=/home/$USER" \
-        -e "WRAPIX_PROMPT=$WRAPIX_PROMPT" \
         -w /workspace \
         docker-archive:${profileImage} \
-        -c 'claude --dangerously-skip-permissions --append-system-prompt "$WRAPIX_PROMPT"'
+        -c 'claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"'
     '';
 }
