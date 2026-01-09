@@ -24,6 +24,10 @@ let
         sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
   '';
 
+  nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
+    experimental-features = nix-command flakes
+  '';
+
   # Base passwd/group (user added at runtime with host UID)
   passwdFile = pkgs.writeTextDir "etc/passwd" ''
     root:x:0:0:root:/root:/bin/bash
@@ -68,6 +72,7 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.dockerTools.caCertificates
     pkgs.cacert
     gitConfig
+    nixConfig
     profileEnv
   ];
 
