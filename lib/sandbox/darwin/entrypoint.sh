@@ -13,6 +13,28 @@ mkdir -p "/home/$HOST_USER"
 chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
 export HOME="/home/$HOST_USER"
 
+# Set up SSH configuration
+# Note: known_hosts is bind-mounted from Nix store
+mkdir -p "$HOME/.ssh"
+
+# Configure SSH to use deploy key if available (Darwin mounts to /home/$USER/.ssh/deploy_keys/)
+if [ -d "$HOME/.ssh/deploy_keys" ] && [ -n "$(ls -A $HOME/.ssh/deploy_keys 2>/dev/null)" ]; then
+  DEPLOY_KEY=$(ls $HOME/.ssh/deploy_keys/* | head -1)
+  cat > "$HOME/.ssh/config" <<EOF
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile $DEPLOY_KEY
+    IdentitiesOnly yes
+EOF
+  chmod 600 "$HOME/.ssh/config"
+fi
+
+# Fix ownership and permissions (known_hosts is read-only mount, skip it)
+chown "$HOST_UID:$HOST_UID" "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+[ -f "$HOME/.ssh/config" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.ssh/config"
+
 # Copy directories from mounts with correct ownership
 # VirtioFS maps all files as root, so directories are mounted to staging location
 # and need to be copied with correct permissions
