@@ -114,7 +114,8 @@ final class GvproxyManager {
         process.executableURL = URL(fileURLWithPath: gvproxyPath)
         process.arguments = [
             "-listen", "unix://\(apiSocketPath.path)",
-            "-listen-vfkit", "unixgram://\(vfkitSocketPath.path)"
+            "-listen-vfkit", "unixgram://\(vfkitSocketPath.path)",
+            "-ssh-port", "-1"  // Disable SSH forwarding
         ]
         process.environment = ProcessInfo.processInfo.environment
         process.standardOutput = FileHandle.nullDevice
