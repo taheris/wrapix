@@ -3,6 +3,7 @@
 
 let
   systemPrompt = builtins.readFile ../sandbox-prompt.txt;
+  knownHosts = import ../known-hosts.nix { inherit pkgs; };
   swiftSource = pkgs.runCommand "wrapix-runner-source" { } ''
     mkdir -p $out
     cp -r ${./swift}/* $out/
@@ -207,6 +208,9 @@ in
             done <<'MOUNTS'
       ${mkMountSpecs profile}
       MOUNTS
+
+            # Add SSH known_hosts
+            MOUNT_ARGS="$MOUNT_ARGS --file-mount ${knownHosts}:/home/$USER/.ssh/known_hosts"
 
             # Add deploy key mount if present
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/${deployKeyExpr}"
