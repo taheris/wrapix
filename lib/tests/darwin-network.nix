@@ -156,6 +156,8 @@ in
           -e WRAPIX_PROMPT="test" \
           -e BD_NO_DB=1 \
           --network default \
+          --dns 100.100.100.100 \
+          --dns 1.1.1.1 \
           --entrypoint /bin/bash \
           "$TEST_IMAGE" /workspace/network-test.sh
         EXIT_CODE=$?

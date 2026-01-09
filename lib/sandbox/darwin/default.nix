@@ -215,6 +215,8 @@ in
               -c "$CPUS" \
               -m 4G \
               --network default \
+              --dns 100.100.100.100 \
+              --dns 1.1.1.1 \
               -v "$PROJECT_DIR:/workspace" \
               $MOUNT_ARGS \
               $ENV_ARGS \
