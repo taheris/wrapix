@@ -2,7 +2,7 @@
 { pkgs, linuxPkgs }:
 
 let
-  systemPrompt = builtins.readFile ../sandbox-prompt.txt;
+  systemPromptDir = pkgs.writeTextDir "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
 
   expandPath =
@@ -44,7 +44,11 @@ in
     }:
     let
       # If deployKey is null, default to repo-hostname format at runtime
-      deployKeyExpr = if deployKey != null then ''"${deployKey}"'' else ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
+      deployKeyExpr =
+        if deployKey != null then
+          ''"${deployKey}"''
+        else
+          ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
     in
     pkgs.writeShellScriptBin "wrapix" ''
             set -euo pipefail
@@ -93,8 +97,12 @@ in
               echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
             fi
 
-            # Build mount arguments at runtime (check file vs directory)
+            # Build mount arguments at runtime
+            # VirtioFS only supports directory mounts, so we mount parent dirs for files
             MOUNT_ARGS=""
+            FILE_MOUNTS=""
+            MOUNTED_DIRS=""
+            mount_idx=0
             while IFS=: read -r src dest optional; do
               [ -z "$src" ] && continue
               # Expand shell variables in paths
@@ -107,25 +115,56 @@ in
                 exit 1
               fi
 
-              MOUNT_ARGS="$MOUNT_ARGS -v $src:$dest"
+              if [ -d "$src" ]; then
+                # Directory: mount directly
+                MOUNT_ARGS="$MOUNT_ARGS -v $src:$dest"
+              else
+                # File: mount parent dir to staging (dedup), track for entrypoint to copy
+                parent_dir=$(dirname "$src")
+                file_name=$(basename "$src")
+                # Check if parent already mounted
+                staging=""
+                for entry in $MOUNTED_DIRS; do
+                  dir="''${entry%%=*}"
+                  path="''${entry#*=}"
+                  if [ "$dir" = "$parent_dir" ]; then
+                    staging="$path"
+                    break
+                  fi
+                done
+                if [ -z "$staging" ]; then
+                  staging="/mnt/wrapix/file$mount_idx"
+                  mount_idx=$((mount_idx + 1))
+                  MOUNT_ARGS="$MOUNT_ARGS -v $parent_dir:$staging"
+                  MOUNTED_DIRS="$MOUNTED_DIRS $parent_dir=$staging"
+                fi
+                [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
+                FILE_MOUNTS="$FILE_MOUNTS$staging/$file_name:$dest"
+              fi
             done <<'MOUNTS'
       ${mkMountSpecs profile}
       MOUNTS
 
-            # Add SSH known_hosts
-            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts"
+            # Add SSH known_hosts and system prompt (directories from Nix store)
+            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${systemPromptDir}:/etc/wrapix"
 
-            # Add deploy key mount if present
-            DEPLOY_KEY="$HOME/.ssh/deploy_keys/${deployKeyExpr}"
-            [ -f "$DEPLOY_KEY" ] && MOUNT_ARGS="$MOUNT_ARGS -v $DEPLOY_KEY:/home/\$USER/.ssh/deploy_keys/${deployKeyExpr}"
+            # Add deploy key: mount parent dir to staging if key exists
+            DEPLOY_KEY_NAME=${deployKeyExpr}
+            DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+            if [ -f "$DEPLOY_KEY" ]; then
+              MOUNT_ARGS="$MOUNT_ARGS -v $HOME/.ssh/deploy_keys:/mnt/wrapix/deploy_keys"
+              [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+            fi
 
             # Build environment arguments
             ENV_ARGS=""
             ENV_ARGS="$ENV_ARGS -e BD_NO_DB=1"
+            [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
             ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
             ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"
             ENV_ARGS="$ENV_ARGS -e HOST_USER=$USER"
-            ENV_ARGS="$ENV_ARGS -e WRAPIX_PROMPT='${systemPrompt}'"
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"
@@ -137,10 +176,13 @@ in
             # Run container with automatic cleanup
             # Note: -w / overrides image's WorkingDir=/workspace which fails if mount isn't ready
             # The entrypoint script handles cd /workspace after mounts are available
+            TTY_ARGS=""
+            [ -t 0 ] && TTY_ARGS="-t -i"
+
             exec container run \
               --name "$CONTAINER_NAME" \
               --rm \
-              -t -i \
+              $TTY_ARGS \
               -w / \
               -c "$CPUS" \
               -m 4G \

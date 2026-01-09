@@ -1,8 +1,6 @@
 { pkgs, system }:
 
 let
-  systemPrompt = ./sandbox-prompt.txt;
-
   isLinux = builtins.elem system [
     "x86_64-linux"
     "aarch64-linux"
@@ -49,7 +47,7 @@ let
           inherit profile;
           entrypointScript = ./linux/entrypoint.sh;
         };
-        entrypoint = import ./linux/entrypoint.nix { inherit pkgs systemPrompt; };
+        entrypoint = import ./linux/entrypoint.nix { inherit pkgs; };
       }
     else if isDarwin then
       darwinSandbox.mkSandbox {

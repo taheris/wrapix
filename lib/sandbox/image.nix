@@ -41,12 +41,18 @@ let
     pkgs.bash
     pkgs.util-linux
     claudePackage
-  ] ++ (profile.packages or [ ]);
+  ]
+  ++ (profile.packages or [ ]);
 
   profileEnv = pkgs.buildEnv {
     name = "wrapix-profile-env";
     paths = allPackages;
-    pathsToLink = [ "/bin" "/share" "/etc" "/lib" ];
+    pathsToLink = [
+      "/bin"
+      "/share"
+      "/etc"
+      "/lib"
+    ];
   };
 in
 pkgs.dockerTools.buildLayeredImage {
