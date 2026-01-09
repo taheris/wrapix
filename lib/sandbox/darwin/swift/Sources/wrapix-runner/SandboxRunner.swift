@@ -355,7 +355,7 @@ struct SandboxRunner: AsyncParsableCommand {
                 guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory),
                       isDirectory.boolValue else { continue }
 
-                let mountPoint = "/mnt/wrapix/dir-mount/\(dirMountIndex)"
+                let mountPoint = "/mnt/wrapix/dir/\(dirMountIndex)"
                 dirMountIndex += 1
 
                 config.mounts.append(
@@ -397,7 +397,7 @@ struct SandboxRunner: AsyncParsableCommand {
                 if let existing = parentDirToMountPoint[parentDir] {
                     mountPoint = existing
                 } else {
-                    mountPoint = "/mnt/wrapix/file-mount/\(mountIndex)"
+                    mountPoint = "/mnt/wrapix/file/\(mountIndex)"
                     parentDirToMountPoint[parentDir] = mountPoint
                     mountIndex += 1
 
