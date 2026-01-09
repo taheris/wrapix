@@ -466,25 +466,36 @@ struct SandboxRunner: AsyncParsableCommand {
         }
 
         // Handle resize events and wait for container exit
+        let exitCode: Int32
         if let sigwinchStream = sigwinchStream, let terminal = terminal {
-            try await withThrowingTaskGroup(of: Void.self) { group in
+            exitCode = try await withThrowingTaskGroup(of: Int32.self) { group in
                 group.addTask {
                     for await _ in sigwinchStream.signals {
                         try await container.resize(to: try terminal.size)
                     }
+                    return 0  // Never reached, but needed for type
                 }
 
-                let exitStatus = try await container.wait()
-                group.cancelAll()
+                group.addTask {
+                    let exitStatus = try await container.wait()
+                    return exitStatus.exitCode
+                }
 
-                try await container.stop()
-                Darwin.exit(exitStatus.exitCode)
+                // Wait for container to exit (first task to complete with exit code)
+                let code = try await group.next()!
+                group.cancelAll()
+                return code
             }
+            try await container.stop()
         } else {
             // No TTY - just wait for container to exit
             let exitStatus = try await container.wait()
             try await container.stop()
-            Darwin.exit(exitStatus.exitCode)
+            exitCode = exitStatus.exitCode
         }
+
+        // Reset terminal before exiting (defer won't run after exit())
+        terminal?.tryReset()
+        Darwin.exit(exitCode)
     }
 }
