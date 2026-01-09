@@ -1,3 +1,4 @@
 .build/
+.bv/
 .direnv/
 result
