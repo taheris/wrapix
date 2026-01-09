@@ -7,7 +7,7 @@ Cross-platform sandbox for Claude Code.
 A secure sandbox for running Claude Code on Linux and macOS. Container isolation provides filesystem and process protection while allowing full network access for web research and development.
 
 - **Linux**: Podman rootless container with user namespace mapping
-- **macOS**: Apple Containerization framework (lightweight VM)
+- **macOS**: Apple [container CLI](https://github.com/apple/container) (lightweight VM)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for design details and security model.
 
@@ -60,7 +60,7 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 
 - macOS 26+ (Tahoe)
 - Apple Silicon (M1/M2/M3/M4)
-- Xcode 26 CLI tools
+- Apple [container CLI](https://github.com/apple/container) (`container system start` to enable)
 
 ## Git Push from Sandbox
 
