@@ -1,17 +1,9 @@
-# Darwin sandbox using Apple Containerization framework (macOS 26+)
+# Darwin sandbox using Apple container CLI (macOS 26+)
 { pkgs, linuxPkgs }:
 
 let
   systemPrompt = builtins.readFile ../sandbox-prompt.txt;
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
-  swiftSource = pkgs.runCommand "wrapix-runner-source" { } ''
-    mkdir -p $out
-    cp -r ${./swift}/* $out/
-  '';
-  # Build kernel using Linux packages (via remote builder on Darwin)
-  kernel = import ./kernel.nix { pkgs = linuxPkgs; };
-  # gvproxy for user-mode networking (full TCP/UDP connectivity)
-  gvproxy = import ./gvproxy.nix { inherit pkgs; };
 
   expandPath =
     path:
@@ -62,7 +54,6 @@ in
             XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
             WRAPIX_DATA="$XDG_DATA_HOME/wrapix"
             WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
-            RUNNER_BIN="$WRAPIX_DATA/bin/wrapix-runner"
             PROJECT_DIR="''${1:-$(pwd)}"
 
             # Check macOS version
@@ -71,118 +62,34 @@ in
               exit 1
             fi
 
-            # Build wrapix-runner if needed (rebuild if source changed)
-            RUNNER_VERSION_FILE="$WRAPIX_DATA/bin/wrapix-runner.version"
-            CURRENT_SOURCE_HASH="${swiftSource}"
-            if [ ! -x "$RUNNER_BIN" ] || [ ! -f "$RUNNER_VERSION_FILE" ] || [ "$(cat "$RUNNER_VERSION_FILE")" != "$CURRENT_SOURCE_HASH" ]; then
-              echo "Building wrapix-runner..."
-              XCODE_SWIFT="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
-              XCODE_SDK="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-
-              if [ ! -x "$XCODE_SWIFT" ] || [ ! -d "$XCODE_SDK" ]; then
-                echo "Error: Xcode required (CLT has Swift PM bug on macOS 26)"
-                echo "Install from App Store, then run: sudo xcode-select -s /Applications/Xcode.app"
-                exit 1
-              fi
-
-              mkdir -p "$WRAPIX_CACHE"
-              rm -rf "$WRAPIX_CACHE/wrapix-runner"
-              cp -r "${swiftSource}" "$WRAPIX_CACHE/wrapix-runner"
-              chmod -R +w "$WRAPIX_CACHE/wrapix-runner"
-              cd "$WRAPIX_CACHE/wrapix-runner"
-
-              # Clean environment to avoid Nix SDK conflicts
-              env -i HOME="$HOME" USER="$USER" TMPDIR="''${TMPDIR:-/tmp}" \
-                PATH="/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin" \
-                DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
-                SDKROOT="$XCODE_SDK" \
-                "$XCODE_SWIFT" build -c release
-
-              mkdir -p "$WRAPIX_DATA/bin"
-              cp .build/release/wrapix-runner "$RUNNER_BIN"
-              codesign --force --sign - --timestamp=none --entitlements=vz.entitlements "$RUNNER_BIN"
-              echo "$CURRENT_SOURCE_HASH" > "$RUNNER_VERSION_FILE"
-              echo "wrapix-runner built successfully"
-            fi
-
-            # Check kernel
-            KERNEL_PATH="${kernel}/vmlinux"
-            if [ ! -f "$KERNEL_PATH" ]; then
-              echo "Error: Linux kernel not found. Build on Linux or configure remote builder."
-              exit 1
-            fi
-
-            # Build vminit image if needed (from Apple containerization repo)
-            if ! "$WRAPIX_DATA/bin/cctl" images get vminit:latest >/dev/null 2>&1; then
-              echo "Building vminit image from containerization repo..."
-              CONTAINERIZATION_DIR="$WRAPIX_CACHE/containerization"
-
-              if [ ! -d "$CONTAINERIZATION_DIR" ]; then
-                git clone --depth 1 https://github.com/apple/containerization.git "$CONTAINERIZATION_DIR"
-              fi
-
-              cd "$CONTAINERIZATION_DIR"
-
-              XCODE_SWIFT="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
-              XCODE_SDK="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-
-              # Build cctl with Xcode (clean env to avoid Nix SDK conflicts)
-              echo "Building cctl..."
-              env -i HOME="$HOME" USER="$USER" TMPDIR="''${TMPDIR:-/tmp}" \
-                PATH="/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin" \
-                DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
-                SDKROOT="$XCODE_SDK" \
-                "$XCODE_SWIFT" build -c release --product cctl
-
-              mkdir -p bin
-              cp "$(env -i PATH="/usr/bin:/bin" DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" "$XCODE_SWIFT" build -c release --show-bin-path)/cctl" bin/
-              codesign --force --sign - --timestamp=none --entitlements=signing/vz.entitlements bin/cctl
-
-              # Add swiftly to PATH (required for cross-compilation)
-              export PATH="$HOME/.swiftly/bin:$PATH"
-
-              # Install Swift cross-compilation SDK if needed (checks if SDK is already installed)
-              if ! swift sdk list 2>/dev/null | grep -q "aarch64-swift-linux-musl"; then
-                echo "Installing Swift cross-compilation toolchain (~2GB download)..."
-                make cross-prep
-              fi
-
-              # Build vminitd with swiftly (for Linux cross-compilation)
-              echo "Building vminitd..."
-              make -C vminitd BUILD_CONFIGURATION=release
-
-              # Create vminit image
-              echo "Creating vminit image..."
-              ./bin/cctl rootfs create \
-                --vminitd vminitd/bin/vminitd \
-                --vmexec vminitd/bin/vmexec \
-                --label org.opencontainers.image.source=https://github.com/apple/containerization \
-                --image vminit:latest \
-                bin/init.rootfs.tar.gz
-
-              # Copy cctl for future use
-              mkdir -p "$WRAPIX_DATA/bin"
-              cp bin/cctl "$WRAPIX_DATA/bin/"
-
-              echo "vminit image built successfully"
-              cd - > /dev/null
+            # Ensure container system is running
+            if ! container system status >/dev/null 2>&1; then
+              echo "Starting container system..."
+              container system start
+              sleep 2
             fi
 
             # Load profile image if needed (reload if image hash changed)
             PROFILE_IMAGE="wrapix-${profile.name}:latest"
             IMAGE_VERSION_FILE="$WRAPIX_DATA/images/wrapix-${profile.name}.version"
             CURRENT_IMAGE_HASH="${profileImage}"
-            if ! "$WRAPIX_DATA/bin/cctl" images get "$PROFILE_IMAGE" >/dev/null 2>&1 || \
+            mkdir -p "$WRAPIX_DATA/images"
+            if ! container image inspect "$PROFILE_IMAGE" >/dev/null 2>&1 || \
                [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
               echo "Loading profile image..."
               # Delete old image if exists
-              "$WRAPIX_DATA/bin/cctl" images delete "$PROFILE_IMAGE" 2>/dev/null || true
-              # Convert Docker-format tar to OCI-archive format (cctl expects OCI layout)
+              container image delete "$PROFILE_IMAGE" 2>/dev/null || true
+              # Convert Docker-format tar to OCI-archive format
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
-              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$PROFILE_IMAGE"
-              "$WRAPIX_DATA/bin/cctl" images load --input "$OCI_TAR"
+              mkdir -p "$WRAPIX_CACHE"
+              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
+              # Load and capture the digest from output (format: "untagged@sha256:...")
+              LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
+              LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
+              if [ -n "$LOADED_REF" ]; then
+                container image tag "$LOADED_REF" "$PROFILE_IMAGE"
+              fi
               rm -f "$OCI_TAR"
-              mkdir -p "$WRAPIX_DATA/images"
               echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
             fi
 
@@ -200,28 +107,48 @@ in
                 exit 1
               fi
 
-              if [ -d "$src" ]; then
-                MOUNT_ARGS="$MOUNT_ARGS --dir-mount $src:$dest"
-              elif [ -f "$src" ]; then
-                MOUNT_ARGS="$MOUNT_ARGS --file-mount $src:$dest"
-              fi
+              MOUNT_ARGS="$MOUNT_ARGS -v $src:$dest"
             done <<'MOUNTS'
       ${mkMountSpecs profile}
       MOUNTS
 
             # Add SSH known_hosts
-            MOUNT_ARGS="$MOUNT_ARGS --file-mount ${knownHosts}:/home/$USER/.ssh/known_hosts"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts"
 
             # Add deploy key mount if present
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/${deployKeyExpr}"
-            [ -f "$DEPLOY_KEY" ] && MOUNT_ARGS="$MOUNT_ARGS --file-mount $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/${deployKeyExpr}"
+            [ -f "$DEPLOY_KEY" ] && MOUNT_ARGS="$MOUNT_ARGS -v $DEPLOY_KEY:/home/\$USER/.ssh/deploy_keys/${deployKeyExpr}"
 
-            export WRAPIX_PROMPT='${systemPrompt}'
+            # Build environment arguments
+            ENV_ARGS=""
+            ENV_ARGS="$ENV_ARGS -e BD_NO_DB=1"
+            ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
+            ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"
+            ENV_ARGS="$ENV_ARGS -e HOST_USER=$USER"
+            ENV_ARGS="$ENV_ARGS -e WRAPIX_PROMPT='${systemPrompt}'"
 
-            exec "$RUNNER_BIN" "$PROJECT_DIR" \
-              --image "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
-              --kernel-path "$KERNEL_PATH" \
-              --gvproxy-path "${gvproxy}/bin/gvproxy" \
-              $MOUNT_ARGS
+            # Generate unique container name
+            CONTAINER_NAME="wrapix-$$"
+
+            # Calculate resources (half of available CPUs, 4GB memory)
+            CPUS=$(($(sysctl -n hw.ncpu) / 2))
+            [ "$CPUS" -lt 2 ] && CPUS=2
+
+            # Run container with automatic cleanup
+            # Note: -w / overrides image's WorkingDir=/workspace which fails if mount isn't ready
+            # The entrypoint script handles cd /workspace after mounts are available
+            exec container run \
+              --name "$CONTAINER_NAME" \
+              --rm \
+              -t -i \
+              -w / \
+              -c "$CPUS" \
+              -m 4G \
+              --network default \
+              -v "$PROJECT_DIR:/workspace" \
+              $MOUNT_ARGS \
+              $ENV_ARGS \
+              "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
+              /entrypoint.sh
     '';
 }

@@ -2,11 +2,11 @@
 # Tests file and directory mounts work correctly in the VM
 #
 # This test will:
-# - Run during `nix flake check` if wrapix infrastructure is set up
+# - Run during `nix flake check` if container CLI is available
 # - Skip gracefully if infrastructure is missing (with instructions)
 #
 # Prerequisites:
-#   nix run . -- .    # Build and setup wrapix infrastructure first
+#   container system start    # Start container system first
 {
   pkgs,
   system,
@@ -17,7 +17,7 @@ let
 
   isDarwin = system == "aarch64-darwin";
 
-  # Use Linux packages for kernel (requires remote builder on Darwin)
+  # Use Linux packages for image building (requires remote builder on Darwin)
   linuxPkgs =
     if isDarwin then
       import (pkgs.path) {
@@ -27,9 +27,6 @@ let
       }
     else
       pkgs;
-
-  # Import kernel from the sandbox module
-  kernel = import ../sandbox/darwin/kernel.nix { pkgs = linuxPkgs; };
 
   # Build profile image for testing
   profiles = import ../sandbox/profiles.nix { pkgs = linuxPkgs; };
@@ -70,13 +67,6 @@ in
           exit 0
         fi
 
-        # Check Xcode
-        if [ ! -d "/Applications/Xcode.app" ]; then
-          echo "SKIP: Requires Xcode"
-          mkdir -p $out
-          exit 0
-        fi
-
         echo "=== Darwin Mount Integration Test ==="
         echo ""
 
@@ -89,62 +79,51 @@ in
         fi
 
         REAL_HOME="/Users/$REAL_USER"
-        XDG_DATA_HOME="$REAL_HOME/.local/share"
-        RUNNER_BIN="$XDG_DATA_HOME/wrapix/bin/wrapix-runner"
-        CCTL_BIN="$XDG_DATA_HOME/wrapix/bin/cctl"
-        KERNEL_PATH="${kernel}/vmlinux"
 
-        # Check prerequisites
-        if [ ! -x "$RUNNER_BIN" ]; then
-          echo "SKIP: wrapix-runner not found at $RUNNER_BIN"
-          echo "Run 'nix run . -- .' first to build it"
+        # Check if container CLI is available
+        if ! command -v container >/dev/null 2>&1; then
+          echo "SKIP: container CLI not found"
+          echo "Install with: nix profile install nixpkgs#container"
           mkdir -p $out
           exit 0
         fi
 
-        if [ ! -x "$CCTL_BIN" ]; then
-          echo "SKIP: cctl not found at $CCTL_BIN"
-          echo "Run 'nix run . -- .' first to build it"
+        # Check if container system is running
+        if ! container system status >/dev/null 2>&1; then
+          echo "SKIP: container system not running"
+          echo "Start with: container system start"
           mkdir -p $out
           exit 0
         fi
 
-        if [ ! -f "$KERNEL_PATH" ]; then
-          echo "SKIP: Linux kernel not found at $KERNEL_PATH"
-          echo "Build with remote Linux builder first"
-          mkdir -p $out
-          exit 0
-        fi
-
-        # Check if we can access the containerization storage
-        # This fails in nix build because we run as nixbld user
-        CONTAINER_STORAGE="$REAL_HOME/Library/Application Support/com.apple.containerization"
+        # Check if we can access the container storage
+        CONTAINER_STORAGE="$REAL_HOME/Library/Application Support/com.apple.container"
         if [ ! -d "$CONTAINER_STORAGE" ] || [ ! -w "$CONTAINER_STORAGE" ]; then
           echo ""
-          echo "SKIP: Cannot access containerization storage (running in nix build sandbox)"
+          echo "SKIP: Cannot access container storage (running in nix build sandbox)"
           echo ""
-          echo "To run this test manually, use the standalone script:"
-          echo "  nix build .#checks.aarch64-darwin.darwin-mount-integration-script"
-          echo "  ./result/bin/test-darwin-mounts"
+          echo "To run this test manually:"
+          echo "  nix run .#test-integration"
           mkdir -p $out
           exit 0
         fi
 
-        # Set HOME so cctl uses the right Application Support directory
+        # Set HOME so container uses the right storage directory
         export HOME="$REAL_HOME"
 
-        # Check if test image exists or load it
+        # Load test image
         TEST_IMAGE="wrapix-mount-test:latest"
-        if ! "$CCTL_BIN" images get "$TEST_IMAGE" >/dev/null 2>&1; then
-          echo "Loading test image..."
-          OCI_TAR=$(mktemp)
-          skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR:$TEST_IMAGE"
-          "$CCTL_BIN" images load --input "$OCI_TAR"
-          rm -f "$OCI_TAR"
+        echo "Loading test image..."
+        container image delete "$TEST_IMAGE" 2>/dev/null || true
+        OCI_TAR=$(mktemp)
+        skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
+        LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
+        LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
+        if [ -n "$LOADED_REF" ]; then
+          container image tag "$LOADED_REF" "$TEST_IMAGE"
         fi
+        rm -f "$OCI_TAR"
 
-        echo "Found wrapix-runner: $RUNNER_BIN"
-        echo "Found kernel: $KERNEL_PATH"
         echo "Using image: $TEST_IMAGE"
         echo ""
 
@@ -186,12 +165,18 @@ in
 
         # Run the container with our test script
         set +e
-        "$RUNNER_BIN" "$WORKSPACE" \
-          --image "$TEST_IMAGE" \
-          --kernel-path "$KERNEL_PATH" \
-          --dir-mount "$CLAUDE_DIR:/home/$REAL_USER/.claude" \
-          --file-mount "$CLAUDE_JSON:/home/$REAL_USER/.claude.json" \
-          --command /bin/bash /workspace/mount-test.sh
+        container run --rm \
+          -w / \
+          -v "$WORKSPACE:/workspace" \
+          -v "$CLAUDE_DIR:/home/$REAL_USER/.claude" \
+          -v "$CLAUDE_JSON:/home/$REAL_USER/.claude.json" \
+          -e HOST_USER=$REAL_USER \
+          -e HOST_UID=$(id -u "$REAL_USER") \
+          -e WRAPIX_PROMPT="test" \
+          -e BD_NO_DB=1 \
+          --network default \
+          --entrypoint /bin/bash \
+          "$TEST_IMAGE" /workspace/mount-test.sh
         EXIT_CODE=$?
         set -e
 
