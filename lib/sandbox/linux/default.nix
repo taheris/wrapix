@@ -131,6 +131,9 @@ in
       exec podman run --rm -it \
         --network=pasta \
         --userns=keep-id \
+        --passwd-entry "$USER:*:$(id -u):$(id -g)::/home/$USER:/bin/bash" \
+        --mount type=tmpfs,destination=/home/$USER \
+        --device /dev/fuse \
         $VOLUME_ARGS \
         $DEPLOY_KEY_ARGS \
         -e "BD_NO_DB=1" \
