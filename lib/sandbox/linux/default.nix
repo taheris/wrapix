@@ -49,6 +49,8 @@ in
       profile,
       profileImage,
       deployKey ? null,
+      cpus ? 4,
+      memoryMb ? 4096,
     }:
     let
       # If deployKey is null, default to repo-hostname format at runtime
@@ -149,6 +151,8 @@ in
       fi
 
       exec podman run --rm -it \
+        --cpus=${toString cpus} \
+        --memory=${toString memoryMb}m \
         --network=pasta \
         --userns=keep-id \
         --passwd-entry "$USER:*:$(id -u):$(id -g)::/home/$USER:/bin/bash" \
