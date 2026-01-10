@@ -186,12 +186,13 @@ in
           -v "$WORKSPACE:/workspace" \
           -v "$CLAUDE_DIR_DEREF:/mnt/wrapix/dir0" \
           -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
-          -e HOST_USER=$REAL_USER \
+          -e BD_DB=/tmp/beads.db \
+          -e BD_NO_DAEMON=1 \
           -e HOST_UID=$(id -u "$REAL_USER") \
-          -e WRAPIX_PROMPT="test" \
-          -e BD_NO_DB=1 \
+          -e HOST_USER=$REAL_USER \
           -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
           -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
+          -e WRAPIX_PROMPT="test" \
           --network default \
           --entrypoint /bin/bash \
           "$TEST_IMAGE" /workspace/mount-test.sh
