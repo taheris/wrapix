@@ -1,7 +1,7 @@
 #!/bin/bash
 # Container network verification test script
 # This runs INSIDE the container to verify networking is working
-set -e
+set -euo pipefail
 
 echo "=== Container Network Verification ==="
 echo "Running as: $(id)"
