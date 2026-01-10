@@ -187,7 +187,8 @@ in
             fi
 
             # Build environment arguments
-            # Container uses its own SQLite database for performance while avoiding conflicts with host daemon
+            # Container initializes its own SQLite database from JSONL on startup
+            # This provides isolation while syncing changes back via JSONL
             ENV_ARGS=""
             ENV_ARGS="$ENV_ARGS -e BD_DB=/tmp/beads.db"
             ENV_ARGS="$ENV_ARGS -e BD_NO_DAEMON=1"

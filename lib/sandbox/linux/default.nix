@@ -126,8 +126,8 @@ in
       fi
 
       # .beads is included via the /workspace mount
-      # Container uses its own SQLite database for performance while avoiding conflicts with host daemon
-      # Writes sync to JSONL which host daemon auto-imports
+      # Container initializes its own SQLite database from JSONL on startup
+      # This provides isolation while syncing changes back via JSONL
 
       exec podman run --rm -it \
         --network=pasta \
