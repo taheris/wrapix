@@ -12,17 +12,10 @@ fi
 cd /workspace
 
 # Configure SSH to use deploy key if available
+# Use GIT_SSH_COMMAND instead of config file to avoid permission issues
+# (the .ssh directory may be created by the known_hosts bind mount with root ownership)
 if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
-  mkdir -p "$HOME/.ssh"
-  cat > "$HOME/.ssh/config" <<EOF
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile $WRAPIX_DEPLOY_KEY
-    IdentitiesOnly yes
-EOF
-  chmod 600 "$HOME/.ssh/config"
-  chmod 700 "$HOME/.ssh"
+  export GIT_SSH_COMMAND="ssh -i $WRAPIX_DEPLOY_KEY -o IdentitiesOnly=yes"
 fi
 
 # Initialize container-local beads database from workspace JSONL if available
