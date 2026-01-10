@@ -187,13 +187,15 @@ in
             fi
 
             # Build environment arguments
+            # Container uses its own SQLite database for performance while avoiding conflicts with host daemon
             ENV_ARGS=""
-            ENV_ARGS="$ENV_ARGS -e BD_NO_DB=1"
-            [ -n "$DIR_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_DIR_MOUNTS=$DIR_MOUNTS"
-            [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
+            ENV_ARGS="$ENV_ARGS -e BD_DB=/tmp/beads.db"
+            ENV_ARGS="$ENV_ARGS -e BD_NO_DAEMON=1"
             ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
             ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"
             ENV_ARGS="$ENV_ARGS -e HOST_USER=$USER"
+            [ -n "$DIR_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_DIR_MOUNTS=$DIR_MOUNTS"
+            [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"

@@ -151,10 +151,11 @@ in
         container run --rm \
           -w / \
           -v "$WORKSPACE:/workspace" \
-          -e HOST_USER=$REAL_USER \
+          -e BD_DB=/tmp/beads.db \
+          -e BD_NO_DAEMON=1 \
           -e HOST_UID=$(id -u "$REAL_USER") \
+          -e HOST_USER=$REAL_USER \
           -e WRAPIX_PROMPT="test" \
-          -e BD_NO_DB=1 \
           --network default \
           --dns 100.100.100.100 \
           --dns 1.1.1.1 \

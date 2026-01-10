@@ -126,7 +126,8 @@ in
       fi
 
       # .beads is included via the /workspace mount
-      # BD_NO_DB=1 prevents container from using the database, avoiding conflicts with host daemon
+      # Container uses its own SQLite database for performance while avoiding conflicts with host daemon
+      # Writes sync to JSONL which host daemon auto-imports
 
       exec podman run --rm -it \
         --network=pasta \
@@ -136,7 +137,8 @@ in
         --device /dev/fuse \
         $VOLUME_ARGS \
         $DEPLOY_KEY_ARGS \
-        -e "BD_NO_DB=1" \
+        -e "BD_DB=/tmp/beads.db" \
+        -e "BD_NO_DAEMON=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
         -e "HOME=/home/$USER" \
         -w /workspace \
