@@ -29,22 +29,18 @@ let
     else
       path;
 
-  # Generate shell code for a single mount
-  mkMountLine =
-    mount:
-    let
-      src = expandPath mount.source;
-      dst = expandDest mount.dest;
-      mode = mount.mode or "rw";
-      optional = mount.optional or false;
-    in
-    if optional then
-      ''[ -e "${src}" ] && VOLUME_ARGS="$VOLUME_ARGS -v ${src}:${dst}:${mode}"''
-    else
-      ''VOLUME_ARGS="$VOLUME_ARGS -v ${src}:${dst}:${mode}"'';
-
-  # Generate all mount lines from profile
-  mkMountLines = profile: builtins.concatStringsSep "\n  " (map mkMountLine profile.mounts);
+  # Generate mount specs as newline-separated list for runtime processing
+  # Format: source:dest:mode:optional|required
+  mkMountSpecs =
+    profile:
+    builtins.concatStringsSep "\n" (
+      map (
+        m:
+        "${expandPath m.source}:${expandDest m.dest}:${m.mode or "rw"}:${
+          if m.optional or false then "optional" else "required"
+        }"
+      ) profile.mounts
+    );
 
 in
 {
@@ -52,7 +48,6 @@ in
     {
       profile,
       profileImage,
-      entrypoint,
       deployKey ? null,
     }:
     let
@@ -66,14 +61,59 @@ in
     pkgs.writeShellScriptBin "wrapix" ''
       set -euo pipefail
 
+      # XDG-compliant directories for staging
+      XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
+      WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
       PROJECT_DIR="''${1:-$(pwd)}"
 
-      # Build volume args from profile
-      VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
-      ${mkMountLines profile}
+      # Clean up stale staging dirs from previous runs (PIDs that no longer exist)
+      mkdir -p "$WRAPIX_CACHE/mounts"
+      for stale_dir in "$WRAPIX_CACHE/mounts"/*; do
+        [ -d "$stale_dir" ] || continue
+        stale_pid=$(basename "$stale_dir")
+        if ! kill -0 "$stale_pid" 2>/dev/null; then
+          rm -rf "$stale_dir"
+        fi
+      done
 
-      # Mount SSH known_hosts (as directory since it's from Nix store) and system prompt
-      VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}:/home/$USER/.ssh/known_hosts_dir:ro"
+      # Create staging directory for this run (cleaned up on exit)
+      STAGING_ROOT="$WRAPIX_CACHE/mounts/$$"
+      mkdir -p "$STAGING_ROOT"
+      trap 'rm -rf "$STAGING_ROOT"' EXIT
+
+      # Build volume args
+      VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
+      dir_idx=0
+
+      # Process profile mounts - stage directories to dereference symlinks
+      while IFS=: read -r src dest mode optional; do
+        [ -z "$src" ] && continue
+        src=$(eval echo "$src")
+        dest=$(eval echo "$dest")
+
+        if [ ! -e "$src" ]; then
+          [ "$optional" = "optional" ] && continue
+          echo "Error: Mount source not found: $src"
+          exit 1
+        fi
+
+        if [ -d "$src" ]; then
+          # Stage directory with cp -rL to dereference symlinks (e.g., nix store)
+          staging="$STAGING_ROOT/dir$dir_idx"
+          mkdir -p "$staging"
+          cp -rL "$src/." "$staging/"
+          dir_idx=$((dir_idx + 1))
+          VOLUME_ARGS="$VOLUME_ARGS -v $staging:$dest:$mode"
+        else
+          # Files can be mounted directly
+          VOLUME_ARGS="$VOLUME_ARGS -v $src:$dest:$mode"
+        fi
+      done <<'MOUNTS'
+      ${mkMountSpecs profile}
+      MOUNTS
+
+      # Mount SSH known_hosts file directly and system prompt
+      VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/$USER/.ssh/known_hosts:ro"
       VOLUME_ARGS="$VOLUME_ARGS -v ${systemPromptFile}:/etc/wrapix-prompt:ro"
 
       # Mount deploy key for this repo (see scripts/setup-deploy-key)
@@ -82,7 +122,7 @@ in
       DEPLOY_KEY_ARGS=""
       if [ -f "$DEPLOY_KEY" ]; then
         VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
-        DEPLOY_KEY_ARGS="-e DEPLOY_KEY_NAME=$DEPLOY_KEY_NAME"
+        DEPLOY_KEY_ARGS="-e GIT_SSH_COMMAND=ssh -i /home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME -o IdentitiesOnly=yes"
       fi
 
       # Mount .beads tracked files only (not gitignored runtime files like db, socket, daemon)
@@ -100,7 +140,6 @@ in
       exec podman run --rm -it \
         --network=pasta \
         --userns=keep-id \
-        --entrypoint /bin/bash \
         $VOLUME_ARGS \
         $DEPLOY_KEY_ARGS \
         -e "BD_NO_DB=1" \
@@ -108,22 +147,6 @@ in
         -e "HOME=/home/$USER" \
         -w /workspace \
         docker-archive:${profileImage} \
-        -c '
-          # Set up SSH: copy known_hosts and create config
-          mkdir -p "$HOME/.ssh"
-          [ -f "$HOME/.ssh/known_hosts_dir/known_hosts" ] && cp "$HOME/.ssh/known_hosts_dir/known_hosts" "$HOME/.ssh/known_hosts"
-          if [ -n "''${DEPLOY_KEY_NAME:-}" ] && [ -f "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" ]; then
-            cat > "$HOME/.ssh/config" <<EOF
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile $HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME
-    IdentitiesOnly yes
-EOF
-            chmod 600 "$HOME/.ssh/config"
-          fi
-          chmod 700 "$HOME/.ssh"
-          exec claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"
-        '
+        /entrypoint.sh
     '';
 }

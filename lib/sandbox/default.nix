@@ -47,7 +47,6 @@ let
           inherit profile;
           entrypointScript = ./linux/entrypoint.sh;
         };
-        entrypoint = import ./linux/entrypoint.nix { inherit pkgs; };
       }
     else if isDarwin then
       darwinSandbox.mkSandbox {
