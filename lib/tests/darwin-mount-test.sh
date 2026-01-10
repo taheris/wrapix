@@ -107,7 +107,7 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     src="${mapping%%:*}"
     dst="${mapping#*:}"
     # Expand $USER in dst path
-    dst=$(echo "$dst" | sed "s|\$USER|$HOST_USER|g")
+    dst="${dst//\$USER/$HOST_USER}"
     if [ -d "$src" ]; then
       mkdir -p "$(dirname "$dst")"
       cp -r "$src" "$dst"  # Symlinks already dereferenced on host
@@ -181,7 +181,7 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     src="${mapping%%:*}"
     dst="${mapping#*:}"
     # Expand $USER in dst path
-    dst=$(echo "$dst" | sed "s|\$USER|$HOST_USER|g")
+    dst="${dst//\$USER/$HOST_USER}"
     if [ -f "$src" ]; then
       mkdir -p "$(dirname "$dst")"
       cp "$src" "$dst"

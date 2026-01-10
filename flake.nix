@@ -60,7 +60,12 @@
           };
 
           legacyPackages.lib = {
-            inherit (wrapix) deriveProfile mkDevShell mkSandbox profiles;
+            inherit (wrapix)
+              deriveProfile
+              mkDevShell
+              mkSandbox
+              profiles
+              ;
           };
 
           packages = {
