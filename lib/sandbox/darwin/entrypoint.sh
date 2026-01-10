@@ -22,12 +22,23 @@ expand_path() {
     echo "$p"
 }
 
+# Validate mount mapping format: must be "src:dst" with exactly one colon
+validate_mount_mapping() {
+    local mapping="$1"
+    [[ "$mapping" =~ ^[^:]+:[^:]+$ ]]
+}
+
 # Copy directories from staging to destination with correct ownership
 # VirtioFS maps files as root, so we copy and fix ownership
 # This must run BEFORE SSH setup so deploy keys are in place
 if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
     for mapping in "${DIR_MOUNTS[@]}"; do
+        [ -z "$mapping" ] && continue
+        if ! validate_mount_mapping "$mapping"; then
+            echo "Warning: Skipping malformed dir mount: $mapping" >&2
+            continue
+        fi
         src="${mapping%%:*}"
         dst=$(expand_path "${mapping#*:}")
         if [ -d "$src" ]; then
@@ -43,6 +54,11 @@ fi
 if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
     for mapping in "${MOUNTS[@]}"; do
+        [ -z "$mapping" ] && continue
+        if ! validate_mount_mapping "$mapping"; then
+            echo "Warning: Skipping malformed file mount: $mapping" >&2
+            continue
+        fi
         src="${mapping%%:*}"
         dst=$(expand_path "${mapping#*:}")
         if [ -f "$src" ]; then
