@@ -16,14 +16,6 @@
 }:
 
 let
-  gitConfig = pkgs.writeTextDir "etc/gitconfig" ''
-    [user]
-        name = Wrapix Sandbox
-        email = sandbox@wrapix.dev
-    [core]
-        sshCommand = sh -c '[ -n "$DEPLOY_KEY_NAME" ] && exec ssh -i "$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME" -o IdentitiesOnly=yes "$@" || exec ssh "$@"' --
-  '';
-
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
   '';
@@ -71,7 +63,6 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.dockerTools.binSh
     pkgs.dockerTools.caCertificates
     pkgs.cacert
-    gitConfig
     nixConfig
     profileEnv
   ];
@@ -91,6 +82,10 @@ pkgs.dockerTools.buildLayeredImage {
     Env = [
       "PATH=${profileEnv}/bin:/bin:/usr/bin"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+      "GIT_AUTHOR_NAME=Wrapix Sandbox"
+      "GIT_AUTHOR_EMAIL=sandbox@wrapix.dev"
+      "GIT_COMMITTER_NAME=Wrapix Sandbox"
+      "GIT_COMMITTER_EMAIL=sandbox@wrapix.dev"
     ];
     WorkingDir = "/workspace";
     Entrypoint = [ "/entrypoint.sh" ];
