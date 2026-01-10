@@ -11,7 +11,6 @@ let
     fd
     file
     findutils
-    fuse-overlayfs
     gawk
     git
     gnugrep
