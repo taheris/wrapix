@@ -11,10 +11,10 @@ let
   # Use Linux packages for building the container image (requires remote builder on Darwin)
   linuxPkgs =
     if isDarwin then
-      import (pkgs.path) {
+      import pkgs.path {
         system = "aarch64-linux";
         config.allowUnfree = true;
-        overlays = pkgs.overlays;
+        inherit (pkgs) overlays;
       }
     else
       pkgs;
