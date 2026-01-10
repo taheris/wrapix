@@ -122,7 +122,8 @@ in
       DEPLOY_KEY_ARGS=""
       if [ -f "$DEPLOY_KEY" ]; then
         VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
-        DEPLOY_KEY_ARGS="-e GIT_SSH_COMMAND=ssh -i /home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME -o IdentitiesOnly=yes"
+        # Pass deploy key path to entrypoint for SSH config setup
+        DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
       fi
 
       # .beads is included via the /workspace mount
