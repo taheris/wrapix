@@ -73,6 +73,7 @@ fi
 # Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
 # The mount uses literal $USER path due to VirtioFS constraints
 mkdir -p "$HOME/.ssh"
+# shellcheck disable=SC2016 # $USER is intentionally literal - VirtioFS mount path
 KNOWN_HOSTS_SRC='/home/$USER/.ssh/known_hosts_dir/known_hosts'
 [ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
 
