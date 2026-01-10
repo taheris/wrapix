@@ -3,6 +3,12 @@ set -euo pipefail
 
 cd /workspace
 
+# Nix flake check note:
+# The container's /nix/store is incomplete (runtime packages only, no build deps).
+# Full `nix flake check` requires the host's complete Nix store.
+# Use `nix flake check --no-build` to verify evaluation without building.
+# For full checks, run outside the container on a host with Nix installed.
+
 # Configure SSH to use deploy key if available
 # Use GIT_SSH_COMMAND instead of config file to avoid permission issues
 # (the .ssh directory may be created by the known_hosts bind mount with root ownership)
