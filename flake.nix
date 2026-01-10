@@ -6,12 +6,12 @@
 
     beads = {
       url = "github:steveyegge/beads";
-      inputs.nixpkgs-lib.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     beads-viewer = {
       url = "github:Dicklesworthstone/beads_viewer";
-      inputs.nixpkgs-lib.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     flake-parts = {
@@ -37,13 +37,17 @@
           ...
         }:
         let
-          sandboxLib = import ./lib { inherit pkgs system; };
-          testLib = import ./lib/tests {
+          wrapix = import ./lib { inherit pkgs system; };
+          test = import ./lib/tests {
             inherit pkgs system;
             src = ./.;
           };
+
         in
         {
+          checks = test.checks;
+          formatter = pkgs.nixfmt;
+
           _module.args.pkgs = import nixpkgs {
             inherit system;
             config.allowUnfree = true;
@@ -55,41 +59,33 @@
             ];
           };
 
-          # Library functions for customization
           legacyPackages.lib = {
-            inherit (sandboxLib) mkSandbox mkDevShell deriveProfile;
-            profiles = sandboxLib.profiles;
+            inherit (wrapix) deriveProfile mkDevShell mkSandbox;
+            profiles = wrapix.profiles;
           };
 
-          # Ready-to-run sandboxes
           packages = {
-            default = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
-            wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
-            wrapix-rust = sandboxLib.mkSandbox { profile = sandboxLib.profiles.rust; };
+            default = wrapix.mkSandbox { profile = wrapix.profiles.base; };
+            wrapix = wrapix.mkSandbox { profile = wrapix.profiles.base; };
+            wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
           };
 
-          devShells.default = sandboxLib.mkDevShell {
-            packages = with pkgs; [
-              beads
-              beads-viewer
-              gh
-              nixfmt-rfc-style
-              podman
-            ];
-          };
-
-          # Formatter for `nix fmt`
-          formatter = pkgs.nixfmt-rfc-style;
-
-          # Tests via `nix flake check`
-          checks = testLib.checks;
-
-          # Apps for running tests
           apps.test-integration = {
             type = "app";
             program = "${
               import ./lib/tests/integration-runner.nix { inherit pkgs system; }
             }/bin/test-integration";
+          };
+
+          devShells.default = wrapix.mkDevShell {
+            packages = with pkgs; [
+              beads
+              beads-viewer
+              gh
+              nixfmt
+              nixfmt-tree
+              podman
+            ];
           };
         };
     };
