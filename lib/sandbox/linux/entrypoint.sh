@@ -21,7 +21,7 @@ fi
 # Initialize container-local beads database from workspace JSONL if available
 # This provides isolation while syncing changes back via JSONL -> host daemon
 if [ -f /workspace/.beads/issues.jsonl ] && [ -f /workspace/.beads/config.yaml ]; then
-  PREFIX=$(grep 'issue-prefix:' /workspace/.beads/config.yaml | sed 's/.*"\([^"]*\)".*/\1/' || echo "")
+  PREFIX=$(grep '^issue-prefix:' /workspace/.beads/config.yaml | sed 's/.*"\([^"]*\)".*/\1/' || echo "")
   if [ -n "$PREFIX" ]; then
     bd init --prefix "$PREFIX" --from-jsonl --quiet 2>/dev/null || true
   fi

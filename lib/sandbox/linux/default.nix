@@ -126,9 +126,17 @@ in
         DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
       fi
 
-      # .beads is included via the /workspace mount
-      # Container initializes its own SQLite database from JSONL on startup
-      # This provides isolation while syncing changes back via JSONL
+      # Stage .beads config files for container-local database isolation
+      # Container gets tmpfs over /workspace/.beads with only config.yaml and issues.jsonl
+      # bd init creates fresh beads.db inside container (not bind-mounted from host)
+      BEADS_ARGS=""
+      if [ -d "$PROJECT_DIR/.beads" ]; then
+        BEADS_ARGS="--mount type=tmpfs,destination=/workspace/.beads,U=true"
+        [ -f "$PROJECT_DIR/.beads/config.yaml" ] && \
+          BEADS_ARGS="$BEADS_ARGS -v $PROJECT_DIR/.beads/config.yaml:/workspace/.beads/config.yaml:ro"
+        [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && \
+          BEADS_ARGS="$BEADS_ARGS -v $PROJECT_DIR/.beads/issues.jsonl:/workspace/.beads/issues.jsonl:rw"
+      fi
 
       exec podman run --rm -it \
         --network=pasta \
@@ -137,8 +145,8 @@ in
         --mount type=tmpfs,destination=/home/$USER \
         --device /dev/fuse \
         $VOLUME_ARGS \
+        $BEADS_ARGS \
         $DEPLOY_KEY_ARGS \
-        -e "BD_DB=/tmp/beads.db" \
         -e "BD_NO_DAEMON=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
         -e "HOME=/home/$USER" \

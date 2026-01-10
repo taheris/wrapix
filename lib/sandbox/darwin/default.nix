@@ -186,11 +186,18 @@ in
               FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
             fi
 
+            # Stage .beads config files for container-local database isolation
+            # bd init creates fresh beads.db inside container (not bind-mounted from host)
+            if [ -d "$PROJECT_DIR/.beads" ]; then
+              beads_staging="$STAGING_ROOT/beads"
+              mkdir -p "$beads_staging"
+              [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$beads_staging/"
+              [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$beads_staging/"
+              MOUNT_ARGS="$MOUNT_ARGS -v $beads_staging:/workspace/.beads"
+            fi
+
             # Build environment arguments
-            # Container initializes its own SQLite database from JSONL on startup
-            # This provides isolation while syncing changes back via JSONL
             ENV_ARGS=""
-            ENV_ARGS="$ENV_ARGS -e BD_DB=/tmp/beads.db"
             ENV_ARGS="$ENV_ARGS -e BD_NO_DAEMON=1"
             ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
             ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"
