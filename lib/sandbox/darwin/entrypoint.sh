@@ -13,31 +13,9 @@ mkdir -p "/home/$HOST_USER"
 chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
 export HOME="/home/$HOST_USER"
 
-# Set up SSH configuration
-# Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
-mkdir -p "$HOME/.ssh"
-[ -f "$HOME/.ssh/known_hosts_dir/known_hosts" ] && cp "$HOME/.ssh/known_hosts_dir/known_hosts" "$HOME/.ssh/known_hosts"
-
-# Configure SSH to use deploy key if available (Darwin mounts to /home/$USER/.ssh/deploy_keys/)
-if [ -d "$HOME/.ssh/deploy_keys" ] && [ -n "$(ls -A $HOME/.ssh/deploy_keys 2>/dev/null)" ]; then
-  DEPLOY_KEY=$(ls $HOME/.ssh/deploy_keys/* | head -1)
-  cat > "$HOME/.ssh/config" <<EOF
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile $DEPLOY_KEY
-    IdentitiesOnly yes
-EOF
-  chmod 600 "$HOME/.ssh/config"
-fi
-
-# Fix ownership and permissions (known_hosts is read-only mount, skip it)
-chown "$HOST_UID:$HOST_UID" "$HOME/.ssh"
-chmod 700 "$HOME/.ssh"
-[ -f "$HOME/.ssh/config" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.ssh/config"
-
 # Copy directories from staging to destination with correct ownership
 # VirtioFS maps files as root, so we copy and fix ownership
+# This must run BEFORE SSH setup so deploy keys are in place
 if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
     for mapping in "${DIR_MOUNTS[@]}"; do
@@ -52,6 +30,7 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
 fi
 
 # Copy files from staging to destination with correct ownership
+# This includes deploy keys which are needed for SSH config
 if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
     for mapping in "${MOUNTS[@]}"; do
@@ -64,6 +43,31 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
         fi
     done
 fi
+
+# Set up SSH configuration
+# Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
+# The mount uses literal $USER path due to VirtioFS constraints
+mkdir -p "$HOME/.ssh"
+KNOWN_HOSTS_SRC='/home/$USER/.ssh/known_hosts_dir/known_hosts'
+[ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
+
+# Configure SSH to use deploy key if available (copied by WRAPIX_FILE_MOUNTS above)
+if [ -d "$HOME/.ssh/deploy_keys" ] && [ -n "$(ls -A $HOME/.ssh/deploy_keys 2>/dev/null)" ]; then
+  DEPLOY_KEY=$(ls $HOME/.ssh/deploy_keys/* | head -1)
+  cat > "$HOME/.ssh/config" <<EOF
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile $DEPLOY_KEY
+    IdentitiesOnly yes
+EOF
+  chmod 600 "$HOME/.ssh/config"
+fi
+
+# Fix ownership and permissions
+chown "$HOST_UID:$HOST_UID" "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+[ -f "$HOME/.ssh/config" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.ssh/config"
 
 cd /workspace
 
