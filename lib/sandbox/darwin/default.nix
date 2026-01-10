@@ -117,6 +117,16 @@ in
             STAGING_ROOT="$WRAPIX_CACHE/mounts/$$"
             mkdir -p "$STAGING_ROOT"
             trap 'rm -rf "$STAGING_ROOT"' EXIT
+
+            # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
+            expand_path() {
+              local p="$1"
+              p="''${p/#\~/$HOME}"
+              p="''${p//\$HOME/$HOME}"
+              p="''${p//\$USER/$USER}"
+              echo "$p"
+            }
+
             MOUNT_ARGS=""
             DIR_MOUNTS=""
             FILE_MOUNTS=""
@@ -126,8 +136,8 @@ in
 
             while IFS=: read -r src dest optional; do
               [ -z "$src" ] && continue
-              src=$(eval echo "$src")
-              dest=$(eval echo "$dest")
+              src=$(expand_path "$src")
+              dest=$(expand_path "$dest")
 
               if [ ! -e "$src" ]; then
                 [ "$optional" = "optional" ] && continue
