@@ -125,17 +125,8 @@ in
         DEPLOY_KEY_ARGS="-e GIT_SSH_COMMAND=ssh -i /home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME -o IdentitiesOnly=yes"
       fi
 
-      # Mount .beads tracked files only (not gitignored runtime files like db, socket, daemon)
-      # This prevents container bd from interfering with host daemon's SQLite connection
-      BEADS_DIR="$PROJECT_DIR/.beads"
-      if [ -d "$BEADS_DIR" ]; then
-        # Create tmpfs overlay for .beads to hide host's runtime files
-        VOLUME_ARGS="$VOLUME_ARGS --mount type=tmpfs,destination=/workspace/.beads"
-        # Mount only tracked files (JSONL, config) into the tmpfs
-        for f in issues.jsonl interactions.jsonl config.yaml metadata.json; do
-          [ -f "$BEADS_DIR/$f" ] && VOLUME_ARGS="$VOLUME_ARGS -v $BEADS_DIR/$f:/workspace/.beads/$f:rw"
-        done
-      fi
+      # .beads is included via the /workspace mount
+      # BD_NO_DB=1 prevents container from using the database, avoiding conflicts with host daemon
 
       exec podman run --rm -it \
         --network=pasta \
