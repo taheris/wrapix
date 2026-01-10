@@ -106,7 +106,7 @@ fi
 if [ -f /workspace/.beads/issues.jsonl ] && [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
   if [ -n "$PREFIX" ]; then
-    bd init --prefix "$PREFIX" --from-jsonl --quiet 2>/dev/null || true
+    bd init --prefix "$PREFIX" --from-jsonl --quiet
   fi
 fi
 
