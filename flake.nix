@@ -70,11 +70,10 @@
             wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
           };
 
-          apps.test-integration = {
+          apps.test-darwin = {
+            meta.description = "Run Darwin integration tests";
             type = "app";
-            program = "${
-              import ./lib/tests/integration-runner.nix { inherit pkgs system; }
-            }/bin/test-integration";
+            program = "${import ./lib/tests/integration-darwin.nix { inherit pkgs system; }}/bin/test-darwin";
           };
 
           devShells.default = wrapix.mkDevShell {
