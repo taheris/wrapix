@@ -192,10 +192,12 @@ in
             # Add deploy key: mount parent dir to staging if key exists
             DEPLOY_KEY_NAME=${deployKeyExpr}
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+            DEPLOY_KEY_ARGS=""
             if [ -f "$DEPLOY_KEY" ]; then
               MOUNT_ARGS="$MOUNT_ARGS -v $HOME/.ssh/deploy_keys:/mnt/wrapix/deploy_keys"
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
               FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+              DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
             fi
 
             # Stage .beads config files for container-local database isolation
@@ -240,6 +242,7 @@ in
               -v "$PROJECT_DIR:/workspace" \
               $MOUNT_ARGS \
               $ENV_ARGS \
+              $DEPLOY_KEY_ARGS \
               "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
               /entrypoint.sh
     '';
