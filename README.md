@@ -25,7 +25,7 @@ nix run github:taheris/wrapix#wrapix-rust ~/myproject
 
 | Profile | Additional Packages | Cache Mounts |
 |---------|---------------------|--------------|
-| base | git, ripgrep, fd, jq, vim, jujutsu, etc. | - |
+| base | git, ripgrep, fd, jq, vim, etc. | - |
 | rust | rustc, cargo, rust-analyzer | ~/.cargo/{registry,git} |
 
 ## Custom Profiles
