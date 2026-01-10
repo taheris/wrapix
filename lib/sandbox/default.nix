@@ -12,7 +12,7 @@ let
   # This requires a Linux remote builder to be configured
   linuxPkgs =
     if isDarwin then
-      import (pkgs.path) {
+      import pkgs.path {
         system = "aarch64-linux"; # Use ARM Linux for Apple Silicon
         config.allowUnfree = true;
       }
