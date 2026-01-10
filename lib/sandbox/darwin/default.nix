@@ -40,6 +40,8 @@ in
       profile,
       profileImage,
       deployKey ? null,
+      cpus ? 4,
+      memoryMb ? 4096,
       ...
     }:
     let
@@ -220,10 +222,6 @@ in
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"
 
-            # Calculate resources (half of available CPUs, 4GB memory)
-            CPUS=$(($(sysctl -n hw.ncpu) / 2))
-            [ "$CPUS" -lt 2 ] && CPUS=2
-
             # Run container
             # Note: -w / because WorkingDir=/workspace fails before mounts are ready
             TTY_ARGS=""
@@ -234,8 +232,8 @@ in
               --rm \
               $TTY_ARGS \
               -w / \
-              -c "$CPUS" \
-              -m 4G \
+              -c ${toString cpus} \
+              -m ${toString memoryMb}M \
               --network default \
               --dns 100.100.100.100 \
               --dns 1.1.1.1 \
