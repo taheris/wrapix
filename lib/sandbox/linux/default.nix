@@ -136,15 +136,16 @@ in
       fi
 
       # Stage .beads config files for container-local database isolation
-      # Container gets tmpfs over /workspace/.beads with only config.yaml and issues.jsonl
-      # bd init creates fresh beads.db inside container (not bind-mounted from host)
+      # Copy to staging (like Darwin) so atomic renames work inside the mount
+      # bd init creates fresh beads.db inside container from the staged JSONL
       BEADS_ARGS=""
+      BEADS_STAGING=""
       if [ -d "$PROJECT_DIR/.beads" ]; then
-        BEADS_ARGS="--mount type=tmpfs,destination=/workspace/.beads,U=true"
-        [ -f "$PROJECT_DIR/.beads/config.yaml" ] && \
-          BEADS_ARGS="$BEADS_ARGS -v $PROJECT_DIR/.beads/config.yaml:/workspace/.beads/config.yaml:ro"
-        [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && \
-          BEADS_ARGS="$BEADS_ARGS -v $PROJECT_DIR/.beads/issues.jsonl:/workspace/.beads/issues.jsonl:rw"
+        BEADS_STAGING="$STAGING_ROOT/beads"
+        mkdir -p "$BEADS_STAGING"
+        [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
+        [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
+        BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
       fi
 
       exec podman run --rm -it \

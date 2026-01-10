@@ -197,13 +197,15 @@ in
             fi
 
             # Stage .beads config files for container-local database isolation
-            # bd init creates fresh beads.db inside container (not bind-mounted from host)
+            # Copy to staging so atomic renames work inside the mount
+            # bd init creates fresh beads.db inside container from the staged JSONL
+            BEADS_STAGING=""
             if [ -d "$PROJECT_DIR/.beads" ]; then
-              beads_staging="$STAGING_ROOT/beads"
-              mkdir -p "$beads_staging"
-              [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$beads_staging/"
-              [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$beads_staging/"
-              MOUNT_ARGS="$MOUNT_ARGS -v $beads_staging:/workspace/.beads"
+              BEADS_STAGING="$STAGING_ROOT/beads"
+              mkdir -p "$BEADS_STAGING"
+              [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
+              [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
+              MOUNT_ARGS="$MOUNT_ARGS -v $BEADS_STAGING:/workspace/.beads"
             fi
 
             # Build environment arguments
