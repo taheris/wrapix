@@ -3,7 +3,7 @@
 # This runs INSIDE the container to verify mounts are working
 #
 # Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
-set -e
+set -euo pipefail
 
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"
