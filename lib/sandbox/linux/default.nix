@@ -60,9 +60,10 @@ in
         else
           ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
     in
-    pkgs.writeShellScriptBin "wrapix" ''
-      set -euo pipefail
-
+    pkgs.writeShellApplication {
+      name = "wrapix";
+      runtimeInputs = [ pkgs.podman ];
+      text = ''
       # XDG-compliant directories for staging
       XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
       WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
@@ -150,6 +151,7 @@ in
         BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
       fi
 
+      # shellcheck disable=SC2086 # Intentional word splitting for volume args
       exec podman run --rm -it \
         --cpus=${toString cpus} \
         --memory=${toString memoryMb}m \
@@ -157,7 +159,6 @@ in
         --userns=keep-id \
         --passwd-entry "$USER:*:$(id -u):$(id -g)::/home/$USER:/bin/bash" \
         --mount type=tmpfs,destination=/home/$USER \
-        --device /dev/fuse \
         $VOLUME_ARGS \
         $BEADS_ARGS \
         $DEPLOY_KEY_ARGS \
@@ -168,4 +169,5 @@ in
         docker-archive:${profileImage} \
         /entrypoint.sh
     '';
+    };
 }
