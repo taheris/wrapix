@@ -74,15 +74,13 @@ let
       packages ? [ ],
       mounts ? [ ],
       env ? { },
-      customPrompt ? null,
     }:
     {
       inherit name;
       packages = basePackages ++ packages;
       mounts = baseMounts ++ mounts;
       env = baseEnv // env;
-    }
-    // (if customPrompt != null then { inherit customPrompt; } else { });
+    };
 
 in
 {
