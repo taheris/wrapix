@@ -77,13 +77,12 @@ KNOWN_HOSTS_SRC='/home/$USER/.ssh/known_hosts_dir/known_hosts'
 [ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
 
 # Configure SSH to use deploy key if available (copied by WRAPIX_FILE_MOUNTS above)
-if [ -d "$HOME/.ssh/deploy_keys" ] && [ -n "$(ls -A $HOME/.ssh/deploy_keys 2>/dev/null)" ]; then
-  DEPLOY_KEY=$(ls $HOME/.ssh/deploy_keys/* | head -1)
+if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
   cat > "$HOME/.ssh/config" <<EOF
 Host github.com
     HostName github.com
     User git
-    IdentityFile $DEPLOY_KEY
+    IdentityFile $WRAPIX_DEPLOY_KEY
     IdentitiesOnly yes
 EOF
   chmod 600 "$HOME/.ssh/config"
