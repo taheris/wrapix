@@ -81,6 +81,15 @@ in
       mkdir -p "$STAGING_ROOT"
       trap 'rm -rf "$STAGING_ROOT"' EXIT
 
+      # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
+      expand_path() {
+        local p="$1"
+        p="''${p/#\~/$HOME}"
+        p="''${p//\$HOME/$HOME}"
+        p="''${p//\$USER/$USER}"
+        echo "$p"
+      }
+
       # Build volume args
       VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
       dir_idx=0
@@ -88,8 +97,8 @@ in
       # Process profile mounts - stage directories to dereference symlinks
       while IFS=: read -r src dest mode optional; do
         [ -z "$src" ] && continue
-        src=$(eval echo "$src")
-        dest=$(eval echo "$dest")
+        src=$(expand_path "$src")
+        dest=$(expand_path "$dest")
 
         if [ ! -e "$src" ]; then
           [ "$optional" = "optional" ] && continue

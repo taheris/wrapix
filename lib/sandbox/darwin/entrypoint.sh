@@ -13,6 +13,15 @@ mkdir -p "/home/$HOST_USER"
 chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
 export HOME="/home/$HOST_USER"
 
+# Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
+expand_path() {
+    local p="$1"
+    p="${p/#\~/$HOME}"
+    p="${p//\$HOME/$HOME}"
+    p="${p//\$USER/$USER}"
+    echo "$p"
+}
+
 # Copy directories from staging to destination with correct ownership
 # VirtioFS maps files as root, so we copy and fix ownership
 # This must run BEFORE SSH setup so deploy keys are in place
@@ -20,7 +29,7 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
     for mapping in "${DIR_MOUNTS[@]}"; do
         src="${mapping%%:*}"
-        dst=$(eval echo "${mapping#*:}")
+        dst=$(expand_path "${mapping#*:}")
         if [ -d "$src" ]; then
             mkdir -p "$(dirname "$dst")"
             cp -r "$src" "$dst"
@@ -35,7 +44,7 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
     for mapping in "${MOUNTS[@]}"; do
         src="${mapping%%:*}"
-        dst=$(eval echo "${mapping#*:}")
+        dst=$(expand_path "${mapping#*:}")
         if [ -f "$src" ]; then
             mkdir -p "$(dirname "$dst")"
             cp "$src" "$dst"
