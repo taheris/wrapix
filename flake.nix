@@ -45,8 +45,8 @@
 
         in
         {
-          checks = test.checks;
-          formatter = pkgs.nixfmt;
+          inherit (test) checks;
+          formatter = pkgs.nixfmt-tree;
 
           _module.args.pkgs = import nixpkgs {
             inherit system;
@@ -60,8 +60,7 @@
           };
 
           legacyPackages.lib = {
-            inherit (wrapix) deriveProfile mkDevShell mkSandbox;
-            profiles = wrapix.profiles;
+            inherit (wrapix) deriveProfile mkDevShell mkSandbox profiles;
           };
 
           packages = {
@@ -84,6 +83,7 @@
               nixfmt
               nixfmt-tree
               podman
+              statix
             ];
           };
         };

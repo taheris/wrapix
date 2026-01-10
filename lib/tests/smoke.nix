@@ -18,10 +18,10 @@ let
   # Must apply same overlay as flake.nix to get pkgs.beads
   linuxPkgs =
     if isDarwin then
-      import (pkgs.path) {
+      import pkgs.path {
         system = "aarch64-linux";
         config.allowUnfree = true;
-        overlays = pkgs.overlays;
+        inherit (pkgs) overlays;
       }
     else
       pkgs;
