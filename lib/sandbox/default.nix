@@ -1,4 +1,8 @@
-{ pkgs, system }:
+{
+  pkgs,
+  system,
+  linuxPkgs,
+}:
 
 let
   isLinux = builtins.elem system [
@@ -6,18 +10,6 @@ let
     "aarch64-linux"
   ];
   isDarwin = system == "aarch64-darwin";
-
-  # Import platform-specific pkgs for image building
-  # On Darwin, we need x86_64-linux or aarch64-linux packages for the container image
-  # This requires a Linux remote builder to be configured
-  linuxPkgs =
-    if isDarwin then
-      import pkgs.path {
-        system = "aarch64-linux"; # Use ARM Linux for Apple Silicon
-        config.allowUnfree = true;
-      }
-    else
-      pkgs;
 
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
   profiles = import ./profiles.nix { pkgs = linuxPkgs; };

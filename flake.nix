@@ -37,11 +37,32 @@
           ...
         }:
         let
-          wrapix = import ./lib { inherit pkgs system; };
+          # Overlay for host system packages (devShell, etc.)
+          hostOverlay = final: prev: {
+            beads = inputs'.beads.packages.default;
+            beads-viewer = inputs'.beads-viewer.packages.default;
+          };
+
+          linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
+
+          linuxPkgs = import nixpkgs {
+            system = linuxSystem;
+            overlays = [ linuxOverlay ];
+            config.allowUnfree = true;
+          };
+
+          # Overlay for Linux container packages (must use Linux binaries)
+          linuxOverlay = final: prev: {
+            beads = inputs.beads.packages.${linuxSystem}.default;
+            beads-viewer = inputs.beads-viewer.packages.${linuxSystem}.default;
+          };
+
           test = import ./lib/tests {
             inherit pkgs system;
             src = ./.;
           };
+
+          wrapix = import ./lib { inherit pkgs system linuxPkgs; };
 
         in
         {
@@ -50,13 +71,8 @@
 
           _module.args.pkgs = import nixpkgs {
             inherit system;
+            overlays = [ hostOverlay ];
             config.allowUnfree = true;
-            overlays = [
-              (final: prev: {
-                beads = inputs'.beads.packages.default;
-                beads-viewer = inputs'.beads-viewer.packages.default;
-              })
-            ];
           };
 
           legacyPackages.lib = {
