@@ -1,10 +1,11 @@
 {
   pkgs,
   system,
+  linuxPkgs ? pkgs,
 }:
 
 let
-  sandbox = import ./sandbox { inherit pkgs system; };
+  sandbox = import ./sandbox { inherit pkgs system linuxPkgs; };
 in
 {
   mkSandbox = profile: sandbox.mkSandbox profile;
