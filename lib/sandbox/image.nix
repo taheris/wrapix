@@ -18,6 +18,8 @@
 let
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
+    sandbox = false
+    filter-syscalls = false
   '';
 
   # Base passwd/group (user added at runtime with host UID)
@@ -55,6 +57,7 @@ pkgs.dockerTools.buildLayeredImage {
   name = "wrapix-${profile.name}";
   tag = "latest";
   maxLayers = 100;
+  includeNixDB = true;
 
   contents = [
     passwdFile
@@ -68,24 +71,39 @@ pkgs.dockerTools.buildLayeredImage {
   ];
 
   extraCommands = ''
-    mkdir -p tmp home root var/run mnt/wrapix/file mnt/wrapix/dir
-    chmod 1777 tmp
+    mkdir -p tmp home root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
+    chmod 1777 tmp var/cache
 
     mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts
 
     cp ${entrypointScript} entrypoint.sh
     chmod +x entrypoint.sh
+
+    # Fix Nix permissions for non-root users
+    # (includeNixDB creates files owned by root)
+    # Store must be writable to add new paths and create lock files
+    chmod -R a+rwX nix/store nix/var/nix
+
+    # Pre-create directory structure Nix expects with correct permissions
+    # This prevents Nix from trying to chmod directories it doesn't own
+    mkdir -p nix/var/nix/profiles/per-user
+    mkdir -p nix/var/nix/gcroots/per-user
+    mkdir -p nix/var/log/nix/drvs
+    chmod 755 nix/var/nix/profiles nix/var/nix/profiles/per-user
+    chmod 755 nix/var/nix/gcroots nix/var/nix/gcroots/per-user
+    chmod -R a+rwX nix/var/log
   '';
 
   config = {
     Env = [
-      "PATH=${profileEnv}/bin:/bin:/usr/bin"
-      "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
       "GIT_AUTHOR_NAME=Wrapix Sandbox"
       "GIT_AUTHOR_EMAIL=sandbox@wrapix.dev"
       "GIT_COMMITTER_NAME=Wrapix Sandbox"
       "GIT_COMMITTER_EMAIL=sandbox@wrapix.dev"
+      "PATH=${profileEnv}/bin:/bin:/usr/bin"
+      "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+      "XDG_CACHE_HOME=/var/cache"
     ];
     WorkingDir = "/workspace";
     Entrypoint = [ "/entrypoint.sh" ];
