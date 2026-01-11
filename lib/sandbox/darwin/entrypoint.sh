@@ -96,11 +96,6 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
-# Fix ownership of beads directory (VirtioFS maps files as root)
-if [ -d /workspace/.beads ]; then
-  chown -R "$HOST_UID:$HOST_UID" /workspace/.beads
-fi
-
 # Initialize container-local beads database from workspace JSONL if available
 # This provides isolation while syncing changes back via JSONL -> host daemon
 if [ -f /workspace/.beads/issues.jsonl ] && [ -f /workspace/.beads/config.yaml ]; then
