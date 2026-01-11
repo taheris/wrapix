@@ -78,6 +78,8 @@ KNOWN_HOSTS_SRC='/home/$USER/.ssh/known_hosts_dir/known_hosts'
 [ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
 
 # Configure SSH to use deploy key if available (copied by WRAPIX_FILE_MOUNTS above)
+# Expand $USER in the path since FILE_MOUNTS copies to the expanded destination
+WRAPIX_DEPLOY_KEY=$(expand_path "${WRAPIX_DEPLOY_KEY:-}")
 if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
   cat > "$HOME/.ssh/config" <<EOF
 Host github.com
