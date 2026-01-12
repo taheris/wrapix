@@ -79,3 +79,48 @@ Both solutions provide full TCP/UDP/ICMP connectivity without elevated privilege
 - Claude has full internet access for research
 
 This is intentional: the sandbox is meant to allow autonomous work with web research capabilities. The security boundary is the container itself, not network filtering.
+
+## Host Notifications
+
+Claude Code can trigger native desktop notifications on the host machine from inside the container via a Unix socket.
+
+```
+┌─ Container ──────────────────────────┐
+│                                      │
+│  Claude Code                         │
+│    └─ Hook: Stop, PostToolUse, etc.  │
+│         └─ wrapix-notify "msg"       │
+│              └─ writes to socket     │
+│                                      │
+└──────────────┬───────────────────────┘
+               │ mounted socket
+               ▼
+┌─ Host ───────────────────────────────┐
+│                                      │
+│  wrapix-notifyd                      │
+│    └─ Listens on Unix socket         │
+│    └─ Triggers native notifications  │
+│         ├─ Linux: notify-send        │
+│         └─ macOS: terminal-notifier  │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+### Components
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `wrapix-notifyd` | Host | Daemon listening on `~/.local/share/wrapix/notify.sock` |
+| `wrapix-notify` | Container | Client that sends JSON to the socket |
+
+### Protocol
+
+The client sends newline-delimited JSON to the socket:
+
+```json
+{"title": "Claude Code", "message": "Task completed", "sound": "Ping"}
+```
+
+- `title`: Notification title (default: "Claude Code")
+- `message`: Notification body
+- `sound`: macOS sound name (optional, ignored on Linux)

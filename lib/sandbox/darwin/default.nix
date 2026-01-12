@@ -189,6 +189,12 @@ in
             MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
             MOUNT_ARGS="$MOUNT_ARGS -v ${systemPromptDir}:/etc/wrapix"
 
+            # Add notification socket if daemon is running
+            NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"
+            if [ -S "$NOTIFY_SOCKET" ]; then
+              MOUNT_ARGS="$MOUNT_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
+            fi
+
             # Add deploy key: mount parent dir to staging if key exists
             DEPLOY_KEY_NAME=${deployKeyExpr}
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"

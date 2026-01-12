@@ -95,6 +95,67 @@ Pass `deployKey` to `mkSandbox` to mount the key:
 - Each deploy key only works for one repository
 - If compromised, revoke it without affecting other access
 
+## Host Notifications
+
+Get native desktop notifications when Claude needs your attention.
+
+### Start the Daemon
+
+Run on the host (not in sandbox):
+
+```bash
+nix run github:taheris/wrapix#wrapix-notifyd
+```
+
+The daemon listens on `~/.local/share/wrapix/notify.sock` and triggers notifications via `terminal-notifier` (macOS) or `notify-send` (Linux).
+
+### Configure Claude Code Hooks
+
+Add to your `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "wrapix-notify 'Claude Code' 'Waiting for input' 'Ping'"
+      }]
+    }]
+  }
+}
+```
+
+**Available events:**
+- `Stop` - Claude is waiting for user input (most useful)
+- `PostToolUse` - After any tool completes
+- `Notification` - Claude's built-in notifications
+
+**Example: Notify on long-running commands:**
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "wrapix-notify 'Claude Code' 'Command finished'"
+      }]
+    }]
+  }
+}
+```
+
+### Test from Container
+
+```bash
+wrapix-notify "Test" "Hello from container"
+```
+
+If the daemon isn't running, the command silently succeeds (no error).
+
 ## License
 
 MIT

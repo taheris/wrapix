@@ -16,6 +16,8 @@
 }:
 
 let
+  notifyClient = import ../notify/client.nix { inherit pkgs; };
+
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
     sandbox = false
@@ -39,6 +41,7 @@ let
     pkgs.bash
     pkgs.util-linux
     claudePackage
+    notifyClient
   ]
   ++ (profile.packages or [ ]);
 

@@ -88,6 +88,7 @@
             default = wrapix.mkSandbox { profile = wrapix.profiles.base; };
             wrapix = wrapix.mkSandbox { profile = wrapix.profiles.base; };
             wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
+            wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
           };
 
           apps.test-darwin = {
@@ -97,15 +98,18 @@
           };
 
           devShells.default = wrapix.mkDevShell {
-            packages = with pkgs; [
-              beads
-              beads-viewer
-              gh
-              nixfmt
-              nixfmt-tree
-              podman
-              statix
-            ];
+            packages =
+              with pkgs;
+              [
+                beads
+                beads-viewer
+                gh
+                nixfmt
+                nixfmt-tree
+                podman
+                statix
+              ]
+              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
           };
         };
     };
