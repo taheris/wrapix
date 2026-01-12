@@ -57,7 +57,7 @@
             beads-viewer = inputs.beads-viewer.packages.${linuxSystem}.default;
           };
 
-          test = import ./lib/tests {
+          test = import ./tests {
             inherit pkgs system;
             src = ./.;
           };
@@ -94,7 +94,7 @@
           apps.test-darwin = {
             meta.description = "Run Darwin integration tests";
             type = "app";
-            program = "${import ./lib/tests/integration-darwin.nix { inherit pkgs system; }}/bin/test-darwin";
+            program = "${import ./tests/integration-darwin.nix { inherit pkgs system; }}/bin/test-darwin";
           };
 
           devShells.default = wrapix.mkDevShell {
