@@ -5,11 +5,16 @@
 }:
 
 let
-  isLinux = builtins.elem system [
-    "x86_64-linux"
-    "aarch64-linux"
-  ];
+  inherit (builtins) elem;
+
   isDarwin = system == "aarch64-darwin";
+  isLinux = elem system [
+    "aarch64-linux"
+    "x86_64-linux"
+  ];
+
+  darwinSandbox = import ./darwin { inherit pkgs linuxPkgs; };
+  linuxSandbox = import ./linux { inherit pkgs; };
 
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
   profiles = import ./profiles.nix { pkgs = linuxPkgs; };
@@ -23,9 +28,6 @@ let
       inherit profile entrypointScript;
       claudePackage = linuxPkgs.claude-code;
     };
-
-  linuxSandbox = import ./linux { inherit pkgs; };
-  darwinSandbox = import ./darwin { inherit pkgs linuxPkgs; };
 
   mkSandbox =
     {
