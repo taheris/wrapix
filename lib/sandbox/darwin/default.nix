@@ -4,34 +4,15 @@
 let
   systemPromptDir = pkgs.writeTextDir "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
-
-  expandPath =
-    path:
-    if builtins.substring 0 2 path == "~/" then
-      ''$HOME/${builtins.substring 2 (builtins.stringLength path) path}''
-    else
-      path;
-
-  expandDest =
-    path:
-    if builtins.substring 0 2 path == "~/" then
-      # HOME is /home/$USER in the container
-      ''/home/$USER/${builtins.substring 2 (builtins.stringLength path) path}''
-    else
-      path;
-
-  # Generate mount specs as newline-separated list for runtime processing
-  # Format: source:dest:optional|required
-  mkMountSpecs =
-    profile:
-    builtins.concatStringsSep "\n" (
-      map (
-        m:
-        "${expandPath m.source}:${expandDest m.dest}:${
-          if m.optional or false then "optional" else "required"
-        }"
-      ) profile.mounts
-    );
+  paths = import ../../util/path.nix { };
+  shellLib = import ../../util/shell.nix { };
+  inherit (paths) mkMountSpecs;
+  inherit (shellLib)
+    expandPathFn
+    cleanStaleStagingDirs
+    createStagingDir
+    mkDeployKeyExpr
+    ;
 
 in
 {
@@ -45,12 +26,7 @@ in
       ...
     }:
     let
-      # If deployKey is null, default to repo-hostname format at runtime
-      deployKeyExpr =
-        if deployKey != null then
-          ''"${deployKey}"''
-        else
-          ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
+      deployKeyExpr = mkDeployKeyExpr deployKey;
     in
     pkgs.writeShellScriptBin "wrapix" ''
             set -euo pipefail
@@ -86,6 +62,9 @@ in
               # Delete old image if exists
               container image delete "$PROFILE_IMAGE" 2>/dev/null || true
               # Convert Docker-format tar to OCI-archive format
+              # Note: --insecure-policy bypasses signature verification, which is safe here
+              # because images are built locally from Nix derivations (trusted source with
+              # cryptographic hashes), not pulled from untrusted registries.
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
               mkdir -p "$WRAPIX_CACHE"
               ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
@@ -107,27 +86,10 @@ in
             #
             # Security: We dereference symlinks on the HOST to avoid mounting /nix/store
             # Use PID-based staging to allow multiple concurrent containers
-            # Clean up stale staging dirs from previous runs (PIDs that no longer exist)
-            mkdir -p "$WRAPIX_CACHE/mounts"
-            for stale_dir in "$WRAPIX_CACHE/mounts"/*; do
-              [ -d "$stale_dir" ] || continue
-              stale_pid=$(basename "$stale_dir")
-              if ! kill -0 "$stale_pid" 2>/dev/null; then
-                rm -rf "$stale_dir"
-              fi
-            done
-            STAGING_ROOT="$WRAPIX_CACHE/mounts/$$"
-            mkdir -p "$STAGING_ROOT"
-            trap 'rm -rf "$STAGING_ROOT"' EXIT
+            ${cleanStaleStagingDirs}
+            ${createStagingDir}
 
-            # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
-            expand_path() {
-              local p="$1"
-              p="''${p/#\~/$HOME}"
-              p="''${p//\$HOME/$HOME}"
-              p="''${p//\$USER/$USER}"
-              echo "$p"
-            }
+            ${expandPathFn}
 
             MOUNT_ARGS=""
             DIR_MOUNTS=""
@@ -182,7 +144,10 @@ in
                 FILE_MOUNTS="$FILE_MOUNTS$staging/$file_name:$dest"
               fi
             done <<'MOUNTS'
-      ${mkMountSpecs profile}
+      ${mkMountSpecs {
+        inherit profile;
+        includeMode = false;
+      }}
       MOUNTS
 
             # Add SSH known_hosts and system prompt (directories from Nix store)

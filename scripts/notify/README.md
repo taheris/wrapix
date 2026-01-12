@@ -30,10 +30,17 @@ DAEMON_PATH="$(nix path-info github:taheris/wrapix#wrapix-notifyd)/bin/wrapix-no
 echo "Daemon path: $DAEMON_PATH"
 ```
 
-2. Generate the plist with the correct path:
+2. Generate the plist with the correct paths:
 
 ```bash
-sed "s|__DAEMON_PATH__|$DAEMON_PATH|g" scripts/notify/com.local.wrapix-notifyd.plist \
+# Create log directory (XDG-compliant location)
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wrapix"
+mkdir -p "$LOG_DIR"
+
+# Generate plist with daemon and log paths
+sed -e "s|__DAEMON_PATH__|$DAEMON_PATH|g" \
+    -e "s|__LOG_DIR__|$LOG_DIR|g" \
+    scripts/notify/com.local.wrapix-notifyd.plist \
     > ~/Library/LaunchAgents/com.local.wrapix-notifyd.plist
 ```
 
@@ -47,7 +54,7 @@ launchctl load ~/Library/LaunchAgents/com.local.wrapix-notifyd.plist
 
 ```bash
 launchctl list | grep wrapix-notifyd
-tail -f /tmp/wrapix-notifyd.log
+tail -f ~/.local/state/wrapix/wrapix-notifyd.log
 ```
 
 ### macOS Uninstall

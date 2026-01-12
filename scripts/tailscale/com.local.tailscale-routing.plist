@@ -19,9 +19,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/tailscale-routing.log</string>
+    <string>__LOG_DIR__/tailscale-routing.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/tailscale-routing.log</string>
+    <string>__LOG_DIR__/tailscale-routing.log</string>
 </dict>
 </plist>

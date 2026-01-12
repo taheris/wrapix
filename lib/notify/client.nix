@@ -16,7 +16,8 @@ pkgs.writeShellScriptBin "wrapix-notify" ''
     exit 0  # Silent success if daemon not running
   fi
 
-  printf '{"title":"%s","message":"%s","sound":"%s"}\n' \
-    "$title" "$message" "$sound" | \
+  # Use jq for safe JSON construction to prevent injection via quotes/backslashes
+  ${pkgs.jq}/bin/jq -n --arg t "$title" --arg m "$message" --arg s "$sound" \
+    '{title: $t, message: $m, sound: $s}' | \
     ${pkgs.netcat}/bin/nc -U -N "$SOCKET" 2>/dev/null || true
 ''

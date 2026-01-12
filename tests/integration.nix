@@ -7,12 +7,12 @@ let
   testPkgs = pkgs.extend (final: prev: { beads = pkgs.hello; });
 
   # Build the sandbox image for tests
-  profiles = import ../sandbox/profiles.nix { pkgs = testPkgs; };
-  testImage = import ../sandbox/image.nix {
+  profiles = import ../lib/sandbox/profiles.nix { pkgs = testPkgs; };
+  testImage = import ../lib/sandbox/image.nix {
     pkgs = testPkgs;
     profile = profiles.base;
     claudePackage = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
-    entrypointScript = ../sandbox/linux/entrypoint.sh;
+    entrypointScript = ../lib/sandbox/linux/entrypoint.sh;
   };
 
   # Common VM configuration for all tests

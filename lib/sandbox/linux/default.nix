@@ -12,35 +12,15 @@
 let
   systemPromptFile = pkgs.writeText "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
-
-  # Convert ~ paths to shell expressions
-  expandPath =
-    path:
-    if builtins.substring 0 2 path == "~/" then
-      ''$HOME/${builtins.substring 2 (builtins.stringLength path) path}''
-    else
-      path;
-
-  # Convert destination ~ paths to container home
-  expandDest =
-    path:
-    if builtins.substring 0 2 path == "~/" then
-      ''/home/$USER/${builtins.substring 2 (builtins.stringLength path) path}''
-    else
-      path;
-
-  # Generate mount specs as newline-separated list for runtime processing
-  # Format: source:dest:mode:optional|required
-  mkMountSpecs =
-    profile:
-    builtins.concatStringsSep "\n" (
-      map (
-        m:
-        "${expandPath m.source}:${expandDest m.dest}:${m.mode or "rw"}:${
-          if m.optional or false then "optional" else "required"
-        }"
-      ) profile.mounts
-    );
+  paths = import ../../util/path.nix { };
+  shellLib = import ../../util/shell.nix { };
+  inherit (paths) mkMountSpecs;
+  inherit (shellLib)
+    expandPathFn
+    cleanStaleStagingDirs
+    createStagingDir
+    mkDeployKeyExpr
+    ;
 
 in
 {
@@ -53,12 +33,7 @@ in
       memoryMb ? 4096,
     }:
     let
-      # If deployKey is null, default to repo-hostname format at runtime
-      deployKeyExpr =
-        if deployKey != null then
-          ''"${deployKey}"''
-        else
-          ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
+      deployKeyExpr = mkDeployKeyExpr deployKey;
     in
     pkgs.writeShellApplication {
       name = "wrapix";
@@ -69,29 +44,11 @@ in
         WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
         PROJECT_DIR="''${1:-$(pwd)}"
 
-        # Clean up stale staging dirs from previous runs (PIDs that no longer exist)
-        mkdir -p "$WRAPIX_CACHE/mounts"
-        for stale_dir in "$WRAPIX_CACHE/mounts"/*; do
-          [ -d "$stale_dir" ] || continue
-          stale_pid=$(basename "$stale_dir")
-          if ! kill -0 "$stale_pid" 2>/dev/null; then
-            rm -rf "$stale_dir"
-          fi
-        done
+        ${cleanStaleStagingDirs}
 
-        # Create staging directory for this run (cleaned up on exit)
-        STAGING_ROOT="$WRAPIX_CACHE/mounts/$$"
-        mkdir -p "$STAGING_ROOT"
-        trap 'rm -rf "$STAGING_ROOT"' EXIT
+        ${createStagingDir}
 
-        # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
-        expand_path() {
-          local p="$1"
-          p="''${p/#\~/$HOME}"
-          p="''${p//\$HOME/$HOME}"
-          p="''${p//\$USER/$USER}"
-          echo "$p"
-        }
+        ${expandPathFn}
 
         # Build volume args
         VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
@@ -121,7 +78,10 @@ in
             VOLUME_ARGS="$VOLUME_ARGS -v $src:$dest:$mode"
           fi
         done <<'MOUNTS'
-        ${mkMountSpecs profile}
+        ${mkMountSpecs {
+          inherit profile;
+          includeMode = true;
+        }}
         MOUNTS
 
         # Mount SSH known_hosts file directly and system prompt
