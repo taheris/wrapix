@@ -9,7 +9,7 @@
   nixfmt =
     pkgs.runCommand "check-nixfmt"
       {
-        nativeBuildInputs = [ pkgs.nixfmt-rfc-style ];
+        nativeBuildInputs = [ pkgs.nixfmt ];
       }
       ''
         cd ${src}

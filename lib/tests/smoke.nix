@@ -36,7 +36,7 @@ let
       if isDarwin then ../sandbox/darwin/entrypoint.sh else ../sandbox/linux/entrypoint.sh;
   };
 
-  sandboxLib = import ../default.nix { inherit pkgs system; };
+  sandboxLib = import ../default.nix { inherit pkgs system linuxPkgs; };
   wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
 
 in
