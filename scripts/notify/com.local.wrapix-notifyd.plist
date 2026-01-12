@@ -17,9 +17,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/wrapix-notifyd.log</string>
+    <string>__LOG_DIR__/wrapix-notifyd.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/wrapix-notifyd.log</string>
+    <string>__LOG_DIR__/wrapix-notifyd.log</string>
 </dict>
 </plist>

@@ -28,11 +28,16 @@ sudo scripts/tailscale/setup-routing.sh
 
 ### Option B: Install as LaunchDaemon (recommended)
 
-1. Edit the plist to set the correct script path:
+1. Edit the plist to set the correct paths:
 
 ```bash
 SCRIPT_PATH="$(cd scripts/tailscale && pwd)"
-sed "s|__SCRIPT_PATH__|$SCRIPT_PATH|g" scripts/tailscale/com.local.tailscale-routing.plist \
+LOG_DIR="/var/log/wrapix"
+sudo mkdir -p "$LOG_DIR"
+
+sed -e "s|__SCRIPT_PATH__|$SCRIPT_PATH|g" \
+    -e "s|__LOG_DIR__|$LOG_DIR|g" \
+    scripts/tailscale/com.local.tailscale-routing.plist \
     > /tmp/com.local.tailscale-routing.plist
 ```
 
@@ -47,7 +52,7 @@ sudo launchctl load /Library/LaunchDaemons/com.local.tailscale-routing.plist
 
 ```bash
 sudo launchctl list | grep tailscale-routing
-tail -f /tmp/tailscale-routing.log
+tail -f /var/log/wrapix/tailscale-routing.log
 ```
 
 ## Uninstall

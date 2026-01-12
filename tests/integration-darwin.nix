@@ -20,12 +20,12 @@ let
       pkgs;
 
   # Build profile image for testing
-  profiles = import ../sandbox/profiles.nix { pkgs = linuxPkgs; };
-  profileImage = import ../sandbox/image.nix {
+  profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profileImage = import ../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
     claudePackage = linuxPkgs.claude-code;
-    entrypointScript = ../sandbox/darwin/entrypoint.sh;
+    entrypointScript = ../lib/sandbox/darwin/entrypoint.sh;
   };
 
   # Test scripts that run inside the container

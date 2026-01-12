@@ -26,17 +26,17 @@ let
     else
       pkgs;
 
-  profiles = import ../sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
 
-  baseImage = import ../sandbox/image.nix {
+  baseImage = import ../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
     claudePackage = linuxPkgs.claude-code;
     entrypointScript =
-      if isDarwin then ../sandbox/darwin/entrypoint.sh else ../sandbox/linux/entrypoint.sh;
+      if isDarwin then ../lib/sandbox/darwin/entrypoint.sh else ../lib/sandbox/linux/entrypoint.sh;
   };
 
-  sandboxLib = import ../default.nix { inherit pkgs system linuxPkgs; };
+  sandboxLib = import ../lib { inherit pkgs system linuxPkgs; };
   wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
 
 in
@@ -77,11 +77,11 @@ in
       }
       ''
         echo "Checking Darwin entrypoint syntax..."
-        bash -n ${../sandbox/darwin/entrypoint.sh}
+        bash -n ${../lib/sandbox/darwin/entrypoint.sh}
 
         echo "Verifying entrypoint handles mount env vars..."
         # Test that entrypoint processes WRAPIX_DIR_MOUNTS correctly
-        SCRIPT="${../sandbox/darwin/entrypoint.sh}"
+        SCRIPT="${../lib/sandbox/darwin/entrypoint.sh}"
         grep -q 'WRAPIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_DIR_MOUNTS handling"; exit 1; }
         grep -q 'WRAPIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_FILE_MOUNTS handling"; exit 1; }
 
@@ -100,7 +100,7 @@ in
       }
       ''
         echo "Checking Linux entrypoint syntax..."
-        bash -n ${../sandbox/linux/entrypoint.sh}
+        bash -n ${../lib/sandbox/linux/entrypoint.sh}
 
         echo "Linux entrypoint validation passed"
         mkdir $out
