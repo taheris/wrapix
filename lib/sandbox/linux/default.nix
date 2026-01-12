@@ -128,6 +128,12 @@ in
         VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/$USER/.ssh/known_hosts:ro"
         VOLUME_ARGS="$VOLUME_ARGS -v ${systemPromptFile}:/etc/wrapix-prompt:ro"
 
+        # Mount notification socket if daemon is running
+        NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"
+        if [ -S "$NOTIFY_SOCKET" ]; then
+          VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
+        fi
+
         # Mount deploy key for this repo (see scripts/setup-deploy-key)
         DEPLOY_KEY_NAME=${deployKeyExpr}
         DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
