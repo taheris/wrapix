@@ -1,0 +1,16 @@
+[Unit]
+Description=Wrapix Notification Daemon
+Documentation=https://github.com/taheris/wrapix
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=__DAEMON_PATH__
+Restart=on-failure
+RestartSec=5
+
+# Ensure we have access to the display for notifications
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target
