@@ -94,6 +94,7 @@ in
       cargo
       gcc
       openssl
+      openssl.dev
       pkg-config
       rust-analyzer
       rustc
@@ -101,6 +102,8 @@ in
 
     env = {
       CARGO_HOME = "/workspace/.cargo";
+      OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+      OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
     };
 
     mounts = [
