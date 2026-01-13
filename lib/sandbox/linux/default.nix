@@ -29,7 +29,7 @@ in
       profile,
       profileImage,
       deployKey ? null,
-      cpus ? 4,
+      cpus ? null,
       memoryMb ? 4096,
     }:
     let
@@ -117,9 +117,22 @@ in
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
         fi
 
+        # Calculate CPUs (use override or half of available, minimum 2)
+        ${
+          if cpus != null then
+            ''
+              CPUS=${toString cpus}
+            ''
+          else
+            ''
+              CPUS=$(($(nproc) / 2))
+              [ "$CPUS" -lt 2 ] && CPUS=2
+            ''
+        }
+
         # shellcheck disable=SC2086 # Intentional word splitting for volume args
         exec podman run --rm -it \
-          --cpus=${toString cpus} \
+          --cpus="$CPUS" \
           --memory=${toString memoryMb}m \
           --network=pasta \
           --userns=keep-id \

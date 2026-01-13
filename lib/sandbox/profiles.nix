@@ -85,16 +85,24 @@ in
 {
   base = mkProfile {
     name = "base";
-    packages = with pkgs; [ ];
   };
 
   rust = mkProfile {
     name = "rust";
+
     packages = with pkgs; [
-      rustc
       cargo
+      gcc
+      openssl
+      pkg-config
       rust-analyzer
+      rustc
     ];
+
+    env = {
+      CARGO_HOME = "/workspace/.cargo";
+    };
+
     mounts = [
       {
         source = "~/.cargo/registry";
@@ -109,9 +117,5 @@ in
         optional = true;
       }
     ];
-    env = {
-      CARGO_HOME = "/tmp/cargo";
-    };
   };
-
 }
