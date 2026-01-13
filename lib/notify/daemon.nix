@@ -9,6 +9,7 @@
 
 let
   inherit (pkgs.stdenv) isDarwin;
+
 in
 pkgs.writeShellApplication {
   name = "wrapix-notifyd";

@@ -71,14 +71,14 @@ let
     {
       name,
       packages ? [ ],
-      mounts ? [ ],
       env ? { },
+      mounts ? [ ],
     }:
     {
       inherit name;
       packages = basePackages ++ packages;
-      mounts = baseMounts ++ mounts;
       env = baseEnv // env;
+      mounts = baseMounts ++ mounts;
     };
 
 in

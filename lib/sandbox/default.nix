@@ -13,7 +13,7 @@ let
     "x86_64-linux"
   ];
 
-  darwinSandbox = import ./darwin { inherit pkgs linuxPkgs; };
+  darwinSandbox = import ./darwin { inherit pkgs; };
   linuxSandbox = import ./linux { inherit pkgs; };
 
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)

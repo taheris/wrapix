@@ -6,9 +6,10 @@
 
 let
   sandbox = import ./sandbox { inherit pkgs system linuxPkgs; };
+
 in
 {
-  mkSandbox = profile: sandbox.mkSandbox profile;
+  inherit (sandbox) profiles;
 
   deriveProfile =
     baseProfile: extensions:
@@ -33,6 +34,5 @@ in
       '';
     };
 
-  # Profiles use Linux packages internally - access via sandbox.profiles
-  inherit (sandbox) profiles;
+  mkSandbox = profile: sandbox.mkSandbox profile;
 }
