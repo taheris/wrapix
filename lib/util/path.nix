@@ -10,7 +10,7 @@ rec {
   expandPath =
     path:
     if builtins.substring 0 2 path == "~/" then
-      ''$HOME/${builtins.substring 2 (builtins.stringLength path) path}''
+      "$HOME/${builtins.substring 2 (builtins.stringLength path) path}"
     else
       path;
 
@@ -19,7 +19,7 @@ rec {
   expandDest =
     path:
     if builtins.substring 0 2 path == "~/" then
-      ''/home/$USER/${builtins.substring 2 (builtins.stringLength path) path}''
+      "/home/$USER/${builtins.substring 2 (builtins.stringLength path) path}"
     else
       path;
 
