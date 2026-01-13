@@ -1,18 +1,22 @@
 # Darwin sandbox using Apple container CLI (macOS 26+)
-{ pkgs, linuxPkgs }:
+{ pkgs }:
 
 let
-  systemPromptDir = pkgs.writeTextDir "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
   paths = import ../../util/path.nix { };
   shellLib = import ../../util/shell.nix { };
+
+  inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
+  inherit (pkgs) writeShellScriptBin writeTextDir;
   inherit (shellLib)
     expandPathFn
     cleanStaleStagingDirs
     createStagingDir
     mkDeployKeyExpr
     ;
+
+  promptDir = writeTextDir "wrapix-prompt" (readFile ../prompt.txt);
 
 in
 {
@@ -28,7 +32,7 @@ in
     let
       deployKeyExpr = mkDeployKeyExpr deployKey;
     in
-    pkgs.writeShellScriptBin "wrapix" ''
+    writeShellScriptBin "wrapix" ''
             set -euo pipefail
 
             # XDG-compliant directories
@@ -152,7 +156,7 @@ in
 
             # Add SSH known_hosts and system prompt (directories from Nix store)
             MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
-            MOUNT_ARGS="$MOUNT_ARGS -v ${systemPromptDir}:/etc/wrapix"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix"
 
             # Add notification socket if daemon is running
             NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"

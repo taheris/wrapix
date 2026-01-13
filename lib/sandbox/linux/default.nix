@@ -1,26 +1,22 @@
 # Linux sandbox implementation using a single container
-#
-# Container isolation provides:
-# - Filesystem isolation (only /workspace is accessible)
-# - Process isolation (can't see/interact with host processes)
-# - User namespace mapping (files created have correct host ownership)
-#
-# Network is open for web research - container isolation is the security boundary.
-
 { pkgs }:
 
 let
-  systemPromptFile = pkgs.writeText "wrapix-prompt" (builtins.readFile ../sandbox-prompt.txt);
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
   paths = import ../../util/path.nix { };
   shellLib = import ../../util/shell.nix { };
+
+  inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
+  inherit (pkgs) writeShellApplication writeText;
   inherit (shellLib)
     expandPathFn
     cleanStaleStagingDirs
     createStagingDir
     mkDeployKeyExpr
     ;
+
+  prompt = writeText "wrapix-prompt" (readFile ../prompt.txt);
 
 in
 {
@@ -35,7 +31,7 @@ in
     let
       deployKeyExpr = mkDeployKeyExpr deployKey;
     in
-    pkgs.writeShellApplication {
+    writeShellApplication {
       name = "wrapix";
       runtimeInputs = [ pkgs.podman ];
       text = ''
@@ -86,7 +82,7 @@ in
 
         # Mount SSH known_hosts file directly and system prompt
         VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/$USER/.ssh/known_hosts:ro"
-        VOLUME_ARGS="$VOLUME_ARGS -v ${systemPromptFile}:/etc/wrapix-prompt:ro"
+        VOLUME_ARGS="$VOLUME_ARGS -v ${prompt}:/etc/wrapix-prompt:ro"
 
         # Mount notification socket if daemon is running
         NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"
