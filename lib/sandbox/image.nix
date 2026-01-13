@@ -16,6 +16,8 @@
 }:
 
 let
+  inherit (pkgs.lib) mapAttrsToList;
+
   notifyClient = import ../notify/client.nix { inherit pkgs; };
 
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
@@ -107,7 +109,8 @@ pkgs.dockerTools.buildLayeredImage {
       "PATH=${profileEnv}/bin:/bin:/usr/bin"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
       "XDG_CACHE_HOME=/var/cache"
-    ];
+    ]
+    ++ (mapAttrsToList (name: value: "${name}=${value}") (profile.env or { }));
     WorkingDir = "/workspace";
     Entrypoint = [ "/entrypoint.sh" ];
   };
