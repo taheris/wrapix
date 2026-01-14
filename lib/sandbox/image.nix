@@ -11,8 +11,8 @@
 {
   pkgs,
   profile,
-  claudePackage,
-  entrypointScript,
+  entrypointPkg,
+  entrypointSh,
 }:
 
 let
@@ -42,7 +42,7 @@ let
     pkgs.coreutils
     pkgs.bash
     pkgs.util-linux
-    claudePackage
+    entrypointPkg
     notifyClient
   ]
   ++ (profile.packages or [ ]);
@@ -82,7 +82,7 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts
 
-    cp ${entrypointScript} entrypoint.sh
+    cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
 
     # Fix Nix permissions for non-root users
