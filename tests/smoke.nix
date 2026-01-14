@@ -31,8 +31,8 @@ let
   baseImage = import ../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
-    claudePackage = linuxPkgs.claude-code;
-    entrypointScript =
+    entrypointPkg = linuxPkgs.claude-code;
+    entrypointSh =
       if isDarwin then ../lib/sandbox/darwin/entrypoint.sh else ../lib/sandbox/linux/entrypoint.sh;
   };
 

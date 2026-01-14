@@ -34,8 +34,8 @@ let
   profileImage = import ../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
-    claudePackage = linuxPkgs.claude-code;
-    entrypointScript = ../lib/sandbox/darwin/entrypoint.sh;
+    entrypointPkg = linuxPkgs.claude-code;
+    entrypointSh = ../lib/sandbox/darwin/entrypoint.sh;
   };
 
   # Test script that runs inside the container
@@ -104,7 +104,7 @@ in
           echo "SKIP: Cannot access container storage (running in nix build sandbox)"
           echo ""
           echo "To run this test manually:"
-          echo "  nix run .#test-integration"
+          echo "  nix run .#test-darwin"
           mkdir -p $out
           exit 0
         fi
