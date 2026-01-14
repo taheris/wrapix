@@ -91,19 +91,20 @@ in
     name = "rust";
 
     packages = with pkgs; [
-      cargo
       gcc
       openssl
       openssl.dev
       pkg-config
-      rust-analyzer
-      rustc
+      postgresql.lib
+      rustup
     ];
 
     env = {
       CARGO_HOME = "/workspace/.cargo";
-      OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+      LIBRARY_PATH = "${pkgs.postgresql.lib}/lib";
       OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+      OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+      RUSTUP_HOME = "/workspace/.rustup";
     };
 
     mounts = [
