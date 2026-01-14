@@ -29,24 +29,50 @@ let
       claudePackage = linuxPkgs.claude-code;
     };
 
+  # Merge extra packages/mounts/env into a profile
+  extendProfile =
+    profile:
+    {
+      packages ? [ ],
+      mounts ? [ ],
+      env ? { },
+    }:
+    profile
+    // {
+      packages = (profile.packages or [ ]) ++ packages;
+      mounts = (profile.mounts or [ ]) ++ mounts;
+      env = (profile.env or { }) // env;
+    };
+
   mkSandbox =
     {
       profile,
       deployKey ? null,
+      # Extra packages to add without using deriveProfile
+      packages ? [ ],
+      # Extra mounts to add without using deriveProfile
+      mounts ? [ ],
+      # Extra env vars to add without using deriveProfile
+      env ? { },
     }:
+    let
+      finalProfile = extendProfile profile { inherit packages mounts env; };
+    in
     if isLinux then
       linuxSandbox.mkSandbox {
-        inherit profile deployKey;
+        profile = finalProfile;
+        inherit deployKey;
         profileImage = mkImage {
-          inherit profile;
+          profile = finalProfile;
           entrypointScript = ./linux/entrypoint.sh;
         };
       }
     else if isDarwin then
       darwinSandbox.mkSandbox {
-        inherit profile deployKey;
+        profile = finalProfile;
+        inherit deployKey;
         profileImage = mkImage {
-          inherit profile;
+          profile = finalProfile;
           entrypointScript = ./darwin/entrypoint.sh;
         };
       }
