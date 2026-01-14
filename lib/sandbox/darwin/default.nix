@@ -87,6 +87,7 @@ in
             #   1. Files appear as root-owned - entrypoint copies with correct ownership
             #   2. Only directory mounts work - files mounted via parent directory
             #   3. Symlinks pointing outside mount are broken - dereference on host
+            #   4. Sockets mount with 0000 perms - entrypoint runs chmod to fix
             #
             # Security: We dereference symlinks on the HOST to avoid mounting /nix/store
             # Use PID-based staging to allow multiple concurrent containers
@@ -98,6 +99,7 @@ in
             MOUNT_ARGS=""
             DIR_MOUNTS=""
             FILE_MOUNTS=""
+            SOCK_MOUNTS=""
             MOUNTED_FILE_DIRS=""
             dir_idx=0
             file_idx=0
@@ -124,6 +126,12 @@ in
                 MOUNT_ARGS="$MOUNT_ARGS -v $host_staging:$staging"
                 [ -n "$DIR_MOUNTS" ] && DIR_MOUNTS="$DIR_MOUNTS,"
                 DIR_MOUNTS="$DIR_MOUNTS$staging:$dest"
+              elif [ -S "$src" ]; then
+                # Socket: mount directly, fix permissions in entrypoint
+                # VirtioFS may show wrong permissions (0000) but chmod can fix it
+                MOUNT_ARGS="$MOUNT_ARGS -v $src:$dest"
+                [ -n "$SOCK_MOUNTS" ] && SOCK_MOUNTS="$SOCK_MOUNTS,"
+                SOCK_MOUNTS="$SOCK_MOUNTS$dest"
               else
                 # File: mount parent dir to staging (dedup), track for entrypoint to copy
                 parent_dir=$(dirname "$src")
@@ -195,6 +203,7 @@ in
             ENV_ARGS="$ENV_ARGS -e HOST_USER=$USER"
             [ -n "$DIR_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_DIR_MOUNTS=$DIR_MOUNTS"
             [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
+            [ -n "$SOCK_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_SOCK_MOUNTS=$SOCK_MOUNTS"
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"

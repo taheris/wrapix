@@ -69,6 +69,18 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     done
 fi
 
+# Fix socket permissions - VirtioFS may mount sockets with 0000 permissions
+if [ -n "${WRAPIX_SOCK_MOUNTS:-}" ]; then
+    IFS=',' read -ra SOCKS <<< "$WRAPIX_SOCK_MOUNTS"
+    for sock in "${SOCKS[@]}"; do
+        [ -z "$sock" ] && continue
+        sock=$(expand_path "$sock")
+        if [ -e "$sock" ]; then
+            chmod 777 "$sock" 2>/dev/null || true
+        fi
+    done
+fi
+
 # Set up SSH configuration
 # Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
 # The mount uses literal $USER path due to VirtioFS constraints
