@@ -98,6 +98,14 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
+# Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
+if [ -n "${RUSTUP_HOME:-}" ] && command -v rustup &>/dev/null; then
+  if ! rustup show active-toolchain &>/dev/null; then
+    rustup default stable
+    rustup component add rust-analyzer
+  fi
+fi
+
 # Initialize container-local beads database from workspace JSONL if available
 # This provides isolation while syncing changes back via JSONL -> host daemon
 if [ -f /workspace/.beads/issues.jsonl ] && [ -f /workspace/.beads/config.yaml ]; then
