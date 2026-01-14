@@ -11,8 +11,10 @@ if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
 fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
+# Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
+# can succeed when toolchain is configured but binaries don't exist (e.g., stale RUSTUP_HOME)
 if [ -n "${RUSTUP_HOME:-}" ] && command -v rustup &>/dev/null; then
-  if ! rustup show active-toolchain &>/dev/null; then
+  if ! rustup which cargo &>/dev/null 2>&1; then
     rustup default stable
     rustup component add rust-analyzer
   fi
