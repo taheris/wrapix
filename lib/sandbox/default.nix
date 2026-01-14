@@ -22,11 +22,11 @@ let
   # Build the container image using Linux packages
   # On Darwin, this will use a remote Linux builder if configured
   mkImage =
-    { profile, entrypointScript }:
+    { profile, entrypointSh }:
     import ./image.nix {
       pkgs = linuxPkgs;
-      inherit profile entrypointScript;
-      claudePackage = linuxPkgs.claude-code;
+      inherit profile entrypointSh;
+      entrypointPkg = linuxPkgs.claude-code;
     };
 
   # Merge extra packages/mounts/env into a profile
@@ -48,15 +48,13 @@ let
     {
       profile,
       deployKey ? null,
-      # Extra packages to add without using deriveProfile
       packages ? [ ],
-      # Extra mounts to add without using deriveProfile
       mounts ? [ ],
-      # Extra env vars to add without using deriveProfile
       env ? { },
     }:
     let
       finalProfile = extendProfile profile { inherit packages mounts env; };
+
     in
     if isLinux then
       linuxSandbox.mkSandbox {
@@ -64,7 +62,7 @@ let
         inherit deployKey;
         profileImage = mkImage {
           profile = finalProfile;
-          entrypointScript = ./linux/entrypoint.sh;
+          entrypointSh = ./linux/entrypoint.sh;
         };
       }
     else if isDarwin then
@@ -73,7 +71,7 @@ let
         inherit deployKey;
         profileImage = mkImage {
           profile = finalProfile;
-          entrypointScript = ./darwin/entrypoint.sh;
+          entrypointSh = ./darwin/entrypoint.sh;
         };
       }
     else

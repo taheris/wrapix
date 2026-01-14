@@ -94,7 +94,7 @@
           apps.test-darwin = {
             meta.description = "Run Darwin integration tests";
             type = "app";
-            program = "${import ./tests/integration-darwin.nix { inherit pkgs system; }}/bin/test-darwin";
+            program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
           };
 
           devShells.default = wrapix.mkDevShell {

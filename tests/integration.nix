@@ -11,8 +11,8 @@ let
   testImage = import ../lib/sandbox/image.nix {
     pkgs = testPkgs;
     profile = profiles.base;
-    claudePackage = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
-    entrypointScript = ../lib/sandbox/linux/entrypoint.sh;
+    entrypointPkg = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
+    entrypointSh = ../lib/sandbox/linux/entrypoint.sh;
   };
 
   # Common VM configuration for all tests

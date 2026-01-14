@@ -1,5 +1,5 @@
-# Integration test runner - runs Darwin VM integration tests
-# Use with: nix run .#test-integration
+# Darwin integration tests - runs container tests on macOS
+# Use with: nix run .#test-darwin
 {
   pkgs,
   system,
@@ -24,8 +24,8 @@ let
   profileImage = import ../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
-    claudePackage = linuxPkgs.claude-code;
-    entrypointScript = ../lib/sandbox/darwin/entrypoint.sh;
+    entrypointPkg = linuxPkgs.claude-code;
+    entrypointSh = ../lib/sandbox/darwin/entrypoint.sh;
   };
 
   # Test scripts that run inside the container
@@ -33,7 +33,7 @@ let
   mountTestScript = ./darwin-mount-test.sh;
 
 in
-pkgs.writeShellScriptBin "test-integration" ''
+pkgs.writeShellScriptBin "test-darwin" ''
   set -euo pipefail
 
   # Ensure we're on Darwin
