@@ -157,7 +157,7 @@ let
       -v "$NIX_STORE:/nix" \
       "$BUILDER_IMAGE"
 
-    # Wait for nix-daemon to be ready (entrypoint runs chmod which can take time on large stores)
+    # Wait for nix-daemon to be ready
     echo "Waiting for services to start..."
     for i in $(seq 1 120); do
       if container exec "$CONTAINER_NAME" pgrep -x nix-daemon >/dev/null 2>&1; then
