@@ -143,7 +143,8 @@ let
 
       # Copy /nix from container to host
       # Use container exec with tar to stream the content
-      container exec "$TEMP_CONTAINER" tar -cf - -C / nix 2>/dev/null | tar -xf - -C "$NIX_STORE" --strip-components=1
+      # Permission warnings are expected (some store paths are 000) and harmless
+      container exec "$TEMP_CONTAINER" tar -cf - -C / nix 2>/dev/null | tar -xf - -C "$NIX_STORE" --strip-components=1 2>/dev/null
 
       # Cleanup temp container
       container stop "$TEMP_CONTAINER" >/dev/null 2>&1 || true
