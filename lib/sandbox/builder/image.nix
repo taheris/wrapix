@@ -1,4 +1,4 @@
-# Build the OCI image for wrapix-builder (persistent Linux remote builder)
+# Build the OCI image for wrapix-builder (Linux remote builder)
 #
 # This creates a layered container image with:
 # - nix-daemon for remote building
@@ -20,19 +20,22 @@ let
     xz
     git
     cacert
+    procps # for pgrep, ps, etc.
   ];
 
-  # passwd: root, builder (UID 1000), nobody
+  # passwd: root, builder (UID 1000), sshd (for privilege separation), nobody
   passwdFile = pkgs.writeTextDir "etc/passwd" ''
     root:x:0:0:root:/root:/bin/bash
     builder:x:1000:1000:Nix Builder:/home/builder:/bin/bash
+    sshd:x:74:74:Privilege-separated SSH:/var/empty:/bin/false
     nobody:x:65534:65534:Unprivileged account:/var/empty:/bin/false
   '';
 
-  # group: root, users (with builder), nogroup
+  # group: root, users (with builder), sshd, nogroup
   groupFile = pkgs.writeTextDir "etc/group" ''
     root:x:0:
     users:x:100:builder
+    sshd:x:74:
     nogroup:x:65534:
   '';
 
@@ -77,8 +80,9 @@ pkgs.dockerTools.buildLayeredImage {
   ];
 
   extraCommands = ''
-    mkdir -p tmp var/run var/log home/builder/.ssh run/sshd etc/ssh
+    mkdir -p tmp var/run var/log var/empty home/builder/.ssh run/sshd etc/ssh
     chmod 1777 tmp
+    chmod 755 var/empty
 
     mkdir -p etc
     echo "127.0.0.1 localhost" > etc/hosts

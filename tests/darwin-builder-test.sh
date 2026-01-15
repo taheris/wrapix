@@ -1,6 +1,6 @@
 #!/bin/bash
 # wrapix-builder integration test
-# Tests the persistent Linux builder functionality on macOS 26+
+# Tests the Linux builder functionality on macOS 26+
 # Use with: nix run .#test-builder (when added to flake.nix)
 set -euo pipefail
 
@@ -97,29 +97,20 @@ else
   # Don't fail the whole test for this - it requires a working Linux builder chain
 fi
 
-# Test 7: Store persistence test
+# Test 7: Restart test (container is ephemeral)
 echo ""
-echo "Test 7: Store persistence"
-# Create a test file in the store
-TEST_MARKER="wrapix-test-$(date +%s)"
-$BUILDER ssh "echo '$TEST_MARKER' > /nix/test-marker" 2>/dev/null || true
-
-# Stop and restart
+echo "Test 7: Container restart"
 echo "  Stopping builder..."
 $BUILDER stop
 sleep 2
 echo "  Starting builder..."
-$BUILDER start
-sleep 5
-
-# Check if marker persists
-if $BUILDER ssh "cat /nix/test-marker" 2>/dev/null | grep -q "$TEST_MARKER"; then
-  echo "  PASS: Store persists across restart"
-  $BUILDER ssh "rm /nix/test-marker" 2>/dev/null || true
+if $BUILDER start; then
+  echo "  PASS: Builder restarted successfully"
 else
-  echo "  FAIL: Store not persistent"
+  echo "  FAIL: Failed to restart builder"
   FAILED=1
 fi
+sleep 5
 
 # Test 8: Config output
 echo ""
