@@ -86,12 +86,12 @@
 
           packages = {
             default = wrapix.mkSandbox { profile = wrapix.profiles.base; };
+
             wrapix = wrapix.mkSandbox { profile = wrapix.profiles.base; };
             wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
-            wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+
             wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
+            wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
           };
 
           apps.test-darwin = {
