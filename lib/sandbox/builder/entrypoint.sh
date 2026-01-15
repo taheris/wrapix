@@ -16,8 +16,9 @@ if [ ! -d /nix/store ] || [ -z "$(/bin/ls -A /nix/store 2>/dev/null)" ]; then
     exit 1
 fi
 
-# Fix permissions for builder user (VirtioFS shows files as root)
-/bin/chmod -R a+rwX /nix/store /nix/var/nix 2>/dev/null || true
+# Note: Permissions are set at bootstrap time (image build + CLI init).
+# VirtioFS UID mapping shows host-owned files as owned by builder inside container,
+# so no runtime chmod needed. Skipping chmod saves 30-60+ seconds on large stores.
 
 # Install SSH host key from nix store (stable for publicHostKey in nix-darwin)
 HOST_KEY="/run/keys/ssh_host_ed25519_key"
