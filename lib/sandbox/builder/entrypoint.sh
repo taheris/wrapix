@@ -19,9 +19,17 @@ fi
 # Fix permissions for builder user (VirtioFS shows files as root)
 /bin/chmod -R a+rwX /nix/store /nix/var/nix 2>/dev/null || true
 
-# Generate SSH host key on first run
-if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
-    echo "Generating SSH host key..."
+# Install SSH host key from nix store (stable for publicHostKey in nix-darwin)
+HOST_KEY="/run/keys/ssh_host_ed25519_key"
+if [ -f "$HOST_KEY" ]; then
+    echo "Installing SSH host key..."
+    cp "$HOST_KEY" /etc/ssh/ssh_host_ed25519_key
+    cp "${HOST_KEY}.pub" /etc/ssh/ssh_host_ed25519_key.pub
+    chmod 600 /etc/ssh/ssh_host_ed25519_key
+    chmod 644 /etc/ssh/ssh_host_ed25519_key.pub
+else
+    # Fallback: generate ephemeral key (publicHostKey will change on restart)
+    echo "Warning: No host key at $HOST_KEY, generating ephemeral key..." >&2
     ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
 fi
 
@@ -41,7 +49,7 @@ mkdir -p "$BUILDER_HOME/.ssh"
 chmod 700 "$BUILDER_HOME/.ssh"
 chown "$BUILDER_UID:$BUILDER_UID" "$BUILDER_HOME/.ssh"
 
-# Install authorized keys from mounted location
+# Install authorized keys from mounted keys
 KEYS_FILE="/run/keys/builder_ed25519.pub"
 if [ -f "$KEYS_FILE" ]; then
     echo "Installing authorized keys..."

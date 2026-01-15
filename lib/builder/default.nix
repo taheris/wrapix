@@ -17,8 +17,10 @@ let
     pkgs = linuxPkgs;
   };
 
-in
-pkgs.writeShellScriptBin "wrapix-builder" ''
+  # SSH keys in nix store (stable, accessible to nix-darwin and root)
+  keys = import ./hostkey.nix { inherit pkgs; };
+
+  script = pkgs.writeShellScriptBin "wrapix-builder" ''
   set -euo pipefail
 
   # XDG-compliant directories
@@ -28,7 +30,7 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
   WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
 
   # Builder-specific paths
-  KEYS_DIR="$WRAPIX_DATA/builder-keys"
+  KEYS_DIR="${keys}"
   NIX_STORE="$WRAPIX_DATA/builder-nix"
   CONTAINER_NAME="wrapix-builder"
   BUILDER_IMAGE="wrapix-builder:latest"
@@ -38,11 +40,14 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     echo "Usage: wrapix-builder <command>"
     echo ""
     echo "Commands:"
-    echo "  start   - Start the builder container"
-    echo "  stop    - Stop and remove the container"
-    echo "  status  - Show builder status and SSH connection info"
-    echo "  ssh     - Connect to builder via SSH (or run a command)"
-    echo "  config  - Print nix.conf configuration for remote builder"
+    echo "  start        - Start the builder container"
+    echo "  stop         - Stop and remove the container"
+    echo "  status       - Show builder status and SSH connection info"
+    echo "  ssh          - Connect to builder via SSH (or run a command)"
+    echo "  config       - Print nix-darwin configuration for remote builder"
+    echo "  setup        - Run all setup steps (routes + ssh, requires sudo)"
+    echo "  setup-routes - Fix container network routes (requires sudo)"
+    echo "  setup-ssh    - Add host key to root's known_hosts (requires sudo)"
     exit 1
   }
 
@@ -68,13 +73,6 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     fi
   }
 
-  generate_ssh_keys() {
-    mkdir -p "$KEYS_DIR"
-    if [ ! -f "$KEYS_DIR/builder_ed25519" ]; then
-      echo "Generating SSH keys..."
-      ssh-keygen -t ed25519 -f "$KEYS_DIR/builder_ed25519" -N "" -C "wrapix-builder"
-    fi
-  }
 
   load_builder_image() {
     IMAGE_VERSION_FILE="$WRAPIX_DATA/images/wrapix-builder.version"
@@ -119,7 +117,6 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
       container rm "$CONTAINER_NAME" 2>/dev/null || true
     fi
 
-    generate_ssh_keys
     load_builder_image
 
     # Ensure persistent Nix store directory exists
@@ -148,8 +145,7 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
 
     echo "Creating builder container..."
 
-    # Keys are mounted read-only for SSH authentication (needed for ssh-ng:// remote builds)
-    # Nix store is mounted for persistence across container restarts
+    # Mount keys (from nix store) and nix store (for persistence)
     container run \
       --name "$CONTAINER_NAME" \
       -d \
@@ -176,8 +172,10 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     echo ""
     echo "Builder started successfully!"
     echo ""
-    echo "Connect via: wrapix-builder ssh"
-    echo "Or configure Nix: wrapix-builder config"
+    echo "Next steps:"
+    echo "  wrapix-builder setup   - Configure routes and SSH for nix-daemon (requires sudo)"
+    echo "  wrapix-builder ssh     - Connect to builder via SSH"
+    echo "  wrapix-builder config  - Print nix-darwin configuration"
   }
 
   cmd_stop() {
@@ -234,21 +232,117 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
   }
 
   cmd_config() {
-    echo "# Add to /etc/nix/nix.conf or ~/.config/nix/nix.conf:"
+    cat <<NIXCONFIG
+# Add to nix-darwin configuration:
+
+# SSH config (environment.etc):
+"ssh/ssh_config.d/100-wrapix-builder.conf".text = '''
+  Host wrapix-builder
+    Hostname localhost
+    Port 2222
+    User builder
+    HostKeyAlias wrapix-builder
+    IdentityFile $KEYS_DIR/builder_ed25519
+''';
+
+# buildMachines (no sshKey needed, uses SSH config):
+{
+  hostName = "wrapix-builder";
+  systems = [ "aarch64-linux" ];
+  protocol = "ssh-ng";
+  maxJobs = 4;
+  supportedFeatures = [ "big-parallel" "benchmark" ];
+  publicHostKey = builtins.readFile $KEYS_DIR/public_host_key_base64;
+}
+
+# Or import from wrapix flake:
+# sshKey: inputs.wrapix.packages.<system>.wrapix-builder.sshKey
+# publicHostKey: inputs.wrapix.packages.<system>.wrapix-builder.publicHostKey
+NIXCONFIG
+  }
+
+  cmd_setup_routes() {
+    # Get the container network subnet from the default network
+    # JSON has escaped slashes: "address":"192.168.64.0\/24"
+    local network
+    network=$(container network inspect default 2>/dev/null | \
+      grep -oE '"address":"[0-9./\\]+"' | head -1 | \
+      sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+    if [ -z "$network" ]; then
+      echo "Error: Could not determine container network subnet"
+      echo "Is the container system running? Try: container system start"
+      exit 1
+    fi
+
+    echo "Fixing route for container network $network..."
+    sudo route delete "$network" 2>/dev/null || true
+    sudo route add "$network" -interface bridge100
+    echo "Route configured successfully"
+  }
+
+  cmd_setup_ssh() {
+    if ! container_exists; then
+      echo "Error: Builder container is not running"
+      echo "Run 'wrapix-builder start' first"
+      exit 1
+    fi
+
+    local state
+    state=$(container inspect "$CONTAINER_NAME" 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ "$state" != "running" ]; then
+      echo "Error: Builder container is not running (state: $state)"
+      echo "Run 'wrapix-builder start' first"
+      exit 1
+    fi
+
+    echo "Adding builder host key to root's known_hosts..."
+    # Remove any existing entry first
+    sudo ssh-keygen -R wrapix-builder 2>/dev/null || true
+    # Accept the new key
+    sudo ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes wrapix-builder true 2>/dev/null || {
+      echo "Error: Failed to connect to wrapix-builder"
+      echo "Check that routes are configured: wrapix-builder setup-routes"
+      exit 1
+    }
+    echo "Host key added to root's known_hosts"
+  }
+
+  cmd_setup() {
+    echo "=== Setting up wrapix-builder ==="
     echo ""
-    echo "builders = ssh-ng://builder@localhost?ssh-key=$KEYS_DIR/builder_ed25519 aarch64-linux - 4 1 big-parallel,benchmark"
+    echo "Step 1: Configuring network routes..."
+    cmd_setup_routes
     echo ""
-    echo "# Or for builders file format (/etc/nix/machines):"
-    echo "# builder@localhost aarch64-linux $KEYS_DIR/builder_ed25519 4 1 big-parallel,benchmark"
+    echo "Step 2: Adding SSH host key for root..."
+    cmd_setup_ssh
+    echo ""
+    echo "=== Setup complete ==="
+    echo "You can now use 'nix run' with wrapix-builder as a remote builder"
   }
 
   # Main command dispatch
   case "''${1:-}" in
-    start)   cmd_start ;;
-    stop)    cmd_stop ;;
-    status)  cmd_status ;;
-    ssh)     shift; cmd_ssh "$@" ;;
-    config)  cmd_config ;;
-    *)       usage ;;
+    start)        cmd_start ;;
+    stop)         cmd_stop ;;
+    status)       cmd_status ;;
+    ssh)          shift; cmd_ssh "$@" ;;
+    config)       cmd_config ;;
+    setup)        cmd_setup ;;
+    setup-routes) cmd_setup_routes ;;
+    setup-ssh)    cmd_setup_ssh ;;
+    *)            usage ;;
   esac
-''
+'';
+
+in
+# Expose the script with passthru attributes for nix-darwin integration
+script.overrideAttrs (old: {
+  passthru = (old.passthru or {}) // {
+    # Public host key for nix-darwin buildMachines
+    publicHostKey = builtins.readFile "${keys}/public_host_key_base64";
+    # SSH key path for nix-darwin buildMachines or SSH config IdentityFile
+    sshKey = "${keys}/builder_ed25519";
+    # Path to keys directory (for reference)
+    keysPath = keys;
+  };
+})

@@ -101,20 +101,19 @@ Build `aarch64-linux` packages on macOS using a persistent Linux container as a 
 
 ```bash
 # Start the builder
-nix run github:taheris/wrapix#wrapix-builder -- start
+wrapix-builder start
 
-# Check status (shows store size)
-nix run github:taheris/wrapix#wrapix-builder -- status
+# Configure routes and SSH for nix-daemon (requires sudo, one-time setup)
+wrapix-builder setup
 
-# Test a build
-nix build --builders 'ssh-ng://builder@localhost:2222 aarch64-linux ~/.local/share/wrapix/builder-keys/builder_ed25519 4 1' \
-  --max-jobs 0 nixpkgs#hello
+# Check status
+wrapix-builder status
 
 # Connect to builder shell
-nix run github:taheris/wrapix#wrapix-builder -- ssh
+wrapix-builder ssh
 
 # Stop the builder
-nix run github:taheris/wrapix#wrapix-builder -- stop
+wrapix-builder stop
 ```
 
 **Requirements:** macOS 26+ (Tahoe), Apple Silicon
@@ -137,60 +136,82 @@ Add `wrapix-builder` to your nix-darwin config for permanent installation and au
     darwinConfigurations.myhost = darwin.lib.darwinSystem {
       system = "aarch64-darwin";
       modules = [
-        ({ pkgs, ... }: {
-          # Install wrapix-builder CLI
-          environment.systemPackages = [
-            wrapix.packages.aarch64-darwin.wrapix-builder
-          ];
+        ({ pkgs, ... }:
+          let
+            builder = wrapix.packages.aarch64-darwin.wrapix-builder;
+          in {
+            # Install wrapix-builder CLI
+            environment.systemPackages = [ builder ];
 
-          # SSH config for wrapix-builder (port 2222)
-          environment.etc."ssh/ssh_config.d/100-wrapix-builder.conf".text = ''
-            Host wrapix-builder
-              Hostname localhost
-              Port 2222
-              User builder
-              HostKeyAlias wrapix-builder
-              IdentityFile /Users/${builtins.getEnv "USER"}/.local/share/wrapix/builder-keys/builder_ed25519
-          '';
+            # SSH config for wrapix-builder
+            environment.etc."ssh/ssh_config.d/100-wrapix-builder.conf".text = ''
+              Host wrapix-builder
+                Hostname localhost
+                Port 2222
+                User builder
+                HostKeyAlias wrapix-builder
+                IdentityFile ${builder.sshKey}
+            '';
 
-          # Add builder to Nix's remote builders
-          nix.buildMachines = [{
-            hostName = "wrapix-builder";
-            systems = [ "aarch64-linux" ];
-            protocol = "ssh-ng";
-            maxJobs = 4;
-            supportedFeatures = [ "big-parallel" "benchmark" ];
-          }];
+            # Add builder to Nix's remote builders
+            nix.buildMachines = [{
+              hostName = "wrapix-builder";
+              systems = [ "aarch64-linux" ];
+              protocol = "ssh-ng";
+              maxJobs = 4;
+              supportedFeatures = [ "big-parallel" "benchmark" ];
+              publicHostKey = builder.publicHostKey;
+            }];
 
-          nix.distributedBuilds = true;
-        })
+            nix.distributedBuilds = true;
+          })
       ];
     };
   };
 }
 ```
 
-After applying the config, start the builder:
+After applying the config:
 
 ```bash
-# Start builder (required before Linux builds)
+# Start the builder container
 wrapix-builder start
+
+# Configure network routes and SSH host key for nix-daemon (requires sudo)
+wrapix-builder setup
 
 # Builds now automatically use the Linux builder
 nix build nixpkgs#hello --system aarch64-linux
 ```
 
+**Note:** Run `wrapix-builder setup` after:
+- First start
+- System restart (routes reset)
+- Container restart (if host key changes)
+
 The Nix store persists across restarts in `~/.local/share/wrapix/builder-nix/`, so builds are cached.
+
+### Setup Commands
+
+| Command | Description |
+|---------|-------------|
+| `wrapix-builder setup` | Run all setup steps (routes + SSH) |
+| `wrapix-builder setup-routes` | Fix container network routes to bridge100 |
+| `wrapix-builder setup-ssh` | Add host key to root's known_hosts |
+
+### Passthru Attributes
+
+The `wrapix-builder` package exposes these attributes for nix-darwin integration:
+
+| Attribute | Description |
+|-----------|-------------|
+| `.sshKey` | Path to SSH private key (for IdentityFile) |
+| `.publicHostKey` | Base64-encoded host key (for buildMachines) |
+| `.keysPath` | Path to keys directory |
 
 ### Manual Configuration
 
-If not using nix-darwin, add to `~/.config/nix/nix.conf`:
-
-```ini
-builders = ssh-ng://builder@localhost:2222 aarch64-linux ~/.local/share/wrapix/builder-keys/builder_ed25519 4 1 big-parallel,benchmark
-```
-
-Or get the config snippet:
+Get the config snippet:
 
 ```bash
 wrapix-builder config

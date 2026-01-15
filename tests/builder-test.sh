@@ -133,7 +133,7 @@ fi
 # Test 8: Config output
 echo ""
 echo "Test 8: Config command"
-if $BUILDER config | grep -q "ssh-ng://"; then
+if $BUILDER config | grep -q 'protocol = "ssh-ng"'; then
   echo "  PASS: Config outputs valid nix.conf snippet"
 else
   echo "  FAIL: Config command failed"
