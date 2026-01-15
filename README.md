@@ -100,27 +100,101 @@ Pass `deployKey` to `mkSandbox` to mount the key:
 Build `aarch64-linux` packages on macOS using a persistent Linux container as a Nix remote builder.
 
 ```bash
-# Build and install
-nix build github:taheris/wrapix#wrapix-builder
-
 # Start the builder
-wrapix-builder start
+nix run github:taheris/wrapix#wrapix-builder -- start
 
-# Get nix.conf configuration
-wrapix-builder config
+# Check status (shows store size)
+nix run github:taheris/wrapix#wrapix-builder -- status
 
 # Test a build
 nix build --builders 'ssh-ng://builder@localhost:2222 aarch64-linux ~/.local/share/wrapix/builder-keys/builder_ed25519 4 1' \
   --max-jobs 0 nixpkgs#hello
 
 # Connect to builder shell
-wrapix-builder ssh
+nix run github:taheris/wrapix#wrapix-builder -- ssh
 
 # Stop the builder
-wrapix-builder stop
+nix run github:taheris/wrapix#wrapix-builder -- stop
 ```
 
 **Requirements:** macOS 26+ (Tahoe), Apple Silicon
+
+### nix-darwin Configuration
+
+Add `wrapix-builder` to your nix-darwin config for permanent installation and automatic Nix remote builder setup:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    darwin.url = "github:LnL7/nix-darwin";
+    darwin.inputs.nixpkgs.follows = "nixpkgs";
+    wrapix.url = "github:taheris/wrapix";
+  };
+
+  outputs = { nixpkgs, darwin, wrapix, ... }: {
+    darwinConfigurations.myhost = darwin.lib.darwinSystem {
+      system = "aarch64-darwin";
+      modules = [
+        ({ pkgs, ... }: {
+          # Install wrapix-builder CLI
+          environment.systemPackages = [
+            wrapix.packages.aarch64-darwin.wrapix-builder
+          ];
+
+          # SSH config for wrapix-builder (port 2222)
+          environment.etc."ssh/ssh_config.d/100-wrapix-builder.conf".text = ''
+            Host wrapix-builder
+              Hostname localhost
+              Port 2222
+              User builder
+              HostKeyAlias wrapix-builder
+              IdentityFile /Users/${builtins.getEnv "USER"}/.local/share/wrapix/builder-keys/builder_ed25519
+          '';
+
+          # Add builder to Nix's remote builders
+          nix.buildMachines = [{
+            hostName = "wrapix-builder";
+            systems = [ "aarch64-linux" ];
+            protocol = "ssh-ng";
+            maxJobs = 4;
+            supportedFeatures = [ "big-parallel" "benchmark" ];
+          }];
+
+          nix.distributedBuilds = true;
+        })
+      ];
+    };
+  };
+}
+```
+
+After applying the config, start the builder:
+
+```bash
+# Start builder (required before Linux builds)
+wrapix-builder start
+
+# Builds now automatically use the Linux builder
+nix build nixpkgs#hello --system aarch64-linux
+```
+
+The Nix store persists across restarts in `~/.local/share/wrapix/builder-nix/`, so builds are cached.
+
+### Manual Configuration
+
+If not using nix-darwin, add to `~/.config/nix/nix.conf`:
+
+```ini
+builders = ssh-ng://builder@localhost:2222 aarch64-linux ~/.local/share/wrapix/builder-keys/builder_ed25519 4 1 big-parallel,benchmark
+```
+
+Or get the config snippet:
+
+```bash
+wrapix-builder config
+```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md#linux-builder-macos) for design details.
 
