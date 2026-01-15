@@ -43,10 +43,17 @@ sleep 5
 # Test 2: Check status
 echo ""
 echo "Test 2: Check status"
-if $BUILDER status | grep -q "running"; then
+STATUS_OUTPUT=$($BUILDER status)
+if echo "$STATUS_OUTPUT" | grep -q "running"; then
   echo "  PASS: Builder is running"
 else
   echo "  FAIL: Builder not running"
+  FAILED=1
+fi
+if echo "$STATUS_OUTPUT" | grep -q "Nix store:"; then
+  echo "  PASS: Status shows Nix store path"
+else
+  echo "  FAIL: Status missing Nix store info"
   FAILED=1
 fi
 
@@ -97,20 +104,34 @@ else
   # Don't fail the whole test for this - it requires a working Linux builder chain
 fi
 
-# Test 7: Restart test (container is ephemeral)
+# Test 7: Store persistence across restart
 echo ""
-echo "Test 7: Container restart"
-echo "  Stopping builder..."
-$BUILDER stop
-sleep 2
-echo "  Starting builder..."
-if $BUILDER start; then
-  echo "  PASS: Builder restarted successfully"
+echo "Test 7: Store persistence"
+echo "  Building a test derivation..."
+# Build something and capture a store path
+TEST_STORE_PATH=$($BUILDER ssh "nix build --no-link --print-out-paths nixpkgs#hello" 2>/dev/null) || TEST_STORE_PATH=""
+if [ -z "$TEST_STORE_PATH" ]; then
+  echo "  WARNING: Could not build test derivation (skipping persistence check)"
 else
-  echo "  FAIL: Failed to restart builder"
-  FAILED=1
+  echo "  Built: $TEST_STORE_PATH"
+  echo "  Stopping builder..."
+  $BUILDER stop
+  sleep 2
+  echo "  Starting builder..."
+  if $BUILDER start; then
+    sleep 5
+    echo "  Checking if store path persisted..."
+    if $BUILDER ssh "test -e '$TEST_STORE_PATH'" 2>/dev/null; then
+      echo "  PASS: Store path persisted across restart"
+    else
+      echo "  FAIL: Store path lost after restart"
+      FAILED=1
+    fi
+  else
+    echo "  FAIL: Failed to restart builder"
+    FAILED=1
+  fi
 fi
-sleep 5
 
 # Test 8: Config output
 echo ""

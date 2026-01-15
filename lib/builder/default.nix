@@ -29,6 +29,7 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
 
   # Builder-specific paths
   KEYS_DIR="$WRAPIX_DATA/builder-keys"
+  NIX_STORE="$WRAPIX_DATA/builder-nix"
   CONTAINER_NAME="wrapix-builder"
   BUILDER_IMAGE="wrapix-builder:latest"
   SSH_PORT=2222
@@ -121,9 +122,34 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     generate_ssh_keys
     load_builder_image
 
+    # Ensure persistent Nix store directory exists
+    mkdir -p "$NIX_STORE"
+
+    # Bootstrap: populate persistent store from image if empty (first run)
+    if [ ! -d "$NIX_STORE/store" ] || [ -z "$(ls -A "$NIX_STORE/store" 2>/dev/null)" ]; then
+      echo "Initializing persistent Nix store (first run)..."
+      echo "This may take a few minutes..."
+
+      # Run temp container without volume mount to export /nix
+      TEMP_CONTAINER="wrapix-builder-init-$$"
+      container run --name "$TEMP_CONTAINER" -d "$BUILDER_IMAGE" >/dev/null 2>&1
+      sleep 3
+
+      # Copy /nix from container to host
+      # Use container exec with tar to stream the content
+      container exec "$TEMP_CONTAINER" tar -cf - -C / nix 2>/dev/null | tar -xf - -C "$NIX_STORE" --strip-components=1
+
+      # Cleanup temp container
+      container stop "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+      container rm "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+
+      echo "Nix store initialized ($(du -sh "$NIX_STORE" 2>/dev/null | cut -f1))"
+    fi
+
     echo "Creating builder container..."
 
     # Keys are mounted read-only for SSH authentication (needed for ssh-ng:// remote builds)
+    # Nix store is mounted for persistence across container restarts
     container run \
       --name "$CONTAINER_NAME" \
       -d \
@@ -132,6 +158,7 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
       --network default \
       -p "$SSH_PORT:22" \
       -v "$KEYS_DIR:/run/keys:ro" \
+      -v "$NIX_STORE:/nix" \
       "$BUILDER_IMAGE"
 
     echo ""
@@ -158,9 +185,15 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
       echo "  ssh -p $SSH_PORT -i $KEYS_DIR/builder_ed25519 builder@localhost"
       echo ""
       echo "SSH keys: $KEYS_DIR"
+      echo "Nix store: $NIX_STORE"
+      if [ "$state" = "running" ] && [ -d "$NIX_STORE" ]; then
+        store_size=$(du -sh "$NIX_STORE" 2>/dev/null | cut -f1) || store_size="unknown"
+        echo "Store size: $store_size"
+      fi
     else
       echo "Builder: not created"
       echo ""
+      echo "Nix store: $NIX_STORE"
       echo "Run 'wrapix-builder start' to create and start the builder"
     fi
   }
