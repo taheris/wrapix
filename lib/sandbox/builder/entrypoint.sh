@@ -2,7 +2,6 @@
 set -euo pipefail
 
 # Builder entrypoint: starts sshd and nix-daemon for remote building
-# This container is persistent (no --rm) and serves as an ssh-ng:// builder
 
 BUILDER_USER="builder"
 BUILDER_UID=1000
@@ -58,6 +57,13 @@ EOF
 echo "Starting nix-daemon..."
 nix-daemon &
 
-# Start sshd in foreground (keeps container alive)
+# Start sshd in background
 echo "Starting sshd..."
-exec /usr/sbin/sshd -D -e
+/bin/sshd -e
+
+# Keep container alive and reap zombies (act as init)
+echo "Services started, waiting..."
+while true; do
+    sleep 60 &
+    wait
+done

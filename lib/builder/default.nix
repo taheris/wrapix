@@ -1,6 +1,6 @@
-# wrapix-builder: CLI wrapper for persistent Linux remote builder
+# wrapix-builder: CLI wrapper for Linux remote builder
 #
-# Manages a persistent container that serves as an ssh-ng:// remote builder
+# Manages a container that serves as an ssh-ng:// remote builder
 # for Nix on macOS. Uses Apple's container CLI (macOS 26+).
 #
 # Usage:
@@ -29,7 +29,6 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
 
   # Builder-specific paths
   KEYS_DIR="$WRAPIX_DATA/builder-keys"
-  NIX_STORE="$WRAPIX_DATA/builder-nix"
   CONTAINER_NAME="wrapix-builder"
   BUILDER_IMAGE="wrapix-builder:latest"
   SSH_PORT=2222
@@ -41,9 +40,16 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     echo "  start   - Start the builder container"
     echo "  stop    - Stop and remove the container"
     echo "  status  - Show builder status and SSH connection info"
-    echo "  ssh     - Connect to builder via SSH"
+    echo "  ssh     - Connect to builder via SSH (or run a command)"
     echo "  config  - Print nix.conf configuration for remote builder"
     exit 1
+  }
+
+  container_exists() {
+    # container inspect returns [] with exit 0 even when container doesn't exist
+    local output
+    output=$(container inspect "$CONTAINER_NAME" 2>/dev/null) || return 1
+    [ "$output" != "[]" ]
   }
 
   check_macos_version() {
@@ -98,22 +104,26 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
     check_macos_version
     ensure_container_system
 
-    # Check if already running
-    if container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
-      echo "Builder container is already running"
-      echo "Use 'wrapix-builder ssh' to connect"
-      exit 0
+    # Check if container exists and is running
+    if container_exists; then
+      local state
+      state=$(container inspect "$CONTAINER_NAME" 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+      if [ "$state" = "running" ]; then
+        echo "Builder container is already running"
+        echo "Use 'wrapix-builder ssh' to connect"
+        exit 0
+      fi
+      # Container exists but not running - remove and recreate
+      echo "Cleaning up stale container..."
+      container rm "$CONTAINER_NAME" 2>/dev/null || true
     fi
 
     generate_ssh_keys
     load_builder_image
 
-    # Initialize persistent nix store directory
-    mkdir -p "$NIX_STORE"
+    echo "Creating builder container..."
 
-    echo "Starting builder container..."
-
-    # Run container (persistent, no --rm)
+    # Keys are mounted read-only for SSH authentication (needed for ssh-ng:// remote builds)
     container run \
       --name "$CONTAINER_NAME" \
       -d \
@@ -121,10 +131,8 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
       -m 4096M \
       --network default \
       -p "$SSH_PORT:22" \
-      -v "$NIX_STORE:/nix" \
       -v "$KEYS_DIR:/run/keys:ro" \
-      "$BUILDER_IMAGE" \
-      /entrypoint.sh
+      "$BUILDER_IMAGE"
 
     echo ""
     echo "Builder started successfully!"
@@ -141,33 +149,43 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
   }
 
   cmd_status() {
-    if container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
-      echo "Builder: running"
+    if container_exists; then
+      local state
+      state=$(container inspect "$CONTAINER_NAME" 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+      echo "Builder: $state"
       echo ""
       echo "SSH connection:"
       echo "  ssh -p $SSH_PORT -i $KEYS_DIR/builder_ed25519 builder@localhost"
       echo ""
-      echo "Nix store: $NIX_STORE"
-      echo "SSH keys:  $KEYS_DIR"
+      echo "SSH keys: $KEYS_DIR"
     else
-      echo "Builder: stopped"
+      echo "Builder: not created"
       echo ""
-      echo "Run 'wrapix-builder start' to start the builder"
+      echo "Run 'wrapix-builder start' to create and start the builder"
     fi
   }
 
   cmd_ssh() {
-    if ! container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+    if ! container_exists; then
       echo "Error: Builder is not running"
       echo "Run 'wrapix-builder start' first"
       exit 1
     fi
 
-    exec ssh -p "$SSH_PORT" \
-      -i "$KEYS_DIR/builder_ed25519" \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      builder@localhost
+    local state
+    state=$(container inspect "$CONTAINER_NAME" 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ "$state" != "running" ]; then
+      echo "Error: Builder container is not running (state: $state)"
+      echo "Run 'wrapix-builder start' first"
+      exit 1
+    fi
+
+    # Use container exec for reliable access (--uid 1000 = builder user)
+    if [ $# -eq 0 ]; then
+      exec container exec -it --uid 1000 "$CONTAINER_NAME" /bin/bash -l
+    else
+      exec container exec --uid 1000 "$CONTAINER_NAME" /bin/bash -c "$*"
+    fi
   }
 
   cmd_config() {
@@ -181,11 +199,11 @@ pkgs.writeShellScriptBin "wrapix-builder" ''
 
   # Main command dispatch
   case "''${1:-}" in
-    start)  cmd_start ;;
-    stop)   cmd_stop ;;
-    status) cmd_status ;;
-    ssh)    cmd_ssh ;;
-    config) cmd_config ;;
-    *)      usage ;;
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    status)  cmd_status ;;
+    ssh)     shift; cmd_ssh "$@" ;;
+    config)  cmd_config ;;
+    *)       usage ;;
   esac
 ''
