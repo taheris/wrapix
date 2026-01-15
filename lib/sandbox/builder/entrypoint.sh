@@ -1,11 +1,23 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Builder entrypoint: starts sshd and nix-daemon for remote building
+#
+# Uses /bin/sh (static busybox) for bootstrapping so it works even when
+# /nix is mounted as an empty volume for persistent store support.
 
 BUILDER_USER="builder"
 BUILDER_UID=1000
 BUILDER_HOME="/home/$BUILDER_USER"
+
+# Verify /nix/store is populated (bootstrap is done by CLI before container start)
+if [ ! -d /nix/store ] || [ -z "$(/bin/ls -A /nix/store 2>/dev/null)" ]; then
+    echo "ERROR: /nix/store is empty. Run 'wrapix-builder start' to initialize." >&2
+    exit 1
+fi
+
+# Fix permissions for builder user (VirtioFS shows files as root)
+/bin/chmod -R a+rwX /nix/store /nix/var/nix 2>/dev/null || true
 
 # Generate SSH host key on first run
 if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
@@ -14,7 +26,7 @@ if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
 fi
 
 # Setup builder user if not exists
-if ! id "$BUILDER_USER" &>/dev/null; then
+if ! id "$BUILDER_USER" >/dev/null 2>&1; then
     echo "Creating builder user..."
     echo "$BUILDER_USER:x:$BUILDER_UID:$BUILDER_UID::$BUILDER_HOME:/bin/bash" >> /etc/passwd
     echo "$BUILDER_USER:x:$BUILDER_UID:" >> /etc/group
@@ -41,8 +53,9 @@ else
 fi
 
 # Configure nix-daemon
+# Use socket in /run to avoid VirtioFS permission issues with /nix
 echo "Configuring nix..."
-mkdir -p /etc/nix
+mkdir -p /etc/nix /run/nix
 cat > /etc/nix/nix.conf <<EOF
 experimental-features = nix-command flakes
 sandbox = false
@@ -53,8 +66,9 @@ min-free = 1073741824
 max-free = 3221225472
 EOF
 
-# Start nix-daemon in background
+# Start nix-daemon with socket in /run (VirtioFS can't handle sockets in /nix)
 echo "Starting nix-daemon..."
+export NIX_DAEMON_SOCKET_PATH=/run/nix/nix-daemon.socket
 nix-daemon &
 
 # Start sshd in background
