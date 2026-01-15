@@ -89,12 +89,23 @@
             wrapix = wrapix.mkSandbox { profile = wrapix.profiles.base; };
             wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
           };
 
           apps.test-darwin = {
             meta.description = "Run Darwin integration tests";
             type = "app";
             program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
+          };
+
+          apps.test-builder = {
+            meta.description = "Run wrapix-builder integration tests (Darwin only)";
+            type = "app";
+            program = "${pkgs.writeShellScriptBin "test-builder" ''
+              exec ${./tests/darwin-builder-test.sh}
+            ''}/bin/test-builder";
           };
 
           devShells.default = wrapix.mkDevShell {
