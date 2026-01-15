@@ -95,6 +95,35 @@ Pass `deployKey` to `mkSandbox` to mount the key:
 - Each deploy key only works for one repository
 - If compromised, revoke it without affecting other access
 
+## Linux Builder (macOS)
+
+Build `aarch64-linux` packages on macOS using a persistent Linux container as a Nix remote builder.
+
+```bash
+# Build and install
+nix build github:taheris/wrapix#wrapix-builder
+
+# Start the builder
+wrapix-builder start
+
+# Get nix.conf configuration
+wrapix-builder config
+
+# Test a build
+nix build --builders 'ssh-ng://builder@localhost:2222 aarch64-linux ~/.local/share/wrapix/builder-keys/builder_ed25519 4 1' \
+  --max-jobs 0 nixpkgs#hello
+
+# Connect to builder shell
+wrapix-builder ssh
+
+# Stop the builder
+wrapix-builder stop
+```
+
+**Requirements:** macOS 26+ (Tahoe), Apple Silicon
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#linux-builder-macos) for design details.
+
 ## Host Notifications
 
 Get native desktop notifications when Claude needs your attention.

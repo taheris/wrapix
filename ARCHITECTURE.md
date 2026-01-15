@@ -124,3 +124,59 @@ The client sends newline-delimited JSON to the socket:
 - `title`: Notification title (default: "Claude Code")
 - `message`: Notification body
 - `sound`: macOS sound name (optional, ignored on Linux)
+
+## Linux Builder (macOS)
+
+The `wrapix-builder` provides a persistent Linux build environment for Nix remote builds on macOS. It runs as a separate container from the ephemeral Claude Code sessions.
+
+```
+┌─ macOS Host ─────────────────────────────────────────────────────┐
+│                                                                  │
+│  nix-daemon                                                      │
+│    └─ ssh-ng://builder@localhost:2222                            │
+│                        │                                         │
+│                        │ SSH (port 2222)                         │
+│                        ▼                                         │
+│  ┌─ wrapix-builder Container (persistent) ────────────────────┐  │
+│  │                                                            │  │
+│  │  sshd (:22)          nix-daemon                            │  │
+│  │    └─ builder user     └─ handles build requests           │  │
+│  │                                                            │  │
+│  │  /nix ◄── VirtioFS mount (persistent store)                │  │
+│  │                                                            │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                        ▲                                         │
+│                        │ VirtioFS                                │
+│  Persistent Storage:   │                                         │
+│    ~/.local/share/wrapix/                                        │
+│      ├── builder-nix/  ◄┘  (Nix store)                           │
+│      └── builder-keys/     (SSH keys)                            │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Key Differences from Claude Code Containers
+
+| Aspect | Claude Code Container | Builder Container |
+|--------|----------------------|-------------------|
+| Lifecycle | Ephemeral (`--rm`) | Persistent |
+| Naming | `wrapix-$$` (PID-based) | `wrapix-builder` (static) |
+| Purpose | Interactive AI coding | Nix remote builds |
+| Store | Ephemeral | Persistent via VirtioFS |
+| Services | Claude Code | sshd + nix-daemon |
+| Network | vmnet (outbound) | vmnet + port 2222 (inbound SSH) |
+
+### Architecture Decisions
+
+1. **Separate from mkSandbox**: The builder has its own image, entrypoint, and launcher—no modifications to the existing sandbox code
+2. **SSH-based protocol**: Uses `ssh-ng://` for compatibility with existing Nix remote builder configuration
+3. **Persistent store**: VirtioFS mounts `~/.local/share/wrapix/builder-nix/` as `/nix` for store persistence across restarts
+4. **Port binding**: SSH exposed on localhost:2222 (no dynamic IP management needed)
+
+### Components
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `wrapix-builder` | `lib/builder/default.nix` | CLI for start/stop/status/ssh/config |
+| Builder image | `lib/sandbox/builder/image.nix` | OCI image with sshd + nix |
+| Entrypoint | `lib/sandbox/builder/entrypoint.sh` | Starts sshd + nix-daemon |
