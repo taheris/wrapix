@@ -127,56 +127,27 @@ The client sends newline-delimited JSON to the socket:
 
 ## Linux Builder (macOS)
 
-The `wrapix-builder` provides a persistent Linux build environment for Nix remote builds on macOS. It runs as a separate container from the ephemeral Claude Code sessions.
+A Linux container for Nix remote builds via `ssh-ng://`. The container is ephemeral (destroyed on stop to avoid Apple CLI timing issues), but the Nix store persists via a VirtioFS volume mount.
 
 ```
 ┌─ macOS Host ─────────────────────────────────────────────────────┐
 │                                                                  │
-│  nix-daemon                                                      │
-│    └─ ssh-ng://builder@localhost:2222                            │
+│  nix-daemon ──► ssh-ng://builder@localhost:2222                  │
 │                        │                                         │
-│                        │ SSH (port 2222)                         │
-│                        ▼                                         │
-│  ┌─ wrapix-builder Container (persistent) ────────────────────┐  │
-│  │                                                            │  │
-│  │  sshd (:22)          nix-daemon                            │  │
-│  │    └─ builder user     └─ handles build requests           │  │
-│  │                                                            │  │
-│  │  /nix ◄── VirtioFS mount (persistent store)                │  │
-│  │                                                            │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                        ▲                                         │
-│                        │ VirtioFS                                │
-│  Persistent Storage:   │                                         │
-│    ~/.local/share/wrapix/                                        │
-│      ├── builder-nix/  ◄┘  (Nix store)                           │
-│      └── builder-keys/     (SSH keys)                            │
+│  ┌─ wrapix-builder ────┼─────────────────────────────────────┐   │
+│  │                     ▼                                     │   │
+│  │  sshd (:22)          nix-daemon                           │   │
+│  │  /nix ◄── VirtioFS mount ◄── ~/.local/share/wrapix/       │   │
+│  │                                  ├── builder-nix/         │   │
+│  └──────────────────────────────────└── builder-keys/        │   │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Differences from Claude Code Containers
+**Design**: Separate from mkSandbox (own image/entrypoint). On first start, the entrypoint copies `/nix-image/*` to the empty volume to initialize the store and DB.
 
-| Aspect | Claude Code Container | Builder Container |
-|--------|----------------------|-------------------|
-| Lifecycle | Ephemeral (`--rm`) | Persistent |
-| Naming | `wrapix-$$` (PID-based) | `wrapix-builder` (static) |
-| Purpose | Interactive AI coding | Nix remote builds |
-| Store | Ephemeral | Persistent via VirtioFS |
-| Services | Claude Code | sshd + nix-daemon |
-| Network | vmnet (outbound) | vmnet + port 2222 (inbound SSH) |
-
-### Architecture Decisions
-
-1. **Separate from mkSandbox**: The builder has its own image, entrypoint, and launcher—no modifications to the existing sandbox code
-2. **SSH-based protocol**: Uses `ssh-ng://` for compatibility with existing Nix remote builder configuration
-3. **Persistent store**: VirtioFS mounts `~/.local/share/wrapix/builder-nix/` as `/nix` for store persistence across restarts
-4. **Port binding**: SSH exposed on localhost:2222 (no dynamic IP management needed)
-
-### Components
-
-| Component | Location | Description |
-|-----------|----------|-------------|
-| `wrapix-builder` | `lib/builder/default.nix` | CLI for start/stop/status/ssh/config |
-| Builder image | `lib/sandbox/builder/image.nix` | OCI image with sshd + nix |
-| Entrypoint | `lib/sandbox/builder/entrypoint.sh` | Starts sshd + nix-daemon |
+| Component | Location |
+|-----------|----------|
+| CLI | `lib/builder/default.nix` |
+| Image | `lib/sandbox/builder/image.nix` |
+| Entrypoint | `lib/sandbox/builder/entrypoint.sh` |
