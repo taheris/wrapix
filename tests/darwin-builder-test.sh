@@ -37,9 +37,6 @@ else
   FAILED=1
 fi
 
-# Give it time to initialize
-sleep 5
-
 # Test 2: Check status
 echo ""
 echo "Test 2: Check status"
