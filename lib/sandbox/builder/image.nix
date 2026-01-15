@@ -44,6 +44,7 @@ let
   '';
 
   # sshd configuration: key-only auth, allow builder user
+  # Note: entrypoint.sh regenerates this at runtime to handle persistent store mounts
   sshdConfig = pkgs.writeTextDir "etc/ssh/sshd_config" ''
     Port 22
     HostKey /etc/ssh/ssh_host_ed25519_key

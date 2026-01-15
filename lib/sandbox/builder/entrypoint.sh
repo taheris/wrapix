@@ -20,6 +20,22 @@ fi
 # VirtioFS UID mapping shows host-owned files as owned by builder inside container,
 # so no runtime chmod needed. Skipping chmod saves 30-60+ seconds on large stores.
 
+# Generate sshd_config (can't use image's config as it may be a broken symlink
+# when /nix is mounted from persistent store with different store paths)
+echo "Configuring sshd..."
+mkdir -p /etc/ssh
+rm -f /etc/ssh/sshd_config  # Remove broken symlink if exists
+cat > /etc/ssh/sshd_config <<EOF
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+AuthorizedKeysFile /home/%u/.ssh/authorized_keys
+PasswordAuthentication no
+PermitRootLogin no
+AllowUsers $BUILDER_USER
+PermitUserEnvironment yes
+Subsystem sftp internal-sftp
+EOF
+
 # Install SSH host key from nix store (stable for publicHostKey in nix-darwin)
 HOST_KEY="/run/keys/ssh_host_ed25519_key"
 if [ -f "$HOST_KEY" ]; then
@@ -74,6 +90,11 @@ cores = 0
 min-free = 1073741824
 max-free = 3221225472
 EOF
+
+# Set NIX_DAEMON_SOCKET_PATH for SSH sessions (non-interactive commands need this)
+echo "NIX_DAEMON_SOCKET_PATH=/run/nix/nix-daemon.socket" > "$BUILDER_HOME/.ssh/environment"
+chown "$BUILDER_UID:$BUILDER_UID" "$BUILDER_HOME/.ssh/environment"
+chmod 600 "$BUILDER_HOME/.ssh/environment"
 
 # Start nix-daemon with socket in /run (VirtioFS can't handle sockets in /nix)
 echo "Starting nix-daemon..."

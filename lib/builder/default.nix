@@ -79,6 +79,15 @@ let
     CURRENT_IMAGE_HASH="${builderImage}"
     mkdir -p "$WRAPIX_DATA/images"
 
+    # Remove stale version file if it references a non-existent store path
+    if [ -f "$IMAGE_VERSION_FILE" ]; then
+      CACHED_HASH=$(cat "$IMAGE_VERSION_FILE")
+      if [ ! -e "$CACHED_HASH" ]; then
+        echo "Removing stale image version file (store path no longer exists)..."
+        rm -f "$IMAGE_VERSION_FILE"
+      fi
+    fi
+
     if ! container image inspect "$BUILDER_IMAGE" >/dev/null 2>&1 || \
        [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
       echo "Loading builder image..."
@@ -264,10 +273,17 @@ NIXCONFIG
   cmd_setup_routes() {
     # Get the container network subnet from the default network
     # JSON has escaped slashes: "address":"192.168.64.0\/24"
+    # Note: container commands must run as original user when script is run with sudo
     local network
-    network=$(container network inspect default 2>/dev/null | \
-      grep -oE '"address":"[0-9./\\]+"' | head -1 | \
-      sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+    if [ -n "''${SUDO_USER:-}" ]; then
+      network=$(sudo -u "$SUDO_USER" container network inspect default 2>/dev/null | \
+        grep -oE '"address":"[0-9./\\]+"' | head -1 | \
+        sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+    else
+      network=$(container network inspect default 2>/dev/null | \
+        grep -oE '"address":"[0-9./\\]+"' | head -1 | \
+        sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+    fi
     if [ -z "$network" ]; then
       echo "Error: Could not determine container network subnet"
       echo "Is the container system running? Try: container system start"
@@ -275,36 +291,72 @@ NIXCONFIG
     fi
 
     echo "Fixing route for container network $network..."
-    sudo route delete "$network" 2>/dev/null || true
-    sudo route add "$network" -interface bridge100
+    route delete "$network" 2>/dev/null || true
+    route add "$network" -interface bridge100
     echo "Route configured successfully"
   }
 
   cmd_setup_ssh() {
-    if ! container_exists; then
+    # Container commands must run as original user when script is run with sudo
+    local container_cmd="container"
+    if [ -n "''${SUDO_USER:-}" ]; then
+      container_cmd="sudo -u $SUDO_USER container"
+    fi
+
+    # Check if container exists
+    local output
+    output=$($container_cmd inspect "$CONTAINER_NAME" 2>/dev/null) || true
+    if [ -z "$output" ] || [ "$output" = "[]" ]; then
       echo "Error: Builder container is not running"
       echo "Run 'wrapix-builder start' first"
       exit 1
     fi
 
     local state
-    state=$(container inspect "$CONTAINER_NAME" 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    state=$(echo "$output" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
     if [ "$state" != "running" ]; then
       echo "Error: Builder container is not running (state: $state)"
       echo "Run 'wrapix-builder start' first"
       exit 1
     fi
 
-    echo "Adding builder host key to root's known_hosts..."
-    # Remove any existing entry first
-    sudo ssh-keygen -R wrapix-builder 2>/dev/null || true
-    # Accept the new key
-    sudo ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes wrapix-builder true 2>/dev/null || {
+    # Copy SSH key with proper permissions (SSH rejects world-readable keys)
+    # Can't symlink because nix store has 444 permissions
+    echo "Installing SSH key at /etc/nix/wrapix_builder_ed25519..."
+    rm -f /etc/nix/wrapix_builder_ed25519
+    cp "$KEYS_DIR/builder_ed25519" /etc/nix/wrapix_builder_ed25519
+    chmod 600 /etc/nix/wrapix_builder_ed25519
+    chown root:nixbld /etc/nix/wrapix_builder_ed25519
+
+    # Symlink for host key is fine (not a private key)
+    echo "Creating host key symlink at /etc/nix/wrapix_builder_host_key_base64..."
+    ln -sf "$KEYS_DIR/public_host_key_base64" /etc/nix/wrapix_builder_host_key_base64
+
+    # Add host key to root's known_hosts (nix-daemon runs as root and reads this)
+    echo "Adding to root's known_hosts..."
+    local host_key
+    host_key=$(cat "$KEYS_DIR/ssh_host_ed25519_key.pub")
+    local root_known_hosts="/var/root/.ssh/known_hosts"
+    mkdir -p /var/root/.ssh
+    chmod 700 /var/root/.ssh
+
+    # Remove old entries
+    if [ -f "$root_known_hosts" ]; then
+      grep -v "^wrapix-builder " "$root_known_hosts" > "$root_known_hosts.tmp" 2>/dev/null || true
+      mv "$root_known_hosts.tmp" "$root_known_hosts"
+    fi
+
+    # Add entry using the raw public key (format: hostname key-type key)
+    echo "wrapix-builder $host_key" >> "$root_known_hosts"
+    chmod 600 "$root_known_hosts"
+
+    # Verify SSH works
+    ssh -o BatchMode=yes wrapix-builder true 2>/dev/null || {
       echo "Error: Failed to connect to wrapix-builder"
       echo "Check that routes are configured: wrapix-builder setup-routes"
       exit 1
     }
-    echo "Host key added to root's known_hosts"
+    echo "Host key added to known_hosts"
   }
 
   cmd_setup() {
