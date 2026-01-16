@@ -94,9 +94,11 @@ pkgs.dockerTools.buildLayeredImage {
     # This prevents Nix from trying to chmod directories it doesn't own
     mkdir -p nix/var/nix/profiles/per-user
     mkdir -p nix/var/nix/gcroots/per-user
+    mkdir -p nix/var/nix/gcroots/auto
     mkdir -p nix/var/log/nix/drvs
     chmod 755 nix/var/nix/profiles nix/var/nix/profiles/per-user
     chmod 755 nix/var/nix/gcroots nix/var/nix/gcroots/per-user
+    chmod 1777 nix/var/nix/gcroots/auto
     chmod -R a+rwX nix/var/log
   '';
 
