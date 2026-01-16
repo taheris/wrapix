@@ -12,8 +12,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and security model.
 ## Basic usage
 
 ```bash
-nix run github:taheris/wrapix              # base sandbox
-nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
+nix run github:taheris/wrapix                # base sandbox
+nix run github:taheris/wrapix#wrapix-rust    # with Rust toolchain
+nix run github:taheris/wrapix#wrapix-python  # with Python toolchain
 ```
 
 ## Sandbox usage
@@ -48,10 +49,19 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
           # simple example using the base profile (start with `nix run`)
           packages.default = wrapix.mkSandbox { };
 
-          # example with rust profile, linux packages, mounts and environment
+          # complete example with additional configuration
           packages.sandbox = wrapix.mkSandbox {
             profile = wrapix.profiles.rust;
-            packages = [ linuxPkgs.sqlx-cli ];
+            deployKey = "myproject"; # for git push (see scripts/setup-deploy-key)
+
+            packages = with linuxPkgs; [
+              sqlx-cli
+            ];
+
+            env = {
+              DATABASE_URL = "postgres://localhost/mydb";
+            };
+
             mounts = [
               {
                 source = "~/.cargo/config.toml";
@@ -59,10 +69,6 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
                 mode = "ro";
               }
             ];
-            env = {
-              DATABASE_URL = "postgres://localhost/mydb";
-            };
-            deployKey = "myproject"; # for git push (see scripts/setup-deploy-key)
           };
         };
     };
@@ -74,7 +80,8 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
 | Profile | Packages |
 |---------|----------|
 | `base` | git, ripgrep, fd, jq, vim |
-| `rust` | base + rustc, cargo, rust-analyzer |
+| `rust` | base + rustup, gcc, openssl, pkg-config |
+| `python` | base + python3, uv, ty, ruff |
 
 ## Notifications
 
