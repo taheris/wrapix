@@ -122,4 +122,28 @@ in
       }
     ];
   };
+
+  python = mkProfile {
+    name = "python";
+
+    packages = with pkgs; [
+      python3
+      ruff
+      ty
+      uv
+    ];
+
+    env = {
+      UV_CACHE_DIR = "/workspace/.uv-cache";
+    };
+
+    mounts = [
+      {
+        source = "~/.cache/uv";
+        dest = "~/.cache/uv";
+        mode = "ro";
+        optional = true;
+      }
+    ];
+  };
 }
