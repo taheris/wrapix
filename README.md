@@ -9,14 +9,14 @@ Secure sandbox for running [Claude Code](https://claude.ai/code) in isolated con
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and security model.
 
-## Usage
+## Basic usage
 
 ```bash
 nix run github:taheris/wrapix              # base sandbox
 nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
 ```
 
-### Sandbox
+## Sandbox usage
 
 ```nix
 {
@@ -45,13 +45,13 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
 
         in
         {
-          # simple example (using the base profile)
+          # simple example using the base profile (start with `nix run`)
           packages.default = wrapix.mkSandbox { };
 
           # example with rust profile, linux packages, mounts and environment
-          packages.my-sandbox = wrapix.mkSandbox {
+          packages.sandbox = wrapix.mkSandbox {
             profile = wrapix.profiles.rust;
-            packages = with linuxPkgs; [ sqlx-cli ];
+            packages = [ linuxPkgs.sqlx-cli ];
             mounts = [
               {
                 source = "~/.cargo/config.toml";
@@ -69,7 +69,7 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
 }
 ```
 
-### Profiles
+## Profiles
 
 | Profile | Packages |
 |---------|----------|
