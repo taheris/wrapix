@@ -34,14 +34,26 @@ let
   # Lint checks run on all platforms
   lintChecks = import ./lint.nix { inherit pkgs src; };
 
+  # README example verification
+  readmeTest = {
+    readme = import ./readme.nix { inherit pkgs src; };
+  };
+
 in
 {
-  checks = smokeTests // darwinMountTests // darwinNetworkTests // integrationTests // lintChecks;
+  checks =
+    smokeTests
+    // darwinMountTests
+    // darwinNetworkTests
+    // integrationTests
+    // lintChecks
+    // readmeTest;
   inherit
     smokeTests
     darwinMountTests
     darwinNetworkTests
     integrationTests
     lintChecks
+    readmeTest
     ;
 }

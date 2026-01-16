@@ -37,7 +37,7 @@ nix run github:taheris/wrapix#wrapix-rust  # with Rust toolchain
       perSystem =
         { system, ... }:
         let
-          wrapix = inputs.wrapix.lib.${system};
+          wrapix = inputs.wrapix.legacyPackages.${system}.lib;
 
           # sandbox runs Linux; use Linux packages even on Darwin
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
