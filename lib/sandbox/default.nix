@@ -46,7 +46,7 @@ let
 
   mkSandbox =
     {
-      profile,
+      profile ? profiles.base,
       deployKey ? null,
       packages ? [ ],
       mounts ? [ ],
