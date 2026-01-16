@@ -10,7 +10,7 @@
 let
   # Static busybox for bootstrapping when /nix volume is empty
   # Provides /bin/sh and basic commands independent of /nix/store
-  busybox = pkgs.pkgsStatic.busybox;
+  inherit (pkgs.pkgsStatic) busybox;
 
   # Packages needed for remote building
   builderPackages = with pkgs; [
