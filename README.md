@@ -85,7 +85,21 @@ Desktop notifications when Claude needs attention:
 nix run github:taheris/wrapix#wrapix-notifyd
 
 # ~/.claude/settings.json
-{ "hooks": { "Stop": [{ "matcher": "", "hooks": [{ "type": "command", "command": "wrapix-notify 'Claude' 'Waiting'" }] }] } }
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "wrapix-notify 'Claude' 'Waiting'"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
 ## Linux Builder (macOS)
