@@ -1,13 +1,17 @@
 # Architecture
 
+This document describes the design and security model of Wrapix.
+
 ## Design Principles
 
-1. **Container isolation is the security boundary**: Filesystem and process isolation protect the host
-2. **Least privilege**: Claude container runs without elevated capabilities
-3. **User namespace mapping**: Files created in /workspace have correct host ownership
-4. **Open network**: Full internet access for web research, git, package managers
+1. **Container isolation is the security boundary** - Filesystem and process isolation protect the host
+2. **Least privilege** - Containers run without elevated capabilities
+3. **User namespace mapping** - Files created in `/workspace` have correct host ownership
+4. **Open network** - Full internet access for web research, git, package managers
 
-## Linux: Single Container
+## Platform Implementations
+
+### Linux: Podman Rootless Container
 
 ```
 ┌─ Podman Container ──────────────────────────────────────────┐
@@ -22,7 +26,9 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## macOS: Single VM
+Uses **pasta** networking for full TCP/UDP/ICMP connectivity without privileges.
+
+### macOS: Apple Container CLI
 
 macOS uses Apple's [container CLI](https://github.com/apple/container) which runs Linux containers as lightweight VMs via the Virtualization framework.
 
@@ -43,52 +49,49 @@ macOS uses Apple's [container CLI](https://github.com/apple/container) which run
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Container CLI Features
+The container CLI provides:
+- **VM Management** - Lightweight VMs via Virtualization.framework
+- **Networking** - Automatic connectivity via vmnet
+- **Storage** - OCI images and virtio-fs mounts
 
-The `container` CLI provides:
-- **VM Management**: Creates and manages lightweight VMs via Virtualization.framework
-- **Networking**: Handles network connectivity automatically via vmnet
-- **Storage**: Manages OCI images and virtio-fs mounts
-- **Visibility**: Running containers appear in `container list`
-
-### Networking Comparison: macOS vs Linux
+### Networking Comparison
 
 | Aspect | Linux (pasta) | macOS (container) |
-|--------|--------------|-------------------|
-| Network mode | `--network=pasta` (Podman) | vmnet (container CLI) |
-| Technology | passt/pasta userspace TCP/IP | macOS networking |
-| Connection | User namespace networking | Default bridge network |
+|--------|---------------|-------------------|
+| Network mode | `--network=pasta` | vmnet bridge |
+| Technology | passt/pasta userspace TCP/IP | macOS Virtualization.framework |
 | Performance | Near-native | Near-native |
 
-Both solutions provide full TCP/UDP/ICMP connectivity without elevated privileges.
+Both provide full TCP/UDP/ICMP connectivity without elevated privileges.
 
 ## Security Model
 
-### What Container Isolation Provides
+### Protected
 
-| Protection | How |
-|------------|-----|
-| Filesystem isolation | Only /workspace is accessible |
-| Process isolation | Cannot see or interact with host processes |
+| Boundary | How |
+|----------|-----|
+| Filesystem | Only `/workspace` is accessible from the host |
+| Processes | Cannot see or interact with host processes |
 | User namespace | Files created have correct host UID |
-| No capabilities | Cannot perform privileged operations |
+| Capabilities | Cannot perform privileged operations |
 
-### What Is NOT Protected
+### Not Protected
 
-- Network traffic is unrestricted
-- Claude has full internet access for research
+- **Network traffic is unrestricted** - Claude has full internet access for research
 
-This is intentional: the sandbox is meant to allow autonomous work with web research capabilities. The security boundary is the container itself, not network filtering.
+This is intentional: the sandbox enables autonomous work with web research capabilities. The security boundary is the container itself, not network filtering.
 
-## Host Notifications
+## Components
 
-Claude Code can trigger native desktop notifications on the host machine from inside the container via a Unix socket.
+### Host Notifications
+
+Native desktop notifications when Claude needs attention, via Unix socket.
 
 ```
 ┌─ Container ──────────────────────────┐
 │                                      │
 │  Claude Code                         │
-│    └─ Hook: Stop, PostToolUse, etc.  │
+│    └─ Hook: Stop, PostToolUse        │
 │         └─ wrapix-notify "msg"       │
 │              └─ writes to socket     │
 │                                      │
@@ -106,28 +109,15 @@ Claude Code can trigger native desktop notifications on the host machine from in
 └──────────────────────────────────────┘
 ```
 
-### Components
-
-| Component | Location | Description |
-|-----------|----------|-------------|
-| `wrapix-notifyd` | Host | Daemon listening on `~/.local/share/wrapix/notify.sock` |
-| `wrapix-notify` | Container | Client that sends JSON to the socket |
-
-### Protocol
-
-The client sends newline-delimited JSON to the socket:
+**Protocol**: Newline-delimited JSON over `~/.local/share/wrapix/notify.sock`
 
 ```json
 {"title": "Claude Code", "message": "Task completed", "sound": "Ping"}
 ```
 
-- `title`: Notification title (default: "Claude Code")
-- `message`: Notification body
-- `sound`: macOS sound name (optional, ignored on Linux)
+### Linux Builder (macOS)
 
-## Linux Builder (macOS)
-
-A Linux container for Nix remote builds via `ssh-ng://`. The container is ephemeral (destroyed on stop to avoid Apple CLI timing issues), but the Nix store persists via a VirtioFS volume mount.
+A Linux container for Nix remote builds via `ssh-ng://`. The Nix store persists via VirtioFS volume mount.
 
 ```
 ┌─ macOS Host ─────────────────────────────────────────────────────┐
@@ -144,10 +134,28 @@ A Linux container for Nix remote builds via `ssh-ng://`. The container is epheme
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Design**: Separate from mkSandbox (own image/entrypoint). On first start, the entrypoint copies `/nix-image/*` to the empty volume to initialize the store and DB.
+On first start, the entrypoint copies `/nix-image/*` to initialize the store.
 
 | Component | Location |
 |-----------|----------|
 | CLI | `lib/builder/default.nix` |
 | Image | `lib/sandbox/builder/image.nix` |
 | Entrypoint | `lib/sandbox/builder/entrypoint.sh` |
+
+## Source Layout
+
+```
+lib/
+├── default.nix              # Top-level API: mkSandbox, deriveProfile, profiles
+├── sandbox/
+│   ├── default.nix          # Platform dispatcher, image builder
+│   ├── profiles.nix         # Built-in profiles (base, rust)
+│   ├── image.nix            # OCI image builder
+│   ├── linux/               # Podman implementation
+│   └── darwin/              # Apple container implementation
+├── builder/
+│   └── default.nix          # Linux builder CLI
+└── notify/
+    ├── daemon.nix           # Host notification daemon
+    └── client.nix           # Container notification client
+```
