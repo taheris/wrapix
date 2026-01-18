@@ -101,6 +101,25 @@ Host github.com
     IdentitiesOnly yes
 EOF
   chmod 600 "$HOME/.ssh/config"
+
+  # Configure git SSH signing using deploy key
+  git config --global gpg.format ssh
+  git config --global user.signingkey "$WRAPIX_DEPLOY_KEY"
+
+  # Create allowed_signers for signature verification
+  mkdir -p "$HOME/.config/git"
+  if ssh-keygen -y -f "$WRAPIX_DEPLOY_KEY" > "$WRAPIX_DEPLOY_KEY.pub.tmp" 2>/dev/null; then
+    echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$WRAPIX_DEPLOY_KEY.pub.tmp")" > "$HOME/.config/git/allowed_signers"
+    rm "$WRAPIX_DEPLOY_KEY.pub.tmp"
+    git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
+    chown "$HOST_UID:$HOST_UID" "$HOME/.config/git/allowed_signers"
+  fi
+  chown -R "$HOST_UID:$HOST_UID" "$HOME/.config"
+fi
+
+# Enable auto-signing if requested
+if [ "${WRAPIX_GIT_SIGN:-}" = "1" ] || [ "${WRAPIX_GIT_SIGN:-}" = "true" ]; then
+  git config --global commit.gpgsign true
 fi
 
 # Fix ownership and permissions

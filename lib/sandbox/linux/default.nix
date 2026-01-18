@@ -46,6 +46,12 @@ in
 
         ${expandPathFn}
 
+        # Read git author from host config (overrideable via env vars)
+        GIT_AUTHOR_NAME="''${GIT_AUTHOR_NAME:-$(git config --global user.name 2>/dev/null || echo 'Wrapix Sandbox')}"
+        GIT_AUTHOR_EMAIL="''${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>/dev/null || echo 'sandbox@wrapix.dev')}"
+        GIT_COMMITTER_NAME="''${GIT_COMMITTER_NAME:-$GIT_AUTHOR_NAME}"
+        GIT_COMMITTER_EMAIL="''${GIT_COMMITTER_EMAIL:-$GIT_AUTHOR_EMAIL}"
+
         # Build volume args
         VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
         dir_idx=0
@@ -140,6 +146,11 @@ in
           -e "BD_NO_DAEMON=1" \
           -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
           -e "HOME=/home/$USER" \
+          -e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME" \
+          -e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL" \
+          -e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME" \
+          -e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL" \
+          ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \
           -w /workspace \
           docker-archive:${profileImage} \
           /entrypoint.sh

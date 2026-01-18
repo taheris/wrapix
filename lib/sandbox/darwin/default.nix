@@ -96,6 +96,12 @@ in
 
             ${expandPathFn}
 
+            # Read git author from host config (overrideable via env vars)
+            GIT_AUTHOR_NAME="''${GIT_AUTHOR_NAME:-$(git config --global user.name 2>/dev/null || echo 'Wrapix Sandbox')}"
+            GIT_AUTHOR_EMAIL="''${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>/dev/null || echo 'sandbox@wrapix.dev')}"
+            GIT_COMMITTER_NAME="''${GIT_COMMITTER_NAME:-$GIT_AUTHOR_NAME}"
+            GIT_COMMITTER_EMAIL="''${GIT_COMMITTER_EMAIL:-$GIT_AUTHOR_EMAIL}"
+
             MOUNT_ARGS=""
             DIR_MOUNTS=""
             FILE_MOUNTS=""
@@ -201,6 +207,11 @@ in
             ENV_ARGS="$ENV_ARGS -e CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}"
             ENV_ARGS="$ENV_ARGS -e HOST_UID=$(id -u)"
             ENV_ARGS="$ENV_ARGS -e HOST_USER=$USER"
+            ENV_ARGS="$ENV_ARGS -e GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME"
+            ENV_ARGS="$ENV_ARGS -e GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL"
+            ENV_ARGS="$ENV_ARGS -e GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME"
+            ENV_ARGS="$ENV_ARGS -e GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL"
+            [ -n "''${WRAPIX_GIT_SIGN:-}" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"
             [ -n "$DIR_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_DIR_MOUNTS=$DIR_MOUNTS"
             [ -n "$FILE_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_FILE_MOUNTS=$FILE_MOUNTS"
             [ -n "$SOCK_MOUNTS" ] && ENV_ARGS="$ENV_ARGS -e WRAPIX_SOCK_MOUNTS=$SOCK_MOUNTS"
