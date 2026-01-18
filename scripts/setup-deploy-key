@@ -64,21 +64,42 @@ fi
 gh repo deploy-key add "$KEY_PATH.pub" -R "$REPO" -t "$KEYNAME" -w
 
 # Add to user's signing keys for commit verification on GitHub
+# Requires admin:ssh_signing_key scope - prompt user to add if missing
 SIGNING_KEY_TITLE="signing-$KEYNAME"
-EXISTING_SIGNING_KEY=$(gh ssh-key list --json title,id \
-    | jq -r ".[] | select(.title == \"$SIGNING_KEY_TITLE\") | .id" 2>/dev/null || true)
+
+# Try to find existing signing key by fingerprint
+EXISTING_SIGNING_KEY=$(gh api /user/ssh_signing_keys --jq ".[] | select(.key | contains(\"$(cat "$KEY_PATH.pub" | awk '{print $2}')\")) | .id" 2>/dev/null || true)
 
 if [[ -n "$EXISTING_SIGNING_KEY" ]]; then
     if [[ "$FORCE" == true ]]; then
-        gh api -X DELETE "/user/keys/$EXISTING_SIGNING_KEY"
-        gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing
-        echo "Signing key updated on your GitHub account"
+        if gh api -X DELETE "/user/ssh_signing_keys/$EXISTING_SIGNING_KEY" 2>/dev/null; then
+            if gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>/dev/null; then
+                echo "Signing key updated on your GitHub account"
+            else
+                echo "Warning: Could not re-add signing key"
+            fi
+        else
+            echo "Warning: Could not delete existing signing key (may need: gh auth refresh -s admin:ssh_signing_key)"
+        fi
     else
         echo "Signing key already exists on GitHub (use -f to update)"
     fi
 else
-    gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing
-    echo "Signing key added to your GitHub account"
+    # Try to add - handle "already in use" gracefully
+    ADD_OUTPUT=$(gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>&1) && {
+        echo "Signing key added to your GitHub account"
+    } || {
+        if echo "$ADD_OUTPUT" | grep -q "already in use"; then
+            echo "Signing key already registered on your GitHub account"
+        elif echo "$ADD_OUTPUT" | grep -q "ssh_signing_key"; then
+            echo ""
+            echo "To enable signed commits verification on GitHub, run:"
+            echo "  gh auth refresh -s admin:ssh_signing_key"
+            echo "  $0 $KEYNAME -f"
+        else
+            echo "Warning: Could not add signing key: $ADD_OUTPUT"
+        fi
+    }
 fi
 
 echo "Done! Key: $KEY_PATH"
