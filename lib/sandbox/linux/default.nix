@@ -96,14 +96,19 @@ in
           VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
         fi
 
-        # Mount deploy key for this repo (see scripts/setup-deploy-key)
+        # Mount deploy key and signing key for this repo (see scripts/setup-deploy-key)
         DEPLOY_KEY_NAME=${deployKeyExpr}
         DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+        SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         DEPLOY_KEY_ARGS=""
         if [ -f "$DEPLOY_KEY" ]; then
           VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
           # Pass deploy key path to entrypoint for SSH config setup
           DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+        fi
+        if [ -f "$SIGNING_KEY" ]; then
+          VOLUME_ARGS="$VOLUME_ARGS -v $SIGNING_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing:ro"
+          DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         fi
 
         # Stage .beads config files for container-local database isolation
