@@ -63,4 +63,22 @@ if [[ -n "$EXISTING_ID" ]]; then
 fi
 gh repo deploy-key add "$KEY_PATH.pub" -R "$REPO" -t "$KEYNAME" -w
 
+# Add to user's signing keys for commit verification on GitHub
+SIGNING_KEY_TITLE="signing-$KEYNAME"
+EXISTING_SIGNING_KEY=$(gh ssh-key list --json title,id \
+    | jq -r ".[] | select(.title == \"$SIGNING_KEY_TITLE\") | .id" 2>/dev/null || true)
+
+if [[ -n "$EXISTING_SIGNING_KEY" ]]; then
+    if [[ "$FORCE" == true ]]; then
+        gh api -X DELETE "/user/keys/$EXISTING_SIGNING_KEY"
+        gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing
+        echo "Signing key updated on your GitHub account"
+    else
+        echo "Signing key already exists on GitHub (use -f to update)"
+    fi
+else
+    gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing
+    echo "Signing key added to your GitHub account"
+fi
+
 echo "Done! Key: $KEY_PATH"

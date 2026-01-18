@@ -104,10 +104,7 @@ pkgs.dockerTools.buildLayeredImage {
 
   config = {
     Env = [
-      "GIT_AUTHOR_NAME=Wrapix Sandbox"
-      "GIT_AUTHOR_EMAIL=sandbox@wrapix.dev"
-      "GIT_COMMITTER_NAME=Wrapix Sandbox"
-      "GIT_COMMITTER_EMAIL=sandbox@wrapix.dev"
+      # GIT_AUTHOR_*/GIT_COMMITTER_* set at runtime by launcher (from host git config)
       "PATH=${profileEnv}/bin:/bin:/usr/bin"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
       "XDG_CACHE_HOME=/var/cache"
