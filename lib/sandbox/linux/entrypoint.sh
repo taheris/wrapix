@@ -22,11 +22,12 @@ if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
     rm "$PUBKEY_TMP"
     git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
   fi
-fi
 
-# Enable auto-signing if requested
-if [ "${WRAPIX_GIT_SIGN:-}" = "1" ] || [ "${WRAPIX_GIT_SIGN:-}" = "true" ]; then
-  git config --global commit.gpgsign true
+  # Enable auto-signing by default when signing key is configured
+  # Set WRAPIX_GIT_SIGN=0 to disable
+  if [ "${WRAPIX_GIT_SIGN:-1}" != "0" ]; then
+    git config --global commit.gpgsign true
+  fi
 fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
