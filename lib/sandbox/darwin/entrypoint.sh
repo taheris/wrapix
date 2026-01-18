@@ -117,11 +117,12 @@ EOF
     chown "$HOST_UID:$HOST_UID" "$HOME/.config/git/allowed_signers"
   fi
   chown -R "$HOST_UID:$HOST_UID" "$HOME/.config"
-fi
 
-# Enable auto-signing if requested
-if [ "${WRAPIX_GIT_SIGN:-}" = "1" ] || [ "${WRAPIX_GIT_SIGN:-}" = "true" ]; then
-  git config --global commit.gpgsign true
+  # Enable auto-signing by default when signing key is configured
+  # Set WRAPIX_GIT_SIGN=0 to disable
+  if [ "${WRAPIX_GIT_SIGN:-1}" != "0" ]; then
+    git config --global commit.gpgsign true
+  fi
 fi
 
 # Fix ownership and permissions
