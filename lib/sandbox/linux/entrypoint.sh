@@ -8,6 +8,23 @@ cd /workspace
 # (the .ssh directory may be created by the known_hosts bind mount with root ownership)
 if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
   export GIT_SSH_COMMAND="ssh -i $WRAPIX_DEPLOY_KEY -o IdentitiesOnly=yes"
+
+  # Configure git SSH signing using deploy key
+  git config --global gpg.format ssh
+  git config --global user.signingkey "$WRAPIX_DEPLOY_KEY"
+
+  # Create allowed_signers for signature verification
+  mkdir -p "$HOME/.config/git"
+  if ssh-keygen -y -f "$WRAPIX_DEPLOY_KEY" > "$WRAPIX_DEPLOY_KEY.pub.tmp" 2>/dev/null; then
+    echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$WRAPIX_DEPLOY_KEY.pub.tmp")" > "$HOME/.config/git/allowed_signers"
+    rm "$WRAPIX_DEPLOY_KEY.pub.tmp"
+    git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
+  fi
+fi
+
+# Enable auto-signing if requested
+if [ "${WRAPIX_GIT_SIGN:-}" = "1" ] || [ "${WRAPIX_GIT_SIGN:-}" = "true" ]; then
+  git config --global commit.gpgsign true
 fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
