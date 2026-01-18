@@ -41,18 +41,28 @@ command -v gh >/dev/null || die "gh CLI required"
 command -v ssh-keygen >/dev/null || die "ssh-keygen required"
 gh auth status >/dev/null 2>&1 || die "run 'gh auth login' first"
 
-KEY_PATH="$HOME/.ssh/deploy_keys/${KEYNAME}"
+KEY_DIR="$HOME/.ssh/deploy_keys"
+KEY_PATH="$KEY_DIR/${KEYNAME}"
+SIGNING_KEY_PATH="$KEY_DIR/${KEYNAME}-signing"
 
 echo "Setting up deploy key '$KEYNAME' for $REPO"
 
-# Generate key pair
+# Generate deploy key pair
 if [[ -f "$KEY_PATH" ]]; then
     [[ "$FORCE" == true ]] || die "key exists: $KEY_PATH (use -f to overwrite)"
     rm -f "$KEY_PATH" "$KEY_PATH.pub"
 fi
-mkdir -p "$(dirname "$KEY_PATH")" && chmod 700 "$(dirname "$KEY_PATH")"
+mkdir -p "$KEY_DIR" && chmod 700 "$KEY_DIR"
 ssh-keygen -t ed25519 -f "$KEY_PATH" -N "" -C "deploy-key-${KEYNAME}" >/dev/null
 chmod 600 "$KEY_PATH" && chmod 644 "$KEY_PATH.pub"
+
+# Generate separate signing key pair (GitHub doesn't allow same key for deploy and signing)
+if [[ -f "$SIGNING_KEY_PATH" ]]; then
+    [[ "$FORCE" == true ]] || die "signing key exists: $SIGNING_KEY_PATH (use -f to overwrite)"
+    rm -f "$SIGNING_KEY_PATH" "$SIGNING_KEY_PATH.pub"
+fi
+ssh-keygen -t ed25519 -f "$SIGNING_KEY_PATH" -N "" -C "signing-key-${KEYNAME}" >/dev/null
+chmod 600 "$SIGNING_KEY_PATH" && chmod 644 "$SIGNING_KEY_PATH.pub"
 
 # Add to GitHub
 EXISTING_ID=$(gh repo deploy-key list -R "$REPO" --json id,title \
@@ -67,39 +77,37 @@ gh repo deploy-key add "$KEY_PATH.pub" -R "$REPO" -t "$KEYNAME" -w
 # Requires admin:ssh_signing_key scope - prompt user to add if missing
 SIGNING_KEY_TITLE="signing-$KEYNAME"
 
-# Try to find existing signing key by fingerprint
-EXISTING_SIGNING_KEY=$(gh api /user/ssh_signing_keys --jq ".[] | select(.key | contains(\"$(cat "$KEY_PATH.pub" | awk '{print $2}')\")) | .id" 2>/dev/null || true)
+# Find existing signing key by title (not fingerprint - that changes when key is regenerated)
+EXISTING_SIGNING_KEY=$(gh api /user/ssh_signing_keys --jq ".[] | select(.title == \"$SIGNING_KEY_TITLE\") | .id" 2>/dev/null || true)
 
 if [[ -n "$EXISTING_SIGNING_KEY" ]]; then
     if [[ "$FORCE" == true ]]; then
         if gh api -X DELETE "/user/ssh_signing_keys/$EXISTING_SIGNING_KEY" 2>/dev/null; then
-            if gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>/dev/null; then
-                echo "Signing key updated on your GitHub account"
-            else
-                echo "Warning: Could not re-add signing key"
-            fi
+            echo -e "\033[31m✓\033[0m Signing key deleted from GitHub"
         else
-            echo "Warning: Could not delete existing signing key (may need: gh auth refresh -s admin:ssh_signing_key)"
+            die "Could not delete existing signing key (run: gh auth refresh -s admin:ssh_signing_key)"
         fi
     else
-        echo "Signing key already exists on GitHub (use -f to update)"
+        echo "Signing key '$SIGNING_KEY_TITLE' already exists on GitHub (use -f to update)"
+        echo "Done! Key: $KEY_PATH"
+        exit 0
     fi
-else
-    # Try to add - handle "already in use" gracefully
-    ADD_OUTPUT=$(gh ssh-key add "$KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>&1) && {
-        echo "Signing key added to your GitHub account"
-    } || {
-        if echo "$ADD_OUTPUT" | grep -q "already in use"; then
-            echo "Signing key already registered on your GitHub account"
-        elif echo "$ADD_OUTPUT" | grep -q "ssh_signing_key"; then
-            echo ""
-            echo "To enable signed commits verification on GitHub, run:"
-            echo "  gh auth refresh -s admin:ssh_signing_key"
-            echo "  $0 $KEYNAME -f"
-        else
-            echo "Warning: Could not add signing key: $ADD_OUTPUT"
-        fi
-    }
 fi
 
-echo "Done! Key: $KEY_PATH"
+# Add the new signing key
+ADD_OUTPUT=$(gh ssh-key add "$SIGNING_KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>&1) && {
+    echo -e "\033[32m✓\033[0m Signing key added to your GitHub account"
+} || {
+    if echo "$ADD_OUTPUT" | grep -q "already in use"; then
+        die "Signing key already in use (this shouldn't happen with a fresh key)"
+    elif echo "$ADD_OUTPUT" | grep -qi "scope\|ssh_signing_key\|permission"; then
+        echo ""
+        die "Missing permission. Run: gh auth refresh -s admin:ssh_signing_key && $0 $KEYNAME -f"
+    else
+        die "Could not add signing key: $ADD_OUTPUT"
+    fi
+}
+
+echo "Done!"
+echo "  Deploy key: $KEY_PATH"
+echo "  Signing key: $SIGNING_KEY_PATH"

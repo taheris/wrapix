@@ -101,16 +101,20 @@ Host github.com
     IdentitiesOnly yes
 EOF
   chmod 600 "$HOME/.ssh/config"
+fi
 
-  # Configure git SSH signing using deploy key
+# Configure git SSH signing using separate signing key
+# (GitHub doesn't allow same key for deploy and signing)
+WRAPIX_SIGNING_KEY=$(expand_path "${WRAPIX_SIGNING_KEY:-}")
+if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   git config --global gpg.format ssh
-  git config --global user.signingkey "$WRAPIX_DEPLOY_KEY"
+  git config --global user.signingkey "$WRAPIX_SIGNING_KEY"
 
   # Create allowed_signers for signature verification
-  # Write temp file to writable location (deploy key dir may be read-only mount)
+  # Write temp file to writable location (signing key dir may be read-only mount)
   mkdir -p "$HOME/.config/git"
-  PUBKEY_TMP="$HOME/.config/git/deploy_key.pub.tmp"
-  if ssh-keygen -y -f "$WRAPIX_DEPLOY_KEY" > "$PUBKEY_TMP" 2>/dev/null; then
+  PUBKEY_TMP="$HOME/.config/git/signing_key.pub.tmp"
+  if ssh-keygen -y -f "$WRAPIX_SIGNING_KEY" > "$PUBKEY_TMP" 2>/dev/null; then
     echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$PUBKEY_TMP")" > "$HOME/.config/git/allowed_signers"
     rm "$PUBKEY_TMP"
     git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"

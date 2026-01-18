@@ -178,15 +178,21 @@ in
               MOUNT_ARGS="$MOUNT_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
             fi
 
-            # Add deploy key: mount parent dir to staging if key exists
+            # Add deploy key and signing key: mount parent dir to staging if key exists
             DEPLOY_KEY_NAME=${deployKeyExpr}
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+            SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
             DEPLOY_KEY_ARGS=""
             if [ -f "$DEPLOY_KEY" ]; then
               MOUNT_ARGS="$MOUNT_ARGS -v $HOME/.ssh/deploy_keys:/mnt/wrapix/deploy_keys"
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
               FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
               DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+            fi
+            if [ -f "$SIGNING_KEY" ]; then
+              [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME-signing:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+              DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
             fi
 
             # Stage .beads config files for container-local database isolation
