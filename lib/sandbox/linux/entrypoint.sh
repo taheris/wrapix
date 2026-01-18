@@ -14,10 +14,12 @@ if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
   git config --global user.signingkey "$WRAPIX_DEPLOY_KEY"
 
   # Create allowed_signers for signature verification
+  # Write temp file to writable location (deploy key dir may be read-only mount)
   mkdir -p "$HOME/.config/git"
-  if ssh-keygen -y -f "$WRAPIX_DEPLOY_KEY" > "$WRAPIX_DEPLOY_KEY.pub.tmp" 2>/dev/null; then
-    echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$WRAPIX_DEPLOY_KEY.pub.tmp")" > "$HOME/.config/git/allowed_signers"
-    rm "$WRAPIX_DEPLOY_KEY.pub.tmp"
+  PUBKEY_TMP="$HOME/.config/git/deploy_key.pub.tmp"
+  if ssh-keygen -y -f "$WRAPIX_DEPLOY_KEY" > "$PUBKEY_TMP" 2>/dev/null; then
+    echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$PUBKEY_TMP")" > "$HOME/.config/git/allowed_signers"
+    rm "$PUBKEY_TMP"
     git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
   fi
 fi
