@@ -113,13 +113,16 @@ in
 
         # Stage .beads config files for container-local database isolation
         # Copy to staging (like Darwin) so atomic renames work inside the mount
-        # bd init creates fresh beads.db inside container from the staged JSONL
+        # bd init creates fresh database inside container from staged source
         BEADS_ARGS=""
         BEADS_STAGING=""
         if [ -d "$PROJECT_DIR/.beads" ]; then
           BEADS_STAGING="$STAGING_ROOT/beads"
           mkdir -p "$BEADS_STAGING"
           [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
+          [ -f "$PROJECT_DIR/.beads/metadata.json" ] && cp "$PROJECT_DIR/.beads/metadata.json" "$BEADS_STAGING/"
+          # Stage data source: dolt-remote/ for Dolt mode, issues.jsonl for SQLite mode
+          [ -d "$PROJECT_DIR/.beads/dolt-remote" ] && cp -r "$PROJECT_DIR/.beads/dolt-remote" "$BEADS_STAGING/"
           [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
         fi
