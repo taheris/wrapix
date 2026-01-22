@@ -52,6 +52,16 @@ sync-branch: "beads"
 #     - ~/beads-planning  # Personal planning repo
 #     - ~/work-planning   # Work planning repo
 
+# Dolt-native sync configuration
+# When enabled, uses Dolt remotes instead of JSONL for sync between containers
+sync:
+  mode: dolt-native          # Use Dolt remotes instead of JSONL
+
+# Dolt remote for container sync
+# Uses file:// URL inside project so existing .beads/ mount handles sync
+federation:
+  remote: "file:///workspace/.beads/dolt-remote"
+
 # Integration settings (access with 'bd config get/set')
 # These are stored in the database, not in this file:
 # - jira.url

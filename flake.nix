@@ -5,12 +5,12 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     beads = {
-      url = "github:steveyegge/beads/v0.47.1";
+      url = "github:steveyegge/beads/v0.49.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     beads-viewer = {
-      url = "github:Dicklesworthstone/beads_viewer/v0.12.1";
+      url = "github:Dicklesworthstone/beads_viewer/v0.13.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

@@ -43,12 +43,25 @@ if [ -n "${RUSTUP_HOME:-}" ] && command -v rustup &>/dev/null; then
   fi
 fi
 
-# Initialize container-local beads database from workspace JSONL if available
-# This provides isolation while syncing changes back via JSONL -> host daemon
-if [ -f /workspace/.beads/issues.jsonl ] && [ -f /workspace/.beads/config.yaml ]; then
+# Initialize container-local beads database
+# Detect backend from metadata.json and use appropriate init strategy
+if [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
   if [ -n "$PREFIX" ]; then
-    bd init --prefix "$PREFIX" --from-jsonl --quiet
+    # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
+    BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
+
+    if [ "$BACKEND" = "dolt" ]; then
+      # Dolt mode: init from Dolt remote (source of truth is dolt-remote/)
+      if [ -d /workspace/.beads/dolt-remote ]; then
+        bd init --prefix "$PREFIX" --backend dolt --from-remote --quiet
+      fi
+    else
+      # Legacy SQLite mode: init from JSONL
+      if [ -f /workspace/.beads/issues.jsonl ]; then
+        bd init --prefix "$PREFIX" --from-jsonl --quiet
+      fi
+    fi
   fi
 fi
 
