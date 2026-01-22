@@ -96,12 +96,14 @@ in
         VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/$USER/.ssh/known_hosts:ro"
         VOLUME_ARGS="$VOLUME_ARGS -v ${prompt}:/etc/wrapix-prompt:ro"
 
-        # Mount notification socket if daemon is running
-        NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"
-        if [ -S "$NOTIFY_SOCKET" ]; then
-          VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
+        # Mount notification socket directory if daemon is running
+        # We mount the directory (not the socket file) so daemon restarts work
+        # without needing to restart the container
+        NOTIFY_SOCKET_DIR="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix"
+        if [ -S "$NOTIFY_SOCKET_DIR/notify.sock" ]; then
+          VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET_DIR:/run/wrapix"
         else
-          echo "Note: Notification socket not found at $NOTIFY_SOCKET" >&2
+          echo "Note: Notification socket not found at $NOTIFY_SOCKET_DIR/notify.sock" >&2
           echo "      Run 'nix run .#wrapix-notifyd' on host for desktop notifications" >&2
         fi
 

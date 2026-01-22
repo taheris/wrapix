@@ -30,13 +30,19 @@ else
   exit 1
 fi
 
-# Test 3: Write test
+# Test 3: Write test (verifies daemon is listening)
 echo ""
 echo "Test 3: Socket writability"
-if echo '{"title":"test","message":"test"}' | nc -U -N /run/wrapix/notify.sock 2>/dev/null; then
+if echo '{"title":"test","message":"test"}' | socat -u STDIN UNIX-CONNECT:/run/wrapix/notify.sock 2>/dev/null; then
   echo "  PASS: Successfully wrote to socket"
 else
   echo "  FAIL: Could not write to socket"
+  echo ""
+  echo "  This usually means one of:"
+  echo "    1. Stale socket mount - the daemon was restarted after the container started."
+  echo "       Fix: Restart the container to pick up the new socket."
+  echo "    2. Daemon not running - wrapix-notifyd is not running on the host."
+  echo "       Fix: Run 'nix run .#wrapix-notifyd' on the host."
   exit 1
 fi
 

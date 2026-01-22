@@ -44,14 +44,18 @@ pkgs.writeShellApplication {
       }
     }
 
-    echo "wrapix-notifyd: listening on $SOCKET"
-    while true; do
-      socat UNIX-LISTEN:"$SOCKET",fork - | while read -r line; do
-        title=$(echo "$line" | jq -r '.title // "Claude Code"')
-        msg=$(echo "$line" | jq -r '.message // ""')
-        sound=$(echo "$line" | jq -r '.sound // ""')
+    # Handler script for each connection - receives JSON on stdin
+    handler() {
+      while read -r line; do
+        title=$(printf '%s\n' "$line" | jq -r '.title // "Claude Code"')
+        msg=$(printf '%s\n' "$line" | jq -r '.message // ""')
+        sound=$(printf '%s\n' "$line" | jq -r '.sound // ""')
         notify "$title" "$msg" "$sound"
       done
-    done
+    }
+    export -f handler notify
+
+    echo "wrapix-notifyd: listening on $SOCKET"
+    socat UNIX-LISTEN:"$SOCKET",fork SYSTEM:'bash -c handler'
   '';
 }
