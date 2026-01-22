@@ -19,15 +19,25 @@ let
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
   profiles = import ./profiles.nix { pkgs = linuxPkgs; };
 
+  # Claude settings to suppress onboarding prompts and set defaults
+  claudeSettings = {
+    autoUpdates = false;
+    bypassPermissionsModeAccepted = true;
+    hasCompletedOnboarding = true;
+    hasSeenTasksHint = true;
+    model = "claude-opus-4-5-20251101";
+    numStartups = 1;
+    officialMarketplaceAutoInstallAttempted = true;
+  };
+
   # Build the container image using Linux packages
   # On Darwin, this will use a remote Linux builder if configured
   mkImage =
     { profile, entrypointSh }:
     import ./image.nix {
       pkgs = linuxPkgs;
-      inherit profile entrypointSh;
+      inherit profile entrypointSh claudeSettings;
       entrypointPkg = linuxPkgs.claude-code;
-      claudeConfigInit = ./init-claude-config.sh;
     };
 
   # Merge extra packages/mounts/env into a profile
