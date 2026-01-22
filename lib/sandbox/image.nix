@@ -13,6 +13,7 @@
   profile,
   entrypointPkg,
   entrypointSh,
+  claudeConfigInit,
 }:
 
 let
@@ -79,11 +80,14 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p tmp home root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
     chmod 1777 tmp var/cache
 
-    mkdir -p etc
+    mkdir -p etc/wrapix
     echo "127.0.0.1 localhost" > etc/hosts
 
     cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
+
+    cp ${claudeConfigInit} etc/wrapix/init-claude-config.sh
+    chmod +x etc/wrapix/init-claude-config.sh
 
     # Fix Nix permissions for non-root users
     # (includeNixDB creates files owned by root)
