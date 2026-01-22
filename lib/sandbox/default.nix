@@ -29,9 +29,6 @@ let
   };
 
   # Claude settings (~/.claude/settings.json) - user preferences
-  # Note: ANTHROPIC_MODEL env var is used instead of 'model' field because
-  # Claude Code removes the model field from settings.json on startup.
-  # Environment variables have higher priority than the settings file.
   claudeSettings = {
     "$schema" = "https://json.schemastore.org/claude-code-settings.json";
     autoUpdates = false;
@@ -41,6 +38,19 @@ let
       DISABLE_AUTOUPDATER = "1";
       DISABLE_ERROR_REPORTING = "1";
       DISABLE_TELEMETRY = "1";
+    };
+    hooks = {
+      Notification = [
+        {
+          matcher = "";
+          hooks = [
+            {
+              type = "command";
+              command = "wrapix-notify 'Claude Code' 'Waiting for input...'";
+            }
+          ];
+        }
+      ];
     };
   };
 
