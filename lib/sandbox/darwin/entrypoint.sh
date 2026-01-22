@@ -142,7 +142,9 @@ if [ ! -f "$HOME/.claude.json" ]; then
 {
   "hasCompletedOnboarding": true,
   "autoUpdates": false,
-  "numStartups": 1
+  "numStartups": 1,
+  "bypassPermissionsModeAccepted": true,
+  "officialMarketplaceAutoInstallAttempted": true
 }
 EOF
   chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
