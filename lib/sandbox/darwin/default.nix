@@ -50,7 +50,7 @@ in
 
             # Ensure container system is running
             if ! container system status >/dev/null 2>&1; then
-              echo "Starting container system..."
+              echo "Starting container system..." >&2
               container system start
               sleep 2
             fi
@@ -169,8 +169,10 @@ in
       MOUNTS
 
             # Add SSH known_hosts and system prompt (directories from Nix store)
+            # Note: prompt mounted to /etc/wrapix-prompts (not /etc/wrapix) to preserve
+            # claude-config.json and claude-settings.json baked into /etc/wrapix by image.nix
             MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
-            MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix-prompts"
 
             # Add notification socket directory if daemon is running
             # We mount the directory (not the socket file) so daemon restarts work
@@ -268,7 +270,7 @@ in
               --dns 100.100.100.100 \
               --dns 1.1.1.1 \
               -v "$PROJECT_DIR:/workspace" \
-              -v "$PROJECT_DIR/.claude:/home/\$USER/.claude" \
+              -v "$PROJECT_DIR/.claude:/home/$USER/.claude" \
               $MOUNT_ARGS \
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \

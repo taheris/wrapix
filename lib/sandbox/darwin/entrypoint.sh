@@ -180,4 +180,4 @@ if [ -f /workspace/.beads/config.yaml ]; then
 fi
 
 exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-  claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix/wrapix-prompt)"
+  claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompts/wrapix-prompt)"
