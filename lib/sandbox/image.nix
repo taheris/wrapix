@@ -13,6 +13,7 @@
   profile,
   entrypointPkg,
   entrypointSh,
+  claudeConfig,
   claudeSettings,
 }:
 
@@ -27,7 +28,8 @@ let
     filter-syscalls = false
   '';
 
-  # Generate Claude settings JSON from Nix attribute set
+  # Generate Claude JSON files from Nix attribute sets
+  claudeConfigJson = pkgs.writeText "claude-config.json" (builtins.toJSON claudeConfig);
   claudeSettingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON claudeSettings);
 
   # Base passwd/group (user added at runtime with host UID)
@@ -89,6 +91,7 @@ pkgs.dockerTools.buildLayeredImage {
     cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
 
+    cp ${claudeConfigJson} etc/wrapix/claude-config.json
     cp ${claudeSettingsJson} etc/wrapix/claude-settings.json
 
     # Fix Nix permissions for non-root users

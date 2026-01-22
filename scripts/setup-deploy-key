@@ -95,9 +95,9 @@ if [[ -n "$EXISTING_SIGNING_KEY" ]]; then
 fi
 
 # Add the new signing key
-ADD_OUTPUT=$(gh ssh-key add "$SIGNING_KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>&1) && {
+if ADD_OUTPUT=$(gh ssh-key add "$SIGNING_KEY_PATH.pub" --title "$SIGNING_KEY_TITLE" --type signing 2>&1); then
     echo -e "\033[32m✓\033[0m Signing key added to your GitHub account"
-} || {
+else
     if echo "$ADD_OUTPUT" | grep -q "already in use"; then
         die "Signing key already in use (this shouldn't happen with a fresh key)"
     elif echo "$ADD_OUTPUT" | grep -qi "scope\|ssh_signing_key\|permission"; then
@@ -106,7 +106,7 @@ ADD_OUTPUT=$(gh ssh-key add "$SIGNING_KEY_PATH.pub" --title "$SIGNING_KEY_TITLE"
     else
         die "Could not add signing key: $ADD_OUTPUT"
     fi
-}
+fi
 
 echo "Done!"
 echo "  Deploy key: $KEY_PATH"
