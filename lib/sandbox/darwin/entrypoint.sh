@@ -154,16 +154,14 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
     BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
-    if [ "$BACKEND" = "dolt" ]; then
-      # Dolt mode: init from Dolt remote (source of truth is dolt-remote/)
-      if [ -d /workspace/.beads/dolt-remote ]; then
-        bd init --prefix "$PREFIX" --backend dolt --from-remote --quiet
-      fi
-    else
-      # Legacy SQLite mode: init from JSONL
-      if [ -f /workspace/.beads/issues.jsonl ]; then
-        bd init --prefix "$PREFIX" --from-jsonl --quiet
-      fi
+    if [ "$BACKEND" = "dolt" ] && [ -d /workspace/.beads/dolt-remote ]; then
+      # Dolt mode: copy dolt-remote as working database, then init
+      mkdir -p /workspace/.beads/dolt
+      cp -r /workspace/.beads/dolt-remote/. /workspace/.beads/dolt/beads/
+      bd init --prefix "$PREFIX" --backend dolt --quiet 2>/dev/null || true
+    elif [ -f /workspace/.beads/issues.jsonl ]; then
+      # SQLite/fallback mode: init from JSONL
+      bd init --prefix "$PREFIX" --from-jsonl --quiet
     fi
   fi
 fi
