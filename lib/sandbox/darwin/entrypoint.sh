@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Add user entry with host UID (passwd is writable at runtime)
-# Note: home directory must be /home/$HOST_USER to match where we copy .claude.json
+# Note: home directory must be /home/$HOST_USER to match where we copy .claude/settings.json
 echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/home/$HOST_USER:/bin/bash" >> /etc/passwd
 echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
 
@@ -136,9 +136,12 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
-# Initialize Claude config (suppress onboarding prompts)
-source /etc/wrapix/init-claude-config.sh
-[ -f "$HOME/.claude.json" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
+# Initialize Claude settings if not already present (from workspace mount)
+if [ ! -f "$HOME/.claude/settings.json" ]; then
+  mkdir -p "$HOME/.claude"
+  cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
+  chown -R "$HOST_UID:$HOST_UID" "$HOME/.claude"
+fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
