@@ -1,27 +1,47 @@
 # Container-side notification client
 #
-# Sends notification requests to the host daemon via Unix socket.
-# Silently succeeds if daemon is not running (socket doesn't exist).
+# Sends notification requests to the host daemon.
+# - Darwin containers: uses TCP to host gateway (VirtioFS can't pass Unix sockets)
+# - Linux containers: uses Unix socket (mounted from host)
+#
+# Silently succeeds if daemon is not running.
 #
 # Usage: wrapix-notify "Title" "Message" ["Sound"]
 { pkgs }:
 
 pkgs.writeShellScriptBin "wrapix-notify" ''
   SOCKET="/run/wrapix/notify.sock"
+  TCP_PORT=5959      # Must match daemon.nix
   VERBOSE="''${WRAPIX_NOTIFY_VERBOSE:-0}"
   title="''${1:-Claude Code}"
   message="''${2:-}"
   sound="''${3:-}"
 
+  # Build JSON payload (compact single-line for line-based daemon protocol)
+  payload=$(${pkgs.jq}/bin/jq -cn --arg t "$title" --arg m "$message" --arg s "$sound" \
+    '{title: $t, message: $m, sound: $s}')
+
+  # Darwin containers set WRAPIX_NOTIFY_TCP=1 (VirtioFS can't pass Unix sockets)
+  if [ "''${WRAPIX_NOTIFY_TCP:-}" = "1" ]; then
+    # Get gateway IP (the host) from routing table
+    GATEWAY=$(${pkgs.iproute2}/bin/ip route | ${pkgs.gawk}/bin/awk '/default/ {print $3; exit}')
+    if [ -z "$GATEWAY" ]; then
+      [ "$VERBOSE" = "1" ] && echo "wrapix-notify: no gateway found" >&2
+      exit 0
+    fi
+    [ "$VERBOSE" = "1" ] && echo "wrapix-notify: using TCP to $GATEWAY:$TCP_PORT" >&2
+    printf '%s\n' "$payload" | ${pkgs.netcat}/bin/nc -N "$GATEWAY" "$TCP_PORT" 2>/dev/null || true
+    [ "$VERBOSE" = "1" ] && echo "wrapix-notify: sent via TCP" >&2
+    exit 0
+  fi
+
+  # Linux containers: use Unix socket mounted from host
   if [ ! -S "$SOCKET" ]; then
     [ "$VERBOSE" = "1" ] && echo "wrapix-notify: socket not found at $SOCKET" >&2
     exit 0  # Silent success if daemon not running
   fi
 
-  # Use jq -c for compact single-line JSON (daemon reads line-by-line)
-  ${pkgs.jq}/bin/jq -cn --arg t "$title" --arg m "$message" --arg s "$sound" \
-    '{title: $t, message: $m, sound: $s}' | \
-    ${pkgs.netcat}/bin/nc -U -N "$SOCKET" 2>/dev/null || true
+  printf '%s\n' "$payload" | ${pkgs.netcat}/bin/nc -U -N "$SOCKET" 2>/dev/null || true
   [ "$VERBOSE" = "1" ] && echo "wrapix-notify: sent to $SOCKET" >&2
   exit 0
 ''

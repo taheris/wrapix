@@ -226,20 +226,33 @@ else
   FAILED=1
 fi
 
-# Test 10: Socket mount permissions (VirtioFS quirk - entrypoint fixes perms)
+# Test 10: Notification transport configuration (Darwin uses TCP, not mounted sockets)
 echo ""
-echo "Test 10: Socket mount permissions (WRAPIX_SOCK_MOUNTS)"
+echo "Test 10: Notification transport"
+if [ "${WRAPIX_NOTIFY_TCP:-}" = "1" ]; then
+  echo "  PASS: WRAPIX_NOTIFY_TCP=1 (TCP transport enabled)"
+  GATEWAY=$(ip route | awk '/default/ {print $3; exit}')
+  if [ -n "$GATEWAY" ]; then
+    echo "  PASS: Gateway found at $GATEWAY (notifications use TCP port 5959)"
+  else
+    echo "  FAIL: No gateway found"
+    FAILED=1
+  fi
+else
+  echo "  FAIL: WRAPIX_NOTIFY_TCP not set"
+  echo "        Darwin containers should have WRAPIX_NOTIFY_TCP=1"
+  FAILED=1
+fi
+
+# Legacy socket mounts (for user-defined mounts, not notifications)
 if [ -n "${WRAPIX_SOCK_MOUNTS:-}" ]; then
-  echo "  PASS: WRAPIX_SOCK_MOUNTS=$WRAPIX_SOCK_MOUNTS"
-  # Parse WRAPIX_SOCK_MOUNTS and check each socket
+  echo "  INFO: WRAPIX_SOCK_MOUNTS=$WRAPIX_SOCK_MOUNTS (user-defined)"
   IFS=',' read -ra SOCKETS <<< "$WRAPIX_SOCK_MOUNTS"
   for sock in "${SOCKETS[@]}"; do
     if [ -S "$sock" ]; then
       PERMS=$(stat -c '%a' "$sock" 2>/dev/null || stat -f '%Lp' "$sock" 2>/dev/null || echo "unknown")
       if [ "$PERMS" = "000" ]; then
-        echo "  FAIL: Socket $sock has 0000 permissions (VirtioFS quirk not fixed)"
-        echo "        Entrypoint should chmod these sockets"
-        FAILED=1
+        echo "  WARN: Socket $sock has 0000 permissions (VirtioFS limitation)"
       else
         echo "  PASS: Socket $sock has accessible permissions ($PERMS)"
       fi
@@ -247,8 +260,6 @@ if [ -n "${WRAPIX_SOCK_MOUNTS:-}" ]; then
       echo "  WARN: Socket $sock in SOCK_MOUNTS but not present"
     fi
   done
-else
-  echo "  SKIP: WRAPIX_SOCK_MOUNTS not set (no sockets mounted)"
 fi
 
 echo ""

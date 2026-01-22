@@ -174,18 +174,9 @@ in
             MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
             MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix-prompts"
 
-            # Add notification socket directory if daemon is running
-            # We mount the directory (not the socket file) so daemon restarts work
-            # without needing to restart the container
-            NOTIFY_SOCKET_DIR="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix"
-            if [ -S "$NOTIFY_SOCKET_DIR/notify.sock" ]; then
-              MOUNT_ARGS="$MOUNT_ARGS -v $NOTIFY_SOCKET_DIR:/run/wrapix"
-              [ -n "$SOCK_MOUNTS" ] && SOCK_MOUNTS="$SOCK_MOUNTS,"
-              SOCK_MOUNTS="$SOCK_MOUNTS/run/wrapix/notify.sock"
-            else
-              echo "Note: Notification socket not found at $NOTIFY_SOCKET_DIR/notify.sock" >&2
-              echo "      Run 'nix run .#wrapix-notifyd' on host for desktop notifications" >&2
-            fi
+            # Notifications use TCP to gateway (port 5959) instead of mounted Unix socket
+            # VirtioFS cannot pass Unix socket operations, so the container client
+            # connects to the host daemon via TCP (WRAPIX_NOTIFY_TCP=1 set below)
 
             # Add deploy key and signing key: mount parent dir to staging if key exists
             DEPLOY_KEY_NAME=${deployKeyExpr}
@@ -233,6 +224,8 @@ in
             [ -n "$DIR_MOUNTS" ] && ENV_ARGS+=(-e "WRAPIX_DIR_MOUNTS=$DIR_MOUNTS")
             [ -n "$FILE_MOUNTS" ] && ENV_ARGS+=(-e "WRAPIX_FILE_MOUNTS=$FILE_MOUNTS")
             [ -n "$SOCK_MOUNTS" ] && ENV_ARGS+=(-e "WRAPIX_SOCK_MOUNTS=$SOCK_MOUNTS")
+            # Tell notification client to use TCP (VirtioFS can't pass Unix sockets)
+            ENV_ARGS+=(-e "WRAPIX_NOTIFY_TCP=1")
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"
