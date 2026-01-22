@@ -27,6 +27,7 @@ let
       pkgs = linuxPkgs;
       inherit profile entrypointSh;
       entrypointPkg = linuxPkgs.claude-code;
+      claudeConfigInit = ./init-claude-config.sh;
     };
 
   # Merge extra packages/mounts/env into a profile
