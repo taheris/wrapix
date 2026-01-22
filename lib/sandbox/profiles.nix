@@ -37,26 +37,9 @@ let
   ];
 
   # Required mounts for all profiles
-  baseMounts = [
-    {
-      source = "~/.claude";
-      dest = "~/.claude";
-      mode = "rw";
-      optional = true;
-    }
-    {
-      source = "~/.claude.json";
-      dest = "~/.claude.json";
-      mode = "rw";
-      optional = true;
-    }
-    {
-      source = "~/.claude.json.backup";
-      dest = "~/.claude.json.backup";
-      mode = "rw";
-      optional = true;
-    }
-  ];
+  # Note: Host ~/.claude is NOT mounted - containers use $PROJECT_DIR/.claude instead
+  # This isolates containers from host config while persisting sessions in the project
+  baseMounts = [ ];
 
   # Environment variables in all profiles
   baseEnv = {
