@@ -226,6 +226,31 @@ else
   FAILED=1
 fi
 
+# Test 10: Socket mount permissions (VirtioFS quirk - entrypoint fixes perms)
+echo ""
+echo "Test 10: Socket mount permissions (WRAPIX_SOCK_MOUNTS)"
+if [ -n "${WRAPIX_SOCK_MOUNTS:-}" ]; then
+  echo "  PASS: WRAPIX_SOCK_MOUNTS=$WRAPIX_SOCK_MOUNTS"
+  # Parse WRAPIX_SOCK_MOUNTS and check each socket
+  IFS=',' read -ra SOCKETS <<< "$WRAPIX_SOCK_MOUNTS"
+  for sock in "${SOCKETS[@]}"; do
+    if [ -S "$sock" ]; then
+      PERMS=$(stat -c '%a' "$sock" 2>/dev/null || stat -f '%Lp' "$sock" 2>/dev/null || echo "unknown")
+      if [ "$PERMS" = "000" ]; then
+        echo "  FAIL: Socket $sock has 0000 permissions (VirtioFS quirk not fixed)"
+        echo "        Entrypoint should chmod these sockets"
+        FAILED=1
+      else
+        echo "  PASS: Socket $sock has accessible permissions ($PERMS)"
+      fi
+    else
+      echo "  WARN: Socket $sock in SOCK_MOUNTS but not present"
+    fi
+  done
+else
+  echo "  SKIP: WRAPIX_SOCK_MOUNTS not set (no sockets mounted)"
+fi
+
 echo ""
 if [ "$FAILED" -eq 0 ]; then
   echo "=== ALL TESTS PASSED ==="
