@@ -13,6 +13,8 @@ let
     profile = profiles.base;
     entrypointPkg = testPkgs.hello; # Use hello as a stand-in for claude-code in tests
     entrypointSh = ../lib/sandbox/linux/entrypoint.sh;
+    claudeConfig = { };
+    claudeSettings = { };
   };
 
   # Common VM configuration for all tests

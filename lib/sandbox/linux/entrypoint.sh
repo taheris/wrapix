@@ -33,10 +33,15 @@ if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   fi
 fi
 
-# Initialize Claude settings if not already present (from workspace mount)
+# Initialize Claude config if not already present (from workspace mount)
+if [ ! -f "$HOME/.claude.json" ]; then
+  cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
+  chmod 644 "$HOME/.claude.json"
+fi
 if [ ! -f "$HOME/.claude/settings.json" ]; then
   mkdir -p "$HOME/.claude"
   cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
+  chmod 644 "$HOME/.claude/settings.json"
 fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set

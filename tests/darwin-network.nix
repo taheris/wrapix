@@ -35,6 +35,8 @@ let
     profile = profiles.base;
     entrypointPkg = linuxPkgs.claude-code;
     entrypointSh = ../lib/sandbox/darwin/entrypoint.sh;
+    claudeConfig = { };
+    claudeSettings = { };
   };
 
   # Test script that runs inside the container
