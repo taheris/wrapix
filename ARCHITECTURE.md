@@ -85,7 +85,11 @@ This is intentional: the sandbox enables autonomous work with web research capab
 
 ### Host Notifications
 
-Native desktop notifications when Claude needs attention, via Unix socket.
+Native desktop notifications when Claude needs attention.
+
+**Transport**:
+- **Linux**: Unix socket mounted from host (`/run/wrapix/notify.sock`)
+- **macOS**: TCP to gateway IP (port 5959) - VirtioFS cannot pass Unix sockets
 
 ```
 ┌─ Container ──────────────────────────┐
@@ -93,15 +97,18 @@ Native desktop notifications when Claude needs attention, via Unix socket.
 │  Claude Code                         │
 │    └─ Hook: Stop, PostToolUse        │
 │         └─ wrapix-notify "msg"       │
-│              └─ writes to socket     │
+│              │                       │
+│              ├─ Darwin? → TCP:5959   │
+│              └─ Linux → Unix socket  │
 │                                      │
 └──────────────┬───────────────────────┘
-               │ mounted socket
+               │ TCP (Darwin) or mounted socket (Linux)
                ▼
 ┌─ Host ───────────────────────────────┐
 │                                      │
 │  wrapix-notifyd                      │
-│    └─ Listens on Unix socket         │
+│    ├─ Linux: Unix socket only        │
+│    └─ macOS: TCP:5959 + Unix socket  │
 │    └─ Triggers native notifications  │
 │         ├─ Linux: notify-send        │
 │         └─ macOS: terminal-notifier  │
@@ -109,7 +116,7 @@ Native desktop notifications when Claude needs attention, via Unix socket.
 └──────────────────────────────────────┘
 ```
 
-**Protocol**: Newline-delimited JSON over `~/.local/share/wrapix/notify.sock`
+**Protocol**: Newline-delimited JSON
 
 ```json
 {"title": "Claude Code", "message": "Task completed", "sound": "Ping"}
