@@ -34,6 +34,8 @@ let
     entrypointPkg = linuxPkgs.claude-code;
     entrypointSh =
       if isDarwin then ../lib/sandbox/darwin/entrypoint.sh else ../lib/sandbox/linux/entrypoint.sh;
+    claudeConfig = { };
+    claudeSettings = { };
   };
 
   sandboxLib = import ../lib { inherit pkgs system linuxPkgs; };

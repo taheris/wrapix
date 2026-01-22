@@ -19,15 +19,29 @@ let
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
   profiles = import ./profiles.nix { pkgs = linuxPkgs; };
 
-  # Claude settings to suppress onboarding prompts and set defaults
-  claudeSettings = {
-    autoUpdates = false;
+  # Claude config (~/.claude.json) - onboarding state and runtime flags
+  claudeConfig = {
     bypassPermissionsModeAccepted = true;
     hasCompletedOnboarding = true;
     hasSeenTasksHint = true;
-    model = "claude-opus-4-5-20251101";
     numStartups = 1;
     officialMarketplaceAutoInstallAttempted = true;
+  };
+
+  # Claude settings (~/.claude/settings.json) - user preferences
+  # Note: ANTHROPIC_MODEL env var is used instead of 'model' field because
+  # Claude Code removes the model field from settings.json on startup.
+  # Environment variables have higher priority than the settings file.
+  claudeSettings = {
+    "$schema" = "https://json.schemastore.org/claude-code-settings.json";
+    autoUpdates = false;
+    env = {
+      ANTHROPIC_MODEL = "opus";
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+      DISABLE_AUTOUPDATER = "1";
+      DISABLE_ERROR_REPORTING = "1";
+      DISABLE_TELEMETRY = "1";
+    };
   };
 
   # Build the container image using Linux packages
@@ -36,7 +50,12 @@ let
     { profile, entrypointSh }:
     import ./image.nix {
       pkgs = linuxPkgs;
-      inherit profile entrypointSh claudeSettings;
+      inherit
+        profile
+        entrypointSh
+        claudeConfig
+        claudeSettings
+        ;
       entrypointPkg = linuxPkgs.claude-code;
     };
 

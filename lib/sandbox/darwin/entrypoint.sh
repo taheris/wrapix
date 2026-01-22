@@ -136,11 +136,17 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
-# Initialize Claude settings if not already present (from workspace mount)
+# Initialize Claude config if not already present (from workspace mount)
+if [ ! -f "$HOME/.claude.json" ]; then
+  cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
+  chmod 644 "$HOME/.claude.json"
+  chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
+fi
 if [ ! -f "$HOME/.claude/settings.json" ]; then
   mkdir -p "$HOME/.claude"
   cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
-  chown -R "$HOST_UID:$HOST_UID" "$HOME/.claude"
+  chmod 644 "$HOME/.claude/settings.json"
+  chown "$HOST_UID:$HOST_UID" "$HOME/.claude/settings.json"
 fi
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
