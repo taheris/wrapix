@@ -33,18 +33,8 @@ if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   fi
 fi
 
-# Initialize Claude config if not present (suppress onboarding prompts)
-if [ ! -f "$HOME/.claude.json" ]; then
-  cat > "$HOME/.claude.json" <<'EOF'
-{
-  "hasCompletedOnboarding": true,
-  "autoUpdates": false,
-  "numStartups": 1,
-  "bypassPermissionsModeAccepted": true,
-  "officialMarketplaceAutoInstallAttempted": true
-}
-EOF
-fi
+# Initialize Claude config (suppress onboarding prompts)
+source /etc/wrapix/init-claude-config.sh
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter

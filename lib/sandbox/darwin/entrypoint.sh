@@ -136,19 +136,9 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
-# Initialize Claude config if not present (suppress onboarding prompts)
-if [ ! -f "$HOME/.claude.json" ]; then
-  cat > "$HOME/.claude.json" <<'EOF'
-{
-  "hasCompletedOnboarding": true,
-  "autoUpdates": false,
-  "numStartups": 1,
-  "bypassPermissionsModeAccepted": true,
-  "officialMarketplaceAutoInstallAttempted": true
-}
-EOF
-  chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
-fi
+# Initialize Claude config (suppress onboarding prompts)
+source /etc/wrapix/init-claude-config.sh
+[ -f "$HOME/.claude.json" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
