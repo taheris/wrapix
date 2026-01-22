@@ -100,6 +100,9 @@ in
         NOTIFY_SOCKET="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/notify.sock"
         if [ -S "$NOTIFY_SOCKET" ]; then
           VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET:/run/wrapix/notify.sock"
+        else
+          echo "Note: Notification socket not found at $NOTIFY_SOCKET" >&2
+          echo "      Run 'nix run .#wrapix-notifyd' on host for desktop notifications" >&2
         fi
 
         # Mount deploy key and signing key for this repo (see scripts/setup-deploy-key)
