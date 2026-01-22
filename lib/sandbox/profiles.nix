@@ -31,7 +31,7 @@ let
     tree
     unzip
     vim
-    which
+    whichQuiet
     yq
     zip
   ];
@@ -80,6 +80,11 @@ let
       env = baseEnv // env;
       mounts = baseMounts ++ mounts;
     };
+
+  # Suppress GNU which's verbose "no X in (PATH)" errors
+  whichQuiet = pkgs.writeShellScriptBin "which" ''
+    ${pkgs.which}/bin/which "$@" 2>/dev/null
+  '';
 
 in
 {
