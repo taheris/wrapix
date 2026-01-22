@@ -241,6 +241,10 @@ in
                 ''
             }
 
+            # Mount project's .claude as container's ~/.claude for session persistence
+            # This isolates container from host config while enabling /rename and /resume
+            mkdir -p "$PROJECT_DIR/.claude"
+
             # Run container
             # Note: -w / because WorkingDir=/workspace fails before mounts are ready
             TTY_ARGS=""
@@ -257,6 +261,7 @@ in
               --dns 100.100.100.100 \
               --dns 1.1.1.1 \
               -v "$PROJECT_DIR:/workspace" \
+              -v "$PROJECT_DIR/.claude:/home/\$USER/.claude" \
               $MOUNT_ARGS \
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \
