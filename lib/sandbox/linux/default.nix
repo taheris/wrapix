@@ -54,6 +54,12 @@ in
 
         # Build volume args
         VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
+
+        # Mount project's .claude as container's ~/.claude for session persistence
+        # This isolates container from host config while enabling /rename and /resume
+        mkdir -p "$PROJECT_DIR/.claude"
+        VOLUME_ARGS="$VOLUME_ARGS -v $PROJECT_DIR/.claude:/home/$USER/.claude:rw"
+
         dir_idx=0
 
         # Process profile mounts - stage directories to dereference symlinks
