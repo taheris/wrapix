@@ -14,12 +14,59 @@ container) needs attention.
 On macOS, the daemon listens on both TCP (for containers) and Unix socket
 (for local testing). Containers connect to the host via the gateway IP.
 
-## Files
+## Installation
 
-- `com.local.wrapix-notifyd.plist` - macOS LaunchAgent config
-- `wrapix-notifyd.service` - Linux systemd user service
+### Home-manager (recommended)
 
-## macOS Installation
+Add `wrapix-notifyd` to your home-manager configuration for automatic startup.
+
+**macOS** (launchd):
+
+```nix
+launchd.agents.wrapix-notifyd = {
+  enable = true;
+  config = {
+    ProgramArguments = [ "${pkgs.wrapix-notifyd}/bin/wrapix-notifyd" ];
+    KeepAlive = true;
+    RunAtLoad = true;
+    StandardOutPath = "/tmp/wrapix-notifyd.log";
+    StandardErrorPath = "/tmp/wrapix-notifyd.log";
+  };
+};
+```
+
+**Linux** (systemd):
+
+```nix
+systemd.user.services.wrapix-notifyd = {
+  Unit = {
+    Description = "Wrapix notification daemon";
+    After = [ "graphical-session.target" ];
+  };
+  Service = {
+    Type = "simple";
+    ExecStart = "${pkgs.wrapix-notifyd}/bin/wrapix-notifyd";
+    Restart = "always";
+    RestartSec = 5;
+  };
+  Install = {
+    WantedBy = [ "graphical-session.target" ];
+  };
+};
+```
+
+Rebuild your configuration and the daemon will start automatically.
+
+### Manual Installation
+
+For users not using home-manager, follow the platform-specific instructions below.
+
+#### Files
+
+- `com.local.wrapix-notifyd.plist` - macOS LaunchAgent template
+- `wrapix-notifyd.service` - Linux systemd user service template
+
+## macOS Manual Installation
 
 ### Option A: Run manually
 
@@ -27,7 +74,7 @@ On macOS, the daemon listens on both TCP (for containers) and Unix socket
 nix run github:taheris/wrapix#wrapix-notifyd
 ```
 
-### Option B: Install as LaunchAgent (recommended)
+### Option B: Install as LaunchAgent
 
 1. Build the daemon and note its path:
 
@@ -64,14 +111,14 @@ launchctl list | grep wrapix-notifyd
 tail -f ~/.local/state/wrapix/wrapix-notifyd.log
 ```
 
-### macOS Uninstall
+### macOS Manual Uninstall
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.local.wrapix-notifyd.plist
 rm ~/Library/LaunchAgents/com.local.wrapix-notifyd.plist
 ```
 
-## Linux Installation
+## Linux Manual Installation
 
 ### Option A: Run manually
 
@@ -111,7 +158,7 @@ systemctl --user status wrapix-notifyd
 journalctl --user -u wrapix-notifyd -f
 ```
 
-### Linux Uninstall
+### Linux Manual Uninstall
 
 ```bash
 systemctl --user disable --now wrapix-notifyd
