@@ -85,13 +85,21 @@ nix run github:taheris/wrapix#wrapix-python  # with Python toolchain
 
 ## Notifications
 
-Desktop notifications when Claude needs attention:
+Desktop notifications when Claude needs attention. See
+[scripts/notify/README.md](scripts/notify/README.md) for installation details.
+
+**Quick start** (run daemon manually):
 
 ```bash
-# host
 nix run github:taheris/wrapix#wrapix-notifyd
+```
 
-# ~/.claude/settings.json
+**Home-manager**: See [scripts/notify/README.md](scripts/notify/README.md) for
+launchd/systemd configuration.
+
+**Hook configuration** (`~/.claude/settings.json`):
+
+```json
 {
   "hooks": {
     "Stop": [
