@@ -210,6 +210,29 @@ in
               MOUNT_ARGS="$MOUNT_ARGS -v $BEADS_STAGING:/workspace/.beads"
             fi
 
+            # Session registration for focus-aware notifications (tmux only)
+            WRAPIX_SESSION_ID=""
+            WRAPIX_SESSION_FILE=""
+            if [ -n "''${TMUX:-}" ]; then
+              WRAPIX_SESSION_ID=$(tmux display-message -p '#S:#I.#P')
+              WRAPIX_SESSION_DIR="''${XDG_DATA_HOME:-$HOME/.local/share}/wrapix/sessions"
+              mkdir -p "$WRAPIX_SESSION_DIR"
+
+              # Capture terminal app name (no sudo required, may need Accessibility permission)
+              TERMINAL_APP=$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true' 2>/dev/null || echo "")
+
+              # Use safe filename (replace : and . with -)
+              SAFE_SESSION_ID="''${WRAPIX_SESSION_ID//[:\.]/-}"
+              WRAPIX_SESSION_FILE="$WRAPIX_SESSION_DIR/$SAFE_SESSION_ID.json"
+              printf '{"session_id":"%s","terminal_app":"%s"}\n' "$WRAPIX_SESSION_ID" "$TERMINAL_APP" > "$WRAPIX_SESSION_FILE"
+            fi
+
+            # Cleanup function for session file
+            cleanup_session() {
+              [ -n "$WRAPIX_SESSION_FILE" ] && [ -f "$WRAPIX_SESSION_FILE" ] && rm -f "$WRAPIX_SESSION_FILE"
+            }
+            trap cleanup_session EXIT
+
             # Build environment arguments (use array to handle spaces in values)
             ENV_ARGS=()
             ENV_ARGS+=(-e "BD_NO_DAEMON=1")
@@ -226,6 +249,8 @@ in
             [ -n "$SOCK_MOUNTS" ] && ENV_ARGS+=(-e "WRAPIX_SOCK_MOUNTS=$SOCK_MOUNTS")
             # Tell notification client to use TCP (VirtioFS can't pass Unix sockets)
             ENV_ARGS+=(-e "WRAPIX_NOTIFY_TCP=1")
+            # Pass session ID for focus-aware notifications (empty if not in tmux)
+            ENV_ARGS+=(-e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID")
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"
