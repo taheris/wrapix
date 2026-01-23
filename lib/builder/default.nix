@@ -75,21 +75,20 @@ let
 
 
       load_builder_image() {
-        IMAGE_VERSION_FILE="$WRAPIX_DATA/images/wrapix-builder.version"
-        CURRENT_IMAGE_HASH="${builderImage}"
-        mkdir -p "$WRAPIX_DATA/images"
+        # Load image into container registry if not present or outdated
+        # Use the store version file to detect if image changed (same source of truth as store init)
+        STORE_VERSION_FILE="$NIX_STORE/.image-version"
+        CURRENT_IMAGE="${builderImage}"
 
-        # Remove stale version file if it references a non-existent store path
-        if [ -f "$IMAGE_VERSION_FILE" ]; then
-          CACHED_HASH=$(cat "$IMAGE_VERSION_FILE")
-          if [ ! -e "$CACHED_HASH" ]; then
-            echo "Removing stale image version file (store path no longer exists)..."
-            rm -f "$IMAGE_VERSION_FILE"
-          fi
+        needs_load=false
+        if ! container image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
+          needs_load=true
+        elif [ ! -f "$STORE_VERSION_FILE" ] || [ "$(cat "$STORE_VERSION_FILE")" != "$CURRENT_IMAGE" ]; then
+          # Image changed or no version file - need to reload to ensure consistency
+          needs_load=true
         fi
 
-        if ! container image inspect "$BUILDER_IMAGE" >/dev/null 2>&1 || \
-           [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
+        if [ "$needs_load" = true ]; then
           echo "Loading builder image..."
           # Delete old image if exists
           container image delete "$BUILDER_IMAGE" 2>/dev/null || true
@@ -104,7 +103,6 @@ let
             container image tag "$LOADED_REF" "$BUILDER_IMAGE"
           fi
           rm -f "$OCI_TAR"
-          echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
         fi
       }
 
@@ -131,9 +129,24 @@ let
         # Ensure persistent Nix store directory exists
         mkdir -p "$NIX_STORE"
 
-        # Bootstrap: populate persistent store from image if empty (first run)
+        # Track image version inside the persistent store
+        # Re-initialize if store is empty OR if image has changed
+        STORE_VERSION_FILE="$NIX_STORE/.image-version"
+        CURRENT_IMAGE="${builderImage}"
+
+        needs_init=false
         if [ ! -d "$NIX_STORE/store" ] || [ -z "$(ls -A "$NIX_STORE/store" 2>/dev/null)" ]; then
+          needs_init=true
           echo "Initializing persistent Nix store (first run)..."
+        elif [ ! -f "$STORE_VERSION_FILE" ] || [ "$(cat "$STORE_VERSION_FILE")" != "$CURRENT_IMAGE" ]; then
+          needs_init=true
+          echo "Builder image changed, re-initializing persistent Nix store..."
+          chmod -R u+w "$NIX_STORE" 2>/dev/null || true
+          rm -rf "$NIX_STORE"
+          mkdir -p "$NIX_STORE"
+        fi
+
+        if [ "$needs_init" = true ]; then
           echo "This may take a few minutes..."
 
           # Run temp container without volume mount to export /nix
@@ -144,11 +157,23 @@ let
           # Copy /nix from container to host
           # Use container exec with tar to stream the content
           # Permission warnings are expected (some store paths are 000) and harmless
-          container exec "$TEMP_CONTAINER" tar -cf - -C / nix 2>/dev/null | tar -xf - -C "$NIX_STORE" --strip-components=1 2>/dev/null
+          # Tar returns exit 2 for these warnings, so we ignore it and verify success below
+          container exec "$TEMP_CONTAINER" tar -cf - -C / nix 2>/dev/null | tar -xf - -C "$NIX_STORE" --strip-components=1 2>/dev/null || true
+
+          # Verify the store was populated
+          if [ ! -d "$NIX_STORE/store" ] || [ -z "$(ls -A "$NIX_STORE/store" 2>/dev/null)" ]; then
+            echo "Error: Failed to initialize Nix store"
+            container stop "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+            container rm "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+            exit 1
+          fi
 
           # Cleanup temp container
           container stop "$TEMP_CONTAINER" >/dev/null 2>&1 || true
           container rm "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+
+          # Record which image this store was initialized from
+          echo "$CURRENT_IMAGE" > "$STORE_VERSION_FILE"
 
           echo "Nix store initialized ($(du -sh "$NIX_STORE" 2>/dev/null | cut -f1))"
         fi
