@@ -22,6 +22,7 @@ let
     jq
     less
     man
+    netcat
     nix
     openssh
     patch
@@ -42,12 +43,7 @@ let
   baseMounts = [ ];
 
   # Environment variables in all profiles
-  baseEnv = {
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-    DISABLE_AUTOUPDATER = "1";
-    DISABLE_ERROR_REPORTING = "1";
-    DISABLE_TELEMETRY = "1";
-  };
+  baseEnv = { };
 
   # Helper to create a profile with base packages, mounts, and env merged in
   mkProfile =
