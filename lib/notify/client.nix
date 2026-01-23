@@ -18,8 +18,10 @@ pkgs.writeShellScriptBin "wrapix-notify" ''
   sound="''${3:-}"
 
   # Build JSON payload (compact single-line for line-based daemon protocol)
+  # Include session_id for focus-aware notifications (empty if not in tmux)
   payload=$(${pkgs.jq}/bin/jq -cn --arg t "$title" --arg m "$message" --arg s "$sound" \
-    '{title: $t, message: $m, sound: $s}')
+    --arg sid "''${WRAPIX_SESSION_ID:-}" \
+    '{title: $t, message: $m, sound: $s, session_id: $sid}')
 
   # Darwin containers set WRAPIX_NOTIFY_TCP=1 (VirtioFS can't pass Unix sockets)
   if [ "''${WRAPIX_NOTIFY_TCP:-}" = "1" ]; then
