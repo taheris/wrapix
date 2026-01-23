@@ -119,8 +119,19 @@ Native desktop notifications when Claude needs attention.
 **Protocol**: Newline-delimited JSON
 
 ```json
-{"title": "Claude Code", "message": "Task completed", "sound": "Ping"}
+{"title": "Claude Code", "message": "Task completed", "sound": "Ping", "session_id": "0:1.0"}
 ```
+
+**Focus-Aware Suppression**: Notifications are suppressed when the terminal is focused.
+
+- Launcher registers tmux session ID with window ID (niri) or app name (Darwin)
+- Session files stored in `$XDG_RUNTIME_DIR/wrapix/sessions/` (Linux) or `$XDG_DATA_HOME/wrapix/sessions/` (Darwin)
+- Daemon checks if session's window is focused before showing notification
+
+| Variable | Description |
+|----------|-------------|
+| `WRAPIX_NOTIFY_ALWAYS=1` | Disable focus checking |
+| `WRAPIX_NOTIFY_VERBOSE=1` | Debug logging |
 
 ### Linux Builder (macOS)
 

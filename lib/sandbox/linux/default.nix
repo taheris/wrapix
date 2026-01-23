@@ -138,6 +138,32 @@ in
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
         fi
 
+        # Session registration for focus-aware notifications (tmux only)
+        WRAPIX_SESSION_ID=""
+        WRAPIX_SESSION_FILE=""
+        if [ -n "''${TMUX:-}" ]; then
+          WRAPIX_SESSION_ID=$(tmux display-message -p '#S:#I.#P')
+          WRAPIX_SESSION_DIR="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrapix/sessions"
+          mkdir -p "$WRAPIX_SESSION_DIR"
+
+          # Capture window ID for focus detection (niri-specific)
+          WINDOW_ID=""
+          if command -v niri >/dev/null 2>&1; then
+            WINDOW_ID=$(niri msg -j focused-window 2>/dev/null | jq -r '.id // ""') || WINDOW_ID=""
+          fi
+
+          # Use safe filename (replace : and . with -)
+          SAFE_SESSION_ID="''${WRAPIX_SESSION_ID//[:\.]/-}"
+          WRAPIX_SESSION_FILE="$WRAPIX_SESSION_DIR/$SAFE_SESSION_ID.json"
+          printf '{"session_id":"%s","window_id":"%s"}\n' "$WRAPIX_SESSION_ID" "$WINDOW_ID" > "$WRAPIX_SESSION_FILE"
+        fi
+
+        # Cleanup function for session file
+        cleanup_session() {
+          [ -n "$WRAPIX_SESSION_FILE" ] && [ -f "$WRAPIX_SESSION_FILE" ] && rm -f "$WRAPIX_SESSION_FILE"
+        }
+        trap cleanup_session EXIT
+
         # Calculate CPUs (use override or half of available, minimum 2)
         ${
           if cpus != null then
@@ -169,6 +195,7 @@ in
           -e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL" \
           -e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME" \
           -e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL" \
+          -e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID" \
           ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \
           -w /workspace \
           docker-archive:${profileImage} \
