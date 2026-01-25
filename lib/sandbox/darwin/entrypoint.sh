@@ -179,11 +179,23 @@ if [ -f /workspace/.beads/config.yaml ]; then
   fi
 fi
 
+# Build system prompt with optional context pinning
+SYSTEM_PROMPT=$(cat /etc/wrapix-prompts/wrapix-prompt)
+
+# Context pinning: append specs/README.md if it exists
+if [ -f /workspace/specs/README.md ]; then
+  SYSTEM_PROMPT="$SYSTEM_PROMPT
+
+## Project Context (from specs/README.md)
+
+$(cat /workspace/specs/README.md)"
+fi
+
 # Check for ralph mode
 if [ "${RALPH_MODE:-}" = "1" ]; then
   exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
     ralph plan
 else
   exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-    claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompts/wrapix-prompt)"
+    claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT"
 fi
