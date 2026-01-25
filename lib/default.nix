@@ -34,5 +34,5 @@ in
       '';
     };
 
-  mkSandbox = profile: sandbox.mkSandbox profile;
+  mkSandbox = sandbox.mkSandbox;
 }
