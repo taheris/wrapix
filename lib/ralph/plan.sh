@@ -78,8 +78,10 @@ LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
 
 echo "=== Starting Interview ==="
 echo ""
-# Pass prompt as argument to keep stdin open for interactive input
-claude --dangerously-skip-permissions "$PROMPT_CONTENT" 2>&1 | tee "$LOG"
+# Use script to preserve tty behavior while logging
+# This keeps stdin/stdout as a terminal so Claude runs interactively
+export PROMPT_CONTENT
+script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 
 # Check for completion
 if grep -q "INTERVIEW_COMPLETE" "$LOG" 2>/dev/null; then

@@ -132,7 +132,9 @@ LOG="$RALPH_DIR/logs/work-$NEXT_ISSUE.log"
 echo ""
 echo "=== Starting work (fresh context) ==="
 echo ""
-echo "$WORK_PROMPT" | claude --dangerously-skip-permissions 2>&1 | tee "$LOG"
+# Use script to preserve tty behavior while logging
+export WORK_PROMPT
+script -q -c 'claude --dangerously-skip-permissions "$WORK_PROMPT"' "$LOG"
 
 # Check for completion
 if grep -q "WORK_COMPLETE" "$LOG" 2>/dev/null; then
