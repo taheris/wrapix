@@ -141,20 +141,28 @@
             };
           };
 
-          devShells.default = wrapix.mkDevShell {
-            packages =
-              with pkgs;
-              [
-                beads
-                beads-viewer
-                gh
-                nixfmt
-                nixfmt-tree
-                podman
-                statix
-              ]
-              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
-          };
+          devShells.default =
+            let
+              ralphPkg = import ./lib/ralph { inherit pkgs; };
+            in
+            wrapix.mkDevShell {
+              packages =
+                with pkgs;
+                [
+                  beads
+                  beads-viewer
+                  gh
+                  nixfmt
+                  nixfmt-tree
+                  podman
+                  statix
+                ]
+                ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
+                ++ ralphPkg.scripts;
+              shellHook = ''
+                export RALPH_TEMPLATE_DIR="${ralphPkg.templateDir}"
+              '';
+            };
         };
     };
 }
