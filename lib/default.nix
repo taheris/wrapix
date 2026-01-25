@@ -6,10 +6,12 @@
 
 let
   sandbox = import ./sandbox { inherit pkgs system linuxPkgs; };
+  ralph = import ./ralph { inherit pkgs; inherit (sandbox) mkSandbox; };
 
 in
 {
   inherit (sandbox) profiles mkSandbox;
+  inherit (ralph) mkRalph;
 
   deriveProfile =
     baseProfile: extensions:
