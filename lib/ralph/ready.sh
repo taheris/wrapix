@@ -12,7 +12,7 @@ fi
 
 if [ ! -f "$PLAN" ]; then
   echo "Error: No plan found at $PLAN"
-  echo "Run ralph-loop in plan mode first to generate a plan."
+  echo "Run 'ralph plan' first to generate a plan."
   exit 1
 fi
 
@@ -39,7 +39,7 @@ echo "  Default priority: $DEFAULT_PRIORITY"
 echo "  Default type: $DEFAULT_TYPE"
 echo ""
 
-# Save label to state file for build phase to use
+# Save label to state file for step phase to use
 echo "$LABEL" > "$RALPH_DIR/state/label"
 
 # Parse YAML frontmatter documents (separated by ---)
@@ -101,9 +101,9 @@ done
 echo ""
 echo "Beads created with label: $LABEL"
 echo ""
-echo "To switch to build mode:"
-echo "  1. Edit $CONFIG_FILE and set: mode = \"build\";"
-echo "  2. Run: ralph-loop"
+echo "To work through issues:"
+echo "  ralph step      # Work one issue at a time"
+echo "  ralph loop      # Work all issues automatically"
 echo ""
 echo "To list created issues:"
 echo "  bd list --labels=$LABEL"

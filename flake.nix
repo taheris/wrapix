@@ -95,18 +95,29 @@
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
           };
 
-          apps.test-darwin = {
-            meta.description = "Run Darwin integration tests";
-            type = "app";
-            program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
-          };
+          apps = {
+            test-darwin = {
+              meta.description = "Run Darwin integration tests";
+              type = "app";
+              program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
+            };
 
-          apps.test-builder = {
-            meta.description = "Run wrapix-builder integration tests (Darwin only)";
-            type = "app";
-            program = "${pkgs.writeShellScriptBin "test-builder" ''
-              exec ${./tests/builder-test.sh}
-            ''}/bin/test-builder";
+            test-builder = {
+              meta.description = "Run wrapix-builder integration tests (Darwin only)";
+              type = "app";
+              program = "${pkgs.writeShellScriptBin "test-builder" ''
+                exec ${./tests/builder-test.sh}
+              ''}/bin/test-builder";
+            };
+
+            ralph = {
+              meta.description = "Ralph Wiggum Loop - run iterative AI workflows in sandbox";
+              type = "app";
+              program = "${pkgs.writeShellScriptBin "ralph-container" ''
+                export RALPH_MODE=1
+                exec ${wrapix.mkSandbox { profile = wrapix.profiles.base; }}/bin/wrapix "$@"
+              ''}/bin/ralph-container";
+            };
           };
 
           devShells.default = wrapix.mkDevShell {
