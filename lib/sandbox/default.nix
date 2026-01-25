@@ -87,6 +87,8 @@ let
   mkSandbox =
     {
       profile ? profiles.base,
+      cpus ? null,
+      memoryMb ? 4096,
       deployKey ? null,
       packages ? [ ],
       mounts ? [ ],
@@ -99,7 +101,7 @@ let
     if isLinux then
       linuxSandbox.mkSandbox {
         profile = finalProfile;
-        inherit deployKey;
+        inherit cpus memoryMb deployKey;
         profileImage = mkImage {
           profile = finalProfile;
           entrypointSh = ./linux/entrypoint.sh;
@@ -108,7 +110,7 @@ let
     else if isDarwin then
       darwinSandbox.mkSandbox {
         profile = finalProfile;
-        inherit deployKey;
+        inherit cpus memoryMb deployKey;
         profileImage = mkImage {
           profile = finalProfile;
           entrypointSh = ./darwin/entrypoint.sh;

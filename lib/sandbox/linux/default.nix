@@ -24,12 +24,14 @@ in
     {
       profile,
       profileImage,
-      deployKey ? null,
       cpus ? null,
       memoryMb ? 4096,
+      deployKey ? null,
+      ...
     }:
     let
       deployKeyExpr = mkDeployKeyExpr deployKey;
+
     in
     writeShellApplication {
       name = "wrapix";
