@@ -193,8 +193,10 @@ fi
 
 # Check for ralph mode
 if [ "${RALPH_MODE:-}" = "1" ]; then
+  # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
+  # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
   exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-    ralph plan
+    ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-}
 else
   exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
     claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT"
