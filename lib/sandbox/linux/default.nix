@@ -37,6 +37,9 @@ in
       name = "wrapix";
       runtimeInputs = [ pkgs.podman ];
       text = ''
+        # Ensure USER is set (may be unset in some environments)
+        USER="''${USER:-$(id -un)}"
+
         # XDG-compliant directories for staging
         XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
         WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"

@@ -9,43 +9,22 @@ let
   inherit (builtins) readFile;
   inherit (pkgs) writeShellScriptBin;
 
-  # Read script contents
-  ralphScript = readFile ./ralph.sh;
-  startScript = readFile ./start.sh;
-  planScript = readFile ./plan.sh;
-  logsScript = readFile ./logs.sh;
-  tuneScript = readFile ./tune.sh;
-  readyScript = readFile ./ready.sh;
-  stepScript = readFile ./step.sh;
-  loopScript = readFile ./loop.sh;
-  statusScript = readFile ./status.sh;
+  templateDir = ./template;
 
 in
 {
-  # Individual script packages
-  ralph = writeShellScriptBin "ralph" ralphScript;
-  ralph-start = writeShellScriptBin "ralph-start" startScript;
-  ralph-plan = writeShellScriptBin "ralph-plan" planScript;
-  ralph-logs = writeShellScriptBin "ralph-logs" logsScript;
-  ralph-tune = writeShellScriptBin "ralph-tune" tuneScript;
-  ralph-ready = writeShellScriptBin "ralph-ready" readyScript;
-  ralph-step = writeShellScriptBin "ralph-step" stepScript;
-  ralph-loop = writeShellScriptBin "ralph-loop" loopScript;
-  ralph-status = writeShellScriptBin "ralph-status" statusScript;
+  inherit templateDir;
 
-  # Template directory path (bundled in image at /etc/wrapix/ralph-template)
-  templateDir = ./template;
-
-  # All scripts as a list for easy inclusion
+  # All scripts as a list for easy inclusion in devShell
   scripts = [
-    (writeShellScriptBin "ralph" ralphScript)
-    (writeShellScriptBin "ralph-start" startScript)
-    (writeShellScriptBin "ralph-plan" planScript)
-    (writeShellScriptBin "ralph-logs" logsScript)
-    (writeShellScriptBin "ralph-tune" tuneScript)
-    (writeShellScriptBin "ralph-ready" readyScript)
-    (writeShellScriptBin "ralph-step" stepScript)
-    (writeShellScriptBin "ralph-loop" loopScript)
-    (writeShellScriptBin "ralph-status" statusScript)
+    (writeShellScriptBin "ralph" (readFile ./ralph.sh))
+    (writeShellScriptBin "ralph-start" (readFile ./start.sh))
+    (writeShellScriptBin "ralph-plan" (readFile ./plan.sh))
+    (writeShellScriptBin "ralph-logs" (readFile ./logs.sh))
+    (writeShellScriptBin "ralph-tune" (readFile ./tune.sh))
+    (writeShellScriptBin "ralph-ready" (readFile ./ready.sh))
+    (writeShellScriptBin "ralph-step" (readFile ./step.sh))
+    (writeShellScriptBin "ralph-loop" (readFile ./loop.sh))
+    (writeShellScriptBin "ralph-status" (readFile ./status.sh))
   ];
 }

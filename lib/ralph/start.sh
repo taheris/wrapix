@@ -13,7 +13,11 @@ TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 SPECS_DIR="specs"
 
 # Get label from argument or generate random 6-char
-LABEL="${1:-$(head -c 6 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 6)}"
+if [ -z "${1:-}" ]; then
+  LABEL=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6 || true)
+else
+  LABEL="$1"
+fi
 
 # Ensure ralph directory structure exists
 if [ ! -d "$RALPH_DIR" ]; then
@@ -68,6 +72,14 @@ rm -f "$RALPH_DIR/state/spec"
 echo "$LABEL" > "$RALPH_DIR/state/label"
 echo "$LABEL" > "$RALPH_DIR/state/spec"
 touch "$RALPH_DIR/state/plan.md"
+
+# Update config.nix with the label
+CONFIG_FILE="$RALPH_DIR/config.nix"
+if [ -f "$CONFIG_FILE" ]; then
+  # Handle both null and previously set string values
+  sed -i 's/label = null;/label = "'"$LABEL"'";/' "$CONFIG_FILE"
+  sed -i 's/label = "[^"]*";/label = "'"$LABEL"'";/' "$CONFIG_FILE"
+fi
 
 echo ""
 echo "Ralph started for feature: $LABEL"

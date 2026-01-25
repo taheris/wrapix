@@ -46,5 +46,5 @@ _:
     if deployKey != null then
       ''"${deployKey}"''
     else
-      ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || hostname)'';
+      ''$(basename "$PROJECT_DIR")-$(hostname -s 2>/dev/null || uname -n)'';
 }
