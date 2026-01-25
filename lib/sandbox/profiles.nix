@@ -1,41 +1,46 @@
 { pkgs }:
 
 let
+  ralph = import ../ralph { inherit pkgs; };
+
   # Base packages included in all profiles
-  basePackages = with pkgs; [
-    bash
-    beads
-    coreutils
-    curl
-    diffutils
-    fd
-    file
-    findutils
-    gawk
-    git
-    gnugrep
-    gnused
-    gnutar
-    gzip
-    iproute2
-    iputils
-    jq
-    less
-    man
-    netcat
-    nix
-    openssh
-    patch
-    procps
-    ripgrep
-    rsync
-    tree
-    unzip
-    vim
-    whichQuiet
-    yq
-    zip
-  ];
+  basePackages =
+    with pkgs;
+    [
+      bash
+      beads
+      coreutils
+      curl
+      diffutils
+      fd
+      file
+      findutils
+      gawk
+      git
+      gnugrep
+      gnused
+      gnutar
+      gzip
+      iproute2
+      iputils
+      jq
+      less
+      man
+      netcat
+      nix
+      openssh
+      patch
+      procps
+      ripgrep
+      rsync
+      tree
+      unzip
+      vim
+      whichQuiet
+      yq
+      zip
+    ]
+    ++ ralph.scripts;
 
   # Required mounts for all profiles
   # Note: Host ~/.claude is NOT mounted - containers use $PROJECT_DIR/.claude instead
