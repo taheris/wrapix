@@ -25,6 +25,8 @@ if [ ! -d "$RALPH_DIR" ]; then
 
   mkdir -p "$(dirname "$RALPH_DIR")"
   cp -r "$TEMPLATE" "$RALPH_DIR"
+  # Fix permissions - Nix store files may be read-only
+  chmod -R u+rwX "$RALPH_DIR"
   echo "Initialized ralph at $RALPH_DIR"
 fi
 
@@ -49,20 +51,9 @@ if [ ! -f "$SPECS_README" ]; then
     cat > "$SPECS_README" << 'EOF'
 # Project Specifications
 
-## Active Work (WIP)
-
-| Spec | Bead | Purpose |
+| Spec | Code | Purpose |
 |------|------|---------|
 
-## Completed (REVIEW)
-
-| Spec | Bead | Purpose |
-|------|------|---------|
-
-## Terminology Index
-
-| Term | Definition | Code Location |
-|------|------------|---------------|
 EOF
     echo "Created minimal $SPECS_README"
   fi

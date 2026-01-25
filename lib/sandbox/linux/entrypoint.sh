@@ -88,7 +88,9 @@ fi
 
 # Check for ralph mode
 if [ "${RALPH_MODE:-}" = "1" ]; then
-  exec ralph plan
+  # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
+  # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
+  exec ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-}
 else
   exec claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT"
 fi
