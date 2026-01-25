@@ -143,7 +143,8 @@
 
           devShells.default =
             let
-              ralphPkg = import ./lib/ralph { inherit pkgs; };
+              ralph = import ./lib/ralph { inherit pkgs; };
+
             in
             wrapix.mkDevShell {
               packages =
@@ -158,9 +159,10 @@
                   statix
                 ]
                 ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
-                ++ ralphPkg.scripts;
+                ++ ralph.scripts;
+
               shellHook = ''
-                export RALPH_TEMPLATE_DIR="${ralphPkg.templateDir}"
+                export RALPH_TEMPLATE_DIR="${ralph.templateDir}"
               '';
             };
         };
