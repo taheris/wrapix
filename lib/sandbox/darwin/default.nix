@@ -36,6 +36,9 @@ in
     writeShellScriptBin "wrapix" ''
             set -euo pipefail
 
+            # Ensure USER is set (may be unset in some environments)
+            USER="''${USER:-$(id -un)}"
+
             # XDG-compliant directories
             XDG_DATA_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}"
             XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
