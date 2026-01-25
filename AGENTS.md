@@ -1,144 +1,95 @@
 # Agent Instructions
 
-## Beads Workflow Integration
+## Specifications
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT
-use markdown TODOs, task lists, or other tracking methods.
+Before implementing features, consult `specs/README.md`. Key points:
+
+- **Architecture first** — Read `specs/architecture.md` for system overview
+- **Check specs before coding** — Each feature has a dedicated spec file
+- **Specs describe intent** — Code describes reality; verify against both
+- **Terminology** — `specs/README.md` has a terminology index
+
+## Commands
+
+### Building with Nix
+
+- **Enter devShell:** `nix develop`
+- **Build sandbox:** `nix build`
+- **Build with Rust:** `nix build .#wrapix-rust`
+- **Build with Python:** `nix build .#wrapix-python`
+- **Run directly:** `nix run github:taheris/wrapix`
+
+### Formatting
+
+- **Format Nix:** `nix fmt`
+- **Check format:** `nix flake check`
+
+## Issue Tracking (Beads)
+
+**Use `bd` for ALL issue tracking.** Do NOT use markdown TODOs or external trackers.
 
 ### Essential Commands
 
 ```bash
-# CLI commands for agents
-bd ready              # Show issues ready to work (no blockers)
-bd list --status=open # All open issues
-bd show <id>          # Full issue details with dependencies
-bd create --title="..." --type=task --priority=2
-bd update <id> --status=in_progress
-bd create "..." --priority=1 --deps discovered-from:<parent-id> # Discover new work
-bd close <id> --reason="Completed"
-bd close <id1> <id2>  # Close multiple issues at once
-bd sync               # Commit and push changes
+bd ready                             # Show unblocked work
+bd show <id>                         # Issue details
+bd create --title="..." --type=task  # Create issue
+bd update <id> --status=in_progress  # Claim work
+bd close <id>                        # Complete work
+bd sync                              # Sync with remote
 ```
 
-### Workflow Pattern
+### Workflow
 
-1. **Start**: Run `bd sync` first to pull latest issues, then `bd ready` to find actionable work
-2. **Claim**: Use `bd update <id> --status=in_progress`
-3. **Work**: Implement the task
-4. **Complete**: Use `bd close <id>`
-5. **Sync**: Always run `bd sync` at session end
+1. `bd sync` — Pull latest issues
+2. `bd ready` — Find actionable work
+3. `bd update <id> --status=in_progress` — Claim it
+4. Implement the task
+5. `bd close <id>` — Mark complete
+6. `bd sync` — Push changes
 
 ### Key Concepts
 
-- **Dependencies**: Issues can block other issues. `bd ready` shows only unblocked work.
-- **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers, not words)
-- **Types**: task, bug, feature, epic, question, docs
-- **Blocking**: `bd dep add <issue> <depends-on>` to add dependencies
+- **Priority:** P0=critical, P1=high, P2=medium, P3=low, P4=backlog
+- **Types:** task, bug, feature, epic, question, docs
+- **Dependencies:** `bd dep add <issue> <depends-on>`
 
-### Session Protocol
+## Session Protocol
 
-**Before ending any session, run this checklist:**
+**When ending a session or when the user says "land the plane", complete ALL steps:**
 
 ```bash
-git status              # Check what changed
-git add <files>         # Stage code changes
-git commit -m "..."     # Commit code
-bd sync                 # Sync beads (pushes to Dolt remote or commits JSONL)
+git status              # Check changes
+git add <files>         # Stage code
+git commit -m "..."     # Commit
+bd sync                 # Sync beads
 git push                # Push to remote
+git status              # Verify "up to date"
 ```
 
-### Important Rules
-
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ✅ Use bd for ALL task tracking
-- ✅ Update status as you work (in_progress → closed)
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Use descriptive titles and set appropriate priority/type
-- ✅ Run `bd <cmd> --help` to discover available flags
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-- ❌ Do NOT clutter repo root with planning documents
-
-IMPORTANT: Always Include Issue Descriptions
-
-Issues without descriptions lack context for future work. When creating issues,
-always include a meaningful description with:
-
-- Why the issue exists (problem statement or need)
-- What needs to be done (scope and approach)
-- How you discovered it (if applicable during work)
-
-## ZFC (Zero Framework Cognition) Principles
-
-Core Architecture Principle: This application is pure orchestration that
-delegates ALL reasoning to external AI. We build a “thin, safe, deterministic
-shell” around AI reasoning with strong guardrails and observability.
-
-✅ ZFC-Compliant (Allowed)
-
-- Pure Orchestration
-- IO and Plumbing; Read/write files, list directories, parse JSON,
-  serialize/deserialize; Persist to stores, watch events, index documents
-- Structural Safety Checks; Schema validation, required fields verification;
-  Path traversal prevention, timeout enforcement, cancellation handling
-- Policy Enforcement; Budget caps, rate limits, confidence thresholds; “Don’t
-  run without approval” gates
-- Mechanical Transforms; Parameter substitution (e.g., ${param} replacement);
-  Compilation; Formatting and rendering AI-provided data
-- State Management; Lifecycle tracking, progress monitoring; Mission journaling,
-  escalation policy execution
-- Typed Error Handling; Use SDK-provided error classes (instanceof checks);
-  Avoid message parsing
-
-❌ ZFC-Violations (Forbidden)
-
-- Local Intelligence/Reasoning
-- Ranking/Scoring/Selection; Any algorithm that chooses among alternatives based
-  on heuristics or weights
-- Plan/Composition/Scheduling; Decisions about dependencies, ordering,
-  parallelization, retry policies
-- Semantic Analysis; Inferring complexity, scope, file dependencies; Determining
-  “what should be done next”
-- Heuristic Classification; Keyword-based routing; Fallback decision trees;
-  Domain-specific rules
-- Quality Judgment; Opinionated validation beyond structural safety;
-  Recommendations like “test-first recommended”
-
-🔄 ZFC-Compliant Pattern
-
-The Correct Flow
-1. Gather Raw Context (IO only); User intent, project files, constraints,
-   mission state
-2. Call AI for Decisions; Classification, selection, composition; Ordering,
-   validation, next steps
-3. Validate Structure; Schema conformance; Safety checks; Policy enforcement
-4. Execute Mechanically; Run AI’s decisions without modification
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT
-complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs
-   follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
+**Rules:**
 - Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+- NEVER stop before pushing
+- If push fails, resolve and retry
+
+## Code Style
+
+### Nix
+
+- Use `nixfmt` for formatting (run `nix fmt`)
+- Use `inherit` to bring names into scope: `inherit (lib) mkOption;`
+- Keep expressions pure; side effects only in builders
+
+### Shell Scripts
+
+- Use `shellcheck` to lint scripts
+- Use `set -euo pipefail` at the top
+- Quote variables: `"$VAR"` not `$VAR`
+- Use `${VAR:-default}` for optional variables
+- Prefer `[[` over `[` for conditionals
+
+### Documentation
+
+- Specs go in `specs/` — one per feature
+- Update `specs/README.md` when adding specs
+- Keep architecture.md as a high-level overview

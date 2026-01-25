@@ -45,10 +45,10 @@ if [ ! -f "$SPEC_FILE" ]; then
 fi
 SPEC_NAME=$(cat "$SPEC_FILE")
 
-PROMPT_TEMPLATE="$RALPH_DIR/prompts/interview.md"
+PROMPT_TEMPLATE="$RALPH_DIR/plan.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
-  echo "Error: Interview prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure prompts/interview.md exists in your ralph directory."
+  echo "Error: Plan prompt template not found: $PROMPT_TEMPLATE"
+  echo "Make sure plan.md exists in your ralph directory."
   exit 1
 fi
 

@@ -5,13 +5,13 @@ RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 PHASE="${1:-}"
 
 case "$PHASE" in
-  plan) PROMPT_FILE="$RALPH_DIR/prompts/plan.md" ;;
-  step) PROMPT_FILE="$RALPH_DIR/prompts/step.md" ;;
+  plan) PROMPT_FILE="$RALPH_DIR/plan.md" ;;
+  step) PROMPT_FILE="$RALPH_DIR/step.md" ;;
   "")
     echo "Usage: ralph tune <plan|step>"
     echo ""
-    echo "  plan  Edit prompts/plan.md"
-    echo "  step  Edit prompts/step.md"
+    echo "  plan  Edit plan.md"
+    echo "  step  Edit step.md"
     exit 0
     ;;
   *)

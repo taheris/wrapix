@@ -7,7 +7,7 @@ Secure sandbox for running [Claude Code](https://claude.ai/code) in isolated con
 
 ## Documentation
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and security model.
+See [specs/architecture.md](specs/architecture.md) for the design and security model.
 
 ## Basic usage
 

@@ -48,10 +48,10 @@ fi
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
-PROMPT_TEMPLATE="$RALPH_DIR/prompts/ready.md"
+PROMPT_TEMPLATE="$RALPH_DIR/ready.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure prompts/ready.md exists in your ralph directory."
+  echo "Make sure ready.md exists in your ralph directory."
   exit 1
 fi
 
