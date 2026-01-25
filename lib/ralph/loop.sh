@@ -29,39 +29,21 @@ while true; do
   echo "=== Step $step_count ==="
 
   # Run ralph-step with optional feature name argument
-  if [ -n "$FEATURE_NAME" ]; then
-    OUTPUT=$(ralph-step "$FEATURE_NAME" 2>&1) || {
-      EXIT_CODE=$?
-      echo "$OUTPUT"
+  OUTPUT=$(ralph-step ${FEATURE_NAME:+"$FEATURE_NAME"} 2>&1) || {
+    EXIT_CODE=$?
+    echo "$OUTPUT"
 
-      # Check if we exited because no more issues (success message)
-      if echo "$OUTPUT" | grep -q "All work complete!"; then
-        break
-      fi
+    # Check if we exited because no more issues (success message)
+    if echo "$OUTPUT" | grep -q "All work complete!"; then
+      break
+    fi
 
-      echo ""
-      echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
-      echo "Review the logs and fix the issue before continuing."
-      echo "To resume: ralph loop $FEATURE_NAME"
-      exit 1
-    }
-  else
-    OUTPUT=$(ralph-step 2>&1) || {
-      EXIT_CODE=$?
-      echo "$OUTPUT"
-
-      # Check if we exited because no more issues (success message)
-      if echo "$OUTPUT" | grep -q "All work complete!"; then
-        break
-      fi
-
-      echo ""
-      echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
-      echo "Review the logs and fix the issue before continuing."
-      echo "To resume: ralph loop"
-      exit 1
-    }
-  fi
+    echo ""
+    echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
+    echo "Review the logs and fix the issue before continuing."
+    echo "To resume: ralph loop${FEATURE_NAME:+ $FEATURE_NAME}"
+    exit 1
+  }
 
   echo "$OUTPUT"
   echo ""
