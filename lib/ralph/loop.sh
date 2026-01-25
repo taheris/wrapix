@@ -7,8 +7,6 @@ set -euo pipefail
 # When last bead completes, transitions WIP -> REVIEW
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
-SPECS_DIR="specs"
-SPECS_README="$SPECS_DIR/README.md"
 
 # Get feature name from argument or state
 FEATURE_NAME="${1:-}"
@@ -18,19 +16,6 @@ if [ -z "$FEATURE_NAME" ]; then
     FEATURE_NAME=$(cat "$SPEC_FILE")
   fi
 fi
-
-# Function to update spec status to REVIEW
-update_spec_status_to_review() {
-  local feature="$1"
-  if [ ! -f "$SPECS_README" ]; then
-    return
-  fi
-
-  echo ""
-  echo "All tasks for '$feature' are complete!"
-  echo "Spec moved to REVIEW status."
-  echo "Please update specs/README.md to move the spec from WIP to REVIEW."
-}
 
 echo "Ralph Wiggum Work Loop starting..."
 if [ -n "$FEATURE_NAME" ]; then
@@ -86,8 +71,3 @@ done
 
 echo ""
 echo "All work complete after $step_count step(s)!"
-
-# Trigger completion notification
-if [ -n "$FEATURE_NAME" ]; then
-  update_spec_status_to_review "$FEATURE_NAME"
-fi
