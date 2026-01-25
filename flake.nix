@@ -114,8 +114,29 @@
               meta.description = "Ralph Wiggum Loop - run iterative AI workflows in sandbox";
               type = "app";
               program = "${pkgs.writeShellScriptBin "ralph-container" ''
+                # Parse ralph subcommand from args (default: help)
+                # Usage: nix run .#ralph [subcommand] [args...] [-- project_dir]
+                RALPH_CMD="''${1:-help}"
+                shift || true
+
+                # Collect remaining args until -- or end
+                RALPH_ARGS=""
+                while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+                  RALPH_ARGS="$RALPH_ARGS $1"
+                  shift
+                done
+
+                # Optional project dir after --
+                PROJECT_DIR=""
+                if [ "$1" = "--" ]; then
+                  shift
+                  PROJECT_DIR="''${1:-}"
+                fi
+
                 export RALPH_MODE=1
-                exec ${wrapix.mkSandbox { profile = wrapix.profiles.base; }}/bin/wrapix "$@"
+                export RALPH_CMD
+                export RALPH_ARGS
+                exec ${wrapix.mkSandbox { profile = wrapix.profiles.base; }}/bin/wrapix $PROJECT_DIR
               ''}/bin/ralph-container";
             };
           };

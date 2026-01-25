@@ -239,6 +239,8 @@ in
             ENV_ARGS+=(-e "BD_NO_DAEMON=1")
             ENV_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}")
             ENV_ARGS+=(-e "RALPH_MODE=''${RALPH_MODE:-}")
+            ENV_ARGS+=(-e "RALPH_CMD=''${RALPH_CMD:-}")
+            ENV_ARGS+=(-e "RALPH_ARGS=''${RALPH_ARGS:-}")
             ENV_ARGS+=(-e "RALPH_DIR=''${RALPH_DIR:-}")
             ENV_ARGS+=(-e "HOST_UID=$(id -u)")
             ENV_ARGS+=(-e "HOST_USER=$USER")
