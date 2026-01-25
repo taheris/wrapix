@@ -74,4 +74,9 @@ if [ -f /workspace/.beads/config.yaml ]; then
   fi
 fi
 
-exec claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"
+# Check for ralph mode
+if [ "${RALPH_MODE:-}" = "1" ]; then
+  exec ralph plan
+else
+  exec claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompt)"
+fi

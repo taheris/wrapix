@@ -9,7 +9,7 @@ let
 
 in
 {
-  inherit (sandbox) profiles;
+  inherit (sandbox) profiles mkSandbox;
 
   deriveProfile =
     baseProfile: extensions:
@@ -33,6 +33,4 @@ in
         echo "Wrapix development shell"
       '';
     };
-
-  mkSandbox = sandbox.mkSandbox;
 }
