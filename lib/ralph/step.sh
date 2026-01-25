@@ -98,10 +98,10 @@ ISSUE_JSON=$(bd show "$NEXT_ISSUE" --json 2>/dev/null) || ISSUE_JSON="{}"
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title // ""')
 ISSUE_DESC=$(echo "$ISSUE_JSON" | jq -r '.description // ""')
 
-PROMPT_TEMPLATE="$RALPH_DIR/prompts/step.md"
+PROMPT_TEMPLATE="$RALPH_DIR/step.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Step prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure prompts/step.md exists in your ralph directory."
+  echo "Make sure step.md exists in your ralph directory."
   exit 1
 fi
 

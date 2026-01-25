@@ -46,21 +46,18 @@ fi
 # Create specs/README.md from template if not exists (never overwrite)
 SPECS_README="$SPECS_DIR/README.md"
 if [ ! -f "$SPECS_README" ]; then
-  SPECS_TEMPLATE="$TEMPLATE/specs-readme.md"
-  if [ -f "$SPECS_TEMPLATE" ]; then
-    cp "$SPECS_TEMPLATE" "$SPECS_README"
-    echo "Created $SPECS_README from template"
-  else
-    # Fallback: create minimal README
-    cat > "$SPECS_README" << 'EOF'
+  cat > "$SPECS_README" << 'EOF'
 # Project Specifications
 
 | Spec | Code | Purpose |
 |------|------|---------|
 
+## Terminology Index
+
+| Term | Definition |
+|------|------------|
 EOF
-    echo "Created minimal $SPECS_README"
-  fi
+  echo "Created $SPECS_README"
 fi
 
 # Clear previous state (but preserve prompts and config)
