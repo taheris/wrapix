@@ -110,40 +110,30 @@
               ''}/bin/test-builder";
             };
 
-            ralph = {
-              meta.description = "Ralph Wiggum Loop - run iterative AI workflows in sandbox";
-              type = "app";
-              program = "${pkgs.writeShellScriptBin "ralph-container" ''
-                # Parse ralph subcommand from args (default: help)
-                # Usage: nix run .#ralph [subcommand] [args...] [-- project_dir]
-                RALPH_CMD="''${1:-help}"
-                shift || true
+            ralph =
+              let
+                ralphPkg = import ./lib/ralph { inherit pkgs; };
+                ralphEnv = pkgs.buildEnv {
+                  name = "ralph-env";
+                  paths = ralphPkg.scripts;
+                };
+                wrapixBin = wrapix.mkSandbox { profile = wrapix.profiles.base; };
 
-                # Collect remaining args until -- or end
-                RALPH_ARGS=""
-                while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-                  RALPH_ARGS="$RALPH_ARGS $1"
-                  shift
-                done
-
-                # Optional project dir after --
-                PROJECT_DIR=""
-                if [ "$1" = "--" ]; then
-                  shift
-                  PROJECT_DIR="''${1:-}"
-                fi
-
-                export RALPH_MODE=1
-                export RALPH_CMD
-                export RALPH_ARGS
-                exec ${wrapix.mkSandbox { profile = wrapix.profiles.base; }}/bin/wrapix $PROJECT_DIR
-              ''}/bin/ralph-container";
-            };
+              in
+              {
+                meta.description = "Ralph Wiggum loop in a sandbox";
+                type = "app";
+                program = "${pkgs.writeShellScriptBin "ralph-runner" ''
+                  export PATH="${ralphEnv}/bin:${wrapixBin}/bin:$PATH"
+                  exec ralph "$@"
+                ''}/bin/ralph-runner";
+              };
           };
 
           devShells.default =
             let
               ralph = import ./lib/ralph { inherit pkgs; };
+              wrapixBin = wrapix.mkSandbox { profile = wrapix.profiles.base; };
 
             in
             wrapix.mkDevShell {
@@ -159,6 +149,7 @@
                   statix
                 ]
                 ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
+                ++ [ wrapixBin ]
                 ++ ralph.scripts;
 
               shellHook = ''
