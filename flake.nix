@@ -79,6 +79,7 @@
             inherit (wrapix)
               deriveProfile
               mkDevShell
+              mkRalph
               mkSandbox
               profiles
               ;
@@ -95,45 +96,32 @@
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
           };
 
-          apps = {
-            test-darwin = {
-              meta.description = "Run Darwin integration tests";
-              type = "app";
-              program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
-            };
+          apps =
+            let
+              ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
 
-            test-builder = {
-              meta.description = "Run wrapix-builder integration tests (Darwin only)";
-              type = "app";
-              program = "${pkgs.writeShellScriptBin "test-builder" ''
-                exec ${./tests/builder-test.sh}
-              ''}/bin/test-builder";
-            };
+            in
+            {
+              ralph = ralph.app;
 
-            ralph =
-              let
-                ralphPkg = import ./lib/ralph { inherit pkgs; };
-                ralphEnv = pkgs.buildEnv {
-                  name = "ralph-env";
-                  paths = ralphPkg.scripts;
-                };
-                wrapixBin = wrapix.mkSandbox { profile = wrapix.profiles.base; };
-
-              in
-              {
-                meta.description = "Ralph Wiggum loop in a sandbox";
+              test-darwin = {
+                meta.description = "Run Darwin integration tests";
                 type = "app";
-                program = "${pkgs.writeShellScriptBin "ralph-runner" ''
-                  export PATH="${ralphEnv}/bin:${wrapixBin}/bin:$PATH"
-                  exec ralph "$@"
-                ''}/bin/ralph-runner";
+                program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
               };
-          };
+
+              test-builder = {
+                meta.description = "Run wrapix-builder integration tests (Darwin only)";
+                type = "app";
+                program = "${pkgs.writeShellScriptBin "test-builder" ''
+                  exec ${./tests/builder-test.sh}
+                ''}/bin/test-builder";
+              };
+            };
 
           devShells.default =
             let
-              ralph = import ./lib/ralph { inherit pkgs; };
-              wrapixBin = wrapix.mkSandbox { profile = wrapix.profiles.base; };
+              ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
 
             in
             wrapix.mkDevShell {
@@ -149,12 +137,9 @@
                   statix
                 ]
                 ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
-                ++ [ wrapixBin ]
-                ++ ralph.scripts;
+                ++ ralph.packages;
 
-              shellHook = ''
-                export RALPH_TEMPLATE_DIR="${ralph.templateDir}"
-              '';
+              shellHook = ralph.shellHook;
             };
         };
     };
