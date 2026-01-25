@@ -1,109 +1,110 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ralph ready
+# Converts spec to beads with task breakdown
+# - Pins context by reading specs/README.md
+# - Reads current spec from state
+# - Analyzes spec and creates task breakdown
+# - Creates parent/epic bead, then child tasks
+# - Updates specs/README.md WIP table with parent bead ID
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
-PLAN="$RALPH_DIR/state/plan.md"
+SPECS_DIR="specs"
+SPECS_README="$SPECS_DIR/README.md"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "Error: No ralph config found at $CONFIG_FILE"
+  echo "Run 'ralph start' first."
   exit 1
 fi
 
-if [ ! -f "$PLAN" ]; then
-  echo "Error: No plan found at $PLAN"
-  echo "Run 'ralph plan' first to generate a plan."
+# Get label from state
+LABEL_FILE="$RALPH_DIR/state/label"
+if [ ! -f "$LABEL_FILE" ]; then
+  echo "Error: No label file found. Run 'ralph start' first."
   exit 1
 fi
+LABEL=$(cat "$LABEL_FILE")
 
-if [ ! -s "$PLAN" ]; then
-  echo "Error: Plan file is empty at $PLAN"
+# Get spec name from state
+SPEC_FILE="$RALPH_DIR/state/spec"
+if [ ! -f "$SPEC_FILE" ]; then
+  echo "Error: No spec file reference found. Run 'ralph start' first."
+  exit 1
+fi
+SPEC_NAME=$(cat "$SPEC_FILE")
+
+# Check spec file exists
+SPEC_PATH="$SPECS_DIR/$SPEC_NAME.md"
+if [ ! -f "$SPEC_PATH" ]; then
+  echo "Error: Spec file not found: $SPEC_PATH"
+  echo "Run 'ralph plan' first to create the specification."
   exit 1
 fi
 
 # Load config as JSON once
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-LABEL_SUFFIX=$(echo "$CONFIG" | jq -r '.beads.label // empty')
 DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
-DEFAULT_TYPE=$(echo "$CONFIG" | jq -r '.beads."default-type" // "task"')
 
-# Generate random 6-char suffix if not set in config
-if [ -z "$LABEL_SUFFIX" ]; then
-  LABEL_SUFFIX=$(head -c 6 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 6)
+PROMPT_TEMPLATE="$RALPH_DIR/prompts/ready.md"
+if [ ! -f "$PROMPT_TEMPLATE" ]; then
+  echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
+  echo "Make sure prompts/ready.md exists in your ralph directory."
+  exit 1
 fi
-LABEL="rl-$LABEL_SUFFIX"
 
-echo "Converting plan to beads issues..."
+mkdir -p "$RALPH_DIR/logs"
+
+# Pin context from specs/README.md
+PINNED_CONTEXT=""
+if [ -f "$SPECS_README" ]; then
+  PINNED_CONTEXT=$(cat "$SPECS_README")
+fi
+
+# Extract title from spec file (first heading)
+SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$SPEC_NAME")
+
+echo "Ralph Ready: Converting spec to beads..."
 echo "  Label: $LABEL"
-echo "  Default priority: $DEFAULT_PRIORITY"
-echo "  Default type: $DEFAULT_TYPE"
+echo "  Spec: $SPEC_PATH"
+echo "  Title: $SPEC_TITLE"
 echo ""
 
-# Save label to state file for step phase to use
-echo "$LABEL" > "$RALPH_DIR/state/label"
+# Read template and substitute placeholders
+PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_NAME\}\}/$SPEC_NAME}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 
-# Parse YAML frontmatter documents (separated by ---)
-# Each document should have frontmatter followed by body
-ISSUE_COUNT=0
+# Use sed for title substitution (handle special chars)
+ESCAPED_TITLE=$(printf '%s\n' "$SPEC_TITLE" | sed 's/[&/\]/\\&/g')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | sed "s/{{SPEC_TITLE}}/$ESCAPED_TITLE/g")
 
-# Use awk to extract frontmatter blocks
-awk '
-BEGIN { in_doc = 0; fm = ""; body = "" }
-/^---[[:space:]]*$/ {
-  if (in_doc && fm != "") {
-    # End of document, output it
-    gsub(/\n$/, "", body)
-    print fm "|||BODY|||" body
-    fm = ""; body = ""
-  }
-  in_doc = !in_doc
-  next
-}
-in_doc && /^[a-z]+:/ { fm = fm $0 "\n"; next }
-!in_doc && NF { body = body $0 "\n" }
-END {
-  if (fm != "") {
-    gsub(/\n$/, "", body)
-    print fm "|||BODY|||" body
-  }
-}
-' "$PLAN" | while IFS= read -r doc; do
-  # Parse frontmatter
-  fm="${doc%%|||BODY|||*}"
-  body="${doc#*|||BODY|||}"
+# Use awk for multi-line pinned context substitution
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
 
-  # Extract fields from frontmatter
-  type=$(echo "$fm" | grep -E "^type:" | sed 's/^type:[[:space:]]*//' | tr -d '\n' || echo "$DEFAULT_TYPE")
-  title=$(echo "$fm" | grep -E "^title:" | sed 's/^title:[[:space:]]*//' | tr -d '\n')
-  priority=$(echo "$fm" | grep -E "^priority:" | sed 's/^priority:[[:space:]]*//' | tr -d '\n' || echo "$DEFAULT_PRIORITY")
+LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
-  # Use defaults if empty
-  [ -z "$type" ] && type="$DEFAULT_TYPE"
-  [ -z "$priority" ] && priority="$DEFAULT_PRIORITY"
-
-  # Skip if no title
-  [ -z "$title" ] && continue
-
-  echo "Creating $type: $title (P$priority)"
-
-  # Create the bead with description if body exists
-  if [ -n "$body" ]; then
-    bd create --title="$title" --description="$body" \
-      --type="$type" --priority="$priority" --labels="$LABEL"
-  else
-    bd create --title="$title" \
-      --type="$type" --priority="$priority" --labels="$LABEL"
-  fi
-
-  ((ISSUE_COUNT++)) || true
-done
-
+echo "=== Creating Task Breakdown ==="
 echo ""
-echo "Beads created with label: $LABEL"
-echo ""
-echo "To work through issues:"
-echo "  ralph step      # Work one issue at a time"
-echo "  ralph loop      # Work all issues automatically"
-echo ""
-echo "To list created issues:"
-echo "  bd list --labels=$LABEL"
+echo "$PROMPT_CONTENT" | claude --dangerously-skip-permissions 2>&1 | tee "$LOG"
+
+# Check for completion
+if grep -q "READY_COMPLETE" "$LOG" 2>/dev/null; then
+  echo ""
+  echo "Task breakdown complete!"
+  echo ""
+  echo "To list created issues:"
+  echo "  bd list --label rl-$LABEL"
+  echo ""
+  echo "To work through issues:"
+  echo "  ralph step      # Work one issue at a time"
+  echo "  ralph loop      # Work all issues automatically"
+else
+  echo ""
+  echo "Task breakdown did not complete. Review log: $LOG"
+  echo "To retry: ralph ready"
+fi
