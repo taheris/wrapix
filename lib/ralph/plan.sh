@@ -9,6 +9,15 @@ set -euo pipefail
 # - Creates specs/<label>.md with full specification
 # - Updates specs/README.md with new terminology and WIP entry
 
+# Container detection: if not in container and wrapix is available, re-launch in container
+# /etc/wrapix/claude-config.json only exists inside containers (baked into image)
+if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; then
+  export RALPH_MODE=1
+  export RALPH_CMD=plan
+  export RALPH_ARGS="${*:-}"
+  exec wrapix
+fi
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
@@ -69,7 +78,8 @@ LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
 
 echo "=== Starting Interview ==="
 echo ""
-echo "$PROMPT_CONTENT" | claude --dangerously-skip-permissions 2>&1 | tee "$LOG"
+# Pass prompt as argument to keep stdin open for interactive input
+claude --dangerously-skip-permissions "$PROMPT_CONTENT" 2>&1 | tee "$LOG"
 
 # Check for completion
 if grep -q "INTERVIEW_COMPLETE" "$LOG" 2>/dev/null; then
