@@ -1,29 +1,89 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ralph step [feature-name]
+# Executes work with test strategy selection and quality gates
+# - Pins context (read specs/README.md)
+# - Gets spec name from argument or state
+# - Picks next ready bead with current label
+# - Implements the task with quality gates
+# - If this was the last bead, triggers completion (WIP -> REVIEW)
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
+SPECS_DIR="specs"
+SPECS_README="$SPECS_DIR/README.md"
+
+# Function to update spec status to REVIEW in specs/README.md
+update_spec_status_to_review() {
+  local feature="$1"
+  if [ ! -f "$SPECS_README" ]; then
+    return
+  fi
+
+  # Move entry from WIP to REVIEW section
+  # This is a simple implementation - just notify the user
+  echo ""
+  echo "All tasks for '$feature' are complete!"
+  echo "Please update specs/README.md to move the spec from WIP to REVIEW."
+}
+
+# Function to check if all beads are complete
+check_all_complete() {
+  local label="$1"
+  local feature="$2"
+  # Check if any ready beads remain
+  local remaining
+  remaining=$(bd list --label "$label" --ready 2>/dev/null | wc -l) || remaining=0
+
+  if [ "$remaining" -eq 0 ]; then
+    update_spec_status_to_review "$feature"
+  fi
+}
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "Error: No ralph config found at $CONFIG_FILE"
   exit 1
 fi
 
-# Get label from state (created by ralph ready)
-LABEL_FILE="$RALPH_DIR/state/label"
-if [ ! -f "$LABEL_FILE" ]; then
-  echo "Error: No label file found. Run 'ralph ready' first."
-  exit 1
+# Get feature name from argument or state
+FEATURE_NAME="${1:-}"
+if [ -z "$FEATURE_NAME" ]; then
+  SPEC_FILE="$RALPH_DIR/state/spec"
+  if [ ! -f "$SPEC_FILE" ]; then
+    echo "Error: No spec file reference found. Run 'ralph start' first or provide feature name."
+    exit 1
+  fi
+  FEATURE_NAME=$(cat "$SPEC_FILE")
 fi
-LABEL=$(cat "$LABEL_FILE")
+
+# Get label from state or derive from feature name
+LABEL_FILE="$RALPH_DIR/state/label"
+if [ -f "$LABEL_FILE" ]; then
+  STATE_LABEL=$(cat "$LABEL_FILE")
+  # If feature name matches state, use state label
+  # Otherwise, use feature name as label
+  if [ "$FEATURE_NAME" = "$STATE_LABEL" ] || [ -z "${1:-}" ]; then
+    LABEL="$STATE_LABEL"
+  else
+    LABEL="$FEATURE_NAME"
+  fi
+else
+  LABEL="$FEATURE_NAME"
+fi
+
+BEAD_LABEL="rl-$LABEL"
+SPEC_PATH="$SPECS_DIR/$FEATURE_NAME.md"
 
 # Find next ready issue with this label
-# Use --ready to get only issues that are open and not blocked/deferred
-NEXT_ISSUE=$(bd list --label "$LABEL" --ready --limit 1 2>/dev/null | awk '{print $1}' | head -1) || true
+NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --limit 1 2>/dev/null | awk '{print $1}' | head -1) || true
 
 if [ -z "$NEXT_ISSUE" ]; then
-  echo "No more ready issues with label: $LABEL"
+  echo "No more ready issues with label: $BEAD_LABEL"
   echo "All work complete!"
+
+  # Check if we should transition WIP -> REVIEW
+  update_spec_status_to_review "$FEATURE_NAME"
   exit 0
 fi
 
@@ -45,19 +105,25 @@ if [ ! -f "$PROMPT_TEMPLATE" ]; then
   exit 1
 fi
 
+# Pin context from specs/README.md
+PINNED_CONTEXT=""
+if [ -f "$SPECS_README" ]; then
+  PINNED_CONTEXT=$(cat "$SPECS_README")
+fi
+
 # Read template and substitute placeholders
-# Use perl for safer multi-line substitution
-WORK_PROMPT=$(perl -pe "
-  s/\\{\\{ISSUE_ID\\}\\}/$NEXT_ISSUE/g;
-" "$PROMPT_TEMPLATE")
+WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
+WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
+WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
+WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
 
 # Handle title separately due to potential special chars
-# shellcheck disable=SC2001 # sed needed for escaping special chars
-WORK_PROMPT=$(echo "$WORK_PROMPT" | sed "s/{{TITLE}}/$(echo "$ISSUE_TITLE" | sed 's/[&/\]/\\&/g')/g")
+ESCAPED_TITLE=$(printf '%s\n' "$ISSUE_TITLE" | sed 's/[&/\]/\\&/g')
+WORK_PROMPT=$(echo "$WORK_PROMPT" | sed "s/{{TITLE}}/$ESCAPED_TITLE/g")
 
-# For description, we need to be careful with multi-line content
-# Use a here-doc approach
+# For description and pinned context, use awk for multi-line
 WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/\{\{DESCRIPTION\}\}/, desc); print}')
+WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
 
 mkdir -p "$RALPH_DIR/logs"
 LOG="$RALPH_DIR/logs/work-$NEXT_ISSUE.log"
@@ -73,6 +139,9 @@ if grep -q "WORK_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
   echo "Work complete. Closing issue: $NEXT_ISSUE"
   bd close "$NEXT_ISSUE"
+
+  # Check if all beads with this label are complete
+  check_all_complete "$BEAD_LABEL" "$FEATURE_NAME"
 else
   echo ""
   echo "Work did not complete. Issue remains in-progress: $NEXT_ISSUE"

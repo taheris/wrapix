@@ -1,18 +1,48 @@
-You are working on issue: {{ISSUE_ID}}
+# Implementation Step
+
+## Context Pinning
+
+First, read specs/README.md to understand project terminology and context:
+
+{{PINNED_CONTEXT}}
+
+## Current Spec
+
+Read: {{SPEC_PATH}}
+
+## Issue Details
+
+Issue: {{ISSUE_ID}}
 Title: {{TITLE}}
 
 {{DESCRIPTION}}
 
 ## Instructions
 
-Complete this task following best practices. When you have finished the work:
+1. **Understand**: Read the spec and issue thoroughly before making changes
+2. **Test Strategy**: Decide between:
+   - Property-based tests: For functions with clear invariants, mathematical properties
+   - Unit tests: For specific behaviors, edge cases, integration points
+3. **Implement**: Write code following the spec
+4. **Quality Gates**: Before completing, ensure:
+   - [ ] All tests pass
+   - [ ] Lint checks pass
+   - [ ] Changes committed
 
-1. Ensure all changes are tested and working
-2. Commit your changes with a clear commit message
-3. Output: WORK_COMPLETE
+## Land the Plane Checklist
 
-If you encounter a blocking issue that prevents completion, output:
-BLOCKED: <reason>
+Before outputting WORK_COMPLETE, verify:
+- [ ] git status (check changes)
+- [ ] git add <files>
+- [ ] bd sync
+- [ ] git commit -m "..."
+- [ ] All tests pass
+- [ ] Lint passes
 
-If you need clarification before proceeding, output:
-CLARIFY: <question>
+## Exit Signals
+
+Output ONE of these when done:
+
+- `WORK_COMPLETE` - Task finished, all quality gates passed
+- `BLOCKED: <reason>` - Cannot proceed, explain why
+- `CLARIFY: <question>` - Need clarification before proceeding
