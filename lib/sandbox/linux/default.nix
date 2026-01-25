@@ -192,6 +192,8 @@ in
           $DEPLOY_KEY_ARGS \
           -e "BD_NO_DAEMON=1" \
           -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+          -e "RALPH_MODE=''${RALPH_MODE:-}" \
+          -e "RALPH_DIR=''${RALPH_DIR:-}" \
           -e "HOME=/home/$USER" \
           -e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME" \
           -e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL" \

@@ -179,5 +179,11 @@ if [ -f /workspace/.beads/config.yaml ]; then
   fi
 fi
 
-exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
-  claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompts/wrapix-prompt)"
+# Check for ralph mode
+if [ "${RALPH_MODE:-}" = "1" ]; then
+  exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+    ralph plan
+else
+  exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+    claude --dangerously-skip-permissions --append-system-prompt "$(cat /etc/wrapix-prompts/wrapix-prompt)"
+fi
