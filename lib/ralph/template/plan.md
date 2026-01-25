@@ -3,6 +3,8 @@
 You are conducting a specification interview. Your goal is to thoroughly understand
 the user's idea and create a comprehensive specification document.
 
+**IMPORTANT: This is a planning-only phase. Do NOT write or modify any code. Do NOT create or edit implementation files. Your sole output is the specification document.**
+
 ## Context (from specs/README.md)
 
 {{PINNED_CONTEXT}}

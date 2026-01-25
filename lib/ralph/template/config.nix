@@ -12,9 +12,9 @@
   };
 
   prompts = {
-    plan = "prompts/plan.md";
-    build = "prompts/build.md";
-    review = "prompts/review.md";
+    plan = "plan.md";
+    ready = "ready.md";
+    step = "step.md";
   };
 
   loop = {
