@@ -21,6 +21,7 @@ let
   inherit (pkgs.lib) mapAttrsToList;
 
   notifyClient = import ../notify/client.nix { inherit pkgs; };
+  ralph = import ../ralph { inherit pkgs; };
 
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
@@ -93,6 +94,9 @@ pkgs.dockerTools.buildLayeredImage {
 
     cp ${claudeConfigJson} etc/wrapix/claude-config.json
     cp ${claudeSettingsJson} etc/wrapix/claude-settings.json
+
+    # Bundle ralph template for ralph-init
+    cp -r ${ralph.templateDir} etc/wrapix/ralph-template
 
     # Fix Nix permissions for non-root users
     # (includeNixDB creates files owned by root)
