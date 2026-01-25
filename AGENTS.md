@@ -22,7 +22,7 @@ bd sync               # Commit and push changes
 
 ### Workflow Pattern
 
-1. **Start**: Run `bd ready` to find actionable work
+1. **Start**: Run `bd sync` first to pull latest issues, then `bd ready` to find actionable work
 2. **Claim**: Use `bd update <id> --status=in_progress`
 3. **Work**: Implement the task
 4. **Complete**: Use `bd close <id>`
