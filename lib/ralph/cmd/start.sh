@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph start [label]
-# Sets up for a new feature with optional label
+# ralph start <label>
+# Sets up for a new feature
 # - Creates specs/ directory if needed
 # - Creates specs/README.md from template if not exists
 # - Clears previous plan state
-# - Sets label in state (random if not provided)
+# - Sets label in state
+# - Substitutes placeholders in template files (LABEL, SPEC_PATH, etc.)
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 SPECS_DIR="specs"
 
-# Get label from argument or generate random 6-char
+# Label is required
 if [ -z "${1:-}" ]; then
-  LABEL=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6 || true)
-else
-  LABEL="$1"
+  echo "Error: Label is required"
+  echo "Usage: ralph start <label>"
+  echo ""
+  echo "Example: ralph start user-auth"
+  exit 1
 fi
+LABEL="$1"
 
 # Ensure ralph directory structure exists
 if [ ! -d "$RALPH_DIR" ]; then
@@ -74,10 +78,54 @@ if [ -f "$CONFIG_FILE" ]; then
   sed -i 's/label = "[^"]*";/label = "'"$LABEL"'";/' "$CONFIG_FILE"
 fi
 
+# Load config to compute derived values
+CONFIG=$(nix eval --json --file "$CONFIG_FILE")
+DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
+SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+
+# Compute spec path based on hidden flag
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  README_INSTRUCTIONS=""
+  README_UPDATE_SECTION=""
+else
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
+  README_UPDATE_SECTION="## Update specs/README.md
+
+After creating the epic, update the WIP table entry with the bead ID:
+\`\`\`markdown
+| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
+\`\`\`"
+fi
+
+# Substitute placeholders in template files
+# These are the placeholders that can be computed at start time
+for template in "$RALPH_DIR"/*.md; do
+  [ -f "$template" ] || continue
+
+  # Substitute simple placeholders with sed
+  sed -i "s|{{LABEL}}|$LABEL|g" "$template"
+  sed -i "s|{{SPEC_PATH}}|$SPEC_PATH|g" "$template"
+  sed -i "s|{{PRIORITY}}|$DEFAULT_PRIORITY|g" "$template"
+
+  # For multi-line substitutions, use awk
+  if grep -q '{{README_INSTRUCTIONS}}' "$template" 2>/dev/null; then
+    awk -v replacement="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, replacement); print}' "$template" > "$template.tmp"
+    mv "$template.tmp" "$template"
+  fi
+
+  if grep -q '{{README_UPDATE_SECTION}}' "$template" 2>/dev/null; then
+    awk -v replacement="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, replacement); print}' "$template" > "$template.tmp"
+    mv "$template.tmp" "$template"
+  fi
+done
+
 echo ""
 echo "Ralph started for feature: $LABEL"
 echo ""
 echo "State: $RALPH_DIR/state/label"
+echo "Spec:  $SPEC_PATH"
 echo ""
 echo "Next steps:"
 echo "  1. Run 'ralph plan' to conduct an interview and create the spec"

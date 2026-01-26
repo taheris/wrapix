@@ -37,25 +37,15 @@ if [ ! -f "$LABEL_FILE" ]; then
 fi
 LABEL=$(cat "$LABEL_FILE")
 
-# Load config as JSON once
+# Load config to check spec.hidden (for display and path computation)
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 
 # Compute spec path based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
-  README_INSTRUCTIONS=""
-  README_UPDATE_SECTION=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
-  README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
-  README_UPDATE_SECTION="## Update specs/README.md
-
-After creating the epic, update the WIP table entry with the bead ID:
-\`\`\`markdown
-| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
-\`\`\`"
 fi
 
 # Check spec file exists
@@ -89,19 +79,15 @@ echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
 echo ""
 
-# Read template and substitute placeholders
+# Read template and substitute runtime-only placeholders
+# (LABEL, SPEC_PATH, PRIORITY, README_INSTRUCTIONS, README_UPDATE_SECTION already substituted by start.sh)
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 
-# Substitute title using parameter expansion
+# SPEC_TITLE is extracted from the spec file at runtime
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 
-# Use awk for multi-line substitutions
+# PINNED_CONTEXT must be substituted at runtime (depends on current specs/README.md)
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v instr="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, instr); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v sect="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, sect); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
