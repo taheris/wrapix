@@ -276,7 +276,19 @@ build_stream_filter() {
   max_tool_input=$(echo "$config" | jq -r '.output."max-tool-input" // 200')
   max_tool_result=$(echo "$config" | jq -r '.output."max-tool-result" // 500')
 
+  # Extract prefix config with defaults
+  local prefix_response prefix_tool_result prefix_tool_error
+  local prefix_thinking_start prefix_thinking_end prefix_stats_header prefix_stats_line
+  prefix_response=$(echo "$config" | jq -r '.output.prefixes.response // "[response] "')
+  prefix_tool_result=$(echo "$config" | jq -r '.output.prefixes."tool-result" // "[result] "')
+  prefix_tool_error=$(echo "$config" | jq -r '.output.prefixes."tool-error" // "[ERROR] "')
+  prefix_thinking_start=$(echo "$config" | jq -r '.output.prefixes."thinking-start" // "<thinking>\n"')
+  prefix_thinking_end=$(echo "$config" | jq -r '.output.prefixes."thinking-end" // "\n</thinking>"')
+  prefix_stats_header=$(echo "$config" | jq -r '.output.prefixes."stats-header" // "\n--- Stats ---\n"')
+  prefix_stats_line=$(echo "$config" | jq -r '.output.prefixes."stats-line" // ""')
+
   debug "Output config: responses=$responses tool_names=$tool_names tool_inputs=$tool_inputs tool_results=$tool_results thinking=$thinking stats=$stats"
+  debug "Prefixes: response='$prefix_response' tool_result='$prefix_tool_result' tool_error='$prefix_tool_error'"
 
   # Build the jq filter dynamically
   # We use a different approach: check message type first, then process content types
@@ -293,17 +305,17 @@ if .type == "assistant" and .message.content then
   local content_checks=""
 
   if [ "$responses" = "true" ]; then
-    content_checks+='
-  if .type == "text" then .text // empty'
+    content_checks+="
+  if .type == \"text\" then \"$prefix_response\" + (.text // empty)"
   fi
 
   if [ "$thinking" = "true" ]; then
     if [ -n "$content_checks" ]; then
-      content_checks+='
-  elif .type == "thinking" then "<thinking>\n" + .thinking + "\n</thinking>"'
+      content_checks+="
+  elif .type == \"thinking\" then \"$prefix_thinking_start\" + .thinking + \"$prefix_thinking_end\""
     else
-      content_checks+='
-  if .type == "thinking" then "<thinking>\n" + .thinking + "\n</thinking>"'
+      content_checks+="
+  if .type == \"thinking\" then \"$prefix_thinking_start\" + .thinking + \"$prefix_thinking_end\""
     fi
   fi
 
@@ -345,9 +357,9 @@ elif .type == \"user\" and .message.content then
   .message.content[] |
   if .type == \"tool_result\" then
     if .is_error == true then
-      \"[ERROR] \" + ((.content // \"unknown error\") | tostring | truncate($max_tool_result))
+      \"$prefix_tool_error\" + ((.content // \"unknown error\") | tostring | truncate($max_tool_result))
     else
-      \"[result] \" + ((.content // \"\") | tostring | truncate($max_tool_result))
+      \"$prefix_tool_result\" + ((.content // \"\") | tostring | truncate($max_tool_result))
     end
   else
     empty
@@ -356,15 +368,15 @@ elif .type == \"user\" and .message.content then
 
   # Add stats output
   if [ "$stats" = "true" ]; then
-    filter+='
+    filter+="
 
 # Show final stats
-elif .type == "result" then
-  "\n--- Stats ---\n" +
-  "Cost: $" + ((.cost_usd // 0) | tostring) + "\n" +
-  "Input tokens: " + ((.usage.input_tokens // 0) | tostring) + "\n" +
-  "Output tokens: " + ((.usage.output_tokens // 0) | tostring) + "\n" +
-  "Duration: " + ((.duration_ms // 0) / 1000 | tostring) + "s"'
+elif .type == \"result\" then
+  \"$prefix_stats_header\" +
+  \"${prefix_stats_line}Cost: \$\" + ((.cost_usd // 0) | tostring) + \"\n\" +
+  \"${prefix_stats_line}Input tokens: \" + ((.usage.input_tokens // 0) | tostring) + \"\n\" +
+  \"${prefix_stats_line}Output tokens: \" + ((.usage.output_tokens // 0) | tostring) + \"\n\" +
+  \"${prefix_stats_line}Duration: \" + ((.duration_ms // 0) / 1000 | tostring) + \"s\""
   fi
 
   # Close the if chain
