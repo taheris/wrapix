@@ -48,6 +48,6 @@ sync_base.jsonl
 # The JSONL files (issues.jsonl, interactions.jsonl) and config files
 # are tracked by git by default since no pattern above ignores them.
 
-# NOTE: dolt-remote/ is intentionally NOT ignored - it IS the source of truth
-# for Dolt-native sync mode (replacing issues.jsonl). It contains the Dolt
-# remote that containers push/pull from.
+# NOTE: dolt-remote/ now lives in the beads branch, not main.
+# It's tracked via the beads worktree at .git/beads-worktrees/beads/.beads/dolt-remote/
+dolt-remote/

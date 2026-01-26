@@ -62,10 +62,12 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
     BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
-    if [ "$BACKEND" = "dolt" ] && [ -d /workspace/.beads/dolt-remote ]; then
+    # Dolt remote lives in beads branch worktree
+    DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
+    if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_REMOTE" ]; then
       # Dolt mode: copy dolt-remote as working database, then init
       mkdir -p /workspace/.beads/dolt
-      cp -r /workspace/.beads/dolt-remote/. /workspace/.beads/dolt/beads/
+      cp -r "$DOLT_REMOTE/." /workspace/.beads/dolt/beads/
       bd init --prefix "$PREFIX" --backend dolt --quiet 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
       # SQLite/fallback mode: init from JSONL
