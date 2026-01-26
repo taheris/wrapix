@@ -1,6 +1,6 @@
 # Task Decomposition
 
-Convert a specification into implementable beads tasks.
+Convert a specification into implementable beads tasks as a molecule.
 
 ## Context Pinning
 
@@ -12,14 +12,12 @@ First, read specs/README.md for project terminology and context:
 
 Label: {{LABEL}}
 Spec file: {{SPEC_PATH}}
+Mode: {{MODE}}
+{{MOLECULE_CONTEXT}}
 
 ## Instructions
 
-1. **Read the spec file** at {{SPEC_PATH}} thoroughly
-2. **Create a parent epic bead** for this specification
-3. **Break down into ordered tasks** as child beads
-4. **Add dependencies** where tasks depend on each other
-{{README_INSTRUCTIONS}}
+{{WORKFLOW_INSTRUCTIONS}}
 
 ## Task Breakdown Guidelines
 
@@ -29,22 +27,7 @@ Spec file: {{SPEC_PATH}}
 - Include test tasks where appropriate
 - Consider: setup, implementation, tests, documentation
 
-## Output Format
-
-First, create the epic bead:
-```bash
-bd create --title="{{SPEC_TITLE}}" --type=epic --priority={{PRIORITY}} --labels="rl-{{LABEL}}"
-```
-
-Then, for each implementation task:
-```bash
-bd create --title="Task title" --description="Description with context" --type=task --priority=N --labels="rl-{{LABEL}}"
-```
-
-Add dependencies between tasks:
-```bash
-bd dep add <dependent-task> <depends-on-task>
-```
+{{OUTPUT_FORMAT}}
 
 {{README_UPDATE_SECTION}}
 
@@ -52,5 +35,5 @@ bd dep add <dependent-task> <depends-on-task>
 
 Output ONE of these at the end of your response:
 
-- `RALPH_COMPLETE` - All tasks created, dependencies set, README updated
+- `RALPH_COMPLETE` - All tasks created, dependencies set, molecule ID stored
 - `RALPH_BLOCKED: <reason>` - Cannot decompose spec (missing information, unclear requirements)
