@@ -198,6 +198,7 @@ in
           -e "RALPH_CMD=''${RALPH_CMD:-}" \
           -e "RALPH_ARGS=''${RALPH_ARGS:-}" \
           -e "RALPH_DIR=''${RALPH_DIR:-}" \
+          -e "RALPH_DEBUG=''${RALPH_DEBUG:-}" \
           -e "HOME=/home/$USER" \
           -e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME" \
           -e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL" \

@@ -13,7 +13,15 @@ let
 
   templateDir = ./template;
 
+  # Shared utilities - must be first so other scripts can source it
+  utilScript = pkgs.writeTextFile {
+    name = "util.sh";
+    text = readFile ./cmd/util.sh;
+    destination = "/bin/util.sh";
+  };
+
   scripts = [
+    utilScript
     (writeShellScriptBin "ralph" (readFile ./cmd/ralph.sh))
     (writeShellScriptBin "ralph-start" (readFile ./cmd/start.sh))
     (writeShellScriptBin "ralph-plan" (readFile ./cmd/plan.sh))
