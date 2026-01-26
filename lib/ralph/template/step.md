@@ -31,7 +31,7 @@ Title: {{TITLE}}
 
 ## Land the Plane Checklist
 
-Before outputting WORK_COMPLETE, verify:
+Before outputting STEP_COMPLETE, verify:
 - [ ] git status (check changes)
 - [ ] git add <files>
 - [ ] bd sync
@@ -41,8 +41,10 @@ Before outputting WORK_COMPLETE, verify:
 
 ## Exit Signals
 
-Output ONE of these when done:
+Output ONE of these when done, then immediately run `/exit` to end the session:
 
-- `WORK_COMPLETE` - Task finished, all quality gates passed
-- `BLOCKED: <reason>` - Cannot proceed, explain why
-- `CLARIFY: <question>` - Need clarification before proceeding
+- `STEP_COMPLETE` - Task finished, all quality gates passed
+- `STEP_BLOCKED: <reason>` - Cannot proceed, explain why
+- `STEP_CLARIFY: <question>` - Need clarification before proceeding
+
+**IMPORTANT**: After outputting an exit signal, you MUST run `/exit` to terminate the session.

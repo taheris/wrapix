@@ -31,28 +31,28 @@ while true; do
   ((++step_count))
   echo "=== Step $step_count ==="
 
-  # Run ralph-step with optional feature name argument
-  # Capture output and exit code separately
+  # Run ralph-step directly for full TTY interactivity
   set +e
-  OUTPUT=$(ralph-step ${FEATURE_NAME:+"$FEATURE_NAME"} 2>&1)
+  ralph-step ${FEATURE_NAME:+"$FEATURE_NAME"}
   EXIT_CODE=$?
   set -e
 
-  echo "$OUTPUT"
-
-  # Check if all work is complete (either no more ready issues, or last task finished)
-  if echo "$OUTPUT" | grep -q "All work complete!"; then
-    break
-  fi
-
-  # Check if step failed (non-zero exit and not "all complete")
-  if [ "$EXIT_CODE" -ne 0 ]; then
-    echo ""
-    echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
-    echo "Review the logs and fix the issue before continuing."
-    echo "To resume: ralph loop${FEATURE_NAME:+ $FEATURE_NAME}"
-    exit 1
-  fi
+  case $EXIT_CODE in
+    0)
+      # Task completed, more work may remain - continue loop
+      ;;
+    100)
+      # All work complete - exit loop
+      break
+      ;;
+    *)
+      echo ""
+      echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
+      echo "Review the logs and fix the issue before continuing."
+      echo "To resume: ralph loop${FEATURE_NAME:+ $FEATURE_NAME}"
+      exit 1
+      ;;
+  esac
 
   echo ""
   echo "--- Continuing to next step ---"
