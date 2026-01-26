@@ -18,6 +18,10 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   exec wrapix
 fi
 
+# Load shared helpers
+# shellcheck source=util.sh
+source "$(dirname "$0")/util.sh"
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
@@ -44,32 +48,41 @@ check_all_complete() {
   local hidden="$3"
   # Check if any ready beads remain
   local remaining
-  remaining=$(bd list --label "$label" --ready 2>/dev/null | wc -l) || remaining=0
+  local output
+  output=$(bd list --label "$label" --ready 2>&1) || {
+    warn "Failed to check remaining issues: ${output:0:100}"
+    remaining=0
+  }
+  remaining=$(echo "$output" | wc -l)
+  debug "Remaining ready issues with label $label: $remaining"
 
   if [ "$remaining" -eq 0 ]; then
     update_spec_status_to_review "$feature" "$hidden"
   fi
 }
 
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "Error: No ralph config found at $CONFIG_FILE"
-  exit 1
-fi
+require_file "$CONFIG_FILE" "Ralph config"
 
 # Get label from state or argument
 LABEL_FILE="$RALPH_DIR/state/label"
 if [ -n "${1:-}" ]; then
   LABEL="$1"
+  debug "Label from argument: $LABEL"
 elif [ -f "$LABEL_FILE" ]; then
   LABEL=$(cat "$LABEL_FILE")
+  debug "Label from state file: $LABEL"
 else
-  echo "Error: No label found. Run 'ralph start' first or provide feature name."
-  exit 1
+  error "No label found. Run 'ralph start' first or provide feature name."
 fi
 
 # Load config to check spec.hidden
-CONFIG=$(nix eval --json --file "$CONFIG_FILE")
+debug "Loading config from $CONFIG_FILE"
+CONFIG=$(nix eval --json --file "$CONFIG_FILE") || error "Failed to evaluate config: $CONFIG_FILE"
+if ! validate_json "$CONFIG" "Config"; then
+  error "Config file did not produce valid JSON"
+fi
 SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+debug "spec.hidden = $SPEC_HIDDEN"
 
 # Compute spec path based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
@@ -79,9 +92,14 @@ else
 fi
 
 BEAD_LABEL="rl-$LABEL"
+debug "Looking for issues with label: $BEAD_LABEL"
 
 # Find next ready issue with this label
-NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty') || true
+BD_LIST_OUTPUT=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>&1) || {
+  warn "bd list command failed: ${BD_LIST_OUTPUT:0:200}"
+  BD_LIST_OUTPUT="[]"
+}
+NEXT_ISSUE=$(bd_list_first_id "$BD_LIST_OUTPUT")
 
 if [ -z "$NEXT_ISSUE" ]; then
   echo "No more ready issues with label: $BEAD_LABEL"
@@ -99,17 +117,33 @@ bd show "$NEXT_ISSUE"
 bd update "$NEXT_ISSUE" --status=in_progress
 
 # Get issue details as JSON for prompt substitution
-# Note: bd show --json returns an array, so extract first element
-ISSUE_JSON=$(bd show "$NEXT_ISSUE" --json 2>/dev/null) || ISSUE_JSON="[]"
-ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.[0].title // ""')
-ISSUE_DESC=$(echo "$ISSUE_JSON" | jq -r '.[0].description // ""')
+debug "Fetching issue details for $NEXT_ISSUE"
+ISSUE_JSON_RAW=$(bd show "$NEXT_ISSUE" --json 2>&1) || {
+  warn "bd show failed for $NEXT_ISSUE: ${ISSUE_JSON_RAW:0:200}"
+  ISSUE_JSON_RAW="[]"
+}
+
+# Extract clean JSON (bd may emit warnings before JSON)
+ISSUE_JSON=$(extract_json "$ISSUE_JSON_RAW")
+
+# Validate JSON structure before parsing
+if ! validate_json_array "$ISSUE_JSON" "Issue $NEXT_ISSUE"; then
+  warn "Could not parse issue details for $NEXT_ISSUE, continuing with empty values"
+  ISSUE_TITLE=""
+  ISSUE_DESC=""
+else
+  ISSUE_TITLE=$(json_array_field "$ISSUE_JSON" "title" "Issue")
+  ISSUE_DESC=$(json_array_field "$ISSUE_JSON" "description" "Issue")
+fi
+
+# Warn if critical fields are empty
+if [ -z "$ISSUE_TITLE" ]; then
+  warn "Issue $NEXT_ISSUE has no title"
+fi
+debug "Issue title: ${ISSUE_TITLE:0:50}..."
 
 PROMPT_TEMPLATE="$RALPH_DIR/step.md"
-if [ ! -f "$PROMPT_TEMPLATE" ]; then
-  echo "Error: Step prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure step.md exists in your ralph directory."
-  exit 1
-fi
+require_file "$PROMPT_TEMPLATE" "Step prompt template (step.md)"
 
 # Pin context from specs/README.md
 PINNED_CONTEXT=""

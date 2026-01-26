@@ -28,7 +28,9 @@
       }
       ''
         cd ${src}
-        shfmt -f lib scripts | xargs -r shellcheck
+        # -x follows sources; --exclude=SC1091 ignores "not following" info
+        # (sources are checked independently, path resolution differs in nix store)
+        shfmt -f lib scripts | xargs -r shellcheck -x --exclude=SC1091
         touch $out
       '';
 
