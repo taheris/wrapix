@@ -17,6 +17,17 @@
     # Truncation limits (0 = no limit)
     max-tool-input = 200; # Max chars for tool input display
     max-tool-result = 500; # Max chars for tool result display
+
+    # Output prefixes (customize the bracket prefixes shown in output)
+    prefixes = {
+      response = "[response] "; # Prefix for assistant text responses
+      tool-result = "✓ [result] "; # Prefix for tool results
+      tool-error = "✗ [error] "; # Prefix for tool errors
+      thinking-start = "<thinking>\n"; # Opening tag for thinking blocks
+      thinking-end = "\n</thinking>"; # Closing tag for thinking blocks
+      stats-header = "\n[stats]\n"; # Header before stats output
+      stats-line = "  "; # Prefix for each stats line
+    };
   };
 
   # Beads integration
