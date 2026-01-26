@@ -4,7 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Allow REPO_ROOT to be set externally (for running from Nix store)
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 MOCK_CLAUDE="$SCRIPT_DIR/mock-claude"
 SCENARIOS_DIR="$SCRIPT_DIR/scenarios"
 

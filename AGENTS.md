@@ -69,15 +69,19 @@ bd sync                              # Sync with remote
 **When ending a session or when the user says "land the plane", complete ALL steps:**
 
 ```bash
+nix run .#test          # Run all tests (must pass)
+nix fmt                 # Format code
 git status              # Check changes
 git add <files>         # Stage code
-git commit -m "..."     # Commit
 bd sync                 # Sync beads
+git commit -m "..."     # Commit
+bd sync                 # Sync any new beads changes
 git push                # Push to remote
 git status              # Verify "up to date"
 ```
 
 **Rules:**
+- Tests MUST pass before committing
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing
 - If push fails, resolve and retry
