@@ -18,7 +18,7 @@ echo ""
 
 # Check if ralph is initialized
 if [ ! -d "$RALPH_DIR" ]; then
-  echo "Ralph not initialized. Run 'ralph start' first."
+  echo "Ralph not initialized. Run 'ralph plan <label>' first."
   exit 0
 fi
 
