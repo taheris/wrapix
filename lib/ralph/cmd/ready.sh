@@ -86,9 +86,8 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 
-# Use sed for title substitution (handle special chars)
-ESCAPED_TITLE=$(printf '%s\n' "$SPEC_TITLE" | sed 's/[&/\]/\\&/g')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | sed "s/{{SPEC_TITLE}}/$ESCAPED_TITLE/g")
+# Substitute title using parameter expansion
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 
 # Use awk for multi-line substitutions
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
@@ -99,7 +98,10 @@ LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
 echo "=== Creating Task Breakdown ==="
 echo ""
-echo "$PROMPT_CONTENT" | claude --dangerously-skip-permissions 2>&1 | tee "$LOG"
+# Use script to preserve tty behavior while logging
+export PROMPT_CONTENT
+# shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
+script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 
 # Check for completion
 if grep -q "READY_COMPLETE" "$LOG" 2>/dev/null; then

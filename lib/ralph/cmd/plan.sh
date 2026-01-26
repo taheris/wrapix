@@ -92,6 +92,7 @@ echo ""
 # Use script to preserve tty behavior while logging
 # This keeps stdin/stdout as a terminal so Claude runs interactively
 export PROMPT_CONTENT
+# shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
 script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 
 # Check for completion
