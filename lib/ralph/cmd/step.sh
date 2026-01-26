@@ -81,7 +81,7 @@ fi
 BEAD_LABEL="rl-$LABEL"
 
 # Find next ready issue with this label
-NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --limit 1 2>/dev/null | awk '{print $1}' | head -1) || true
+NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty') || true
 
 if [ -z "$NEXT_ISSUE" ]; then
   echo "No more ready issues with label: $BEAD_LABEL"
