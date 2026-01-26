@@ -113,6 +113,27 @@ Newline-delimited JSON:
 - [ ] Daemon handles multiple simultaneous connections
 - [ ] Client works from inside container
 
+## Security Considerations
+
+### macOS TCP Transport
+
+On macOS, the notification daemon listens on TCP port 5959 bound to 192.168.64.1 (the vmnet gateway). This is necessary because VirtioFS cannot pass Unix sockets between the host and containers.
+
+**Exposure**: Any container running on the vmnet bridge can send notifications to the host. There is no authentication on the notification protocol.
+
+**Impact**: Low. Notifications are cosmetic - they trigger native desktop alerts but cannot execute code. The worst case is unwanted notification spam.
+
+**Mitigations**:
+- Port bound to vmnet interface only (not 0.0.0.0), limiting exposure to local containers
+- Focus-aware suppression prevents notifications when terminal is focused
+- Notifications are rate-limited by the natural latency of container communication
+
+Rate limiting was considered but rejected as the added complexity outweighs the marginal benefit for this low-impact scenario.
+
+### Linux Unix Socket
+
+On Linux, the daemon uses a Unix socket mounted into containers. This provides inherent access control through filesystem permissions - only containers with the socket mounted can send notifications.
+
 ## Out of Scope
 
 - Mobile/remote notifications

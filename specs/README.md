@@ -11,6 +11,7 @@
 | [ralph-tests.md](./ralph-tests.md) | `tests/ralph/` | Integration tests for ralph workflow |
 | [ralph-workflow.md](./ralph-workflow.md) | `lib/ralph/` | Spec-driven AI orchestration |
 | [sandbox.md](./sandbox.md) | `lib/sandbox/default.nix` | Platform-agnostic container isolation |
+| [security-considerations.md](./security-considerations.md) | — | Security tradeoffs and mitigations |
 
 ## Terminology Index
 

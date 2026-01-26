@@ -187,7 +187,7 @@ let
           -c 4 \
           -m 4096M \
           --network default \
-          -p "$SSH_PORT:22" \
+          -p "127.0.0.1:$SSH_PORT:22" \
           -v "$KEYS_DIR:/run/keys:ro" \
           -v "$NIX_STORE:/nix" \
           "$BUILDER_IMAGE"
