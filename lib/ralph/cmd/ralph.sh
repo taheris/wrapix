@@ -13,13 +13,33 @@ case "$COMMAND" in
   loop)  exec ralph-loop "$@" ;;
   status) exec ralph-status "$@" ;;
   edit)
-    PROMPT_FILE="$RALPH_DIR/plan.md"
-    if [ ! -f "$PROMPT_FILE" ]; then
-      echo "Prompt file not found: $PROMPT_FILE"
-      echo "Run 'ralph plan <label>' first."
+    # Get current label
+    LABEL_FILE="$RALPH_DIR/state/label"
+    if [ ! -f "$LABEL_FILE" ]; then
+      echo "No active feature. Run 'ralph plan <label>' first."
       exit 1
     fi
-    exec "${EDITOR:-vi}" "$PROMPT_FILE"
+    LABEL=$(cat "$LABEL_FILE")
+
+    # Check if spec is hidden (stored in state/ vs specs/)
+    CONFIG_FILE="$RALPH_DIR/config.nix"
+    SPEC_HIDDEN="false"
+    if [ -f "$CONFIG_FILE" ]; then
+      SPEC_HIDDEN=$(nix eval --json --file "$CONFIG_FILE" 2>/dev/null | jq -r '.spec.hidden // false') || true
+    fi
+
+    if [ "$SPEC_HIDDEN" = "true" ]; then
+      SPEC_FILE="$RALPH_DIR/state/$LABEL.md"
+    else
+      SPEC_FILE="specs/$LABEL.md"
+    fi
+
+    if [ ! -f "$SPEC_FILE" ]; then
+      echo "Spec file not found: $SPEC_FILE"
+      echo "Run 'ralph plan $LABEL' to create it."
+      exit 1
+    fi
+    exec "${EDITOR:-vi}" "$SPEC_FILE"
     ;;
   tune)
     PROMPT_FILE="$RALPH_DIR/step.md"
@@ -47,12 +67,12 @@ case "$COMMAND" in
     echo ""
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"
-    echo "  edit            Edit plan prompt template (plan.md)"
+    echo "  edit            Edit current spec file"
     echo "  tune            Edit step prompt template (step.md)"
     echo ""
     echo "Workflow:"
     echo "  1. ralph plan my-feature   # Start feature and run spec interview"
-    echo "  2. ralph edit              # Adjust plan prompt if needed"
+    echo "  2. ralph edit              # Adjust spec if needed"
     echo "  3. ralph ready             # Convert spec to beads"
     echo "  4. ralph step              # Work one task to test prompts"
     echo "  5. ralph tune              # Adjust step prompt if needed"
