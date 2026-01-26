@@ -6,13 +6,16 @@
 
 let
   inherit (pkgs) bash runCommandLocal;
-  inherit (builtins) elem;
+  inherit (builtins) elem getEnv;
 
   isLinux = elem system [
     "x86_64-linux"
     "aarch64-linux"
   ];
   isDarwin = system == "aarch64-darwin";
+
+  # Skip heavy image tests when SKIP_IMAGE_TEST=1 (saves ~20s)
+  skipImageTest = getEnv "SKIP_IMAGE_TEST" != "";
 
   # Use Linux packages for image building (requires remote builder on Darwin)
   # Must apply same overlay as flake.nix to get pkgs.beads
@@ -45,14 +48,22 @@ in
 {
   # Verify OCI image builds and is a valid tar archive
   # On Darwin, this requires a Linux remote builder
-  image-builds = runCommandLocal "smoke-image-builds" { } ''
-    echo "Checking base image..."
-    test -f ${baseImage}
-    tar -tf ${baseImage} >/dev/null
+  # Skip with SKIP_IMAGE_TEST=1 for faster iteration (saves ~20s)
+  image-builds =
+    if skipImageTest then
+      runCommandLocal "smoke-image-builds-skipped" { } ''
+        echo "SKIP: Image build test (SKIP_IMAGE_TEST=1)"
+        mkdir $out
+      ''
+    else
+      runCommandLocal "smoke-image-builds" { } ''
+        echo "Checking base image..."
+        test -f ${baseImage}
+        tar -tf ${baseImage} >/dev/null
 
-    echo "Image built successfully"
-    mkdir $out
-  '';
+        echo "Image built successfully"
+        mkdir $out
+      '';
 
   # Verify wrapix script has valid bash syntax
   script-syntax =
