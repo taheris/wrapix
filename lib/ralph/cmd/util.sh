@@ -238,3 +238,19 @@ extract_json() {
   echo "$input"
   return 1
 }
+
+# Strip "## Implementation Notes" section from markdown content
+# This section provides transient context during ralph ready but shouldn't persist in permanent docs
+# Usage: strip_implementation_notes "$markdown_content"
+# Returns: markdown with Implementation Notes section removed
+strip_implementation_notes() {
+  local content="$1"
+
+  # Use awk to remove the ## Implementation Notes section
+  # Removes from "## Implementation Notes" to the next ## heading or end of file
+  echo "$content" | awk '
+    /^## Implementation Notes/ { skip = 1; next }
+    /^## / && skip { skip = 0 }
+    !skip { print }
+  '
+}

@@ -8,6 +8,7 @@ set -euo pipefail
 # - Analyzes spec and creates task breakdown
 # - Creates parent/epic bead, then child tasks
 # - Updates specs/README.md WIP table with parent bead ID
+# - Finalizes spec to specs/ (stripping Implementation Notes section)
 
 # Container detection: if not in container and wrapix is available, re-launch in container
 # /etc/wrapix/claude-config.json only exists inside containers (baked into image)
@@ -17,6 +18,10 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   export RALPH_ARGS="${*:-}"
   exec wrapix
 fi
+
+# Load shared helpers
+# shellcheck source=util.sh
+source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
@@ -102,6 +107,18 @@ script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 if grep -q "READY_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
   echo "Task breakdown complete!"
+
+  # Strip Implementation Notes section from spec if present
+  FINAL_SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  SPEC_CONTENT=$(cat "$SPEC_PATH")
+  FINAL_CONTENT=$(strip_implementation_notes "$SPEC_CONTENT")
+
+  if [ "$SPEC_CONTENT" != "$FINAL_CONTENT" ]; then
+    echo ""
+    echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
+    echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
+  fi
+
   echo ""
   echo "To list created issues:"
   echo "  bd list --label rl-$LABEL"
