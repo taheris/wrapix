@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Mock Claude executable for ralph integration tests
+# Reads scenario file from MOCK_SCENARIO and executes the appropriate phase
+set -euo pipefail
+
+SCENARIO_FILE="${MOCK_SCENARIO:-}"
+PROMPT="$*"
+
+# Debug output (only if RALPH_DEBUG is set)
+if [ "${RALPH_DEBUG:-0}" = "1" ]; then
+  echo "[mock-claude] Scenario: ${SCENARIO_FILE:-<none>}" >&2
+  echo "[mock-claude] Prompt length: ${#PROMPT}" >&2
+fi
+
+# If no scenario, just echo the prompt and exit
+if [ -z "$SCENARIO_FILE" ]; then
+  echo "[mock-claude] No scenario file specified (MOCK_SCENARIO)"
+  echo "[mock-claude] Prompt received:"
+  echo "$PROMPT"
+  exit 0
+fi
+
+# Check scenario file exists
+if [ ! -f "$SCENARIO_FILE" ]; then
+  echo "[mock-claude] ERROR: Scenario file not found: $SCENARIO_FILE" >&2
+  exit 1
+fi
+
+# Source the scenario file
+# shellcheck source=/dev/null
+source "$SCENARIO_FILE"
+
+# Detect phase from prompt content
+detect_phase() {
+  local prompt="$1"
+
+  # Check for plan phase markers
+  if echo "$prompt" | grep -qi "spec interview\|create.*spec\|plan"; then
+    echo "plan"
+    return
+  fi
+
+  # Check for ready phase markers
+  if echo "$prompt" | grep -qi "convert spec\|create.*task\|task breakdown\|ready"; then
+    echo "ready"
+    return
+  fi
+
+  # Check for step phase markers (implementation)
+  if echo "$prompt" | grep -qi "implementation\|issue details\|working on\|step"; then
+    echo "step"
+    return
+  fi
+
+  # Default to step (most common)
+  echo "step"
+}
+
+PHASE=$(detect_phase "$PROMPT")
+
+if [ "${RALPH_DEBUG:-0}" = "1" ]; then
+  echo "[mock-claude] Detected phase: $PHASE" >&2
+fi
+
+# Call the appropriate phase function if it exists
+case "$PHASE" in
+  plan)
+    if type phase_plan &>/dev/null; then
+      phase_plan
+    else
+      echo "[mock-claude] No phase_plan function defined"
+    fi
+    ;;
+  ready)
+    if type phase_ready &>/dev/null; then
+      phase_ready
+    else
+      echo "[mock-claude] No phase_ready function defined"
+    fi
+    ;;
+  step)
+    if type phase_step &>/dev/null; then
+      phase_step
+    else
+      echo "[mock-claude] No phase_step function defined"
+    fi
+    ;;
+  *)
+    echo "[mock-claude] Unknown phase: $PHASE"
+    ;;
+esac
