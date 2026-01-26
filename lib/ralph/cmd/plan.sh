@@ -32,6 +32,7 @@ CURRENT_FILE="$RALPH_DIR/state/current.json"
 # Parse arguments
 LABEL=""
 SPEC_HIDDEN="false"
+UPDATE_SPEC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,9 +40,18 @@ while [[ $# -gt 0 ]]; do
       SPEC_HIDDEN="true"
       shift
       ;;
+    -u|--update)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --update requires a spec name"
+        echo "Usage: ralph plan --update <spec>"
+        exit 1
+      fi
+      UPDATE_SPEC="$2"
+      shift 2
+      ;;
     -*)
       echo "Error: Unknown option: $1"
-      echo "Usage: ralph plan [--hidden|-h] <label>"
+      echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
       exit 1
       ;;
     *)
@@ -49,7 +59,7 @@ while [[ $# -gt 0 ]]; do
         LABEL="$1"
       else
         echo "Error: Too many arguments"
-        echo "Usage: ralph plan [--hidden|-h] <label>"
+        echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
         exit 1
       fi
       shift
@@ -57,22 +67,51 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate mutually exclusive options
+if [ -n "$UPDATE_SPEC" ] && [ "$SPEC_HIDDEN" = "true" ]; then
+  echo "Error: --hidden and --update cannot be combined"
+  echo "  --hidden creates a new spec in state/"
+  echo "  --update modifies an existing spec in specs/"
+  exit 1
+fi
+
+# Handle --update mode: validate spec exists and set label
+if [ -n "$UPDATE_SPEC" ]; then
+  UPDATE_SPEC_PATH="$SPECS_DIR/$UPDATE_SPEC.md"
+  if [ ! -f "$UPDATE_SPEC_PATH" ]; then
+    echo "Error: Spec not found: $UPDATE_SPEC_PATH"
+    echo "Available specs in $SPECS_DIR/:"
+    found_specs=false
+    for spec_file in "$SPECS_DIR"/*.md; do
+      [ -f "$spec_file" ] || continue
+      found_specs=true
+      basename "$spec_file" .md | sed 's/^/  /'
+    done
+    [ "$found_specs" = "true" ] || echo "  (none)"
+    exit 1
+  fi
+  # In update mode, use the spec name as the label
+  LABEL="$UPDATE_SPEC"
+fi
+
 # If no argument provided, try to read from state file
 if [ -z "$LABEL" ] && [ -f "$CURRENT_FILE" ]; then
   LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
   SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
 fi
 
-# Label is required
+# Label is required (unless --update was used, which sets it)
 if [ -z "$LABEL" ]; then
   echo "Error: Label is required"
-  echo "Usage: ralph plan [--hidden|-h] <label>"
+  echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
   echo ""
   echo "Options:"
-  echo "  -h, --hidden    Store spec in state/ instead of specs/"
+  echo "  -h, --hidden        Store spec in state/ instead of specs/"
+  echo "  -u, --update <spec> Update an existing spec in specs/"
   echo ""
   echo "Example: ralph plan user-auth"
   echo "         ralph plan --hidden internal-tool"
+  echo "         ralph plan --update sandbox"
   echo ""
   echo "Or resume an existing plan by running 'ralph plan' after 'ralph plan <label>' was run."
   exit 1
