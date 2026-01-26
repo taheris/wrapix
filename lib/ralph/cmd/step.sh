@@ -199,6 +199,7 @@ WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
 WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
+WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
 
 # For description and pinned context, use awk for multi-line
 WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/\{\{DESCRIPTION\}\}/, desc); print}')
