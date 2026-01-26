@@ -58,7 +58,11 @@
   ];
 
   exit-signals = {
-    complete = "PLAN_COMPLETE";
+    plan-complete = "PLAN_COMPLETE";
+    ready-complete = "READY_COMPLETE";
+    step-complete = "STEP_COMPLETE";
+    step-blocked = "STEP_BLOCKED:";
+    step-clarify = "STEP_CLARIFY:";
     blocked = "BLOCKED:";
     clarify = "CLARIFY:";
   };

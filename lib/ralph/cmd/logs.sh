@@ -20,6 +20,6 @@ echo ""
 
 for log in $RECENT_LOGS; do
   echo "--- $(basename "$log") ---"
-  grep -E "(PLAN_COMPLETE|WORK_COMPLETE|BLOCKED:|CLARIFY:|error:|Error:|ERROR)" "$log" 2>/dev/null || echo "(no signals found)"
+  grep -E "(PLAN_COMPLETE|READY_COMPLETE|STEP_COMPLETE|STEP_BLOCKED:|STEP_CLARIFY:|BLOCKED:|CLARIFY:|error:|Error:|ERROR)" "$log" 2>/dev/null || echo "(no signals found)"
   echo ""
 done

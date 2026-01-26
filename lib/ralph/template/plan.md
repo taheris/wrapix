@@ -60,6 +60,10 @@ This section is **automatically stripped** when the spec is finalized to `specs/
 
 ## Exit Signals
 
-- `INTERVIEW_COMPLETE` - Interview finished, spec created
+Output ONE of these when done, then immediately run `/exit` to end the session:
+
+- `PLAN_COMPLETE` - Interview finished, spec created
 - `BLOCKED: <reason>` - Cannot proceed without additional information
 - `CLARIFY: <question>` - Need clarification on something specific
+
+**IMPORTANT**: After outputting an exit signal, you MUST run `/exit` to terminate the session.

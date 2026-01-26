@@ -140,7 +140,8 @@ if [ -z "$NEXT_ISSUE" ]; then
   # Close the epic and transition WIP -> REVIEW
   close_epic_if_exists "$BEAD_LABEL"
   update_spec_status_to_review "$LABEL" "$SPEC_HIDDEN"
-  exit 0
+  # Exit 100 signals "all complete" to loop.sh (vs 0 for "task done, more may remain")
+  exit 100
 fi
 
 echo "Working on: $NEXT_ISSUE"
@@ -216,7 +217,7 @@ export WORK_PROMPT
 script -q -c 'claude --dangerously-skip-permissions "$WORK_PROMPT"' "$LOG"
 
 # Check for completion
-if grep -q "WORK_COMPLETE" "$LOG" 2>/dev/null; then
+if grep -q "STEP_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
   echo "Work complete. Closing issue: $NEXT_ISSUE"
   bd close "$NEXT_ISSUE"
