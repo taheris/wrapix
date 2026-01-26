@@ -93,6 +93,8 @@
           apps = {
             ralph = ralph.app;
             test = test.app;
+            test-lint = test.apps.lint;
+            test-ralph = test.apps.ralph;
           };
 
           devShells.default = wrapix.mkDevShell {

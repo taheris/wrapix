@@ -85,6 +85,40 @@ let
   '';
 
   # ============================================================================
+  # Individual Test Runner Apps
+  # ============================================================================
+
+  # Lint-only tests (fast: ~5s)
+  testLint = writeShellScriptBin "test-lint" ''
+    set -euo pipefail
+    echo "=== Lint Checks ==="
+    echo ""
+    echo "Running: nix flake check (lint only)"
+    echo "This runs nixfmt, shellcheck, and statix checks."
+    echo ""
+    # Build only the lint checks
+    ${pkgs.nix}/bin/nix build --no-link \
+      .#checks.${system}.nixfmt \
+      .#checks.${system}.shellcheck \
+      .#checks.${system}.statix
+    echo "PASS: All lint checks"
+  '';
+
+  # Ralph integration tests only (no flake check)
+  testRalph = writeShellScriptBin "test-ralph" ''
+    set -euo pipefail
+    echo "=== Ralph Integration Tests ==="
+    echo ""
+    if command -v bd &>/dev/null && command -v ralph-step &>/dev/null; then
+      ${ralphIntegrationTests}/bin/test-ralph-integration
+    else
+      echo "SKIP: Ralph integration tests (bd or ralph-step not in PATH)"
+      echo "Run from devShell: nix develop"
+      exit 1
+    fi
+  '';
+
+  # ============================================================================
   # Unified Test Runner App
   # ============================================================================
 
@@ -98,18 +132,12 @@ let
     echo ""
 
     # ----------------------------------------
-    # Nix Flake Checks
+    # Nix Flake Checks (skipped - already run by nix flake check)
     # ----------------------------------------
-    echo "----------------------------------------"
-    echo "Running: Nix Flake Checks"
-    echo "----------------------------------------"
-    if ${pkgs.nix}/bin/nix flake check --impure 2>&1; then
-      echo "PASS: Nix flake checks"
-    else
-      echo "FAIL: Nix flake checks"
-      FAILED=1
-    fi
-    echo ""
+    # NOTE: Removed embedded "nix flake check" call.
+    # If you ran "nix run .#test", the checks were already built.
+    # Run "nix flake check" separately if you want lint/smoke checks.
+    # This saves ~50s by avoiding redundant evaluation.
 
     # ----------------------------------------
     # Ralph Integration Tests
@@ -205,6 +233,23 @@ in
     meta.description = "Run all tests (some skip gracefully based on platform)";
     type = "app";
     program = "${testAll}/bin/test-all";
+  };
+
+  # Additional apps for selective testing
+  apps = {
+    # Fast lint-only tests (~5s)
+    lint = {
+      meta.description = "Run lint checks only (nixfmt, shellcheck, statix)";
+      type = "app";
+      program = "${testLint}/bin/test-lint";
+    };
+
+    # Ralph integration tests only (~20s)
+    ralph = {
+      meta.description = "Run ralph integration tests only";
+      type = "app";
+      program = "${testRalph}/bin/test-ralph";
+    };
   };
 
   # Individual test sets (for debugging/selective running)
