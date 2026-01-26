@@ -223,7 +223,8 @@ Title: {{TITLE}}
 
 1. **Understand**: Read the spec and issue thoroughly before making changes
 2. **Implement**: Write code following the spec
-3. **Quality Gates**: Before completing, ensure:
+3. **Discovered Work**: Create with: `bd create --title="..." --labels="rl-{{LABEL}}"`
+4. **Quality Gates**: Before completing, ensure:
    - [ ] All tests pass
    - [ ] Lint checks pass
 

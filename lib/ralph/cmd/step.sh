@@ -28,6 +28,7 @@ debug "Syncing beads database..."
 bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
@@ -188,6 +189,9 @@ debug "Issue title: ${ISSUE_TITLE:0:50}..."
 
 PROMPT_TEMPLATE="$RALPH_DIR/step.md"
 require_file "$PROMPT_TEMPLATE" "Step prompt template (step.md)"
+
+# Validate template has placeholders, reset from source if corrupted
+validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/step.md" "step.md"
 
 # Pin context from specs/README.md
 PINNED_CONTEXT=""

@@ -24,6 +24,7 @@ fi
 source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
@@ -81,6 +82,9 @@ if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Make sure ready.md exists in your ralph directory."
   exit 1
 fi
+
+# Validate template has placeholders, reset from source if corrupted
+validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/ready.md" "ready.md"
 
 mkdir -p "$RALPH_DIR/logs"
 

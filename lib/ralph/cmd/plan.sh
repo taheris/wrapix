@@ -152,6 +152,9 @@ if [ ! -f "$PROMPT_TEMPLATE" ]; then
   exit 1
 fi
 
+# Validate template has placeholders, reset from source if corrupted
+validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/plan.md" "plan.md"
+
 # Pin context from specs/README.md
 PINNED_CONTEXT=""
 if [ -f "$SPECS_README" ]; then

@@ -409,6 +409,39 @@ run_claude_stream() {
     | jq --unbuffered -r "$jq_filter" 2>/dev/null || true
 }
 
+# Validate template has required placeholders, reset from source if corrupted
+# Usage: validate_template "$local_path" "$source_path" "$template_name"
+# Returns: 0 if valid or repaired, 1 if repair failed
+validate_template() {
+  local local_path="$1"
+  local source_path="$2"
+  local template_name="${3:-template}"
+
+  if [ ! -f "$local_path" ]; then
+    warn "$template_name not found at $local_path"
+    return 1
+  fi
+
+  # Check for required placeholder - if {{LABEL}} is missing, template is corrupted
+  if ! grep -q '{{LABEL}}' "$local_path" 2>/dev/null; then
+    warn "$template_name is missing {{LABEL}} placeholder - resetting from source"
+
+    if [ ! -f "$source_path" ]; then
+      warn "Source template not found at $source_path - cannot repair"
+      return 1
+    fi
+
+    # Backup corrupted file before overwriting
+    cp "$local_path" "${local_path}.bak"
+    debug "Backed up corrupted $template_name to ${local_path}.bak"
+
+    cp "$source_path" "$local_path"
+    debug "$template_name reset from $source_path"
+  fi
+
+  return 0
+}
+
 # Run claude interactively with an initial prompt
 # Usage: run_claude_interactive "$prompt_var_name"
 # Opens an interactive Claude console with the prompt as initial context
