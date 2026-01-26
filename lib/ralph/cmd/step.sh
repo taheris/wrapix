@@ -9,6 +9,15 @@ set -euo pipefail
 # - Implements the task with quality gates
 # - If this was the last bead, triggers completion (WIP -> REVIEW)
 
+# Container detection: if not in container and wrapix is available, re-launch in container
+# /etc/wrapix/claude-config.json only exists inside containers (baked into image)
+if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; then
+  export RALPH_MODE=1
+  export RALPH_CMD=step
+  export RALPH_ARGS="${*:-}"
+  exec wrapix
+fi
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
