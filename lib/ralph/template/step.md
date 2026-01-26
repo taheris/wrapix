@@ -31,7 +31,7 @@ Title: {{TITLE}}
 
 ## Land the Plane Checklist
 
-Before outputting STEP_COMPLETE, verify:
+Before outputting RALPH_COMPLETE, verify:
 - [ ] git status (check changes)
 - [ ] git add <files>
 - [ ] bd sync
@@ -43,8 +43,8 @@ Before outputting STEP_COMPLETE, verify:
 
 Output ONE of these when done, then immediately run `/exit` to end the session:
 
-- `STEP_COMPLETE` - Task finished, all quality gates passed
-- `STEP_BLOCKED: <reason>` - Cannot proceed, explain why
-- `STEP_CLARIFY: <question>` - Need clarification before proceeding
+- `RALPH_COMPLETE` - Task finished, all quality gates passed
+- `RALPH_BLOCKED: <reason>` - Cannot proceed, explain why
+- `RALPH_CLARIFY: <question>` - Need clarification before proceeding
 
 **IMPORTANT**: After outputting an exit signal, you MUST run `/exit` to terminate the session.
