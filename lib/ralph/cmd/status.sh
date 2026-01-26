@@ -2,19 +2,14 @@
 set -euo pipefail
 
 # ralph status
-# Show current workflow state:
+# Show current workflow state using bd mol commands:
 # - Current label and spec name
-# - Beads progress: open/in_progress/closed counts
-# - Next ready task (if any)
-# - Spec status (WIP/REVIEW)
+# - Molecule progress (completion %, rate, ETA)
+# - Current position in DAG
+# - Stale molecule warnings
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 SPECS_DIR="specs"
-SPECS_README="$SPECS_DIR/README.md"
-
-echo "Ralph Status"
-echo "============"
-echo ""
 
 # Check if ralph is initialized
 if [ ! -d "$RALPH_DIR" ]; then
@@ -22,49 +17,85 @@ if [ ! -d "$RALPH_DIR" ]; then
   exit 0
 fi
 
-# Current label and hidden flag from state
+# Read state from current.json
 CURRENT_FILE="$RALPH_DIR/state/current.json"
+LABEL=""
+MOLECULE=""
 SPEC_HIDDEN="false"
+
 if [ -f "$CURRENT_FILE" ]; then
   LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+  MOLECULE=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
   SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
-  if [ -n "$LABEL" ]; then
-    echo "Label: $LABEL"
-    BEAD_LABEL="rl-$LABEL"
-  else
-    echo "Label: (not set)"
-    LABEL=""
-    BEAD_LABEL=""
-  fi
-else
-  echo "Label: (not set)"
-  LABEL=""
-  BEAD_LABEL=""
 fi
 
+# Header
 if [ -n "$LABEL" ]; then
-  # Compute spec path based on hidden flag
-  if [ "$SPEC_HIDDEN" = "true" ]; then
-    SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
-    echo "Spec: $LABEL (hidden)"
-  else
-    SPEC_PATH="$SPECS_DIR/$LABEL.md"
-    echo "Spec: $LABEL"
-  fi
-  if [ -f "$SPEC_PATH" ]; then
-    echo "  File: $SPEC_PATH (exists)"
-  else
-    echo "  File: $SPEC_PATH (not created yet)"
-  fi
+  echo "Ralph Status: $LABEL"
+  echo "==============================="
 else
-  echo "Spec: (not set)"
+  echo "Ralph Status"
+  echo "============"
+  echo ""
+  echo "Label: (not set)"
+  echo ""
+  echo "Run 'ralph plan <label>' to start a new feature."
+  exit 0
+fi
+
+# Molecule ID
+if [ -n "$MOLECULE" ]; then
+  echo "Molecule: $MOLECULE"
+else
+  echo "Molecule: (not set)"
+fi
+
+# Spec location
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  echo "Spec: $SPEC_PATH (hidden)"
+else
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  echo "Spec: $SPEC_PATH"
 fi
 
 echo ""
 
-# Beads progress (if label is set)
-if [ -n "$BEAD_LABEL" ]; then
+# If molecule is set, use bd mol commands for progress tracking
+if [ -n "$MOLECULE" ]; then
+  # Progress section
+  echo "Progress:"
+  if PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE" 2>&1); then
+    # Indent each line of progress output
+    echo "$PROGRESS_OUTPUT" | sed 's/^/  /'
+  else
+    echo "  (unable to get progress)"
+  fi
+
+  echo ""
+
+  # Current position in DAG
+  echo "Current Position:"
+  if CURRENT_OUTPUT=$(bd mol current "$MOLECULE" 2>&1); then
+    echo "$CURRENT_OUTPUT" | sed 's/^/  /'
+  else
+    echo "  (unable to get current position)"
+  fi
+
+  echo ""
+
+  # Check for stale molecules (hygiene warnings)
+  if STALE_OUTPUT=$(bd mol stale --quiet 2>&1) && [ -n "$STALE_OUTPUT" ]; then
+    echo "Warnings:"
+    echo "$STALE_OUTPUT" | sed 's/^/  /'
+    echo ""
+  fi
+else
+  # Fallback: no molecule set, use legacy label-based counting
+  BEAD_LABEL="rl-$LABEL"
   echo "Beads Progress ($BEAD_LABEL):"
+  echo "  (No molecule set - using label-based counting)"
+  echo ""
 
   # Count by status
   OPEN_COUNT=$(bd list --label "$BEAD_LABEL" --status=open 2>/dev/null | wc -l) || OPEN_COUNT=0
@@ -101,24 +132,9 @@ if [ -n "$BEAD_LABEL" ]; then
       echo "No tasks found for label: $BEAD_LABEL"
     fi
   fi
-else
-  echo "No beads label set. Run 'ralph ready' after creating a spec."
-fi
 
-echo ""
-
-# Spec status from README (only when not hidden)
-if [ "$SPEC_HIDDEN" != "true" ] && [ -f "$SPECS_README" ] && [ -n "${LABEL:-}" ]; then
-  echo "Spec Status:"
-  if grep -q "$LABEL.*WIP\|Active Work.*$LABEL" "$SPECS_README" 2>/dev/null; then
-    echo "  Status: WIP (Work In Progress)"
-  elif grep -q "$LABEL.*REVIEW\|Completed.*$LABEL" "$SPECS_README" 2>/dev/null; then
-    echo "  Status: REVIEW"
-  else
-    echo "  Status: Not tracked in specs/README.md"
-  fi
-elif [ "$SPEC_HIDDEN" = "true" ] && [ -n "${LABEL:-}" ]; then
-  echo "Spec Status: Hidden (beads are source of truth)"
+  echo ""
+  echo "Run 'ralph ready' to create a molecule for this spec."
 fi
 
 echo ""
