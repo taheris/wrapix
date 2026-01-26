@@ -71,6 +71,12 @@ let
     exec ${./ralph/run-tests.sh}
   '';
 
+  # Builder integration tests (Darwin only)
+  builderIntegrationTests = writeShellScriptBin "test-builder" ''
+    set -euo pipefail
+    exec ${./builder-test.sh}
+  '';
+
   # ============================================================================
   # Unified Test Runner App
   # ============================================================================
@@ -137,6 +143,30 @@ let
         ''
           echo "SKIP: Darwin tests (not on Darwin)"
           SKIPPED_TESTS="$SKIPPED_TESTS darwin"
+        ''
+    }
+    echo ""
+
+    # ----------------------------------------
+    # Builder Integration Tests (Darwin only)
+    # ----------------------------------------
+    echo "----------------------------------------"
+    echo "Running: Builder Integration Tests"
+    echo "----------------------------------------"
+    ${
+      if isDarwin then
+        ''
+          if ${builderIntegrationTests}/bin/test-builder; then
+            echo "PASS: Builder integration tests"
+          else
+            echo "FAIL: Builder integration tests"
+            FAILED=1
+          fi
+        ''
+      else
+        ''
+          echo "SKIP: Builder tests (not on Darwin)"
+          SKIPPED_TESTS="$SKIPPED_TESTS builder"
         ''
     }
     echo ""

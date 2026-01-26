@@ -96,16 +96,7 @@
             in
             {
               ralph = ralph.app;
-
               test = test.app;
-
-              test-builder = {
-                meta.description = "Run wrapix-builder integration tests (Darwin only)";
-                type = "app";
-                program = "${pkgs.writeShellScriptBin "test-builder" ''
-                  exec ${./tests/builder-test.sh}
-                ''}/bin/test-builder";
-              };
             };
 
           devShells.default =
