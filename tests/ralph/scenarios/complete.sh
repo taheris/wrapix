@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Complete scenario - always outputs RALPH_COMPLETE
 # Used to test successful task completion
 

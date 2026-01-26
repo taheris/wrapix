@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Check-status scenario - verifies issue is in_progress during execution
 # Used to test that step.sh marks issues as in_progress before work starts
 

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Echo scenario - simple echo for basic testing
 # Used to verify mock-claude is working
 
