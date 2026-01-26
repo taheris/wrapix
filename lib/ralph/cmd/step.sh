@@ -99,9 +99,10 @@ bd show "$NEXT_ISSUE"
 bd update "$NEXT_ISSUE" --status=in_progress
 
 # Get issue details as JSON for prompt substitution
-ISSUE_JSON=$(bd show "$NEXT_ISSUE" --json 2>/dev/null) || ISSUE_JSON="{}"
-ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title // ""')
-ISSUE_DESC=$(echo "$ISSUE_JSON" | jq -r '.description // ""')
+# Note: bd show --json returns an array, so extract first element
+ISSUE_JSON=$(bd show "$NEXT_ISSUE" --json 2>/dev/null) || ISSUE_JSON="[]"
+ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.[0].title // ""')
+ISSUE_DESC=$(echo "$ISSUE_JSON" | jq -r '.[0].description // ""')
 
 PROMPT_TEMPLATE="$RALPH_DIR/step.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
