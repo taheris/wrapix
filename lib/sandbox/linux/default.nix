@@ -137,8 +137,7 @@ in
           mkdir -p "$BEADS_STAGING"
           [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
           [ -f "$PROJECT_DIR/.beads/metadata.json" ] && cp "$PROJECT_DIR/.beads/metadata.json" "$BEADS_STAGING/"
-          # Stage data source: dolt-remote/ for Dolt mode, issues.jsonl for SQLite mode
-          [ -d "$PROJECT_DIR/.beads/dolt-remote" ] && cp -r "$PROJECT_DIR/.beads/dolt-remote" "$BEADS_STAGING/"
+          # Stage issues.jsonl for SQLite mode (dolt-remote accessed via beads worktree in workspace mount)
           [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
         fi
