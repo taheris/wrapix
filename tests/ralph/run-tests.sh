@@ -657,6 +657,234 @@ EOF
   teardown_test_env
 }
 
+# Test: ralph status wrapper calls bd mol commands correctly
+# Uses mock bd to verify:
+# 1. bd mol progress called with correct molecule
+# 2. bd mol current called with correct molecule
+# 3. bd mol stale called for hygiene warnings
+# 4. Output format matches spec
+# 5. Graceful fallback when molecule not set
+test_status_wrapper_bd_mol_calls() {
+  CURRENT_TEST="status_wrapper_bd_mol_calls"
+  test_header "Status Wrapper Calls bd mol Commands Correctly"
+
+  setup_test_env "status-wrapper"
+
+  # Source the scenario helper
+  # shellcheck source=/dev/null
+  source "$SCENARIOS_DIR/status-wrapper.sh"
+
+  local label="test-feature"
+  local molecule_id="test-mol-abc123"
+  local log_file="$TEST_DIR/bd-mock.log"
+  local mock_responses="$TEST_DIR/mock-responses"
+
+  # Create spec file (required by status.sh for Spec: line)
+  cat > "$TEST_DIR/specs/$label.md" << 'EOF'
+# Test Feature
+
+## Requirements
+- Test requirement
+EOF
+
+  # Set up current.json with molecule
+  echo "{\"label\":\"$label\",\"molecule\":\"$molecule_id\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  # Create mock responses directory
+  mkdir -p "$mock_responses"
+
+  # Set up mock progress output (per spec format)
+  cat > "$mock_responses/mol-progress.txt" << 'EOF'
+▓▓▓▓▓▓▓▓░░ 80% (8/10)
+Rate: 2.5 steps/hour
+ETA: ~48 min
+EOF
+
+  # Set up mock current output (per spec format)
+  cat > "$mock_responses/mol-current.txt" << 'EOF'
+[done]    Setup project structure
+[done]    Implement core feature
+[current] Write tests         ← you are here
+[ready]   Update documentation
+[blocked] Final review (waiting on tests)
+EOF
+
+  # Set up mock stale output (empty = no stale molecules)
+  touch "$mock_responses/mol-stale.txt"
+
+  # Set up mock bd
+  rm -f "$log_file"
+  setup_mock_bd "$log_file" "$mock_responses"
+
+  test_pass "Set up mock bd with responses"
+
+  # Run ralph-status
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  # Verify ralph-status succeeded
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status completed successfully"
+  else
+    test_fail "ralph-status failed with exit code $status_exit"
+  fi
+
+  # Verify bd mol progress was called with correct molecule
+  if grep -q "bd mol progress $molecule_id" "$log_file" 2>/dev/null; then
+    test_pass "bd mol progress called with correct molecule ID"
+  else
+    test_fail "bd mol progress not called with molecule: $molecule_id"
+    echo "    Log contents:"
+    cat "$log_file" 2>/dev/null | sed 's/^/      /' || echo "      (empty)"
+  fi
+
+  # Verify bd mol current was called with correct molecule
+  if grep -q "bd mol current $molecule_id" "$log_file" 2>/dev/null; then
+    test_pass "bd mol current called with correct molecule ID"
+  else
+    test_fail "bd mol current not called with molecule: $molecule_id"
+  fi
+
+  # Verify bd mol stale was called
+  if grep -q "bd mol stale" "$log_file" 2>/dev/null; then
+    test_pass "bd mol stale called for hygiene warnings"
+  else
+    test_fail "bd mol stale not called"
+  fi
+
+  # Verify output format - header
+  if echo "$status_output" | grep -q "Ralph Status: $label"; then
+    test_pass "Output has correct header with label"
+  else
+    test_fail "Missing or incorrect Ralph Status header"
+  fi
+
+  # Verify output format - molecule ID
+  if echo "$status_output" | grep -q "Molecule: $molecule_id"; then
+    test_pass "Output shows molecule ID"
+  else
+    test_fail "Missing molecule ID in output"
+  fi
+
+  # Verify output format - progress section
+  if echo "$status_output" | grep -q "Progress:"; then
+    test_pass "Output has Progress section"
+  else
+    test_fail "Missing Progress section"
+  fi
+
+  # Verify output format - progress bar from mock
+  if echo "$status_output" | grep -q "80%"; then
+    test_pass "Progress output includes percentage"
+  else
+    test_fail "Progress output missing percentage"
+  fi
+
+  # Verify output format - current position section
+  if echo "$status_output" | grep -q "Current Position:"; then
+    test_pass "Output has Current Position section"
+  else
+    test_fail "Missing Current Position section"
+  fi
+
+  # Verify output includes position markers from mock
+  if echo "$status_output" | grep -q '\[current\]'; then
+    test_pass "Output includes [current] marker"
+  else
+    test_fail "Output missing [current] marker"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status fallback when molecule not set
+test_status_wrapper_fallback() {
+  CURRENT_TEST="status_wrapper_fallback"
+  test_header "Status Wrapper Fallback Without Molecule"
+
+  setup_test_env "status-fallback"
+
+  local label="test-feature"
+
+  # Create spec file
+  cat > "$TEST_DIR/specs/$label.md" << 'EOF'
+# Test Feature
+
+## Requirements
+- Test requirement
+EOF
+
+  # Set up current.json WITHOUT molecule
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  # Run ralph-status
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  # Should still succeed (graceful fallback)
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status completed successfully in fallback mode"
+  else
+    test_fail "ralph-status failed in fallback mode (exit $status_exit)"
+  fi
+
+  # Verify fallback message
+  if echo "$status_output" | grep -q "No molecule set\|no molecule\|Molecule: (not set)"; then
+    test_pass "Fallback mode shows molecule not set"
+  else
+    test_fail "Expected fallback mode indication"
+  fi
+
+  # Verify prompts user to run ralph ready
+  if echo "$status_output" | grep -qi "ralph ready"; then
+    test_pass "Prompts user to run ralph ready"
+  else
+    test_fail "Should prompt user to run ralph ready"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status exits gracefully when no label set
+test_status_wrapper_no_label() {
+  CURRENT_TEST="status_wrapper_no_label"
+  test_header "Status Wrapper Without Label"
+
+  setup_test_env "status-no-label"
+
+  # Set up empty current.json (no label)
+  echo '{}' > "$RALPH_DIR/state/current.json"
+
+  # Run ralph-status
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  # Should succeed (graceful exit)
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status completed successfully without label"
+  else
+    test_fail "ralph-status failed without label (exit $status_exit)"
+  fi
+
+  # Verify prompts user to run ralph plan
+  if echo "$status_output" | grep -qi "ralph plan"; then
+    test_pass "Prompts user to run ralph plan"
+  else
+    test_fail "Should prompt user to run ralph plan"
+  fi
+
+  teardown_test_env
+}
+
 # Test: step exits 100 when no issues remain
 test_step_exits_100_when_complete() {
   CURRENT_TEST="step_exits_100_when_complete"
@@ -2413,6 +2641,9 @@ ALL_TESTS=(
   test_isolated_beads_db
   test_step_marks_in_progress
   test_status_mol_current_position
+  test_status_wrapper_bd_mol_calls
+  test_status_wrapper_fallback
+  test_status_wrapper_no_label
   test_step_closes_issue_on_complete
   test_step_no_close_without_signal
   test_step_exits_100_when_complete
