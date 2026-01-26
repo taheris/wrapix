@@ -254,3 +254,136 @@ strip_implementation_notes() {
     !skip { print }
   '
 }
+
+# Build jq filter for stream-json output based on config
+# Usage: build_stream_filter "$config_json"
+# Returns: jq filter string for processing claude stream-json output
+build_stream_filter() {
+  local config="$1"
+
+  # Extract output config with defaults
+  local responses tool_names tool_inputs tool_results thinking stats
+  local max_tool_input max_tool_result
+
+  responses=$(echo "$config" | jq -r '.output.responses // true')
+  tool_names=$(echo "$config" | jq -r '.output."tool-names" // true')
+  tool_inputs=$(echo "$config" | jq -r '.output."tool-inputs" // false')
+  tool_results=$(echo "$config" | jq -r '.output."tool-results" // false')
+  thinking=$(echo "$config" | jq -r '.output.thinking // false')
+  stats=$(echo "$config" | jq -r '.output.stats // false')
+  max_tool_input=$(echo "$config" | jq -r '.output."max-tool-input" // 200')
+  max_tool_result=$(echo "$config" | jq -r '.output."max-tool-result" // 500')
+
+  debug "Output config: responses=$responses tool_names=$tool_names tool_inputs=$tool_inputs tool_results=$tool_results thinking=$thinking stats=$stats"
+
+  # Build the jq filter dynamically
+  # We use a different approach: check message type first, then process content types
+  local filter='
+# Helper function for truncation
+def truncate(n): if n == 0 then . elif (. | length) > n then .[0:n] + "..." else . end;
+
+# Process assistant messages - extract text and thinking from content array
+if .type == "assistant" and .message.content then
+  .message.content[] |
+'
+
+  # Build content type checks within assistant message processing
+  local content_checks=""
+
+  if [ "$responses" = "true" ]; then
+    content_checks+='
+  if .type == "text" then .text // empty'
+  fi
+
+  if [ "$thinking" = "true" ]; then
+    if [ -n "$content_checks" ]; then
+      content_checks+='
+  elif .type == "thinking" then "<thinking>\n" + .thinking + "\n</thinking>"'
+    else
+      content_checks+='
+  if .type == "thinking" then "<thinking>\n" + .thinking + "\n</thinking>"'
+    fi
+  fi
+
+  # Close content type checks or provide default
+  if [ -n "$content_checks" ]; then
+    filter+="$content_checks"'
+  else empty end'
+  else
+    filter+='empty'
+  fi
+
+  # Add tool use (names and/or inputs)
+  if [ "$tool_names" = "true" ] || [ "$tool_inputs" = "true" ]; then
+    filter+='
+
+# Show tool use
+elif .type == "content_block_start" and .content_block.type == "tool_use" then
+'
+    if [ "$tool_inputs" = "true" ]; then
+      filter+="  \"[\" + .content_block.name + \"] \" + ((.content_block.input // {}) | tostring | truncate($max_tool_input))"
+    else
+      filter+='  "[" + .content_block.name + "]"'
+    fi
+  fi
+
+  # Add tool results
+  if [ "$tool_results" = "true" ]; then
+    filter+="
+
+# Show tool results
+elif .type == \"user\" and .message.content then
+  .message.content[] |
+  if .type == \"tool_result\" then
+    if .is_error == true then
+      \"[ERROR] \" + ((.content // \"unknown error\") | tostring | truncate($max_tool_result))
+    else
+      \"[result] \" + ((.content // \"\") | tostring | truncate($max_tool_result))
+    end
+  else
+    empty
+  end"
+  fi
+
+  # Add stats output
+  if [ "$stats" = "true" ]; then
+    filter+='
+
+# Show final stats
+elif .type == "result" then
+  "\n--- Stats ---\n" +
+  "Cost: $" + ((.cost_usd // 0) | tostring) + "\n" +
+  "Input tokens: " + ((.usage.input_tokens // 0) | tostring) + "\n" +
+  "Output tokens: " + ((.usage.output_tokens // 0) | tostring) + "\n" +
+  "Duration: " + ((.duration_ms // 0) / 1000 | tostring) + "s"'
+  fi
+
+  # Close the if chain
+  filter+='
+
+else
+  empty
+end'
+
+  echo "$filter"
+}
+
+# Run claude with stream-json output and configurable display
+# Usage: run_claude_stream "$prompt_var_name" "$log_file" "$config_json"
+# The prompt must be exported as an environment variable before calling
+run_claude_stream() {
+  local prompt_var="$1"
+  local log_file="$2"
+  local config="$3"
+
+  local jq_filter
+  jq_filter=$(build_stream_filter "$config")
+
+  debug "Running claude with stream-json output to $log_file"
+
+  # Run claude with stream-json, tee to log, and filter with jq
+  # The prompt variable is passed via environment
+  claude --dangerously-skip-permissions --print --output-format stream-json --verbose "${!prompt_var}" 2>&1 \
+    | tee "$log_file" \
+    | jq --unbuffered -r "$jq_filter" 2>/dev/null || true
+}

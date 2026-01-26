@@ -19,6 +19,10 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   exec wrapix
 fi
 
+# Load shared helpers
+# shellcheck source=util.sh
+source "$(dirname "$0")/util.sh"
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 SPECS_DIR="specs"
@@ -87,13 +91,7 @@ fi
 # Set/update label in state
 echo "$LABEL" > "$LABEL_FILE"
 
-# Update config.nix with the label
 CONFIG_FILE="$RALPH_DIR/config.nix"
-if [ -f "$CONFIG_FILE" ]; then
-  # Handle both null and previously set string values
-  sed -i 's/label = null;/label = "'"$LABEL"'";/' "$CONFIG_FILE"
-  sed -i 's/label = "[^"]*";/label = "'"$LABEL"'";/' "$CONFIG_FILE"
-fi
 
 # Load config to compute derived values
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
@@ -153,22 +151,9 @@ LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
 
 echo "=== Starting Interview ==="
 echo ""
-# Use stream-json for real-time output display
-# --print with text format buffers until completion; stream-json streams each message
+# Use stream-json for real-time output display with configurable visibility
 export PROMPT_CONTENT
-claude --dangerously-skip-permissions --print --output-format stream-json --verbose "$PROMPT_CONTENT" 2>&1 \
-  | tee "$LOG" \
-  | jq --unbuffered -r '
-    # Extract text from assistant messages
-    if .type == "assistant" and .message.content then
-      .message.content[] | select(.type == "text") | .text // empty
-    # Show tool use activity
-    elif .type == "assistant" and .message.tool_use then
-      "[\(.message.tool_use.name // "tool")]"
-    else
-      empty
-    end
-  ' 2>/dev/null || true
+run_claude_stream "PROMPT_CONTENT" "$LOG" "$CONFIG"
 
 # Check for completion by examining the result in the JSON log
 if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LOG" >/dev/null 2>&1; then
