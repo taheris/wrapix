@@ -58,7 +58,8 @@ test_skip() {
   ((SKIPPED++)) || true
 }
 
-# Assert file exists
+# Assert file exists (used in tests that check file creation)
+# shellcheck disable=SC2329
 assert_file_exists() {
   local file="$1"
   local msg="${2:-File should exist: $file}"
@@ -69,7 +70,8 @@ assert_file_exists() {
   fi
 }
 
-# Assert file does not exist
+# Assert file does not exist (available for future tests)
+# shellcheck disable=SC2329
 assert_file_not_exists() {
   local file="$1"
   local msg="${2:-File should not exist: $file}"
@@ -104,7 +106,8 @@ assert_exit_code() {
   fi
 }
 
-# Assert beads issue exists with label
+# Assert beads issue exists with label (available for future tests)
+# shellcheck disable=SC2329
 assert_bead_exists() {
   local label="$1"
   local msg="${2:-Bead with label $label should exist}"
@@ -115,7 +118,8 @@ assert_bead_exists() {
   fi
 }
 
-# Assert beads issue count
+# Assert beads issue count (available for future tests)
+# shellcheck disable=SC2329
 assert_bead_count() {
   local label="$1"
   local expected="$2"
@@ -1308,9 +1312,8 @@ test_happy_path() {
   echo ""
   echo "  Phase 3: Testing ralph step..."
 
-  # Find open tasks before step
-  local open_before
-  open_before=$(bd list --label "rl-$label" --status=open --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  # Note: We could compare open_before vs after, but instead we verify
+  # that exactly one task was closed (more precise check)
 
   set +e
   OUTPUT=$(ralph-step 2>&1)

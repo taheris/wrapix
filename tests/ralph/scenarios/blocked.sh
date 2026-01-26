@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Blocked scenario - outputs RALPH_BLOCKED signal
 # Used to test that workflow pauses when blocked
 

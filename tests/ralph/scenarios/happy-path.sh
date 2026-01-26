@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Happy path scenario - full workflow test
 # Tests: ralph plan -> ralph ready -> ralph step -> ralph loop
 #
