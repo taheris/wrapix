@@ -4,7 +4,7 @@
 #
 # This scenario simulates a complete feature workflow:
 # 1. plan: Creates a spec file
-# 2. ready: Creates an epic and tasks with dependencies
+# 2. ready: Creates molecule (epic + child tasks), stores molecule ID in current.json
 # 3. step: Completes the first unblocked task
 # 4. loop: Completes remaining tasks and closes epic
 
@@ -60,19 +60,32 @@ SPEC_EOF
 phase_ready() {
   # Get label from state or environment
   local label="${LABEL:-happy-path-test}"
+  local ralph_dir="${RALPH_DIR:-.claude/ralph}"
 
-  # Create an epic for this feature
+  # Create an epic for this feature (epic becomes the molecule root)
   local epic_json
   epic_json=$(bd create --title="Happy Path Feature" --type=epic --labels="rl-$label" --json 2>/dev/null)
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '.id')
 
-  echo "Created epic: $epic_id"
+  echo "Created epic (molecule root): $epic_id"
+
+  # Store molecule ID in current.json
+  # The epic is the molecule root per ralph-workflow.md spec
+  local current_file="$ralph_dir/state/current.json"
+  if [ -f "$current_file" ]; then
+    # Update existing current.json with molecule ID
+    local updated_json
+    updated_json=$(jq --arg mol "$epic_id" '. + {molecule: $mol}' "$current_file")
+    echo "$updated_json" > "$current_file"
+    echo "Stored molecule ID in current.json: $epic_id"
+  fi
 
   # Create tasks (all independent for happy path test)
   # Note: Dependency tests are covered by test_step_respects_dependencies.
   # The happy path test focuses on verifying the full workflow from
   # plan -> ready -> step -> loop without dependency complications.
+  # Tasks are grouped under the molecule via the rl-$label label, NOT via dependencies.
 
   local task_a_json
   task_a_json=$(bd create --title="Task A - First task" --type=task --labels="rl-$label" --json 2>/dev/null)
@@ -93,8 +106,8 @@ phase_ready() {
   echo "Created Task C: $task_c_id"
 
   echo ""
-  echo "Task breakdown:"
-  echo "  Epic: $epic_id (Happy Path Feature)"
+  echo "Molecule breakdown:"
+  echo "  Molecule root (epic): $epic_id (Happy Path Feature)"
   echo "  Task A: $task_a_id"
   echo "  Task B: $task_b_id"
   echo "  Task C: $task_c_id"
