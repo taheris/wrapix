@@ -215,7 +215,7 @@ echo ""
 # --print mode processes the prompt and exits automatically (no interactive session)
 export WORK_PROMPT
 # shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
-script -q -c 'claude --dangerously-skip-permissions --print "$WORK_PROMPT"' "$LOG"
+script -q -f -c 'claude --dangerously-skip-permissions --print "$WORK_PROMPT"' "$LOG"
 
 # Check for completion
 if grep -q "RALPH_COMPLETE" "$LOG" 2>/dev/null; then
