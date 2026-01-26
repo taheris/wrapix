@@ -31,6 +31,9 @@ let
   integrationTests =
     if isLinux && hasKvm then import ./integration.nix { inherit pkgs system; } else { };
 
+  # Ralph workflow tests run on all platforms
+  ralphTests = import ./ralph { inherit pkgs system; };
+
   # Lint checks run on all platforms
   lintChecks = import ./lint.nix { inherit pkgs src; };
 
@@ -46,6 +49,7 @@ in
     // darwinMountTests
     // darwinNetworkTests
     // integrationTests
+    // ralphTests
     // lintChecks
     // readmeTest;
   inherit
@@ -53,6 +57,7 @@ in
     darwinMountTests
     darwinNetworkTests
     integrationTests
+    ralphTests
     lintChecks
     readmeTest
     ;
