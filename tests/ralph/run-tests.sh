@@ -190,10 +190,9 @@ setup_test_env() {
 |------|------|---------|
 EOF
 
-  # Create minimal ralph config
+  # Create minimal ralph config (spec.hidden removed - now uses --hidden flag)
   cat > "$TEST_DIR/.claude/ralph/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 2;
 }
 EOF
@@ -429,7 +428,7 @@ test_step_closes_issue_on_complete() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
   TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -473,7 +472,7 @@ test_step_no_close_without_signal() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
   TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -511,7 +510,7 @@ test_step_marks_in_progress() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
   TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -554,7 +553,7 @@ test_step_exits_100_when_complete() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # No issues to work - should exit 100
   set +e
@@ -583,7 +582,7 @@ test_step_handles_blocked_signal() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
   TASK_ID=$(bd create --title="Blocked task" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -630,7 +629,7 @@ test_step_respects_dependencies() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create task 1 (no deps)
   TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -698,7 +697,7 @@ test_loop_processes_all() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create multiple tasks
   TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -752,7 +751,7 @@ test_parallel_agent_simulation() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create Task A (will be marked in_progress to simulate first agent working on it)
   TASK_A_ID=$(bd create --title="Task A - First agent working" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -871,7 +870,7 @@ test_step_skips_in_progress() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create Task 1 and mark it in_progress (simulates another agent working on it)
   TASK1_ID=$(bd create --title="Task 1 - Already in progress" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -930,7 +929,7 @@ test_step_skips_blocked_by_in_progress() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create parent task and mark it in_progress
   PARENT_ID=$(bd create --title="Parent Task - In progress" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -1086,7 +1085,7 @@ test_partial_epic_completion() {
 EOF
 
   # Set up label state
-  echo "test-feature" > "$RALPH_DIR/state/label"
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create an epic for this feature
   EPIC_ID=$(bd create --title="Test Feature Epic" --type=epic --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
@@ -1249,7 +1248,7 @@ test_happy_path() {
 
   # Set the label for this test
   local label="happy-path-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
   export LABEL="$label"
 
   # Use the happy-path scenario
@@ -1428,46 +1427,37 @@ test_happy_path() {
 # Config Behavior Tests
 #-----------------------------------------------------------------------------
 
-# Test: spec.hidden=true places spec in state/ and doesn't update README
+# Test: --hidden flag places spec in state/ and doesn't update README
 test_config_spec_hidden_true() {
   CURRENT_TEST="config_spec_hidden_true"
-  test_header "Config: spec.hidden=true"
+  test_header "Flag: --hidden"
 
   setup_test_env "spec-hidden-true"
 
-  # Configure spec.hidden = true
-  cat > "$RALPH_DIR/config.nix" << 'EOF'
-{
-  spec.hidden = true;
-  beads.priority = 2;
-}
-EOF
-
   local label="hidden-test"
-  echo "$label" > "$RALPH_DIR/state/label"
   export LABEL="$label"
   export SPEC_PATH="$RALPH_DIR/state/$label.md"
 
   # Use happy-path scenario which creates spec file
   export MOCK_SCENARIO="$SCENARIOS_DIR/happy-path.sh"
 
-  # Run ralph plan
+  # Run ralph plan with --hidden flag
   set +e
-  ralph-plan "$label" >/dev/null 2>&1
+  ralph-plan --hidden "$label" >/dev/null 2>&1
   set -e
 
   # Check that spec was created in state/ (hidden location)
   if [ -f "$RALPH_DIR/state/$label.md" ]; then
     test_pass "Spec created in state/ directory (hidden)"
   else
-    test_fail "Spec should be created in state/ when hidden=true"
+    test_fail "Spec should be created in state/ when --hidden flag used"
   fi
 
   # Check that spec was NOT created in specs/
   if [ ! -f "specs/$label.md" ]; then
-    test_pass "Spec NOT created in specs/ (correct for hidden=true)"
+    test_pass "Spec NOT created in specs/ (correct for --hidden)"
   else
-    test_fail "Spec should NOT be created in specs/ when hidden=true"
+    test_fail "Spec should NOT be created in specs/ when --hidden flag used"
   fi
 
   # Check that specs/README.md was NOT updated with this label
@@ -1477,33 +1467,33 @@ EOF
     test_pass "README.md unchanged (expected for hidden spec)"
   fi
 
+  # Verify current.json has hidden=true
+  local hidden_value
+  hidden_value=$(jq -r '.hidden // false' "$RALPH_DIR/state/current.json" 2>/dev/null || echo "false")
+  if [ "$hidden_value" = "true" ]; then
+    test_pass "current.json has hidden=true"
+  else
+    test_fail "current.json should have hidden=true"
+  fi
+
   teardown_test_env
 }
 
-# Test: spec.hidden=false (default) places spec in specs/ and updates README
+# Test: no --hidden flag (default) places spec in specs/
 test_config_spec_hidden_false() {
   CURRENT_TEST="config_spec_hidden_false"
-  test_header "Config: spec.hidden=false"
+  test_header "Default: no --hidden flag"
 
   setup_test_env "spec-hidden-false"
 
-  # Configure spec.hidden = false (default)
-  cat > "$RALPH_DIR/config.nix" << 'EOF'
-{
-  spec.hidden = false;
-  beads.priority = 2;
-}
-EOF
-
   local label="visible-test"
-  echo "$label" > "$RALPH_DIR/state/label"
   export LABEL="$label"
   export SPEC_PATH="specs/$label.md"
 
   # Use happy-path scenario which creates spec file
   export MOCK_SCENARIO="$SCENARIOS_DIR/happy-path.sh"
 
-  # Run ralph plan
+  # Run ralph plan without --hidden flag
   set +e
   ralph-plan "$label" >/dev/null 2>&1
   set -e
@@ -1512,14 +1502,23 @@ EOF
   if [ -f "specs/$label.md" ]; then
     test_pass "Spec created in specs/ directory (visible)"
   else
-    test_fail "Spec should be created in specs/ when hidden=false"
+    test_fail "Spec should be created in specs/ without --hidden flag"
   fi
 
   # Check that spec was NOT created in state/
   if [ ! -f "$RALPH_DIR/state/$label.md" ]; then
-    test_pass "Spec NOT created in state/ (correct for hidden=false)"
+    test_pass "Spec NOT created in state/ (correct for default)"
   else
-    test_fail "Spec should NOT be created in state/ when hidden=false"
+    test_fail "Spec should NOT be created in state/ without --hidden flag"
+  fi
+
+  # Verify current.json has hidden=false
+  local hidden_value
+  hidden_value=$(jq -r '.hidden // false' "$RALPH_DIR/state/current.json" 2>/dev/null || echo "false")
+  if [ "$hidden_value" = "false" ]; then
+    test_pass "current.json has hidden=false"
+  else
+    test_fail "current.json should have hidden=false"
   fi
 
   teardown_test_env
@@ -1542,13 +1541,12 @@ EOF
 
   # Set up label
   local label="priority-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
   export LABEL="$label"
 
   # Test 1: Create issue with priority 1 (high)
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 1;
 }
 EOF
@@ -1594,12 +1592,11 @@ EOF
 
   # Set up label
   local label="iter-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create config with max-iterations = 2
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 2;
   loop = {
     max-iterations = 2;
@@ -1669,12 +1666,11 @@ EOF
 
   # Set up label
   local label="pause-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create config with pause-on-failure = true (default)
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 2;
   loop = {
     pause-on-failure = true;
@@ -1745,12 +1741,11 @@ EOF
 
   # Set up label
   local label="continue-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create config with pause-on-failure = false
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 2;
   loop = {
     pause-on-failure = false;
@@ -1809,7 +1804,7 @@ EOF
 
   # Set up label
   local label="hooks-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create marker file paths
   local pre_hook_marker="$TEST_DIR/pre-hook-marker"
@@ -1818,7 +1813,6 @@ EOF
   # Create config with hooks that write to marker files
   cat > "$RALPH_DIR/config.nix" << EOF
 {
-  spec.hidden = false;
   beads.priority = 2;
   loop = {
     pre-hook = "echo pre >> $pre_hook_marker";
@@ -1877,12 +1871,11 @@ EOF
 
   # Set up label
   local label="pattern-test"
-  echo "$label" > "$RALPH_DIR/state/label"
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create config with custom failure patterns
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
-  spec.hidden = false;
   beads.priority = 2;
   failure-patterns = [
     { pattern = "CUSTOM_ERROR:"; action = "pause"; }

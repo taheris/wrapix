@@ -27,22 +27,52 @@ RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
+CURRENT_FILE="$RALPH_DIR/state/current.json"
 
-# Label can be passed as argument or read from state
-LABEL="${1:-}"
-LABEL_FILE="$RALPH_DIR/state/label"
+# Parse arguments
+LABEL=""
+SPEC_HIDDEN="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--hidden)
+      SPEC_HIDDEN="true"
+      shift
+      ;;
+    -*)
+      echo "Error: Unknown option: $1"
+      echo "Usage: ralph plan [--hidden|-h] <label>"
+      exit 1
+      ;;
+    *)
+      if [ -z "$LABEL" ]; then
+        LABEL="$1"
+      else
+        echo "Error: Too many arguments"
+        echo "Usage: ralph plan [--hidden|-h] <label>"
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
 
 # If no argument provided, try to read from state file
-if [ -z "$LABEL" ] && [ -f "$LABEL_FILE" ]; then
-  LABEL=$(cat "$LABEL_FILE")
+if [ -z "$LABEL" ] && [ -f "$CURRENT_FILE" ]; then
+  LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+  SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
 fi
 
 # Label is required
 if [ -z "$LABEL" ]; then
   echo "Error: Label is required"
-  echo "Usage: ralph plan <label>"
+  echo "Usage: ralph plan [--hidden|-h] <label>"
+  echo ""
+  echo "Options:"
+  echo "  -h, --hidden    Store spec in state/ instead of specs/"
   echo ""
   echo "Example: ralph plan user-auth"
+  echo "         ralph plan --hidden internal-tool"
   echo ""
   echo "Or resume an existing plan by running 'ralph plan' after 'ralph plan <label>' was run."
   exit 1
@@ -88,15 +118,15 @@ EOF
   echo "Created $SPECS_README"
 fi
 
-# Set/update label in state
-echo "$LABEL" > "$LABEL_FILE"
+# Set/update state in current.json
+jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" \
+  '{label: $label, hidden: $hidden}' > "$CURRENT_FILE"
 
 CONFIG_FILE="$RALPH_DIR/config.nix"
 
 # Load config to compute derived values
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
-SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 
 # Compute spec path and README instructions based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then

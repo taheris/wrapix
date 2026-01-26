@@ -14,9 +14,9 @@ RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 # Get feature name from argument or state
 FEATURE_NAME="${1:-}"
 if [ -z "$FEATURE_NAME" ]; then
-  LABEL_FILE="$RALPH_DIR/state/label"
-  if [ -f "$LABEL_FILE" ]; then
-    FEATURE_NAME=$(cat "$LABEL_FILE")
+  CURRENT_FILE="$RALPH_DIR/state/current.json"
+  if [ -f "$CURRENT_FILE" ]; then
+    FEATURE_NAME=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
   fi
 fi
 

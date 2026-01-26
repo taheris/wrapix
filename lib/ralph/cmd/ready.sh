@@ -34,17 +34,22 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-# Get label from state
-LABEL_FILE="$RALPH_DIR/state/label"
-if [ ! -f "$LABEL_FILE" ]; then
-  echo "Error: No label file found. Run 'ralph plan <label>' first."
+# Get label and hidden flag from state
+CURRENT_FILE="$RALPH_DIR/state/current.json"
+if [ ! -f "$CURRENT_FILE" ]; then
+  echo "Error: No current.json found. Run 'ralph plan <label>' first."
   exit 1
 fi
-LABEL=$(cat "$LABEL_FILE")
+LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
+SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
 
-# Load config to check spec.hidden and get priority
+if [ -z "$LABEL" ]; then
+  echo "Error: No label in current.json. Run 'ralph plan <label>' first."
+  exit 1
+fi
+
+# Load config to get priority
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
 # Compute spec path and README instructions based on hidden flag
