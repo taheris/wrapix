@@ -46,12 +46,17 @@ plan → ready → loop/step
 ralph plan my-feature
 ```
 
-- Sets up feature workspace (if not exists)
-- Creates `specs/my-feature.md` (or hidden in state/)
-- Substitutes template placeholders fresh each run
-- Conducts spec-gathering conversation
-- Writes requirements to spec file
-- Outputs `RALPH_COMPLETE` when done
+Combines workspace setup and spec interview into a single idempotent command:
+
+- **Setup** (idempotent — safe to rerun):
+  - Creates feature workspace directory if not exists
+  - Initializes state files (`state/label`, `state/config.toml`)
+  - Creates `specs/my-feature.md` (or hidden in `state/` if configured)
+- **Interview**:
+  - Substitutes template placeholders fresh each run
+  - Conducts spec-gathering conversation with AI
+  - Writes requirements to spec file
+  - Outputs `RALPH_COMPLETE` when done
 
 ### 2. Ready
 
