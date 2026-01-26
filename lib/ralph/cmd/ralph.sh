@@ -6,7 +6,6 @@ COMMAND="${1:-help}"
 shift || true
 
 case "$COMMAND" in
-  start) exec ralph-start "$@" ;;
   plan)  exec ralph-plan "$@" ;;
   logs)  exec ralph-logs "$@" ;;
   ready) exec ralph-ready "$@" ;;
@@ -17,7 +16,7 @@ case "$COMMAND" in
     PROMPT_FILE="$RALPH_DIR/plan.md"
     if [ ! -f "$PROMPT_FILE" ]; then
       echo "Prompt file not found: $PROMPT_FILE"
-      echo "Run 'ralph start <label>' first."
+      echo "Run 'ralph plan <label>' first."
       exit 1
     fi
     exec "${EDITOR:-vi}" "$PROMPT_FILE"
@@ -26,22 +25,21 @@ case "$COMMAND" in
     PROMPT_FILE="$RALPH_DIR/step.md"
     if [ ! -f "$PROMPT_FILE" ]; then
       echo "Prompt file not found: $PROMPT_FILE"
-      echo "Run 'ralph start <label>' first."
+      echo "Run 'ralph plan <label>' first."
       exit 1
     fi
     exec "${EDITOR:-vi}" "$PROMPT_FILE"
     ;;
-  # Backwards compatibility: init -> start
-  init)
-    echo "Note: 'ralph init' is now 'ralph start'"
-    exec ralph-start "$@"
+  # Backwards compatibility: start -> plan, init -> plan
+  start|init)
+    echo "Note: 'ralph $COMMAND' is now 'ralph plan <label>'"
+    exec ralph-plan "$@"
     ;;
   help|--help|-h)
     echo "Usage: ralph <command> [args]"
     echo ""
     echo "Spec-Driven Workflow Commands:"
-    echo "  start <label>   Start a new feature (sets label, substitutes templates)"
-    echo "  plan            Run specification interview"
+    echo "  plan <label>    Start/continue a feature (sets label, runs spec interview)"
     echo "  ready           Convert spec to beads issues"
     echo "  step [feature]  Work one issue (fresh context), then exit"
     echo "  loop [feature]  Loop through all steps until done"
@@ -53,13 +51,12 @@ case "$COMMAND" in
     echo "  tune            Edit step prompt template (step.md)"
     echo ""
     echo "Workflow:"
-    echo "  1. ralph start my-feature  # Start new feature"
-    echo "  2. ralph plan              # Interview to create spec"
-    echo "  3. ralph edit              # Adjust plan prompt if needed"
-    echo "  4. ralph ready             # Convert spec to beads"
-    echo "  5. ralph step              # Work one task to test prompts"
-    echo "  6. ralph tune              # Adjust step prompt if needed"
-    echo "  7. ralph loop              # Work through remaining tasks"
+    echo "  1. ralph plan my-feature   # Start feature and run spec interview"
+    echo "  2. ralph edit              # Adjust plan prompt if needed"
+    echo "  3. ralph ready             # Convert spec to beads"
+    echo "  4. ralph step              # Work one task to test prompts"
+    echo "  5. ralph tune              # Adjust step prompt if needed"
+    echo "  6. ralph loop              # Work through remaining tasks"
     echo ""
     echo "Multi-Feature Support:"
     echo "  ralph step feature-a       # Work on specific feature"
