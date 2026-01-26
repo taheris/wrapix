@@ -107,7 +107,7 @@ elif [ -f "$LABEL_FILE" ]; then
   LABEL=$(cat "$LABEL_FILE")
   debug "Label from state file: $LABEL"
 else
-  error "No label found. Run 'ralph start' first or provide feature name."
+  error "No label found. Run 'ralph plan <label>' first or provide feature name."
 fi
 
 # Load config to check spec.hidden
@@ -184,11 +184,18 @@ if [ -f "$SPECS_README" ]; then
   PINNED_CONTEXT=$(cat "$SPECS_README")
 fi
 
-# Read template and substitute runtime-only placeholders
-# (SPEC_PATH already substituted by start.sh)
+# Compute spec path based on hidden flag
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+else
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
+fi
+
+# Read template content (placeholders are substituted at runtime)
 WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
 
-# Issue-specific placeholders (change for each issue)
+# Substitute all placeholders at runtime
+WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
 

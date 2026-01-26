@@ -16,14 +16,13 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 
 ### Functional
 
-1. **Feature Initialization** - `ralph start` creates feature workspace
-2. **Spec Interview** - `ralph plan` conducts requirements gathering
-3. **Issue Creation** - `ralph ready` converts specs to beads issues
-4. **Single-Issue Work** - `ralph step` works on one issue in fresh context
-5. **Continuous Work** - `ralph loop` processes issues until complete
-6. **Progress Tracking** - `ralph status` shows workflow state
-7. **Log Access** - `ralph logs` shows recent command output
-8. **Prompt Tuning** - `ralph tune` edits prompt templates
+1. **Spec Interview** - `ralph plan <label>` initializes feature and conducts requirements gathering
+2. **Issue Creation** - `ralph ready` converts specs to beads issues
+3. **Single-Issue Work** - `ralph step` works on one issue in fresh context
+4. **Continuous Work** - `ralph loop` processes issues until complete
+5. **Progress Tracking** - `ralph status` shows workflow state
+6. **Log Access** - `ralph logs` shows recent command output
+7. **Prompt Tuning** - `ralph tune` edits prompt templates
 
 ### Non-Functional
 
@@ -34,36 +33,27 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 ## Workflow Phases
 
 ```
-start → plan → ready → loop/step
-  │       │       │        │
-  │       │       │        └─ Implementation
-  │       │       └─ Issue creation
-  │       └─ Spec interview
-  └─ Feature initialization
+plan → ready → loop/step
+  │       │        │
+  │       │        └─ Implementation
+  │       └─ Issue creation
+  └─ Feature initialization + Spec interview
 ```
 
-### 1. Start
+### 1. Plan
 
 ```bash
-ralph start my-feature
+ralph plan my-feature
 ```
 
-- Creates `specs/my-feature.md`
-- Updates `specs/README.md`
-- Sets up feature context
-
-### 2. Plan
-
-```bash
-ralph plan
-```
-
-- Loads plan prompt template
+- Sets up feature workspace (if not exists)
+- Creates `specs/my-feature.md` (or hidden in state/)
+- Substitutes template placeholders fresh each run
 - Conducts spec-gathering conversation
 - Writes requirements to spec file
 - Outputs `INTERVIEW_COMPLETE` when done
 
-### 3. Ready
+### 2. Ready
 
 ```bash
 ralph ready
@@ -74,7 +64,7 @@ ralph ready
 - Links issues to spec file
 - Sets appropriate priorities
 
-### 4. Step / Loop
+### 3. Step / Loop
 
 ```bash
 ralph step    # Work on single issue
@@ -136,15 +126,14 @@ Why this feature is needed.
 
 | File | Role |
 |------|------|
-| `lib/ralph/ralph.sh` | Main dispatcher |
-| `lib/ralph/start.sh` | Feature initialization |
-| `lib/ralph/plan.sh` | Spec interview |
-| `lib/ralph/ready.sh` | Issue creation |
-| `lib/ralph/step.sh` | Single-issue work |
-| `lib/ralph/loop.sh` | Continuous work |
-| `lib/ralph/status.sh` | Progress display |
-| `lib/ralph/logs.sh` | Log viewer |
-| `lib/ralph/tune.sh` | Template editor |
+| `lib/ralph/cmd/ralph.sh` | Main dispatcher |
+| `lib/ralph/cmd/plan.sh` | Feature initialization + spec interview |
+| `lib/ralph/cmd/ready.sh` | Issue creation |
+| `lib/ralph/cmd/step.sh` | Single-issue work |
+| `lib/ralph/cmd/loop.sh` | Continuous work |
+| `lib/ralph/cmd/status.sh` | Progress display |
+| `lib/ralph/cmd/logs.sh` | Log viewer |
+| `lib/ralph/cmd/util.sh` | Shared helper functions |
 | `lib/ralph/template/` | Prompt templates |
 
 ## Integration with Beads
@@ -158,8 +147,7 @@ Ralph uses `bd` (beads) for issue tracking:
 
 ## Success Criteria
 
-- [ ] `ralph start` creates valid spec structure
-- [ ] `ralph plan` produces complete specifications
+- [ ] `ralph plan <label>` initializes workspace and produces complete specifications
 - [ ] `ralph ready` creates correct beads issues
 - [ ] `ralph step` completes single issues
 - [ ] `ralph loop` processes all ready issues

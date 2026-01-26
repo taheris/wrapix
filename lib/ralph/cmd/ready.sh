@@ -30,27 +30,37 @@ SPECS_README="$SPECS_DIR/README.md"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "Error: No ralph config found at $CONFIG_FILE"
-  echo "Run 'ralph start' first."
+  echo "Run 'ralph plan <label>' first."
   exit 1
 fi
 
 # Get label from state
 LABEL_FILE="$RALPH_DIR/state/label"
 if [ ! -f "$LABEL_FILE" ]; then
-  echo "Error: No label file found. Run 'ralph start' first."
+  echo "Error: No label file found. Run 'ralph plan <label>' first."
   exit 1
 fi
 LABEL=$(cat "$LABEL_FILE")
 
-# Load config to check spec.hidden (for display and path computation)
+# Load config to check spec.hidden and get priority
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
-# Compute spec path based on hidden flag
+# Compute spec path and README instructions based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  README_INSTRUCTIONS=""
+  README_UPDATE_SECTION=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
+  README_UPDATE_SECTION="## Update specs/README.md
+
+After creating the epic, update the WIP table entry with the bead ID:
+\`\`\`markdown
+| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
+\`\`\`"
 fi
 
 # Check spec file exists
@@ -84,14 +94,18 @@ echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
 echo ""
 
-# Read template and substitute runtime-only placeholders
-# (LABEL, SPEC_PATH, PRIORITY, README_INSTRUCTIONS, README_UPDATE_SECTION already substituted by start.sh)
+# Read template content (placeholders are substituted at runtime)
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
 
-# SPEC_TITLE is extracted from the spec file at runtime
+# Substitute all placeholders at runtime
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 
-# PINNED_CONTEXT must be substituted at runtime (depends on current specs/README.md)
+# Multi-line substitutions using awk
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, replacement); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
