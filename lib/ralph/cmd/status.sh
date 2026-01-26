@@ -88,7 +88,7 @@ if [ -n "$BEAD_LABEL" ]; then
   echo ""
 
   # Next ready task
-  NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --limit 1 2>/dev/null | awk '{print $1}' | head -1) || true
+  NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty') || true
   if [ -n "$NEXT_ISSUE" ]; then
     echo "Next Ready Task:"
     bd show "$NEXT_ISSUE" 2>/dev/null | head -5 || echo "  $NEXT_ISSUE"
