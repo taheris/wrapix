@@ -14,15 +14,15 @@ let
   templateDir = ./template;
 
   scripts = [
-    (writeShellScriptBin "ralph" (readFile ./ralph.sh))
-    (writeShellScriptBin "ralph-start" (readFile ./start.sh))
-    (writeShellScriptBin "ralph-plan" (readFile ./plan.sh))
-    (writeShellScriptBin "ralph-logs" (readFile ./logs.sh))
-    (writeShellScriptBin "ralph-tune" (readFile ./tune.sh))
-    (writeShellScriptBin "ralph-ready" (readFile ./ready.sh))
-    (writeShellScriptBin "ralph-step" (readFile ./step.sh))
-    (writeShellScriptBin "ralph-loop" (readFile ./loop.sh))
-    (writeShellScriptBin "ralph-status" (readFile ./status.sh))
+    (writeShellScriptBin "ralph" (readFile ./cmd/ralph.sh))
+    (writeShellScriptBin "ralph-start" (readFile ./cmd/start.sh))
+    (writeShellScriptBin "ralph-plan" (readFile ./cmd/plan.sh))
+    (writeShellScriptBin "ralph-logs" (readFile ./cmd/logs.sh))
+    (writeShellScriptBin "ralph-tune" (readFile ./cmd/tune.sh))
+    (writeShellScriptBin "ralph-ready" (readFile ./cmd/ready.sh))
+    (writeShellScriptBin "ralph-step" (readFile ./cmd/step.sh))
+    (writeShellScriptBin "ralph-loop" (readFile ./cmd/loop.sh))
+    (writeShellScriptBin "ralph-status" (readFile ./cmd/status.sh))
   ];
 
   ralphEnv = buildEnv {

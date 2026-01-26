@@ -33,6 +33,7 @@ let
       procps
       ripgrep
       rsync
+      shellcheck
       tree
       unzip
       vim
