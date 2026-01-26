@@ -158,8 +158,13 @@ EOF
 fi
 
 # Set/update state in current.json
-jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" \
-  '{label: $label, hidden: $hidden}' > "$CURRENT_FILE"
+# Track whether this is an update to an existing spec (vs new spec)
+UPDATE_MODE="false"
+if [ -n "$UPDATE_SPEC" ]; then
+  UPDATE_MODE="true"
+fi
+jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
+  '{label: $label, hidden: $hidden, update: $update}' > "$CURRENT_FILE"
 
 CONFIG_FILE="$RALPH_DIR/config.nix"
 

@@ -35,7 +35,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-# Get label and hidden flag from state
+# Get label, hidden flag, and update mode from state
 CURRENT_FILE="$RALPH_DIR/state/current.json"
 if [ ! -f "$CURRENT_FILE" ]; then
   echo "Error: No current.json found. Run 'ralph plan <label>' first."
@@ -43,6 +43,7 @@ if [ ! -f "$CURRENT_FILE" ]; then
 fi
 LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
 SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
+UPDATE_MODE=$(jq -r '.update // false' "$CURRENT_FILE")
 
 if [ -z "$LABEL" ]; then
   echo "Error: No label in current.json. Run 'ralph plan <label>' first."
@@ -97,10 +98,35 @@ fi
 # Extract title from spec file (first heading)
 SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$SPEC_NAME")
 
+# Build existing tasks context for update mode
+EXISTING_TASKS_CONTEXT=""
+if [ "$UPDATE_MODE" = "true" ]; then
+  # Query existing beads with this label
+  EXISTING_BEADS=$(bd list --label "rl-$LABEL" --format json 2>/dev/null || echo "[]")
+  EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
+
+  if [ "$EXISTING_COUNT" -gt 0 ]; then
+    EXISTING_TASKS_CONTEXT="
+## Existing Tasks (Update Mode)
+
+This is an UPDATE to an existing spec. The following tasks already exist for label \`rl-$LABEL\`:
+
+\`\`\`json
+$EXISTING_BEADS
+\`\`\`
+
+**IMPORTANT**: Do NOT recreate the epic or any existing tasks. Only create NEW tasks for requirements that are not already covered by existing tasks above. If no new tasks are needed, just output RALPH_COMPLETE."
+  fi
+fi
+
 echo "Ralph Ready: Converting spec to beads..."
 echo "  Label: $LABEL"
 echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
+if [ "$UPDATE_MODE" = "true" ]; then
+  echo "  Mode: UPDATE (adding new tasks only)"
+  echo "  Existing tasks: $EXISTING_COUNT"
+fi
 echo ""
 
 # Read template content (placeholders are substituted at runtime)
@@ -116,6 +142,11 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
+
+# Append existing tasks context for update mode
+if [ -n "$EXISTING_TASKS_CONTEXT" ]; then
+  PROMPT_CONTENT="${PROMPT_CONTENT}${EXISTING_TASKS_CONTEXT}"
+fi
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
