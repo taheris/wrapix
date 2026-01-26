@@ -28,7 +28,7 @@ echo ""
 
 step_count=0
 while true; do
-  ((step_count++))
+  ((++step_count))
   echo "=== Step $step_count ==="
 
   # Run ralph-step with optional feature name argument
