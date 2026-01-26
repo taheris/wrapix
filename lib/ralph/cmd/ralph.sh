@@ -13,19 +13,17 @@ case "$COMMAND" in
   loop)  exec ralph-loop "$@" ;;
   status) exec ralph-status "$@" ;;
   edit)
-    # Get current label
-    LABEL_FILE="$RALPH_DIR/state/label"
-    if [ ! -f "$LABEL_FILE" ]; then
+    # Get current label and hidden flag from current.json
+    CURRENT_FILE="$RALPH_DIR/state/current.json"
+    if [ ! -f "$CURRENT_FILE" ]; then
       echo "No active feature. Run 'ralph plan <label>' first."
       exit 1
     fi
-    LABEL=$(cat "$LABEL_FILE")
-
-    # Check if spec is hidden (stored in state/ vs specs/)
-    CONFIG_FILE="$RALPH_DIR/config.nix"
-    SPEC_HIDDEN="false"
-    if [ -f "$CONFIG_FILE" ]; then
-      SPEC_HIDDEN=$(nix eval --json --file "$CONFIG_FILE" 2>/dev/null | jq -r '.spec.hidden // false') || true
+    LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
+    SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
+    if [ -z "$LABEL" ]; then
+      echo "No label in current.json. Run 'ralph plan <label>' first."
+      exit 1
     fi
 
     if [ "$SPEC_HIDDEN" = "true" ]; then
