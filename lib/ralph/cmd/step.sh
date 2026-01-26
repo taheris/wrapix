@@ -119,13 +119,6 @@ fi
 SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 debug "spec.hidden = $SPEC_HIDDEN"
 
-# Compute spec path based on hidden flag
-if [ "$SPEC_HIDDEN" = "true" ]; then
-  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
-else
-  SPEC_PATH="$SPECS_DIR/$LABEL.md"
-fi
-
 BEAD_LABEL="rl-$LABEL"
 debug "Looking for issues with label: $BEAD_LABEL"
 
@@ -191,13 +184,12 @@ if [ -f "$SPECS_README" ]; then
   PINNED_CONTEXT=$(cat "$SPECS_README")
 fi
 
-# Read template and substitute placeholders
+# Read template and substitute runtime-only placeholders
+# (SPEC_PATH already substituted by start.sh)
 WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
-WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
-WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
-WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
 
-# Substitute title using parameter expansion
+# Issue-specific placeholders (change for each issue)
+WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
 
 # For description and pinned context, use awk for multi-line
