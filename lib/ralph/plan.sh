@@ -37,13 +37,23 @@ if [ ! -f "$LABEL_FILE" ]; then
 fi
 LABEL=$(cat "$LABEL_FILE")
 
-# Get spec name from state
-SPEC_FILE="$RALPH_DIR/state/spec"
-if [ ! -f "$SPEC_FILE" ]; then
-  echo "Error: No spec file reference found. Run 'ralph start' first."
-  exit 1
+# Load config to check spec.hidden
+CONFIG=$(nix eval --json --file "$CONFIG_FILE")
+SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+
+# Compute spec path based on hidden flag
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  README_INSTRUCTIONS=""
+else
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  README_INSTRUCTIONS="2. **Update specs/README.md**:
+   - Add new terminology to the Terminology Index
+   - Add WIP entry to Active Work table:
+     \`\`\`
+     | [$LABEL.md](./$LABEL.md) | (pending) | Brief purpose |
+     \`\`\`"
 fi
-SPEC_NAME=$(cat "$SPEC_FILE")
 
 PROMPT_TEMPLATE="$RALPH_DIR/plan.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
@@ -62,17 +72,18 @@ fi
 
 echo "Ralph Plan Interview starting..."
 echo "  Label: $LABEL"
-echo "  Spec: $SPEC_NAME"
-echo "  Prompt: $PROMPT_TEMPLATE"
+echo "  Spec: $SPEC_PATH"
+echo "  Hidden: $SPEC_HIDDEN"
 echo ""
 
 # Read template and substitute placeholders
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_NAME\}\}/$SPEC_NAME}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 
-# Use awk for multi-line pinned context substitution
+# Use awk for multi-line substitutions
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v instr="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, instr); print}')
 
 LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
 
@@ -86,10 +97,10 @@ script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 # Check for completion
 if grep -q "INTERVIEW_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
-  echo "Interview complete. Specification created at: $SPECS_DIR/$SPEC_NAME.md"
+  echo "Interview complete. Specification created at: $SPEC_PATH"
   echo ""
   echo "Next steps:"
-  echo "  1. Review the spec: cat $SPECS_DIR/$SPEC_NAME.md"
+  echo "  1. Review the spec: cat $SPEC_PATH"
   echo "  2. Convert to beads: ralph ready"
 else
   echo ""

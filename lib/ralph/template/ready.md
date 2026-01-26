@@ -19,7 +19,7 @@ Spec file: {{SPEC_PATH}}
 2. **Create a parent epic bead** for this specification
 3. **Break down into ordered tasks** as child beads
 4. **Add dependencies** where tasks depend on each other
-5. **Update specs/README.md** with the epic bead ID
+{{README_INSTRUCTIONS}}
 
 ## Task Breakdown Guidelines
 
@@ -46,12 +46,7 @@ Add dependencies between tasks:
 bd dep add <dependent-task> <depends-on-task>
 ```
 
-## Update specs/README.md
-
-After creating the epic, update the WIP table entry with the bead ID:
-```markdown
-| [{{SPEC_NAME}}.md](./{{SPEC_NAME}}.md) | beads-XXXXXX | Brief purpose |
-```
+{{README_UPDATE_SECTION}}
 
 ## Exit Signals
 

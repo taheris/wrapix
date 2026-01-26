@@ -28,25 +28,33 @@ if [ ! -f "$LABEL_FILE" ]; then
 fi
 LABEL=$(cat "$LABEL_FILE")
 
-# Get spec name from state
-SPEC_FILE="$RALPH_DIR/state/spec"
-if [ ! -f "$SPEC_FILE" ]; then
-  echo "Error: No spec file reference found. Run 'ralph start' first."
-  exit 1
+# Load config as JSON once
+CONFIG=$(nix eval --json --file "$CONFIG_FILE")
+DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
+SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+
+# Compute spec path based on hidden flag
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  README_INSTRUCTIONS=""
+  README_UPDATE_SECTION=""
+else
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
+  README_UPDATE_SECTION="## Update specs/README.md
+
+After creating the epic, update the WIP table entry with the bead ID:
+\`\`\`markdown
+| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
+\`\`\`"
 fi
-SPEC_NAME=$(cat "$SPEC_FILE")
 
 # Check spec file exists
-SPEC_PATH="$SPECS_DIR/$SPEC_NAME.md"
 if [ ! -f "$SPEC_PATH" ]; then
   echo "Error: Spec file not found: $SPEC_PATH"
   echo "Run 'ralph plan' first to create the specification."
   exit 1
 fi
-
-# Load config as JSON once
-CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
 PROMPT_TEMPLATE="$RALPH_DIR/ready.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
@@ -75,7 +83,6 @@ echo ""
 # Read template and substitute placeholders
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_NAME\}\}/$SPEC_NAME}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 
@@ -83,8 +90,10 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 ESCAPED_TITLE=$(printf '%s\n' "$SPEC_TITLE" | sed 's/[&/\]/\\&/g')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | sed "s/{{SPEC_TITLE}}/$ESCAPED_TITLE/g")
 
-# Use awk for multi-line pinned context substitution
+# Use awk for multi-line substitutions
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v instr="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, instr); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v sect="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, sect); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
