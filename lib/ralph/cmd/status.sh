@@ -35,11 +35,22 @@ else
 fi
 
 # Current spec
-SPEC_FILE="$RALPH_DIR/state/spec"
-if [ -f "$SPEC_FILE" ]; then
-  SPEC_NAME=$(cat "$SPEC_FILE")
-  SPEC_PATH="$SPECS_DIR/$SPEC_NAME.md"
-  echo "Spec: $SPEC_NAME"
+CONFIG_FILE="$RALPH_DIR/config.nix"
+SPEC_HIDDEN="false"
+if [ -f "$CONFIG_FILE" ]; then
+  CONFIG=$(nix eval --json --file "$CONFIG_FILE" 2>/dev/null) || CONFIG="{}"
+  SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+fi
+
+if [ -n "$LABEL" ]; then
+  # Compute spec path based on hidden flag
+  if [ "$SPEC_HIDDEN" = "true" ]; then
+    SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+    echo "Spec: $LABEL (hidden)"
+  else
+    SPEC_PATH="$SPECS_DIR/$LABEL.md"
+    echo "Spec: $LABEL"
+  fi
   if [ -f "$SPEC_PATH" ]; then
     echo "  File: $SPEC_PATH (exists)"
   else
@@ -96,16 +107,18 @@ fi
 
 echo ""
 
-# Spec status from README
-if [ -f "$SPECS_README" ] && [ -n "${SPEC_NAME:-}" ]; then
+# Spec status from README (only when not hidden)
+if [ "$SPEC_HIDDEN" != "true" ] && [ -f "$SPECS_README" ] && [ -n "${LABEL:-}" ]; then
   echo "Spec Status:"
-  if grep -q "$SPEC_NAME.*WIP\|Active Work.*$SPEC_NAME" "$SPECS_README" 2>/dev/null; then
+  if grep -q "$LABEL.*WIP\|Active Work.*$LABEL" "$SPECS_README" 2>/dev/null; then
     echo "  Status: WIP (Work In Progress)"
-  elif grep -q "$SPEC_NAME.*REVIEW\|Completed.*$SPEC_NAME" "$SPECS_README" 2>/dev/null; then
+  elif grep -q "$LABEL.*REVIEW\|Completed.*$LABEL" "$SPECS_README" 2>/dev/null; then
     echo "  Status: REVIEW"
   else
     echo "  Status: Not tracked in specs/README.md"
   fi
+elif [ "$SPEC_HIDDEN" = "true" ] && [ -n "${LABEL:-}" ]; then
+  echo "Spec Status: Hidden (beads are source of truth)"
 fi
 
 echo ""

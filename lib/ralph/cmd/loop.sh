@@ -14,9 +14,9 @@ RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 # Get feature name from argument or state
 FEATURE_NAME="${1:-}"
 if [ -z "$FEATURE_NAME" ]; then
-  SPEC_FILE="$RALPH_DIR/state/spec"
-  if [ -f "$SPEC_FILE" ]; then
-    FEATURE_NAME=$(cat "$SPEC_FILE")
+  LABEL_FILE="$RALPH_DIR/state/label"
+  if [ -f "$LABEL_FILE" ]; then
+    FEATURE_NAME=$(cat "$LABEL_FILE")
   fi
 fi
 
