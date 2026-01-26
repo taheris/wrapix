@@ -52,14 +52,23 @@ sync-branch: "beads"
 #     - ~/beads-planning  # Personal planning repo
 #     - ~/work-planning   # Work planning repo
 
-# Dolt-native sync configuration
-# When enabled, uses Dolt remotes instead of JSONL for sync between containers
+# Sync configuration
+# git-portable: JSONL exported on push, imported on pull (works across machines)
+# dolt-native: Dolt remotes for sync (requires local dolt-remote setup)
 sync:
-  mode: dolt-native          # Use Dolt remotes instead of JSONL
+  mode: git-portable
 
-# Dolt remote for sync
-federation:
-  remote: "file:///home/shaun/src/github.com/taheris/wrapix/.git/beads-worktrees/beads/.beads/dolt-remote"
+# Beads worktree setup (required for sync to work)
+# The beads branch holds the JSONL files that sync between machines.
+# Set up the worktree on first clone:
+#   git worktree add .git/beads-worktrees/beads beads
+#
+# NOTE: bd sync --full has a bug where it doesn't stage changes before committing.
+# Workaround: manually sync with git after running bd sync:
+#   bd sync
+#   git -C .git/beads-worktrees/beads add .beads/issues.jsonl
+#   git -C .git/beads-worktrees/beads commit -m "bd sync: $(date '+%Y-%m-%d %H:%M:%S')"
+#   git -C .git/beads-worktrees/beads push origin beads
 
 # Integration settings (access with 'bd config get/set')
 # These are stored in the database, not in this file:
