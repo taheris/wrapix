@@ -162,6 +162,113 @@ assert_bead_status() {
 }
 
 #-----------------------------------------------------------------------------
+# Molecule Test Utilities
+#-----------------------------------------------------------------------------
+
+# Assert molecule exists (verify molecule was created)
+# Usage: assert_molecule_exists <molecule_id> [message]
+# shellcheck disable=SC2329
+assert_molecule_exists() {
+  local molecule="$1"
+  local msg="${2:-Molecule $molecule should exist}"
+  if bd mol show "$molecule" >/dev/null 2>&1; then
+    test_pass "$msg"
+  else
+    test_fail "$msg (molecule not found)"
+  fi
+}
+
+# Assert molecule progress percentage
+# Usage: assert_molecule_progress <molecule_id> <expected_pct> [message]
+# Example: assert_molecule_progress "bd-xyz" 80 "Should be 80% complete"
+# shellcheck disable=SC2329
+assert_molecule_progress() {
+  local molecule="$1"
+  local expected_pct="$2"
+  local msg="${3:-Molecule $molecule should be $expected_pct% complete}"
+
+  # Get progress output and extract percentage
+  local progress_output
+  progress_output=$(bd mol progress "$molecule" 2>/dev/null) || {
+    test_fail "$msg (failed to get progress)"
+    return
+  }
+
+  # Parse percentage from output (format: "▓▓▓▓░░ 80% (8/10)" or similar)
+  local actual_pct
+  actual_pct=$(echo "$progress_output" | grep -oE '[0-9]+%' | head -1 | tr -d '%' || echo "")
+
+  if [ -z "$actual_pct" ]; then
+    # Try JSON format if available
+    actual_pct=$(bd mol progress "$molecule" --json 2>/dev/null | jq -r '.percentage // empty' 2>/dev/null || echo "")
+  fi
+
+  if [ -z "$actual_pct" ]; then
+    test_fail "$msg (could not parse percentage from output)"
+    return
+  fi
+
+  if [ "$expected_pct" -eq "$actual_pct" ]; then
+    test_pass "$msg"
+  else
+    test_fail "$msg (got $actual_pct%)"
+  fi
+}
+
+# Assert molecule has expected step count
+# Usage: assert_molecule_step_count <molecule_id> <expected_total> [message]
+# shellcheck disable=SC2329
+assert_molecule_step_count() {
+  local molecule="$1"
+  local expected="$2"
+  local msg="${3:-Molecule $molecule should have $expected steps}"
+
+  # Get progress output and extract total count
+  local progress_output
+  progress_output=$(bd mol progress "$molecule" 2>/dev/null) || {
+    test_fail "$msg (failed to get progress)"
+    return
+  }
+
+  # Parse total from output (format: "80% (8/10)" -> extract 10)
+  local actual
+  actual=$(echo "$progress_output" | grep -oE '\([0-9]+/[0-9]+\)' | head -1 | sed 's/.*\///' | tr -d ')' || echo "")
+
+  if [ -z "$actual" ]; then
+    test_fail "$msg (could not parse step count from output)"
+    return
+  fi
+
+  if [ "$expected" -eq "$actual" ]; then
+    test_pass "$msg"
+  else
+    test_fail "$msg (got $actual)"
+  fi
+}
+
+# Assert molecule current position shows expected marker
+# Usage: assert_molecule_current_marker <molecule_id> <marker> [message]
+# Markers: [done], [current], [ready], [blocked], [pending]
+# shellcheck disable=SC2329
+assert_molecule_current_marker() {
+  local molecule="$1"
+  local marker="$2"
+  local msg="${3:-Molecule $molecule should show $marker marker}"
+
+  local current_output
+  current_output=$(bd mol current "$molecule" 2>/dev/null) || {
+    test_fail "$msg (failed to get current position)"
+    return
+  }
+
+  if echo "$current_output" | grep -q "\\$marker\\]"; then
+    test_pass "$msg"
+  else
+    test_fail "$msg (marker not found in output)"
+  fi
+}
+
+#-----------------------------------------------------------------------------
 # Test Environment Setup/Teardown
 #-----------------------------------------------------------------------------
 
@@ -216,6 +323,7 @@ Read: {{SPEC_PATH}}
 
 Issue: {{ISSUE_ID}}
 Title: {{TITLE}}
+Molecule: {{MOLECULE_ID}}
 
 {{DESCRIPTION}}
 
@@ -223,7 +331,9 @@ Title: {{TITLE}}
 
 1. **Understand**: Read the spec and issue thoroughly before making changes
 2. **Implement**: Write code following the spec
-3. **Discovered Work**: Create with: `bd create --title="..." --labels="rl-{{LABEL}}"`
+3. **Discovered Work**: If you find tasks outside this issue's scope:
+   - Create with: `bd create --title="..." --labels="rl-{{LABEL}}"`
+   - Bond to molecule: `bd mol bond {{MOLECULE_ID}} <new-issue>`
 4. **Quality Gates**: Before completing, ensure:
    - [ ] All tests pass
    - [ ] Lint checks pass
