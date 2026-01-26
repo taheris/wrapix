@@ -61,14 +61,10 @@ EOF
 fi
 
 # Clear previous state (but preserve prompts and config)
-rm -f "$RALPH_DIR/state/plan.md"
 rm -f "$RALPH_DIR/state/label"
-rm -f "$RALPH_DIR/state/spec"
 
-# Set new label and spec name
+# Set new label
 echo "$LABEL" > "$RALPH_DIR/state/label"
-echo "$LABEL" > "$RALPH_DIR/state/spec"
-touch "$RALPH_DIR/state/plan.md"
 
 # Update config.nix with the label
 CONFIG_FILE="$RALPH_DIR/config.nix"
@@ -81,11 +77,7 @@ fi
 echo ""
 echo "Ralph started for feature: $LABEL"
 echo ""
-echo "State files:"
-echo "  Label: $RALPH_DIR/state/label"
-echo "  Spec:  $RALPH_DIR/state/spec"
-echo ""
-echo "Spec file will be created at: $SPECS_DIR/$LABEL.md"
+echo "State: $RALPH_DIR/state/label"
 echo ""
 echo "Next steps:"
 echo "  1. Run 'ralph plan' to conduct an interview and create the spec"

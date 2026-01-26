@@ -2,6 +2,11 @@
   # Active prompt mode: "plan" | "build" | "review"
   mode = "plan";
 
+  # Spec file handling
+  spec = {
+    hidden = false; # When true, store plan in state/{label}.md instead of specs/
+  };
+
   # Beads integration
   beads = {
     # Label for issues - leave null to auto-generate random 6-char ID
