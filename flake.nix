@@ -92,7 +92,6 @@
           apps =
             let
               ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
-              isDarwin = system == "aarch64-darwin";
 
             in
             {
@@ -101,69 +100,7 @@
               test = {
                 meta.description = "Run all tests (darwin tests skip gracefully on Linux)";
                 type = "app";
-                program = "${pkgs.writeShellScriptBin "test-all" ''
-                  set -euo pipefail
-
-                  FAILED=0
-                  DARWIN_SKIPPED=0
-
-                  echo "=== Wrapix Test Suite ==="
-                  echo ""
-
-                  # Run nix flake checks (smoke, ralph, lint, darwin logic tests)
-                  echo "----------------------------------------"
-                  echo "Running: Nix Flake Checks"
-                  echo "----------------------------------------"
-                  if ${pkgs.nix}/bin/nix flake check --impure 2>&1; then
-                    echo "PASS: Nix flake checks"
-                  else
-                    echo "FAIL: Nix flake checks"
-                    FAILED=1
-                  fi
-                  echo ""
-
-                  # Darwin integration tests (container runtime)
-                  echo "----------------------------------------"
-                  echo "Running: Darwin Integration Tests"
-                  echo "----------------------------------------"
-                  ${
-                    if isDarwin then
-                      ''
-                        if ${import ./tests/darwin { inherit pkgs system; }}/bin/test-darwin; then
-                          echo "PASS: Darwin integration tests"
-                        else
-                          echo "FAIL: Darwin integration tests"
-                          FAILED=1
-                        fi
-                      ''
-                    else
-                      ''
-                        echo "SKIP: Darwin tests (not on Darwin)"
-                        DARWIN_SKIPPED=1
-                      ''
-                  }
-                  echo ""
-
-                  # Summary
-                  echo "========================================"
-                  if [ "$FAILED" -eq 0 ]; then
-                    if [ "$DARWIN_SKIPPED" -eq 1 ]; then
-                      echo "ALL TESTS PASSED (Darwin tests skipped)"
-                    else
-                      echo "ALL TESTS PASSED"
-                    fi
-                    exit 0
-                  else
-                    echo "SOME TESTS FAILED"
-                    exit 1
-                  fi
-                ''}/bin/test-all";
-              };
-
-              test-darwin = {
-                meta.description = "Run Darwin integration tests";
-                type = "app";
-                program = "${import ./tests/darwin { inherit pkgs system; }}/bin/test-darwin";
+                program = "${import ./tests/run-all.nix { inherit pkgs system; }}/bin/test-all";
               };
 
               test-builder = {
