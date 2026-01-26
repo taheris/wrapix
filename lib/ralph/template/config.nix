@@ -1,17 +1,26 @@
 {
-  # Active prompt mode: "plan" | "build" | "review"
-  mode = "plan";
-
   # Spec file handling
   spec = {
     hidden = false; # When true, store plan in state/{label}.md instead of specs/
   };
 
+  # Stream output visibility (what to show during claude execution)
+  output = {
+    # Core output types
+    responses = true; # Assistant text responses (always recommended)
+    tool-names = true; # Show tool names like [Bash], [Read]
+    tool-inputs = true; # Show tool input parameters
+    tool-results = true; # Show tool execution results
+    thinking = true; # Show extended thinking content
+    stats = true; # Show final stats (cost, tokens, duration)
+
+    # Truncation limits (0 = no limit)
+    max-tool-input = 200; # Max chars for tool input display
+    max-tool-result = 500; # Max chars for tool result display
+  };
+
   # Beads integration
   beads = {
-    # Label for issues - leave null to auto-generate random 6-char ID
-    # Final label will be prefixed: rl-{label}
-    label = null;
     priority = 2; # Default priority (0=critical, 2=medium, 4=backlog)
     default-type = "task";
   };
