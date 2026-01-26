@@ -97,11 +97,7 @@
             {
               ralph = ralph.app;
 
-              test = {
-                meta.description = "Run all tests (darwin tests skip gracefully on Linux)";
-                type = "app";
-                program = "${import ./tests/run-all.nix { inherit pkgs system; }}/bin/test-all";
-              };
+              test = test.app;
 
               test-builder = {
                 meta.description = "Run wrapix-builder integration tests (Darwin only)";
