@@ -943,6 +943,199 @@ EOF
   teardown_test_env
 }
 
+# Test: extract_json handles malformed bd output (warning + JSON)
+# bd commands sometimes emit warnings before the actual JSON output
+# The extract_json function should handle this gracefully
+test_malformed_bd_output_parsing() {
+  CURRENT_TEST="malformed_bd_output_parsing"
+  test_header "Malformed BD Output Parsing (Warning + JSON)"
+
+  setup_test_env "malformed-output"
+
+  # Source util.sh to get access to extract_json
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Test case 1: Warning line before JSON array
+  local output1="Warning: Stale lock file detected
+[{\"id\": \"beads-001\", \"title\": \"Test issue\", \"status\": \"open\"}]"
+
+  local extracted1
+  extracted1=$(extract_json "$output1")
+
+  if echo "$extracted1" | jq -e '.[0].id == "beads-001"' >/dev/null 2>&1; then
+    test_pass "Extracted JSON from warning + array output"
+  else
+    test_fail "Failed to extract JSON from warning + array output"
+  fi
+
+  # Test case 2: Multiple warning lines before JSON
+  local output2="⚠ No Dolt remote configured, skipping push
+Removing stale Dolt LOCK file: /path/to/lock (age: 6s)
+[{\"id\": \"beads-002\", \"title\": \"Another issue\"}]"
+
+  local extracted2
+  extracted2=$(extract_json "$output2")
+
+  if echo "$extracted2" | jq -e '.[0].id == "beads-002"' >/dev/null 2>&1; then
+    test_pass "Extracted JSON from multiple warnings + array"
+  else
+    test_fail "Failed to extract JSON from multiple warnings + array"
+  fi
+
+  # Test case 3: Clean JSON (no warnings) - should pass through unchanged
+  local output3='[{"id": "beads-003", "title": "Clean output"}]'
+
+  local extracted3
+  extracted3=$(extract_json "$output3")
+
+  if echo "$extracted3" | jq -e '.[0].id == "beads-003"' >/dev/null 2>&1; then
+    test_pass "Passed through clean JSON array"
+  else
+    test_fail "Failed to pass through clean JSON array"
+  fi
+
+  # Test case 4: Warning before JSON object (not array)
+  local output4="Note: some diagnostic message
+{\"id\": \"beads-004\", \"status\": \"open\"}"
+
+  local extracted4
+  extracted4=$(extract_json "$output4")
+
+  if echo "$extracted4" | jq -e '.id == "beads-004"' >/dev/null 2>&1; then
+    test_pass "Extracted JSON object from warning + object output"
+  else
+    test_fail "Failed to extract JSON object from warning + object output"
+  fi
+
+  # Test case 5: Empty array after warning (edge case)
+  local output5="Warning: No issues found
+[]"
+
+  local extracted5
+  extracted5=$(extract_json "$output5")
+
+  if echo "$extracted5" | jq -e 'type == "array" and length == 0' >/dev/null 2>&1; then
+    test_pass "Extracted empty array from warning + empty array"
+  else
+    test_fail "Failed to extract empty array from warning + empty array"
+  fi
+
+  teardown_test_env
+}
+
+# Test: partial epic completion (2/3 tasks closed, epic stays open)
+# When an epic has tasks and only some are closed, the epic should remain open
+test_partial_epic_completion() {
+  CURRENT_TEST="partial_epic_completion"
+  test_header "Partial Epic Completion (2/3 tasks closed, epic stays open)"
+
+  setup_test_env "partial-epic"
+
+  # Create a spec file
+  cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
+# Test Feature
+
+## Requirements
+- Task 1: First subtask
+- Task 2: Second subtask
+- Task 3: Third subtask
+EOF
+
+  # Set up label state
+  echo "test-feature" > "$RALPH_DIR/state/label"
+
+  # Create an epic for this feature
+  EPIC_ID=$(bd create --title="Test Feature Epic" --type=epic --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+
+  if [ -z "$EPIC_ID" ] || [ "$EPIC_ID" = "null" ]; then
+    test_fail "Could not create epic"
+    teardown_test_env
+    return
+  fi
+
+  test_pass "Created epic: $EPIC_ID"
+
+  # Create 3 tasks that are part of this epic
+  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK3_ID=$(bd create --title="Task 3" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+
+  test_pass "Created 3 tasks: $TASK1_ID, $TASK2_ID, $TASK3_ID"
+
+  # Verify epic is open
+  assert_bead_status "$EPIC_ID" "open" "Epic should start as open"
+
+  # Use complete scenario for steps
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  # Run 2 steps to close 2 tasks
+  set +e
+  ralph-step >/dev/null 2>&1  # Close task 1
+  ralph-step >/dev/null 2>&1  # Close task 2
+  set -e
+
+  # Count how many tasks are closed
+  local closed_count=0
+  for task_id in "$TASK1_ID" "$TASK2_ID" "$TASK3_ID"; do
+    local status
+    status=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+    if [ "$status" = "closed" ]; then
+      ((closed_count++)) || true
+    fi
+  done
+
+  if [ "$closed_count" -ge 2 ]; then
+    test_pass "At least 2 tasks are closed (actual: $closed_count)"
+  else
+    test_fail "Expected at least 2 closed tasks, got $closed_count"
+  fi
+
+  # The key test: epic should still be OPEN because 1 task remains
+  local epic_status
+  epic_status=$(bd show "$EPIC_ID" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+
+  if [ "$epic_status" != "closed" ]; then
+    test_pass "Epic remains open with incomplete tasks (status: $epic_status)"
+  else
+    test_fail "Epic should NOT be closed when tasks remain open"
+  fi
+
+  # Now close the remaining task(s)
+  set +e
+  ralph-step >/dev/null 2>&1  # Close task 3 (or any remaining)
+  # Run one more time to trigger completion check
+  ralph-step >/dev/null 2>&1
+  set -e
+
+  # Now all tasks should be closed
+  closed_count=0
+  for task_id in "$TASK1_ID" "$TASK2_ID" "$TASK3_ID"; do
+    local status
+    status=$(bd show "$task_id" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+    if [ "$status" = "closed" ]; then
+      ((closed_count++)) || true
+    fi
+  done
+
+  if [ "$closed_count" -eq 3 ]; then
+    test_pass "All 3 tasks are now closed"
+  else
+    test_fail "Expected all 3 tasks closed, got $closed_count"
+  fi
+
+  # Now the epic SHOULD be closed
+  epic_status=$(bd show "$EPIC_ID" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+
+  if [ "$epic_status" = "closed" ]; then
+    test_pass "Epic is closed after all tasks complete"
+  else
+    test_fail "Epic should be closed when all tasks are complete (status: $epic_status)"
+  fi
+
+  teardown_test_env
+}
+
 # Test: isolated beads database
 test_isolated_beads_db() {
   CURRENT_TEST="isolated_beads_db"
@@ -1030,6 +1223,9 @@ run_tests() {
   test_parallel_agent_simulation
   test_step_skips_in_progress
   test_step_skips_blocked_by_in_progress
+  # Error handling tests
+  test_malformed_bd_output_parsing
+  test_partial_epic_completion
 
   # Summary
   echo ""
