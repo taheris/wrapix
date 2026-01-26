@@ -37,22 +37,15 @@ if [ ! -f "$LABEL_FILE" ]; then
 fi
 LABEL=$(cat "$LABEL_FILE")
 
-# Load config to check spec.hidden
+# Load config to check spec.hidden (for display only)
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 
-# Compute spec path based on hidden flag
+# Compute spec path based on hidden flag (for display only)
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
-  README_INSTRUCTIONS=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
-  README_INSTRUCTIONS="2. **Update specs/README.md**:
-   - Add new terminology to the Terminology Index
-   - Add WIP entry to Active Work table:
-     \`\`\`
-     | [$LABEL.md](./$LABEL.md) | (pending) | Brief purpose |
-     \`\`\`"
 fi
 
 PROMPT_TEMPLATE="$RALPH_DIR/plan.md"
@@ -76,14 +69,12 @@ echo "  Spec: $SPEC_PATH"
 echo "  Hidden: $SPEC_HIDDEN"
 echo ""
 
-# Read template and substitute placeholders
+# Read template and substitute runtime-only placeholders
+# (LABEL, SPEC_PATH, README_INSTRUCTIONS already substituted by start.sh)
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 
-# Use awk for multi-line substitutions
+# PINNED_CONTEXT must be substituted at runtime (depends on current specs/README.md)
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v instr="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, instr); print}')
 
 LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
 
