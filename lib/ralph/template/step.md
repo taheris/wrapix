@@ -24,7 +24,10 @@ Title: {{TITLE}}
    - Property-based tests: For functions with clear invariants, mathematical properties
    - Unit tests: For specific behaviors, edge cases, integration points
 3. **Implement**: Write code following the spec
-4. **Quality Gates**: Before completing, ensure:
+4. **Discovered Work**: If you find tasks outside this issue's scope:
+   - Create with provenance: `bd create --title="..." --type=task --labels="rl-{{LABEL}}" --deps="discovered-from:{{ISSUE_ID}}"`
+   - Do NOT implement discovered tasks in this session—stay focused
+5. **Quality Gates**: Before completing, ensure:
    - [ ] All tests pass
    - [ ] Lint checks pass
    - [ ] Changes committed
