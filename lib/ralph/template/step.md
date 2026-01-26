@@ -41,10 +41,8 @@ Before outputting RALPH_COMPLETE, verify:
 
 ## Exit Signals
 
-Output ONE of these when done, then immediately run `/exit` to end the session:
+Output ONE of these at the end of your response:
 
 - `RALPH_COMPLETE` - Task finished, all quality gates passed
 - `RALPH_BLOCKED: <reason>` - Cannot proceed, explain why
 - `RALPH_CLARIFY: <question>` - Need clarification before proceeding
-
-**IMPORTANT**: After outputting an exit signal, you MUST run `/exit` to terminate the session.
