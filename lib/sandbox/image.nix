@@ -102,9 +102,8 @@ pkgs.dockerTools.buildLayeredImage {
 
     # Fix Nix permissions for non-root users
     # (includeNixDB creates files owned by root)
-    # Store needs read+execute only (immutability); var needs write for state
-    chmod -R a+rX nix/store
-    chmod -R a+rwX nix/var/nix
+    # Store must be writable to add new paths and create lock files
+    chmod -R a+rwX nix/store nix/var/nix
 
     # Pre-create directory structure Nix expects with correct permissions
     # This prevents Nix from trying to chmod directories it doesn't own
