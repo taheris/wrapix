@@ -13,6 +13,29 @@ the user's idea and create a comprehensive specification document.
 
 Label: {{LABEL}}
 Spec file: {{SPEC_PATH}}
+Mode: {{MODE}}
+
+## Modes
+
+### New Spec Mode (default)
+
+When creating a new feature specification:
+- Conduct the interview to gather requirements
+- Write the complete spec file at `{{SPEC_PATH}}`
+- The spec becomes the source of truth for `ralph ready`
+
+### Update Mode (`--update`)
+
+When refining an existing, already-implemented spec:
+- The spec file already exists and has been implemented
+- **Do NOT modify the spec file** during the planning conversation
+- Discuss and capture NEW requirements in the conversation only
+- `ralph ready` will:
+  1. Update the spec file with new requirements
+  2. Create new tasks for the additional work
+  3. Bond those tasks to the existing molecule
+
+In update mode, your role is to help the user articulate what additional work is needed, not to edit the spec directly.
 
 ## Interview Guidelines
 
@@ -35,6 +58,8 @@ Spec file: {{SPEC_PATH}}
 
 ## Output Actions
 
+### New Spec Mode
+
 When you have gathered enough information, create:
 
 1. **Spec file** at `{{SPEC_PATH}}`:
@@ -46,9 +71,17 @@ When you have gathered enough information, create:
    - Out of scope items
    - (Optional) Implementation Notes section
 
-## Implementation Notes Section
+### Update Mode
 
-You may include an optional `## Implementation Notes` section at the end of the spec for:
+**Do NOT write to the spec file.** Instead:
+
+1. Summarize the new requirements gathered during the conversation
+2. Confirm with the user that the requirements are complete
+3. Output `RALPH_COMPLETE` — `ralph ready` will handle updating the spec and creating tasks
+
+## Implementation Notes Section (New Spec Mode Only)
+
+When writing a new spec, you may include an optional `## Implementation Notes` section at the end for:
 - Bugs or gotchas discovered during research
 - Implementation hints and suggestions
 - Technical details that inform task breakdown but aren't requirements
