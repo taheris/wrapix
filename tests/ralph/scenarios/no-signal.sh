@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # No-signal scenario - outputs without RALPH_COMPLETE
 # Used to test that issues remain open when no completion signal is given
 
