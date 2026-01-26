@@ -44,6 +44,17 @@ When you have gathered enough information, create:
    - Affected files/modules
    - Success criteria
    - Out of scope items
+   - (Optional) Implementation Notes section
+
+## Implementation Notes Section
+
+You may include an optional `## Implementation Notes` section at the end of the spec for:
+- Bugs or gotchas discovered during research
+- Implementation hints and suggestions
+- Technical details that inform task breakdown but aren't requirements
+- Context that helps during `ralph ready` but shouldn't persist in permanent docs
+
+This section is **automatically stripped** when the spec is finalized to `specs/`. Use it freely for transient context that aids implementation planning.
 
 {{README_INSTRUCTIONS}}
 
