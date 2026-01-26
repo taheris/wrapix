@@ -163,8 +163,21 @@ UPDATE_MODE="false"
 if [ -n "$UPDATE_SPEC" ]; then
   UPDATE_MODE="true"
 fi
-jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
-  '{label: $label, hidden: $hidden, update: $update}' > "$CURRENT_FILE"
+
+# In update mode, preserve existing molecule ID from current.json
+EXISTING_MOLECULE=""
+if [ "$UPDATE_MODE" = "true" ] && [ -f "$CURRENT_FILE" ]; then
+  EXISTING_MOLECULE=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
+fi
+
+# Build the new state JSON, preserving molecule if it exists
+if [ -n "$EXISTING_MOLECULE" ]; then
+  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" --arg molecule "$EXISTING_MOLECULE" \
+    '{label: $label, hidden: $hidden, update: $update, molecule: $molecule}' > "$CURRENT_FILE"
+else
+  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
+    '{label: $label, hidden: $hidden, update: $update}' > "$CURRENT_FILE"
+fi
 
 CONFIG_FILE="$RALPH_DIR/config.nix"
 
