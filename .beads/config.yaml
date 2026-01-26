@@ -57,11 +57,9 @@ sync-branch: "beads"
 sync:
   mode: dolt-native          # Use Dolt remotes instead of JSONL
 
-# Dolt remote for container sync
-# Note: The actual remote path is configured in the dolt database via `dolt remote`.
-# - Containers: entrypoint sets remote to file:///workspace/.beads/dolt-remote
-# - Host: bd init or manual `dolt remote add` sets the correct absolute path
-# The federation.remote config is not used directly; dolt database remotes are authoritative.
+# Dolt remote for sync
+federation:
+  remote: "file:///home/shaun/src/github.com/taheris/wrapix/.git/beads-worktrees/beads/.beads/dolt-remote"
 
 # Integration settings (access with 'bd config get/set')
 # These are stored in the database, not in this file:
