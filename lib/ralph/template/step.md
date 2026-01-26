@@ -25,7 +25,12 @@ Title: {{TITLE}}
    - Unit tests: For specific behaviors, edge cases, integration points
 3. **Implement**: Write code following the spec
 4. **Discovered Work**: If you find tasks outside this issue's scope:
-   - Create with provenance: `bd create --title="..." --type=task --labels="rl-{{LABEL}}" --deps="discovered-from:{{ISSUE_ID}}"`
+   - First create the issue: `bd create --title="..." --type=task --labels="rl-{{LABEL}}"`
+   - Then bond it to the molecule with the appropriate type:
+     - **Sequential**: `bd mol bond {{MOLECULE_ID}} <new-issue-id> --type sequential`
+       Use when discovered work blocks current task completion
+     - **Parallel**: `bd mol bond {{MOLECULE_ID}} <new-issue-id> --type parallel`
+       Use when work is independent and can be done anytime
    - Do NOT implement discovered tasks in this session—stay focused
 5. **Quality Gates**: Before completing, ensure:
    - [ ] All tests pass
