@@ -28,6 +28,16 @@ Before implementing features, consult `specs/README.md`. Key points:
 
 **Use `bd` for ALL issue tracking.** Do NOT use markdown TODOs or external trackers.
 
+### CRITICAL: Session Start
+
+**ALWAYS run `bd sync` BEFORE any other bd command.** The local database may be stale.
+Without syncing first, `bd ready` and `bd list` will show outdated or empty results.
+
+```bash
+bd sync    # MUST run this first every session
+bd ready   # Now shows accurate results
+```
+
 ### Essential Commands
 
 ```bash
