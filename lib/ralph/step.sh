@@ -17,27 +17,28 @@ SPECS_README="$SPECS_DIR/README.md"
 # Function to update spec status to REVIEW in specs/README.md
 update_spec_status_to_review() {
   local feature="$1"
-  if [ ! -f "$SPECS_README" ]; then
-    return
-  fi
+  local hidden="$2"
 
-  # Move entry from WIP to REVIEW section
-  # This is a simple implementation - just notify the user
   echo ""
   echo "All tasks for '$feature' are complete!"
-  echo "Please update specs/README.md to move the spec from WIP to REVIEW."
+
+  # Only mention README update if not hidden
+  if [ "$hidden" != "true" ] && [ -f "$SPECS_README" ]; then
+    echo "Please update specs/README.md to move the spec from WIP to REVIEW."
+  fi
 }
 
 # Function to check if all beads are complete
 check_all_complete() {
   local label="$1"
   local feature="$2"
+  local hidden="$3"
   # Check if any ready beads remain
   local remaining
   remaining=$(bd list --label "$label" --ready 2>/dev/null | wc -l) || remaining=0
 
   if [ "$remaining" -eq 0 ]; then
-    update_spec_status_to_review "$feature"
+    update_spec_status_to_review "$feature" "$hidden"
   fi
 }
 
@@ -46,34 +47,29 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-# Get feature name from argument or state
-FEATURE_NAME="${1:-}"
-if [ -z "$FEATURE_NAME" ]; then
-  SPEC_FILE="$RALPH_DIR/state/spec"
-  if [ ! -f "$SPEC_FILE" ]; then
-    echo "Error: No spec file reference found. Run 'ralph start' first or provide feature name."
-    exit 1
-  fi
-  FEATURE_NAME=$(cat "$SPEC_FILE")
+# Get label from state or argument
+LABEL_FILE="$RALPH_DIR/state/label"
+if [ -n "${1:-}" ]; then
+  LABEL="$1"
+elif [ -f "$LABEL_FILE" ]; then
+  LABEL=$(cat "$LABEL_FILE")
+else
+  echo "Error: No label found. Run 'ralph start' first or provide feature name."
+  exit 1
 fi
 
-# Get label from state or derive from feature name
-LABEL_FILE="$RALPH_DIR/state/label"
-if [ -f "$LABEL_FILE" ]; then
-  STATE_LABEL=$(cat "$LABEL_FILE")
-  # If feature name matches state, use state label
-  # Otherwise, use feature name as label
-  if [ "$FEATURE_NAME" = "$STATE_LABEL" ] || [ -z "${1:-}" ]; then
-    LABEL="$STATE_LABEL"
-  else
-    LABEL="$FEATURE_NAME"
-  fi
+# Load config to check spec.hidden
+CONFIG=$(nix eval --json --file "$CONFIG_FILE")
+SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
+
+# Compute spec path based on hidden flag
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
 else
-  LABEL="$FEATURE_NAME"
+  SPEC_PATH="$SPECS_DIR/$LABEL.md"
 fi
 
 BEAD_LABEL="rl-$LABEL"
-SPEC_PATH="$SPECS_DIR/$FEATURE_NAME.md"
 
 # Find next ready issue with this label
 NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --limit 1 2>/dev/null | awk '{print $1}' | head -1) || true
@@ -83,7 +79,7 @@ if [ -z "$NEXT_ISSUE" ]; then
   echo "All work complete!"
 
   # Check if we should transition WIP -> REVIEW
-  update_spec_status_to_review "$FEATURE_NAME"
+  update_spec_status_to_review "$LABEL" "$SPEC_HIDDEN"
   exit 0
 fi
 
@@ -143,7 +139,7 @@ if grep -q "WORK_COMPLETE" "$LOG" 2>/dev/null; then
   bd close "$NEXT_ISSUE"
 
   # Check if all beads with this label are complete
-  check_all_complete "$BEAD_LABEL" "$FEATURE_NAME"
+  check_all_complete "$BEAD_LABEL" "$LABEL" "$SPEC_HIDDEN"
 else
   echo ""
   echo "Work did not complete. Issue remains in-progress: $NEXT_ISSUE"

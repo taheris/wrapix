@@ -12,7 +12,7 @@ the user's idea and create a comprehensive specification document.
 ## Current Feature
 
 Label: {{LABEL}}
-Spec file: specs/{{SPEC_NAME}}.md
+Spec file: {{SPEC_PATH}}
 
 ## Interview Guidelines
 
@@ -37,7 +37,7 @@ Spec file: specs/{{SPEC_NAME}}.md
 
 When you have gathered enough information, create:
 
-1. **Spec file** at `specs/{{SPEC_NAME}}.md`:
+1. **Spec file** at `{{SPEC_PATH}}`:
    - Title and overview
    - Problem statement
    - Requirements (functional and non-functional)
@@ -45,12 +45,7 @@ When you have gathered enough information, create:
    - Success criteria
    - Out of scope items
 
-2. **Update specs/README.md**:
-   - Add new terminology to the Terminology Index
-   - Add WIP entry to Active Work table:
-     ```
-     | [{{SPEC_NAME}}.md](./{{SPEC_NAME}}.md) | (pending) | Brief purpose |
-     ```
+{{README_INSTRUCTIONS}}
 
 ## Exit Signals
 
