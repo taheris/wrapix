@@ -52,7 +52,7 @@ bd dep add <dependent-task> <depends-on-task>
 
 Output ONE of these when done, then immediately run `/exit` to end the session:
 
-- `READY_COMPLETE` - All tasks created, dependencies set, README updated
-- `BLOCKED: <reason>` - Cannot decompose spec (missing information, unclear requirements)
+- `RALPH_COMPLETE` - All tasks created, dependencies set, README updated
+- `RALPH_BLOCKED: <reason>` - Cannot decompose spec (missing information, unclear requirements)
 
 **IMPORTANT**: After outputting an exit signal, you MUST run `/exit` to terminate the session.

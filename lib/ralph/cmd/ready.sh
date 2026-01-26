@@ -118,7 +118,7 @@ export PROMPT_CONTENT
 script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
 
 # Check for completion
-if grep -q "READY_COMPLETE" "$LOG" 2>/dev/null; then
+if grep -q "RALPH_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
   echo "Task breakdown complete!"
 

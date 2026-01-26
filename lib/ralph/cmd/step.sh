@@ -217,7 +217,7 @@ export WORK_PROMPT
 script -q -c 'claude --dangerously-skip-permissions "$WORK_PROMPT"' "$LOG"
 
 # Check for completion
-if grep -q "STEP_COMPLETE" "$LOG" 2>/dev/null; then
+if grep -q "RALPH_COMPLETE" "$LOG" 2>/dev/null; then
   echo ""
   echo "Work complete. Closing issue: $NEXT_ISSUE"
   bd close "$NEXT_ISSUE"
