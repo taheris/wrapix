@@ -56,6 +56,7 @@
           };
 
           wrapix = import ./lib { inherit pkgs system linuxPkgs; };
+          ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
 
         in
         {
@@ -89,37 +90,27 @@
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
           };
 
-          apps =
-            let
-              ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
+          apps = {
+            ralph = ralph.app;
+            test = test.app;
+          };
 
-            in
-            {
-              ralph = ralph.app;
-              test = test.app;
-            };
+          devShells.default = wrapix.mkDevShell {
+            packages =
+              with pkgs;
+              [
+                beads
+                gh
+                nixfmt
+                nixfmt-tree
+                podman
+                statix
+              ]
+              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
+              ++ ralph.packages;
 
-          devShells.default =
-            let
-              ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
-
-            in
-            wrapix.mkDevShell {
-              packages =
-                with pkgs;
-                [
-                  beads
-                  gh
-                  nixfmt
-                  nixfmt-tree
-                  podman
-                  statix
-                ]
-                ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
-                ++ ralph.packages;
-
-              inherit (ralph) shellHook;
-            };
+            inherit (ralph) shellHook;
+          };
         };
     };
 }
