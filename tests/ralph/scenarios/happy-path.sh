@@ -81,29 +81,26 @@ phase_ready() {
     echo "Stored molecule ID in current.json: $epic_id"
   fi
 
-  # Create tasks (all independent for happy path test)
+  # Create tasks and bond them to the molecule using bd mol bond
   # Note: Dependency tests are covered by test_step_respects_dependencies.
   # The happy path test focuses on verifying the full workflow from
   # plan -> ready -> step -> loop without dependency complications.
-  # Tasks are grouped under the molecule via the rl-$label label, NOT via dependencies.
+  # Tasks are bonded to the molecule for proper tracking.
 
-  local task_a_json
-  task_a_json=$(bd create --title="Task A - First task" --type=task --labels="rl-$label" --json 2>/dev/null)
   local task_a_id
-  task_a_id=$(echo "$task_a_json" | jq -r '.id')
-  echo "Created Task A: $task_a_id"
+  task_a_id=$(bd create --title="Task A - First task" --type=task --labels="rl-$label" --silent 2>/dev/null)
+  bd mol bond "$epic_id" "$task_a_id" --type parallel 2>/dev/null || true
+  echo "Created and bonded Task A: $task_a_id"
 
-  local task_b_json
-  task_b_json=$(bd create --title="Task B - Second task" --type=task --labels="rl-$label" --json 2>/dev/null)
   local task_b_id
-  task_b_id=$(echo "$task_b_json" | jq -r '.id')
-  echo "Created Task B: $task_b_id"
+  task_b_id=$(bd create --title="Task B - Second task" --type=task --labels="rl-$label" --silent 2>/dev/null)
+  bd mol bond "$epic_id" "$task_b_id" --type parallel 2>/dev/null || true
+  echo "Created and bonded Task B: $task_b_id"
 
-  local task_c_json
-  task_c_json=$(bd create --title="Task C - Third task" --type=task --labels="rl-$label" --json 2>/dev/null)
   local task_c_id
-  task_c_id=$(echo "$task_c_json" | jq -r '.id')
-  echo "Created Task C: $task_c_id"
+  task_c_id=$(bd create --title="Task C - Third task" --type=task --labels="rl-$label" --silent 2>/dev/null)
+  bd mol bond "$epic_id" "$task_c_id" --type parallel 2>/dev/null || true
+  echo "Created and bonded Task C: $task_c_id"
 
   echo ""
   echo "Molecule breakdown:"
