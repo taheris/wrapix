@@ -158,10 +158,40 @@ if [ -f "$SPECS_README" ]; then
   PINNED_CONTEXT=$(cat "$SPECS_README")
 fi
 
-echo "Ralph Plan Interview starting..."
-echo "  Label: $LABEL"
-echo "  Spec: $SPEC_PATH"
-echo "  Hidden: $SPEC_HIDDEN"
+# Check if we're continuing an existing spec
+EXISTING_SPEC=""
+CONTINUATION_CONTEXT=""
+if [ -f "$SPEC_PATH" ]; then
+  EXISTING_SPEC=$(cat "$SPEC_PATH")
+  CONTINUATION_CONTEXT="
+
+---
+
+## Continuing Existing Plan
+
+You are continuing work on an existing specification. Here is the current content of \`$SPEC_PATH\`:
+
+\`\`\`markdown
+$EXISTING_SPEC
+\`\`\`
+
+Review this spec with the user. They may want to:
+- Continue refining incomplete sections
+- Add new requirements
+- Clarify existing points
+- Finalize and proceed to implementation
+
+Ask the user what they'd like to work on."
+  echo "Continuing existing plan..."
+  echo "  Label: $LABEL"
+  echo "  Spec: $SPEC_PATH (exists)"
+  echo "  Hidden: $SPEC_HIDDEN"
+else
+  echo "Starting new plan..."
+  echo "  Label: $LABEL"
+  echo "  Spec: $SPEC_PATH"
+  echo "  Hidden: $SPEC_HIDDEN"
+fi
 echo ""
 
 # Read template content
@@ -177,24 +207,14 @@ PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIO
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
 
-LOG="$RALPH_DIR/logs/plan-interview-$(date +%Y%m%d-%H%M%S).log"
+# Append continuation context if resuming an existing spec
+PROMPT_CONTENT="${PROMPT_CONTENT}${CONTINUATION_CONTEXT}"
 
-echo "=== Starting Interview ==="
-echo ""
-# Use stream-json for real-time output display with configurable visibility
+# Open interactive Claude console with the plan prompt
 export PROMPT_CONTENT
-run_claude_stream "PROMPT_CONTENT" "$LOG" "$CONFIG"
+run_claude_interactive "PROMPT_CONTENT"
 
-# Check for completion by examining the result in the JSON log
-if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LOG" >/dev/null 2>&1; then
-  echo ""
-  echo "Plan complete. Specification created at: $SPEC_PATH"
-  echo ""
-  echo "Next steps:"
-  echo "  1. Review the spec: cat $SPEC_PATH"
-  echo "  2. Convert to beads: ralph ready"
-else
-  echo ""
-  echo "Plan did not complete. Review log: $LOG"
-  echo "To continue: ralph plan"
-fi
+echo ""
+echo "Next steps:"
+echo "  1. Review the spec: cat $SPEC_PATH"
+echo "  2. Convert to beads: ralph ready"

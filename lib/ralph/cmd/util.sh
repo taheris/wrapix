@@ -408,3 +408,16 @@ run_claude_stream() {
     | tee "$log_file" \
     | jq --unbuffered -r "$jq_filter" 2>/dev/null || true
 }
+
+# Run claude interactively with an initial prompt
+# Usage: run_claude_interactive "$prompt_var_name"
+# Opens an interactive Claude console with the prompt as initial context
+run_claude_interactive() {
+  local prompt_var="$1"
+
+  debug "Running claude interactively"
+
+  # Run claude without --print to open interactive console
+  # The prompt is passed as the initial message
+  claude --dangerously-skip-permissions "${!prompt_var}"
+}
