@@ -1927,6 +1927,179 @@ EOF
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
+# List of all test functions
+ALL_TESTS=(
+  test_mock_claude_exists
+  test_isolated_beads_db
+  test_step_marks_in_progress
+  test_step_closes_issue_on_complete
+  test_step_no_close_without_signal
+  test_step_exits_100_when_complete
+  test_step_handles_blocked_signal
+  test_step_respects_dependencies
+  test_loop_processes_all
+  test_parallel_agent_simulation
+  test_step_skips_in_progress
+  test_step_skips_blocked_by_in_progress
+  test_malformed_bd_output_parsing
+  test_partial_epic_completion
+  test_happy_path
+  test_config_spec_hidden_true
+  test_config_spec_hidden_false
+  test_config_beads_priority
+  test_config_loop_max_iterations
+  test_config_loop_pause_on_failure_true
+  test_config_loop_pause_on_failure_false
+  test_config_loop_hooks
+  test_config_failure_patterns
+)
+
+# Run a single test in isolation and write results to file
+run_test_isolated() {
+  local test_func="$1"
+  local result_file="$2"
+  local output_file="$3"
+
+  # Reset counters for this test
+  PASSED=0
+  FAILED=0
+  SKIPPED=0
+  FAILED_TESTS=()
+
+  # Run the test, capturing output
+  "$test_func" > "$output_file" 2>&1
+
+  # Write results
+  echo "passed=$PASSED" > "$result_file"
+  echo "failed=$FAILED" >> "$result_file"
+  echo "skipped=$SKIPPED" >> "$result_file"
+  for t in "${FAILED_TESTS[@]}"; do
+    echo "failed_test=$t" >> "$result_file"
+  done
+}
+
+# Check if GNU parallel is available
+has_parallel() {
+  command -v parallel &>/dev/null
+}
+
+# Run tests in parallel using background jobs
+run_tests_parallel() {
+  local results_dir
+  results_dir=$(mktemp -d -t "ralph-test-results-XXXXXX")
+
+  local pids=()
+  local test_names=()
+
+  echo "Running ${#ALL_TESTS[@]} tests in parallel..."
+  echo ""
+
+  # Launch all tests in background
+  for test_func in "${ALL_TESTS[@]}"; do
+    local result_file="$results_dir/${test_func}.result"
+    local output_file="$results_dir/${test_func}.output"
+
+    # Run test in subshell
+    (run_test_isolated "$test_func" "$result_file" "$output_file") &
+    pids+=($!)
+    test_names+=("$test_func")
+  done
+
+  # Wait for all tests to complete
+  local all_passed=true
+  for i in "${!pids[@]}"; do
+    local pid="${pids[$i]}"
+    local test_func="${test_names[$i]}"
+
+    if wait "$pid"; then
+      : # Test subprocess exited cleanly
+    fi
+
+    # Show output
+    local output_file="$results_dir/${test_func}.output"
+    if [ -f "$output_file" ]; then
+      cat "$output_file"
+    fi
+  done
+
+  # Aggregate results
+  local total_passed=0
+  local total_failed=0
+  local total_skipped=0
+  local all_failed_tests=()
+
+  for test_func in "${ALL_TESTS[@]}"; do
+    local result_file="$results_dir/${test_func}.result"
+    if [ -f "$result_file" ]; then
+      local p f s
+      p=$(grep "^passed=" "$result_file" | cut -d= -f2)
+      f=$(grep "^failed=" "$result_file" | cut -d= -f2)
+      s=$(grep "^skipped=" "$result_file" | cut -d= -f2)
+      total_passed=$((total_passed + p))
+      total_failed=$((total_failed + f))
+      total_skipped=$((total_skipped + s))
+
+      while IFS= read -r line; do
+        all_failed_tests+=("${line#failed_test=}")
+      done < <(grep "^failed_test=" "$result_file")
+    fi
+  done
+
+  # Clean up
+  rm -rf "$results_dir"
+
+  # Summary
+  echo ""
+  echo "=========================================="
+  echo "  Test Summary"
+  echo "=========================================="
+  echo -e "  ${GREEN}Passed:${NC}  $total_passed"
+  echo -e "  ${RED}Failed:${NC}  $total_failed"
+  echo -e "  ${YELLOW}Skipped:${NC} $total_skipped"
+  echo ""
+
+  if [ "$total_failed" -gt 0 ]; then
+    echo -e "${RED}Failed tests:${NC}"
+    for t in "${all_failed_tests[@]}"; do
+      echo "  - $t"
+    done
+    echo ""
+    exit 1
+  else
+    echo -e "${GREEN}All tests passed!${NC}"
+    exit 0
+  fi
+}
+
+# Run tests sequentially (original behavior)
+run_tests_sequential() {
+  for test_func in "${ALL_TESTS[@]}"; do
+    "$test_func"
+  done
+
+  # Summary
+  echo ""
+  echo "=========================================="
+  echo "  Test Summary"
+  echo "=========================================="
+  echo -e "  ${GREEN}Passed:${NC}  $PASSED"
+  echo -e "  ${RED}Failed:${NC}  $FAILED"
+  echo -e "  ${YELLOW}Skipped:${NC} $SKIPPED"
+  echo ""
+
+  if [ "$FAILED" -gt 0 ]; then
+    echo -e "${RED}Failed tests:${NC}"
+    for t in "${FAILED_TESTS[@]}"; do
+      echo "  - $t"
+    done
+    echo ""
+    exit 1
+  else
+    echo -e "${GREEN}All tests passed!${NC}"
+    exit 0
+  fi
+}
+
 run_tests() {
   echo "=========================================="
   echo "  Ralph Integration Tests"
@@ -1963,57 +2136,17 @@ run_tests() {
 
   echo "Prerequisites OK"
 
-  # Run tests
-  test_mock_claude_exists
-  test_isolated_beads_db
-  test_step_marks_in_progress
-  test_step_closes_issue_on_complete
-  test_step_no_close_without_signal
-  test_step_exits_100_when_complete
-  test_step_handles_blocked_signal
-  test_step_respects_dependencies
-  test_loop_processes_all
-  # Parallel agent simulation tests
-  test_parallel_agent_simulation
-  test_step_skips_in_progress
-  test_step_skips_blocked_by_in_progress
-  # Error handling tests
-  test_malformed_bd_output_parsing
-  test_partial_epic_completion
-  # Full workflow tests
-  test_happy_path
-  # Config behavior tests
-  test_config_spec_hidden_true
-  test_config_spec_hidden_false
-  test_config_beads_priority
-  test_config_loop_max_iterations
-  test_config_loop_pause_on_failure_true
-  test_config_loop_pause_on_failure_false
-  test_config_loop_hooks
-  test_config_failure_patterns
-
-  # Summary
-  echo ""
-  echo "=========================================="
-  echo "  Test Summary"
-  echo "=========================================="
-  echo -e "  ${GREEN}Passed:${NC}  $PASSED"
-  echo -e "  ${RED}Failed:${NC}  $FAILED"
-  echo -e "  ${YELLOW}Skipped:${NC} $SKIPPED"
-  echo ""
-
-  if [ "$FAILED" -gt 0 ]; then
-    echo -e "${RED}Failed tests:${NC}"
-    for t in "${FAILED_TESTS[@]}"; do
-      echo "  - $t"
-    done
+  # Check for --sequential flag or RALPH_TEST_SEQUENTIAL env var
+  if [ "${1:-}" = "--sequential" ] || [ "${RALPH_TEST_SEQUENTIAL:-}" = "1" ]; then
+    echo "Mode: Sequential"
     echo ""
-    exit 1
+    run_tests_sequential
   else
-    echo -e "${GREEN}All tests passed!${NC}"
-    exit 0
+    echo "Mode: Parallel"
+    echo ""
+    run_tests_parallel
   fi
 }
 
-# Run tests
-run_tests
+# Run tests (pass through args)
+run_tests "$@"
