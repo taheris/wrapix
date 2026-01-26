@@ -113,9 +113,8 @@ WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
 
-# Handle title separately due to potential special chars
-ESCAPED_TITLE=$(printf '%s\n' "$ISSUE_TITLE" | sed 's/[&/\]/\\&/g')
-WORK_PROMPT=$(echo "$WORK_PROMPT" | sed "s/{{TITLE}}/$ESCAPED_TITLE/g")
+# Substitute title using parameter expansion
+WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
 
 # For description and pinned context, use awk for multi-line
 WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/\{\{DESCRIPTION\}\}/, desc); print}')
@@ -130,6 +129,7 @@ echo "=== Starting work (fresh context) ==="
 echo ""
 # Use script to preserve tty behavior while logging
 export WORK_PROMPT
+# shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
 script -q -c 'claude --dangerously-skip-permissions "$WORK_PROMPT"' "$LOG"
 
 # Check for completion
