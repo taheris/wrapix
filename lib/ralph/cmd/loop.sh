@@ -32,23 +32,28 @@ while true; do
   echo "=== Step $step_count ==="
 
   # Run ralph-step with optional feature name argument
-  OUTPUT=$(ralph-step ${FEATURE_NAME:+"$FEATURE_NAME"} 2>&1) || {
-    EXIT_CODE=$?
-    echo "$OUTPUT"
+  # Capture output and exit code separately
+  set +e
+  OUTPUT=$(ralph-step ${FEATURE_NAME:+"$FEATURE_NAME"} 2>&1)
+  EXIT_CODE=$?
+  set -e
 
-    # Check if we exited because no more issues (success message)
-    if echo "$OUTPUT" | grep -q "All work complete!"; then
-      break
-    fi
+  echo "$OUTPUT"
 
+  # Check if all work is complete (either no more ready issues, or last task finished)
+  if echo "$OUTPUT" | grep -q "All work complete!"; then
+    break
+  fi
+
+  # Check if step failed (non-zero exit and not "all complete")
+  if [ "$EXIT_CODE" -ne 0 ]; then
     echo ""
     echo "Step failed (exit code: $EXIT_CODE). Pausing work loop."
     echo "Review the logs and fix the issue before continuing."
     echo "To resume: ralph loop${FEATURE_NAME:+ $FEATURE_NAME}"
     exit 1
-  }
+  fi
 
-  echo "$OUTPUT"
   echo ""
   echo "--- Continuing to next step ---"
   echo ""

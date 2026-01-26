@@ -22,6 +22,11 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
+# Sync beads database to ensure we have latest state
+# This is critical - container may have stale data
+debug "Syncing beads database..."
+bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
+
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
@@ -41,22 +46,52 @@ update_spec_status_to_review() {
   fi
 }
 
+# Function to close the epic for this label if it exists and is open
+close_epic_if_exists() {
+  local label="$1"
+
+  debug "Checking for open epic with label: $label"
+  local epic_output
+  epic_output=$(bd list --label "$label" --json 2>&1) || {
+    warn "Failed to check for epic: ${epic_output:0:100}"
+    return 0
+  }
+
+  local epic_json
+  epic_json=$(extract_json "$epic_output")
+  local epic_id
+  epic_id=$(echo "$epic_json" | jq -r '[.[] | select(.issue_type == "epic" and (.status == "closed" | not))][0].id // empty' 2>/dev/null)
+
+  if [ -n "$epic_id" ]; then
+    echo "Closing epic: $epic_id"
+    bd close "$epic_id" --reason="All tasks complete" || warn "Failed to close epic $epic_id"
+  fi
+}
+
 # Function to check if all beads are complete
 check_all_complete() {
   local label="$1"
   local feature="$2"
   local hidden="$3"
-  # Check if any ready beads remain
-  local remaining
+  # Check if any ready beads remain (excluding epics)
+  local remaining=0
   local output
-  output=$(bd list --label "$label" --ready 2>&1) || {
+  output=$(bd list --label "$label" --ready --json 2>&1) || {
     warn "Failed to check remaining issues: ${output:0:100}"
     remaining=0
   }
-  remaining=$(echo "$output" | wc -l)
-  debug "Remaining ready issues with label $label: $remaining"
+
+  # Extract JSON and count non-epic work items
+  local json
+  json=$(extract_json "$output")
+  if [ -n "$json" ] && echo "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    remaining=$(echo "$json" | jq '[.[] | select(.issue_type == "epic" | not)] | length')
+  fi
+  debug "Remaining ready work items with label $label: $remaining"
 
   if [ "$remaining" -eq 0 ]; then
+    # Close the epic if all tasks are done
+    close_epic_if_exists "$label"
     update_spec_status_to_review "$feature" "$hidden"
   fi
 }
@@ -94,18 +129,23 @@ fi
 BEAD_LABEL="rl-$LABEL"
 debug "Looking for issues with label: $BEAD_LABEL"
 
-# Find next ready issue with this label
-BD_LIST_OUTPUT=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>&1) || {
+# Find next ready issue with this label (excluding epics - they're containers, not work items)
+BD_LIST_OUTPUT=$(bd list --label "$BEAD_LABEL" --ready --sort priority --json 2>&1) || {
   warn "bd list command failed: ${BD_LIST_OUTPUT:0:200}"
   BD_LIST_OUTPUT="[]"
 }
-NEXT_ISSUE=$(bd_list_first_id "$BD_LIST_OUTPUT")
+# Filter out epics and get first work item
+BD_LIST_JSON=$(extract_json "$BD_LIST_OUTPUT")
+BD_WORK_ITEMS=$(echo "$BD_LIST_JSON" | jq '[.[] | select(.issue_type == "epic" | not)]' 2>/dev/null || echo "[]")
+# Note: || true prevents set -e from exiting on empty array (return code 1)
+NEXT_ISSUE=$(bd_list_first_id "$BD_WORK_ITEMS") || true
 
 if [ -z "$NEXT_ISSUE" ]; then
   echo "No more ready issues with label: $BEAD_LABEL"
   echo "All work complete!"
 
-  # Check if we should transition WIP -> REVIEW
+  # Close the epic and transition WIP -> REVIEW
+  close_epic_if_exists "$BEAD_LABEL"
   update_spec_status_to_review "$LABEL" "$SPEC_HIDDEN"
   exit 0
 fi
