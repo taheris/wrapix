@@ -6,7 +6,10 @@
 
 let
   sandbox = import ./sandbox { inherit pkgs system linuxPkgs; };
-  ralph = import ./ralph { inherit pkgs; inherit (sandbox) mkSandbox; };
+  ralph = import ./ralph {
+    inherit pkgs;
+    inherit (sandbox) mkSandbox;
+  };
 
 in
 {

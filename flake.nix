@@ -131,7 +131,7 @@
                 ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
                 ++ ralph.packages;
 
-              shellHook = ralph.shellHook;
+              inherit (ralph) shellHook;
             };
         };
     };
