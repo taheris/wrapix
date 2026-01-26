@@ -9,15 +9,42 @@ Secure sandbox for running [Claude Code](https://claude.ai/code) in isolated con
 
 See [specs/architecture.md](specs/architecture.md) for the design and security model.
 
-## Basic usage
+## Usage
+
+### Without flake
 
 ```bash
-nix run github:taheris/wrapix                # base sandbox
-nix run github:taheris/wrapix#wrapix-rust    # with Rust toolchain
-nix run github:taheris/wrapix#wrapix-python  # with Python toolchain
+nix run github:taheris/wrapix                # base profile
+nix run github:taheris/wrapix#wrapix-rust    # rust profile
+nix run github:taheris/wrapix#wrapix-python  # python profile
 ```
 
-## Sandbox usage
+### Flake with base profile
+
+```nix
+{
+  inputs = {
+    wrapix.url = "github:taheris/wrapix";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+  };
+
+  outputs =
+    inputs:
+    inputs.flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+      perSystem =
+        { system, ... }:
+        let
+          wrapix = inputs.wrapix.legacyPackages.${system}.lib;
+        in
+        {
+          packages.default = wrapix.mkSandbox { };
+        };
+    };
+}
+```
+
+### Flake with custom profile
 
 ```nix
 {
@@ -30,11 +57,7 @@ nix run github:taheris/wrapix#wrapix-python  # with Python toolchain
   outputs =
     inputs:
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem =
         { system, ... }:
         let
@@ -43,14 +66,9 @@ nix run github:taheris/wrapix#wrapix-python  # with Python toolchain
           # sandbox runs Linux; use Linux packages even on Darwin
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
           linuxPkgs = import inputs.nixpkgs { system = linuxSystem; };
-
         in
         {
-          # simple example using the base profile (start with `nix run`)
-          packages.default = wrapix.mkSandbox { };
-
-          # complete example with additional configuration
-          packages.sandbox = wrapix.mkSandbox {
+          packages.default = wrapix.mkSandbox {
             profile = wrapix.profiles.rust;
             deployKey = "myproject"; # for git push (see scripts/setup-deploy-key)
 
@@ -96,26 +114,6 @@ nix run github:taheris/wrapix#wrapix-notifyd
 
 **Home-manager**: See [scripts/notify/README.md](scripts/notify/README.md) for
 launchd/systemd configuration.
-
-**Hook configuration** (`~/.claude/settings.json`):
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "wrapix-notify 'Claude' 'Waiting'"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
 
 ## Linux Builder (macOS)
 
