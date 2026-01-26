@@ -113,9 +113,10 @@ LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 echo "=== Creating Task Breakdown ==="
 echo ""
 # Use script to preserve tty behavior while logging
+# --print mode processes the prompt and exits automatically (no interactive session)
 export PROMPT_CONTENT
 # shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
-script -q -c 'claude --dangerously-skip-permissions "$PROMPT_CONTENT"' "$LOG"
+script -q -c 'claude --dangerously-skip-permissions --print "$PROMPT_CONTENT"' "$LOG"
 
 # Check for completion
 if grep -q "RALPH_COMPLETE" "$LOG" 2>/dev/null; then
