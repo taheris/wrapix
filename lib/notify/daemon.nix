@@ -6,6 +6,12 @@
 # On Darwin: Listens on TCP port 5959 (VirtioFS can't pass Unix sockets)
 #            Also listens on Unix socket for local testing
 #
+# Security note (macOS):
+#   TCP port 5959 is bound to 192.168.64.1 (vmnet gateway), not 0.0.0.0.
+#   Any container on vmnet can send notifications - no authentication.
+#   Impact is low: notifications are cosmetic (no code execution).
+#   See specs/notifications.md for full security analysis.
+#
 # Usage: nix run .#wrapix-notifyd
 { pkgs }:
 

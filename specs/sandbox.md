@@ -32,7 +32,7 @@ Running AI coding assistants with unrestricted host access creates security risk
 
 ### Linux (Podman)
 
-- Uses `--network=pasta` for userspace networking
+- Uses `--network=pasta` for userspace networking (open outbound, no inbound ports)
 - Uses `--userns=keep-id` for UID mapping
 - Mounts workspace via bind mount
 
@@ -40,6 +40,7 @@ Running AI coding assistants with unrestricted host access creates security risk
 
 - Requires macOS 26+ and Apple Silicon
 - Uses Virtualization.framework for lightweight VMs
+- Uses vmnet for networking (open outbound, no inbound ports)
 - Uses virtio-fs for workspace mounting
 - Entrypoint creates user matching host UID
 

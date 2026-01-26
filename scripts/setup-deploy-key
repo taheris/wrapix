@@ -3,6 +3,10 @@
 # Setup a deploy key for secure git push from sandboxed environments.
 # Must be run from within a git repository with a GitHub remote.
 #
+# Security note: Keys are generated without passphrases to enable
+# non-interactive use by AI agents. See specs/security-considerations.md
+# for the security tradeoff discussion and mitigations.
+#
 # Usage: setup-deploy-key [keyname] [-f|--force]
 #
 

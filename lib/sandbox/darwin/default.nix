@@ -182,13 +182,19 @@ in
             # VirtioFS cannot pass Unix socket operations, so the container client
             # connects to the host daemon via TCP (WRAPIX_NOTIFY_TCP=1 set below)
 
-            # Add deploy key and signing key: mount parent dir to staging if key exists
+            # Add deploy key and signing key: stage only specific key files to temp dir
+            # This isolates the container from seeing other projects' deploy keys
+            # (aligned with Linux behavior which mounts only specific key files)
             DEPLOY_KEY_NAME=${deployKeyExpr}
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
             SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
             DEPLOY_KEY_ARGS=""
             if [ -f "$DEPLOY_KEY" ]; then
-              MOUNT_ARGS="$MOUNT_ARGS -v $HOME/.ssh/deploy_keys:/mnt/wrapix/deploy_keys"
+              DEPLOY_STAGING="$STAGING_ROOT/deploy_keys"
+              mkdir -p "$DEPLOY_STAGING"
+              cp "$DEPLOY_KEY" "$DEPLOY_STAGING/$DEPLOY_KEY_NAME"
+              [ -f "$SIGNING_KEY" ] && cp "$SIGNING_KEY" "$DEPLOY_STAGING/$DEPLOY_KEY_NAME-signing"
+              MOUNT_ARGS="$MOUNT_ARGS -v $DEPLOY_STAGING:/mnt/wrapix/deploy_keys"
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
               FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
               DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"

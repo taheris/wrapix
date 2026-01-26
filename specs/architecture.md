@@ -52,4 +52,4 @@ lib/
 | Linux Builder | Remote Nix builds on macOS | `wrapix-builder` |
 | Ralph | Spec-driven AI workflow | `ralph {start,plan,ready,step,loop}` |
 
-See individual spec files for detailed requirements and implementation notes.
+See individual spec files for detailed requirements and implementation notes. Security tradeoffs and mitigations are documented in [security-considerations.md](./security-considerations.md).

@@ -23,6 +23,8 @@ let
   notifyClient = import ../notify/client.nix { inherit pkgs; };
   ralph = import ../ralph { inherit pkgs; };
 
+  # Nix sandbox disabled: outer container provides isolation.
+  # See specs/security-considerations.md "Nix Sandbox Disabled" for security rationale.
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
     sandbox = false
@@ -100,8 +102,9 @@ pkgs.dockerTools.buildLayeredImage {
 
     # Fix Nix permissions for non-root users
     # (includeNixDB creates files owned by root)
-    # Store must be writable to add new paths and create lock files
-    chmod -R a+rwX nix/store nix/var/nix
+    # Store needs read+execute only (immutability); var needs write for state
+    chmod -R a+rX nix/store
+    chmod -R a+rwX nix/var/nix
 
     # Pre-create directory structure Nix expects with correct permissions
     # This prevents Nix from trying to chmod directories it doesn't own

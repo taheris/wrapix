@@ -5,9 +5,13 @@ Secure sandbox for running [Claude Code](https://claude.ai/code) in isolated con
 - **Linux**: Podman rootless container
 - **macOS**: Apple [container CLI](https://github.com/apple/container) (macOS 26+, Apple Silicon)
 
-## Documentation
+## Security Model
 
-See [specs/architecture.md](specs/architecture.md) for the design and security model.
+The sandbox provides **filesystem and process isolation**—code inside the container cannot access your host filesystem outside `/workspace` or affect host processes.
+
+**Network access is unrestricted by design.** Sandboxed code can reach any internet host, which is intentional for AI research, package managers, and git operations. If you need network isolation, additional firewall rules must be applied externally.
+
+For the overall security model, see [architecture.md](specs/architecture.md).
 
 ## Usage
 

@@ -28,6 +28,47 @@ Apple Silicon Macs can run Linux VMs efficiently, but setting up a Nix remote bu
 2. **Automatic Initialization** - First start copies initial Nix store
 3. **Secure** - SSH keys stored in user data directory
 
+### Security
+
+1. **SSH Port Binding** - SSH port 2222 is bound to localhost (127.0.0.1) only, not exposed to network interfaces
+2. **Key-Based Auth** - Password authentication is disabled; only SSH key authentication is accepted
+3. **Limited Access** - Only the `builder` user has SSH access to the container
+
+### Trust Model
+
+The Linux builder uses a **container-boundary security model**:
+
+1. **Nix Sandbox Disabled** (`sandbox = false`)
+   - Nix's internal build sandboxing is disabled inside the container
+   - The outer container provides the security boundary instead
+   - This avoids nested namespace complexity and improves build compatibility
+
+2. **Trusted Users** (`trusted-users = root builder`)
+   - The `builder` user has full trust within the Nix daemon
+   - This allows remote builds to set arbitrary derivation options
+   - Appropriate because:
+     - SSH access is restricted to localhost (no network exposure)
+     - SSH key is required (no password auth)
+     - Only the host user who started the builder has the SSH key
+
+3. **Single-User Design**
+   - The builder is designed for single-user local development
+   - Not suitable for multi-tenant or shared build infrastructure
+   - Each user should run their own builder instance
+
+**Security Boundary Summary:**
+
+| Layer | Protection |
+|-------|------------|
+| Container | Process isolation, filesystem namespace, network namespace |
+| SSH | Key-based auth only, localhost binding, no root login |
+| Nix | Delegated to container boundary (sandbox disabled internally) |
+
+This model trades Nix's internal sandboxing for container-level isolation, which is appropriate when:
+- The builder runs locally on a single-user workstation
+- Network access is restricted to localhost
+- The user trusts code they're building (their own projects)
+
 ## Architecture
 
 ```

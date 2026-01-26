@@ -6,6 +6,13 @@
 # 3. Client key is accessible to root (nix-daemon) for remote builds
 # 4. wrapix-builder can reference keys directly from the store
 #
+# Security note: Keys are generated without passphrases for automated use.
+# Keys in /nix/store are world-readable, but this is mitigated by:
+# - SSH port bound to localhost only (not network-accessible)
+# - Password authentication disabled
+# - Keys only grant access to local builder (no external systems)
+# See specs/security-considerations.md "Builder SSH Keys" section for full analysis.
+#
 { pkgs }:
 
 pkgs.runCommand "wrapix-builder-keys"
