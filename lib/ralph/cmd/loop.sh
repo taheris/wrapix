@@ -5,6 +5,9 @@ set -euo pipefail
 # Iterate through all work items for a feature
 # Each step runs with fresh context (new claude process)
 # When last bead completes, transitions WIP -> REVIEW
+#
+# Note: No container check here - each ralph-step call enters its own
+# fresh container, which is the intended behavior for context isolation.
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 
