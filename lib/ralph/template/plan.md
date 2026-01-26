@@ -31,7 +31,7 @@ Spec file: {{SPEC_PATH}}
    - Affected parts of the codebase
    - Success criteria and test approach
 3. When you have enough information, say: "I have enough to write the spec"
-4. When the user says "done" or confirms the spec looks good, output: INTERVIEW_COMPLETE
+4. When the user says "done" or confirms the spec looks good, output: RALPH_COMPLETE
 
 ## Output Actions
 

@@ -211,14 +211,25 @@ LOG="$RALPH_DIR/logs/work-$NEXT_ISSUE.log"
 echo ""
 echo "=== Starting work (fresh context) ==="
 echo ""
-# Use script to preserve tty behavior while logging
-# --print mode processes the prompt and exits automatically (no interactive session)
+# Use stream-json for real-time output display
+# --print with text format buffers until completion; stream-json streams each message
 export WORK_PROMPT
-# shellcheck disable=SC2016 # Variable expanded by subshell, not current shell
-script -q -f -c 'claude --dangerously-skip-permissions --print "$WORK_PROMPT"' "$LOG"
+claude --dangerously-skip-permissions --print --output-format stream-json --verbose "$WORK_PROMPT" 2>&1 \
+  | tee "$LOG" \
+  | jq --unbuffered -r '
+    # Extract text from assistant messages
+    if .type == "assistant" and .message.content then
+      .message.content[] | select(.type == "text") | .text // empty
+    # Show tool use activity
+    elif .type == "assistant" and .message.tool_use then
+      "[\(.message.tool_use.name // "tool")]"
+    else
+      empty
+    end
+  ' 2>/dev/null || true
 
-# Check for completion
-if grep -q "RALPH_COMPLETE" "$LOG" 2>/dev/null; then
+# Check for completion by examining the result in the JSON log
+if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LOG" >/dev/null 2>&1; then
   echo ""
   echo "Work complete. Closing issue: $NEXT_ISSUE"
   bd close "$NEXT_ISSUE"
