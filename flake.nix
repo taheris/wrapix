@@ -5,12 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     beads = {
-      url = "github:steveyegge/beads/v0.49.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    beads-viewer = {
-      url = "github:Dicklesworthstone/beads_viewer/v0.13.0";
+      url = "github:steveyegge/beads";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -40,7 +35,6 @@
           # Overlay for host system packages (devShell, etc.)
           hostOverlay = final: prev: {
             beads = inputs'.beads.packages.default;
-            beads-viewer = inputs'.beads-viewer.packages.default;
           };
 
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
@@ -54,7 +48,6 @@
           # Overlay for Linux container packages (must use Linux binaries)
           linuxOverlay = final: prev: {
             beads = inputs.beads.packages.${linuxSystem}.default;
-            beads-viewer = inputs.beads-viewer.packages.${linuxSystem}.default;
           };
 
           test = import ./tests {
@@ -129,7 +122,6 @@
                 with pkgs;
                 [
                   beads
-                  beads-viewer
                   gh
                   nixfmt
                   nixfmt-tree
