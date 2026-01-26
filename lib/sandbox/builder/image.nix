@@ -104,7 +104,9 @@ pkgs.dockerTools.buildLayeredImage {
     chmod +x entrypoint.sh
 
     # Fix Nix permissions for non-root users
-    chmod -R a+rwX nix/store nix/var/nix
+    # Store needs read+execute only (immutability); var needs write for state
+    chmod -R a+rX nix/store
+    chmod -R a+rwX nix/var/nix
 
     # Pre-create Nix directory structure
     mkdir -p nix/var/nix/profiles/per-user

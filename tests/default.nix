@@ -40,6 +40,9 @@ let
   # Ralph utility function tests run on all platforms
   ralphTests = import ./ralph { inherit pkgs system; };
 
+  # Shell utility tests run on all platforms
+  shellTests = import ./shell.nix { inherit pkgs system; };
+
   # Lint checks run on all platforms
   lintChecks = import ./lint.nix { inherit pkgs src; };
 
@@ -55,6 +58,7 @@ let
     // darwinNetworkTests
     // integrationTests
     // ralphTests
+    // shellTests
     // lintChecks
     // readmeTest;
 
@@ -259,6 +263,7 @@ in
     darwinNetworkTests
     integrationTests
     ralphTests
+    shellTests
     lintChecks
     readmeTest
     ;
