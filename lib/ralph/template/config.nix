@@ -1,9 +1,4 @@
 {
-  # Spec file handling
-  spec = {
-    hidden = false; # When true, store plan in state/{label}.md instead of specs/
-  };
-
   # Stream output visibility (what to show during claude execution)
   output = {
     # Core output types

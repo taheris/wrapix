@@ -22,24 +22,24 @@ if [ ! -d "$RALPH_DIR" ]; then
   exit 0
 fi
 
-# Current label
-LABEL_FILE="$RALPH_DIR/state/label"
-if [ -f "$LABEL_FILE" ]; then
-  LABEL=$(cat "$LABEL_FILE")
-  echo "Label: $LABEL"
-  BEAD_LABEL="rl-$LABEL"
+# Current label and hidden flag from state
+CURRENT_FILE="$RALPH_DIR/state/current.json"
+SPEC_HIDDEN="false"
+if [ -f "$CURRENT_FILE" ]; then
+  LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+  SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
+  if [ -n "$LABEL" ]; then
+    echo "Label: $LABEL"
+    BEAD_LABEL="rl-$LABEL"
+  else
+    echo "Label: (not set)"
+    LABEL=""
+    BEAD_LABEL=""
+  fi
 else
   echo "Label: (not set)"
   LABEL=""
   BEAD_LABEL=""
-fi
-
-# Current spec
-CONFIG_FILE="$RALPH_DIR/config.nix"
-SPEC_HIDDEN="false"
-if [ -f "$CONFIG_FILE" ]; then
-  CONFIG=$(nix eval --json --file "$CONFIG_FILE" 2>/dev/null) || CONFIG="{}"
-  SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 fi
 
 if [ -n "$LABEL" ]; then

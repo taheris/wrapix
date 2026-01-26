@@ -98,25 +98,35 @@ check_all_complete() {
 
 require_file "$CONFIG_FILE" "Ralph config"
 
-# Get label from state or argument
-LABEL_FILE="$RALPH_DIR/state/label"
+# Get label and hidden flag from state or argument
+CURRENT_FILE="$RALPH_DIR/state/current.json"
 if [ -n "${1:-}" ]; then
   LABEL="$1"
   debug "Label from argument: $LABEL"
-elif [ -f "$LABEL_FILE" ]; then
-  LABEL=$(cat "$LABEL_FILE")
+  # When label is provided as argument, read hidden from current.json if available
+  if [ -f "$CURRENT_FILE" ]; then
+    SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
+  else
+    SPEC_HIDDEN="false"
+  fi
+elif [ -f "$CURRENT_FILE" ]; then
+  LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
+  SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
   debug "Label from state file: $LABEL"
 else
   error "No label found. Run 'ralph plan <label>' first or provide feature name."
 fi
 
-# Load config to check spec.hidden
+if [ -z "$LABEL" ]; then
+  error "No label found in current.json. Run 'ralph plan <label>' first."
+fi
+
+# Load config
 debug "Loading config from $CONFIG_FILE"
 CONFIG=$(nix eval --json --file "$CONFIG_FILE") || error "Failed to evaluate config: $CONFIG_FILE"
 if ! validate_json "$CONFIG" "Config"; then
   error "Config file did not produce valid JSON"
 fi
-SPEC_HIDDEN=$(echo "$CONFIG" | jq -r '.spec.hidden // false')
 debug "spec.hidden = $SPEC_HIDDEN"
 
 BEAD_LABEL="rl-$LABEL"
