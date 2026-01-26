@@ -20,19 +20,19 @@ let
       pkgs;
 
   # Build profile image for testing
-  profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
-  profileImage = import ../lib/sandbox/image.nix {
+  profiles = import ../../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profileImage = import ../../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
     entrypointPkg = linuxPkgs.claude-code;
-    entrypointSh = ../lib/sandbox/darwin/entrypoint.sh;
+    entrypointSh = ../../lib/sandbox/darwin/entrypoint.sh;
     claudeConfig = { };
     claudeSettings = { };
   };
 
   # Test scripts that run inside the container
-  networkTestScript = ./darwin-network-test.sh;
-  mountTestScript = ./darwin-mount-test.sh;
+  networkTestScript = ./network-test.sh;
+  mountTestScript = ./mount-test.sh;
 
 in
 pkgs.writeShellScriptBin "test-darwin" ''
