@@ -129,7 +129,7 @@
                   ${
                     if isDarwin then
                       ''
-                        if ${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin; then
+                        if ${import ./tests/darwin { inherit pkgs system; }}/bin/test-darwin; then
                           echo "PASS: Darwin integration tests"
                         else
                           echo "FAIL: Darwin integration tests"
@@ -163,7 +163,7 @@
               test-darwin = {
                 meta.description = "Run Darwin integration tests";
                 type = "app";
-                program = "${import ./tests/darwin.nix { inherit pkgs system; }}/bin/test-darwin";
+                program = "${import ./tests/darwin { inherit pkgs system; }}/bin/test-darwin";
               };
 
               test-builder = {

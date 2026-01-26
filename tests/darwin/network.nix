@@ -1,6 +1,5 @@
-# Darwin VM mount integration test
-#
-# Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
+# Darwin VM network integration test
+# Runs actual VM to verify networking works
 #
 # This test will:
 # - Run during `nix flake check` if container CLI is available
@@ -30,25 +29,25 @@ let
       pkgs;
 
   # Build profile image for testing
-  profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
-  profileImage = import ../lib/sandbox/image.nix {
+  profiles = import ../../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profileImage = import ../../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
     entrypointPkg = linuxPkgs.claude-code;
-    entrypointSh = ../lib/sandbox/darwin/entrypoint.sh;
+    entrypointSh = ../../lib/sandbox/darwin/entrypoint.sh;
     claudeConfig = { };
     claudeSettings = { };
   };
 
   # Test script that runs inside the container
-  containerTestScript = ./darwin-mount-test.sh;
+  containerTestScript = ./network-test.sh;
 
 in
 {
-  # Integration test that runs a VM and tests mounts
+  # Integration test that runs a VM and tests networking
   # Skips gracefully if infrastructure is not available
-  darwin-mount-integration =
-    runCommandLocal "test-darwin-mounts"
+  darwin-network-integration =
+    runCommandLocal "test-darwin-network"
       {
         nativeBuildInputs = [ pkgs.skopeo ];
       }
@@ -70,7 +69,7 @@ in
           exit 0
         fi
 
-        echo "=== Darwin Mount Integration Test ==="
+        echo "=== Darwin Network Integration Test ==="
         echo ""
 
         # Get the real console user
@@ -115,7 +114,7 @@ in
         export HOME="$REAL_HOME"
 
         # Load test image
-        TEST_IMAGE="wrapix-mount-test:latest"
+        TEST_IMAGE="wrapix-network-test:latest"
         echo "Loading test image..."
         container image delete "$TEST_IMAGE" 2>/dev/null || true
         OCI_TAR=$(mktemp)
@@ -140,73 +139,42 @@ in
         # Set up test workspace
         WORKSPACE="$TEST_DIR/workspace"
         mkdir -p "$WORKSPACE"
-        echo "workspace-file-content" > "$WORKSPACE/workspace-test.txt"
 
         # Copy the container test script into workspace
-        cp ${containerTestScript} "$WORKSPACE/mount-test.sh"
-        chmod +x "$WORKSPACE/mount-test.sh"
+        cp ${containerTestScript} "$WORKSPACE/network-test.sh"
+        chmod +x "$WORKSPACE/network-test.sh"
 
-        # Set up directory mount (simulating ~/.claude)
-        # VirtioFS maps files as root, so we use staging + WRAPIX_DIR_MOUNTS
-        CLAUDE_DIR="$TEST_DIR/claude-config"
-        mkdir -p "$CLAUDE_DIR/mcp"
-
-        # Create symlink to simulate home-manager (points outside the directory)
-        SYMLINK_TARGET="$TEST_DIR/symlink-target"
-        mkdir -p "$SYMLINK_TARGET"
-        echo '{"test": "settings-value"}' > "$SYMLINK_TARGET/settings.json"
-        ln -s "$SYMLINK_TARGET/settings.json" "$CLAUDE_DIR/settings.json"
-
-        # Create regular file for nested config
-        echo '{"server": "mcp-config"}' > "$CLAUDE_DIR/mcp/config.json"
-
-        # Set up file mount (simulating ~/.claude.json)
-        # VirtioFS only supports directory mounts, so we mount parent dir to staging
-        CLAUDE_JSON_DIR="$TEST_DIR/claude-json"
-        mkdir -p "$CLAUDE_JSON_DIR"
-        echo '{"apiKey": "test-api-key-12345"}' > "$CLAUDE_JSON_DIR/claude.json"
-
-        # Build mount environment variables in same format as production:
-        # DIR_MOUNTS:  /staging/path:/destination/path
-        # FILE_MOUNTS: /staging/path/filename:/destination/path
-        DIR_MOUNTS="/mnt/wrapix/dir0:/home/$REAL_USER/.claude"
-        FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$REAL_USER/.claude.json"
-
-        echo "Test setup: symlink in $CLAUDE_DIR -> $SYMLINK_TARGET"
+        echo ""
+        echo "Running container with network test..."
         echo ""
 
-        # Dereference symlinks on host (security: avoids mounting /nix/store)
-        CLAUDE_DIR_DEREF="$TEST_DIR/claude-config-deref"
-        mkdir -p "$CLAUDE_DIR_DEREF"
-        cp -rL "$CLAUDE_DIR/." "$CLAUDE_DIR_DEREF/"
-
         # Run the container with our test script
-        # Note: Using dereferenced directory, no /nix/store mount needed
         set +e
         container run --rm \
           -w / \
           -v "$WORKSPACE:/workspace" \
-          -v "$CLAUDE_DIR_DEREF:/mnt/wrapix/dir0" \
-          -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
           -e BD_DB=/tmp/beads.db \
           -e BD_NO_DAEMON=1 \
           -e HOST_UID=$(id -u "$REAL_USER") \
           -e HOST_USER=$REAL_USER \
-          -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
-          -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
           -e WRAPIX_PROMPT="test" \
           --network default \
+          --dns 100.100.100.100 \
+          --dns 1.1.1.1 \
           --entrypoint /bin/bash \
-          "$TEST_IMAGE" /workspace/mount-test.sh
+          "$TEST_IMAGE" /workspace/network-test.sh
         EXIT_CODE=$?
         set -e
 
         echo ""
+        echo "Container exit code: $EXIT_CODE"
+
+        echo ""
         if [ "$EXIT_CODE" -eq 0 ]; then
-          echo "=== MOUNT INTEGRATION TEST PASSED ==="
+          echo "=== NETWORK INTEGRATION TEST PASSED ==="
           mkdir -p $out
         else
-          echo "=== MOUNT INTEGRATION TEST FAILED ==="
+          echo "=== NETWORK INTEGRATION TEST FAILED ==="
           exit 1
         fi
       '';

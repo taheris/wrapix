@@ -21,10 +21,10 @@ let
   smokeTests = import ./smoke.nix { inherit pkgs system; };
 
   # Darwin mount tests run on all platforms (test logic, not VM)
-  darwinMountTests = import ./darwin-mounts.nix { inherit pkgs system; };
+  darwinMountTests = import ./darwin/mounts.nix { inherit pkgs system; };
 
   # Darwin network tests run on all platforms (test logic, not VM)
-  darwinNetworkTests = import ./darwin-network.nix { inherit pkgs system; };
+  darwinNetworkTests = import ./darwin/network.nix { inherit pkgs system; };
 
   # Integration tests require NixOS VM (Linux with KVM only)
   # Skip when KVM unavailable (e.g., inside containers)
