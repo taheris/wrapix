@@ -51,7 +51,7 @@ ralph plan my-feature
 - Substitutes template placeholders fresh each run
 - Conducts spec-gathering conversation
 - Writes requirements to spec file
-- Outputs `INTERVIEW_COMPLETE` when done
+- Outputs `RALPH_COMPLETE` when done
 
 ### 2. Ready
 
