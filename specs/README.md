@@ -10,6 +10,7 @@
 | [linux-builder.md](./linux-builder.md) | `lib/builder/default.nix` | Remote Nix builds for macOS |
 | [ralph-workflow.md](./ralph-workflow.md) | `lib/ralph/` | Spec-driven AI orchestration |
 | [beads.md](./beads.md) | `.beads/` | Issue tracking with dependency support |
+| [ralph-tests.md](./ralph-tests.md) | `tests/ralph/` | Integration tests for ralph workflow |
 
 ## Terminology Index
 
