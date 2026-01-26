@@ -161,7 +161,7 @@ else
 2. **Create a parent epic bead** as the molecule root
 3. **Capture the epic ID** for use as the molecule root
 4. **Store the molecule ID** in current.json
-5. **Break down into ordered tasks** as child beads with the epic as parent
+5. **Create tasks** and **bond them to the molecule** using bd mol bond
 6. **Add dependencies** where tasks depend on each other
 {{README_INSTRUCTIONS}}"
 
@@ -178,9 +178,13 @@ echo \"Created molecule root: \$MOLECULE_ID\"
 jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
 \`\`\`
 
-Then, for each implementation task, create it as a child of the epic:
+Then, for each implementation task, create it and bond to the molecule:
 \`\`\`bash
-bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"rl-{{LABEL}}\" --parent=\"\$MOLECULE_ID\"
+# Create the task
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"rl-{{LABEL}}\" --silent)
+
+# Bond it to the molecule (sequential by default, or use --type parallel for independent tasks)
+bd mol bond \"\$MOLECULE_ID\" \"\$TASK_ID\" --type sequential
 \`\`\`
 
 Add dependencies between tasks:
