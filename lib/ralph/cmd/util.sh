@@ -265,12 +265,14 @@ build_stream_filter() {
   local responses tool_names tool_inputs tool_results thinking stats
   local max_tool_input max_tool_result
 
-  responses=$(echo "$config" | jq -r '.output.responses // true')
-  tool_names=$(echo "$config" | jq -r '.output."tool-names" // true')
-  tool_inputs=$(echo "$config" | jq -r '.output."tool-inputs" // false')
-  tool_results=$(echo "$config" | jq -r '.output."tool-results" // false')
-  thinking=$(echo "$config" | jq -r '.output.thinking // false')
-  stats=$(echo "$config" | jq -r '.output.stats // false')
+  # Note: jq's // operator treats false as null, so we use explicit null checks
+  # to properly handle explicit false values vs missing keys
+  responses=$(echo "$config" | jq -r 'if .output.responses == null then true else .output.responses end')
+  tool_names=$(echo "$config" | jq -r 'if .output."tool-names" == null then true else .output."tool-names" end')
+  tool_inputs=$(echo "$config" | jq -r 'if .output."tool-inputs" == null then true else .output."tool-inputs" end')
+  tool_results=$(echo "$config" | jq -r 'if .output."tool-results" == null then true else .output."tool-results" end')
+  thinking=$(echo "$config" | jq -r 'if .output.thinking == null then true else .output.thinking end')
+  stats=$(echo "$config" | jq -r 'if .output.stats == null then true else .output.stats end')
   max_tool_input=$(echo "$config" | jq -r '.output."max-tool-input" // 200')
   max_tool_result=$(echo "$config" | jq -r '.output."max-tool-result" // 500')
 
@@ -305,26 +307,33 @@ if .type == "assistant" and .message.content then
     fi
   fi
 
+  # Add tool use inside assistant message content (names and/or inputs)
+  if [ "$tool_names" = "true" ] || [ "$tool_inputs" = "true" ]; then
+    if [ -n "$content_checks" ]; then
+      if [ "$tool_inputs" = "true" ]; then
+        content_checks+="
+  elif .type == \"tool_use\" then \"[\" + .name + \"] \" + ((.input // {}) | tostring | truncate($max_tool_input))"
+      else
+        content_checks+='
+  elif .type == "tool_use" then "[" + .name + "]"'
+      fi
+    else
+      if [ "$tool_inputs" = "true" ]; then
+        content_checks+="
+  if .type == \"tool_use\" then \"[\" + .name + \"] \" + ((.input // {}) | tostring | truncate($max_tool_input))"
+      else
+        content_checks+='
+  if .type == "tool_use" then "[" + .name + "]"'
+      fi
+    fi
+  fi
+
   # Close content type checks or provide default
   if [ -n "$content_checks" ]; then
     filter+="$content_checks"'
   else empty end'
   else
     filter+='empty'
-  fi
-
-  # Add tool use (names and/or inputs)
-  if [ "$tool_names" = "true" ] || [ "$tool_inputs" = "true" ]; then
-    filter+='
-
-# Show tool use
-elif .type == "content_block_start" and .content_block.type == "tool_use" then
-'
-    if [ "$tool_inputs" = "true" ]; then
-      filter+="  \"[\" + .content_block.name + \"] \" + ((.content_block.input // {}) | tostring | truncate($max_tool_input))"
-    else
-      filter+='  "[" + .content_block.name + "]"'
-    fi
   fi
 
   # Add tool results
