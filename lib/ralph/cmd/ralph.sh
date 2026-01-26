@@ -30,7 +30,7 @@ case "$COMMAND" in
     echo "  status          Show current workflow state"
     echo ""
     echo "Utility Commands:"
-    echo "  logs <phase> [N]  View recent logs (plan|step, default 5)"
+    echo "  logs [N]          View recent work logs (default 5)"
     echo "  tune <phase>      Edit prompt template (plan|step)"
     echo ""
     echo "Workflow:"
