@@ -32,15 +32,9 @@ Title: {{TITLE}}
    - [ ] Lint checks pass
    - [ ] Changes committed
 
-## Land the Plane Checklist
+## Land the Plane
 
-Before outputting RALPH_COMPLETE, verify:
-- [ ] git status (check changes)
-- [ ] git add <files>
-- [ ] bd sync
-- [ ] git commit -m "..."
-- [ ] All tests pass
-- [ ] Lint passes
+Before outputting RALPH_COMPLETE, follow the **Session Protocol** in `AGENTS.md`.
 
 ## Exit Signals
 

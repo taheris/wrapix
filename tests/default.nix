@@ -66,9 +66,16 @@ let
   darwinIntegrationTests = import ./darwin { inherit pkgs system; };
 
   # Ralph workflow integration tests (with mock-claude)
+  # Copy entire ralph test directory to store so run-tests.sh can find mock-claude and scenarios
+  ralphTestDir = pkgs.runCommandLocal "ralph-test-dir" { } ''
+    cp -r ${./ralph} $out
+    chmod +x $out/run-tests.sh $out/mock-claude $out/scenarios/*.sh
+  '';
+
   ralphIntegrationTests = writeShellScriptBin "test-ralph-integration" ''
     set -euo pipefail
-    exec ${./ralph/run-tests.sh}
+    export REPO_ROOT="${src}"
+    exec ${ralphTestDir}/run-tests.sh
   '';
 
   # Builder integration tests (Darwin only)
