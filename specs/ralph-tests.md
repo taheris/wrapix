@@ -121,8 +121,8 @@ EOF
 
 phase_ready() {
   # Create beads issues
-  bd create --title="Task 1" --type=task --labels="rl-$LABEL"
-  bd create --title="Task 2" --type=task --labels="rl-$LABEL"
+  bd create --title="Task 1" --type=task --labels="spec-$LABEL"
+  bd create --title="Task 2" --type=task --labels="spec-$LABEL"
   bd dep add beads-002 beads-001
   echo "RALPH_COMPLETE"
 }
