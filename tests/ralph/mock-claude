@@ -54,24 +54,26 @@ source "$SCENARIO_FILE"
 detect_phase() {
   local prompt="$1"
 
-  # Check for plan phase markers
-  # Matches: "Specification Interview", "spec interview", "create a spec", "plan"
-  if echo "$prompt" | grep -qiE "specification.interview|spec.interview|create.*spec|plan\.md"; then
-    echo "plan"
+  # Check for step phase markers FIRST (most specific)
+  # Matches: "# Implementation Step" (the heading), "## Issue Details", "step.md"
+  # Note: Use more specific patterns to avoid matching "each implementation step" in ready.md
+  if echo "$prompt" | grep -qE "^# Implementation Step|^## Issue Details|step\.md"; then
+    echo "step"
     return
   fi
 
   # Check for ready phase markers
-  # Matches: "Convert Spec to Tasks", "task breakdown", "ready.md"
-  if echo "$prompt" | grep -qiE "convert.spec|create.*task|task.breakdown|ready\.md"; then
+  # Matches: "Convert Spec to Tasks", "task breakdown", "create task beads", "ready.md"
+  if echo "$prompt" | grep -qiE "convert.spec|task.breakdown|create.task.bead|ready\.md"; then
     echo "ready"
     return
   fi
 
-  # Check for step phase markers (implementation)
-  # Matches: "Implementation Step", "Issue Details", "step.md"
-  if echo "$prompt" | grep -qiE "implementation|issue.details|step\.md"; then
-    echo "step"
+  # Check for plan phase markers
+  # Matches: "Specification Interview", "spec interview", "plan.md"
+  # Note: Removed "create.*spec" as it false-positives on step template's "bd create --labels=spec-"
+  if echo "$prompt" | grep -qiE "specification.interview|spec.interview|plan\.md"; then
+    echo "plan"
     return
   fi
 
