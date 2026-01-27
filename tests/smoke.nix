@@ -121,7 +121,7 @@ in
 
   # Verify builder key generation produces expected outputs
   # Security note: Keys are in Nix store (world-readable), mitigated by localhost-only SSH
-  # See specs/security-considerations.md "Builder SSH Keys" section
+  # See specs/security-review.md "Builder SSH Keys" section
   builder-keys-structure =
     let
       builderKeys = import ../lib/builder/hostkey.nix { inherit pkgs; };
@@ -152,10 +152,10 @@ in
       echo "PASS: Base64 public host key present"
 
       # Document that keys are in Nix store (world-readable)
-      # This is intentional - see specs/security-considerations.md for security analysis
+      # This is intentional - see specs/security-review.md for security analysis
       echo ""
       echo "NOTE: Keys are in Nix store at ${builderKeys}"
-      echo "This is documented in specs/security-considerations.md 'Builder SSH Keys' section"
+      echo "This is documented in specs/security-review.md 'Builder SSH Keys' section"
       echo "Mitigations: localhost-only SSH, password auth disabled, machine-local keys"
 
       echo ""
