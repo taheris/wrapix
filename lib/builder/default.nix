@@ -95,7 +95,7 @@ let
           # Convert Docker-format tar to OCI-archive format
           OCI_TAR="$WRAPIX_CACHE/builder-image-oci.tar"
           mkdir -p "$WRAPIX_CACHE"
-          ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${builderImage}" "oci-archive:$OCI_TAR"
+          ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:${builderImage}" "oci-archive:$OCI_TAR"
           # Load and capture the digest from output
           LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
           LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
