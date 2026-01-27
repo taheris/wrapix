@@ -24,7 +24,7 @@ let
   ralph = import ../ralph { inherit pkgs; };
 
   # Nix sandbox disabled: outer container provides isolation.
-  # See specs/security-considerations.md "Nix Sandbox Disabled" for security rationale.
+  # See specs/security-review.md "Nix Sandbox Disabled" for security rationale.
   nixConfig = pkgs.writeTextDir "etc/nix/nix.conf" ''
     experimental-features = nix-command flakes
     sandbox = false
