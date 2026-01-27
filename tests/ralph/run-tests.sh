@@ -332,7 +332,7 @@ Molecule: {{MOLECULE_ID}}
 1. **Understand**: Read the spec and issue thoroughly before making changes
 2. **Implement**: Write code following the spec
 3. **Discovered Work**: If you find tasks outside this issue's scope:
-   - Create with: `bd create --title="..." --labels="rl-{{LABEL}}"`
+   - Create with: `bd create --title="..." --labels="spec-{{LABEL}}"`
    - Bond to molecule: `bd mol bond {{MOLECULE_ID}} <new-issue>`
 4. **Quality Gates**: Before completing, ensure:
    - [ ] All tests pass
@@ -353,7 +353,7 @@ EOF
 
 Read: {{SPEC_PATH}}
 
-Label: rl-{{LABEL}}
+Label: spec-{{LABEL}}
 Priority: {{PRIORITY}}
 Spec Title: {{SPEC_TITLE}}
 
@@ -543,7 +543,7 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
-  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "null" ]; then
     test_fail "Could not create test bead"
@@ -587,7 +587,7 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
-  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created task: $TASK_ID"
 
@@ -625,7 +625,7 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
-  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_ID=$(bd create --title="Implement feature" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created task: $TASK_ID"
 
@@ -672,7 +672,7 @@ EOF
 
   # Create an epic (molecule root)
   local epic_json
-  epic_json=$(bd create --title="Test Feature" --type=epic --labels="rl-$label" --json 2>/dev/null)
+  epic_json=$(bd create --title="Test Feature" --type=epic --labels="spec-$label" --json 2>/dev/null)
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '.id')
 
@@ -686,19 +686,19 @@ EOF
   # Create tasks with different states
   # Task A: Completed (should show [done])
   local task_a_json
-  task_a_json=$(bd create --title="Task A - Completed" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_a_json=$(bd create --title="Task A - Completed" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_a_id
   task_a_id=$(echo "$task_a_json" | jq -r '.id')
 
   # Task B: In Progress (should show [current])
   local task_b_json
-  task_b_json=$(bd create --title="Task B - In Progress" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_b_json=$(bd create --title="Task B - In Progress" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_b_id
   task_b_id=$(echo "$task_b_json" | jq -r '.id')
 
   # Task C: Blocked by Task B (should show [blocked])
   local task_c_json
-  task_c_json=$(bd create --title="Task C - Blocked" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_c_json=$(bd create --title="Task C - Blocked" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_c_id
   task_c_id=$(echo "$task_c_json" | jq -r '.id')
 
@@ -1043,7 +1043,7 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create a task bead
-  TASK_ID=$(bd create --title="Blocked task" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_ID=$(bd create --title="Blocked task" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created task: $TASK_ID"
 
@@ -1090,10 +1090,10 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create task 1 (no deps)
-  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   # Create task 2 (depends on task 1)
-  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   # Add dependency: task 2 depends on task 1
   bd dep add "$TASK2_ID" "$TASK1_ID" 2>/dev/null
@@ -1158,9 +1158,9 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create multiple tasks
-  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
-  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
-  TASK3_ID=$(bd create --title="Task 3" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK3_ID=$(bd create --title="Task 3" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created 3 tasks"
 
@@ -1212,13 +1212,13 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create Task A (will be marked in_progress to simulate first agent working on it)
-  TASK_A_ID=$(bd create --title="Task A - First agent working" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_A_ID=$(bd create --title="Task A - First agent working" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   # Create Task B (independent, no dependencies - should be available)
-  TASK_B_ID=$(bd create --title="Task B - Independent" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_B_ID=$(bd create --title="Task B - Independent" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   # Create Task C (depends on Task A - should be blocked)
-  TASK_C_ID=$(bd create --title="Task C - Depends on A" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK_C_ID=$(bd create --title="Task C - Depends on A" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   # Add dependency: Task C depends on Task A
   bd dep add "$TASK_C_ID" "$TASK_A_ID" 2>/dev/null
@@ -1247,7 +1247,7 @@ EOF
 
   # Check bd list --ready output directly
   local ready_output
-  ready_output=$(bd list --label "rl-test-feature" --ready --json 2>/dev/null)
+  ready_output=$(bd list --label "spec-test-feature" --ready --json 2>/dev/null)
   local ready_ids
   ready_ids=$(echo "$ready_output" | jq -r '.[].id' 2>/dev/null | tr '\n' ' ')
 
@@ -1331,11 +1331,11 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create Task 1 and mark it in_progress (simulates another agent working on it)
-  TASK1_ID=$(bd create --title="Task 1 - Already in progress" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK1_ID=$(bd create --title="Task 1 - Already in progress" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
   bd update "$TASK1_ID" --status=in_progress 2>/dev/null
 
   # Create Task 2 (open, should be selected)
-  TASK2_ID=$(bd create --title="Task 2 - Available" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Task 2 - Available" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created Task 1 (in_progress): $TASK1_ID"
   test_pass "Created Task 2 (open): $TASK2_ID"
@@ -1390,15 +1390,15 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create parent task and mark it in_progress
-  PARENT_ID=$(bd create --title="Parent Task - In progress" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  PARENT_ID=$(bd create --title="Parent Task - In progress" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
   bd update "$PARENT_ID" --status=in_progress 2>/dev/null
 
   # Create child task that depends on parent
-  CHILD_ID=$(bd create --title="Child Task - Blocked by parent" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  CHILD_ID=$(bd create --title="Child Task - Blocked by parent" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
   bd dep add "$CHILD_ID" "$PARENT_ID" 2>/dev/null
 
   # Create independent task (should be available)
-  INDEPENDENT_ID=$(bd create --title="Independent Task - Available" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  INDEPENDENT_ID=$(bd create --title="Independent Task - Available" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created Parent (in_progress): $PARENT_ID"
   test_pass "Created Child (blocked by parent): $CHILD_ID"
@@ -1546,7 +1546,7 @@ EOF
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
   # Create an epic for this feature
-  EPIC_ID=$(bd create --title="Test Feature Epic" --type=epic --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  EPIC_ID=$(bd create --title="Test Feature Epic" --type=epic --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   if [ -z "$EPIC_ID" ] || [ "$EPIC_ID" = "null" ]; then
     test_fail "Could not create epic"
@@ -1557,9 +1557,9 @@ EOF
   test_pass "Created epic: $EPIC_ID"
 
   # Create 3 tasks that are part of this epic
-  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
-  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
-  TASK3_ID=$(bd create --title="Task 3" --type=task --labels="rl-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK1_ID=$(bd create --title="Task 1" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Task 2" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+  TASK3_ID=$(bd create --title="Task 3" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created 3 tasks: $TASK1_ID, $TASK2_ID, $TASK3_ID"
 
@@ -1764,7 +1764,7 @@ test_happy_path() {
 
   # Check that epic was created
   local epic_count
-  epic_count=$(bd list --label "rl-$label" --type=epic --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  epic_count=$(bd list --label "spec-$label" --type=epic --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   if [ "$epic_count" -ge 1 ]; then
     test_pass "ralph ready created epic"
   else
@@ -1773,7 +1773,7 @@ test_happy_path() {
 
   # Check that tasks were created
   local task_count
-  task_count=$(bd list --label "rl-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  task_count=$(bd list --label "spec-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   if [ "$task_count" -ge 3 ]; then
     test_pass "ralph ready created tasks (found $task_count)"
   else
@@ -1801,7 +1801,7 @@ test_happy_path() {
 
   # Get the epic ID (molecule root)
   local epic_id
-  epic_id=$(bd list --label "rl-$label" --type=epic --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
+  epic_id=$(bd list --label "spec-$label" --type=epic --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
 
   if [ "$epic_id" = "unknown" ] || [ -z "$epic_id" ]; then
     test_fail "Could not find epic (molecule root)"
@@ -1908,7 +1908,7 @@ test_happy_path() {
 
   # Check that exactly one task was closed (the unblocked one)
   local closed_count
-  closed_count=$(bd list --label "rl-$label" --status=closed --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  closed_count=$(bd list --label "spec-$label" --status=closed --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   if [ "$closed_count" -eq 1 ]; then
     test_pass "ralph step closed one task"
   else
@@ -1917,7 +1917,7 @@ test_happy_path() {
 
   # Verify a task was closed (any task, since they're all independent)
   local closed_task
-  closed_task=$(bd list --label "rl-$label" --status=closed --type=task --json 2>/dev/null | jq -r '.[0].title // "unknown"' 2>/dev/null)
+  closed_task=$(bd list --label "spec-$label" --status=closed --type=task --json 2>/dev/null | jq -r '.[0].title // "unknown"' 2>/dev/null)
   if [ "$closed_task" != "unknown" ]; then
     test_pass "ralph step closed a task: $closed_task"
   else
@@ -1944,7 +1944,7 @@ test_happy_path() {
 
   # All tasks should be closed now
   local all_tasks_closed
-  all_tasks_closed=$(bd list --label "rl-$label" --status=closed --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  all_tasks_closed=$(bd list --label "spec-$label" --status=closed --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   if [ "$all_tasks_closed" -ge 3 ]; then
     test_pass "ralph loop closed all tasks ($all_tasks_closed closed)"
   else
@@ -1954,12 +1954,12 @@ test_happy_path() {
   # Get epic ID and check if closed
   # Note: bd list by default excludes closed items, so we query closed epics specifically
   local epic_id
-  epic_id=$(bd list --label "rl-$label" --type=epic --status=closed --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
+  epic_id=$(bd list --label "spec-$label" --type=epic --status=closed --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
   if [ "$epic_id" != "unknown" ] && [ -n "$epic_id" ]; then
     test_pass "Epic is closed after all tasks complete (epic: $epic_id)"
   else
     # Try to find open epic (auto-close may not be implemented)
-    epic_id=$(bd list --label "rl-$label" --type=epic --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
+    epic_id=$(bd list --label "spec-$label" --type=epic --json 2>/dev/null | jq -r '.[0].id // "unknown"' 2>/dev/null)
     if [ "$epic_id" != "unknown" ] && [ -n "$epic_id" ]; then
       echo "  NOTE: Epic $epic_id is still open (auto-close may not be implemented)"
       test_skip "Epic auto-close verification"
@@ -2106,21 +2106,21 @@ EOF
 EOF
 
   # Create a task directly with priority 1
-  TASK1_ID=$(bd create --title="High priority task" --type=task --labels="rl-$label" --priority=1 --json 2>/dev/null | jq -r '.id')
+  TASK1_ID=$(bd create --title="High priority task" --type=task --labels="spec-$label" --priority=1 --json 2>/dev/null | jq -r '.id')
   test_pass "Created task with priority 1: $TASK1_ID"
 
   # Verify priority is 1
   assert_bead_priority "$TASK1_ID" "1" "Task should have priority 1 (high)"
 
   # Test 2: Create issue with priority 3 (low)
-  TASK2_ID=$(bd create --title="Low priority task" --type=task --labels="rl-$label" --priority=3 --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Low priority task" --type=task --labels="spec-$label" --priority=3 --json 2>/dev/null | jq -r '.id')
   test_pass "Created task with priority 3: $TASK2_ID"
 
   # Verify priority is 3
   assert_bead_priority "$TASK2_ID" "3" "Task should have priority 3 (low)"
 
   # Test 3: Create issue with default priority (2)
-  TASK3_ID=$(bd create --title="Default priority task" --type=task --labels="rl-$label" --json 2>/dev/null | jq -r '.id')
+  TASK3_ID=$(bd create --title="Default priority task" --type=task --labels="spec-$label" --json 2>/dev/null | jq -r '.id')
   test_pass "Created task with default priority: $TASK3_ID"
 
   # Default priority should be 2
@@ -2161,14 +2161,14 @@ EOF
 
   # Create 5 tasks (more than max-iterations)
   for i in 1 2 3 4 5; do
-    bd create --title="Task $i" --type=task --labels="rl-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
   done
 
   test_pass "Created 5 tasks"
 
   # Count initial open tasks
   local initial_count
-  initial_count=$(bd list --label "rl-$label" --status=open --json 2>/dev/null | jq 'length')
+  initial_count=$(bd list --label "spec-$label" --status=open --json 2>/dev/null | jq 'length')
   test_pass "Initial open tasks: $initial_count"
 
   # Use complete scenario
@@ -2184,7 +2184,7 @@ EOF
 
   # Count remaining open tasks
   local final_count
-  final_count=$(bd list --label "rl-$label" --status=open --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  final_count=$(bd list --label "spec-$label" --status=open --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   # NOTE: Current loop.sh doesn't implement max-iterations
   # When not implemented, all 5 tasks get completed
@@ -2234,7 +2234,7 @@ EOF
 
   # Create 3 tasks
   for i in 1 2 3; do
-    bd create --title="Task $i" --type=task --labels="rl-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
   done
 
   test_pass "Created 3 tasks"
@@ -2257,7 +2257,7 @@ EOF
 
   # Check that only 1 task was attempted (marked in_progress)
   local in_progress_count
-  in_progress_count=$(bd list --label "rl-$label" --status=in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  in_progress_count=$(bd list --label "spec-$label" --status=in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   if [ "$in_progress_count" -ge 1 ]; then
     test_pass "At least 1 task was attempted (found $in_progress_count in_progress)"
@@ -2267,7 +2267,7 @@ EOF
 
   # Verify loop paused (didn't process all tasks)
   local closed_count
-  closed_count=$(bd list --label "rl-$label" --status=closed --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  closed_count=$(bd list --label "spec-$label" --status=closed --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   if [ "$closed_count" -eq 0 ]; then
     test_pass "Loop paused - no tasks closed (correct for RALPH_BLOCKED)"
@@ -2309,7 +2309,7 @@ EOF
 
   # Create 3 tasks
   for i in 1 2 3; do
-    bd create --title="Task $i" --type=task --labels="rl-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
   done
 
   test_pass "Created 3 tasks"
@@ -2376,7 +2376,7 @@ EOF
 EOF
 
   # Create a single task
-  bd create --title="Hook test task" --type=task --labels="rl-$label" >/dev/null 2>&1
+  bd create --title="Hook test task" --type=task --labels="spec-$label" >/dev/null 2>&1
 
   test_pass "Created 1 task"
 
@@ -2439,7 +2439,7 @@ EOF
 EOF
 
   # Create a task
-  TASK_ID=$(bd create --title="Pattern test task" --type=task --labels="rl-$label" --json 2>/dev/null | jq -r '.id')
+  TASK_ID=$(bd create --title="Pattern test task" --type=task --labels="spec-$label" --json 2>/dev/null | jq -r '.id')
 
   test_pass "Created task: $TASK_ID"
 
@@ -2536,7 +2536,7 @@ EOF
 
   # Create an epic (molecule root) for this feature
   local epic_json
-  epic_json=$(bd create --title="Update Mode Feature" --type=epic --labels="rl-$label" --json 2>/dev/null)
+  epic_json=$(bd create --title="Update Mode Feature" --type=epic --labels="spec-$label" --json 2>/dev/null)
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '.id')
 
@@ -2550,17 +2550,17 @@ EOF
 
   # Create original tasks A, B, C
   local task_a_json
-  task_a_json=$(bd create --title="Task A - Original task one" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_a_json=$(bd create --title="Task A - Original task one" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_a_id
   task_a_id=$(echo "$task_a_json" | jq -r '.id')
 
   local task_b_json
-  task_b_json=$(bd create --title="Task B - Original task two" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_b_json=$(bd create --title="Task B - Original task two" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_b_id
   task_b_id=$(echo "$task_b_json" | jq -r '.id')
 
   local task_c_json
-  task_c_json=$(bd create --title="Task C - Original task three" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task_c_json=$(bd create --title="Task C - Original task three" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task_c_id
   task_c_id=$(echo "$task_c_json" | jq -r '.id')
 
@@ -2618,7 +2618,7 @@ EOF
 
   # Count tasks before ralph ready
   local tasks_before
-  tasks_before=$(bd list --label "rl-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  tasks_before=$(bd list --label "spec-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   test_pass "Tasks before ralph ready: $tasks_before"
 
   # Run ralph ready (scenario's phase_ready handles update mode)
@@ -2650,7 +2650,7 @@ EOF
 
   # Count tasks after ralph ready
   local tasks_after
-  tasks_after=$(bd list --label "rl-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  tasks_after=$(bd list --label "spec-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   test_pass "Tasks after ralph ready: $tasks_after"
 
   # Verify new tasks were created (should be more than before)
@@ -2669,7 +2669,7 @@ EOF
 
   # Verify new tasks have the correct label
   local new_tasks
-  new_tasks=$(bd list --label "rl-$label" --type=task --json 2>/dev/null)
+  new_tasks=$(bd list --label "spec-$label" --type=task --json 2>/dev/null)
 
   # Check for Task D (new validation feature)
   if echo "$new_tasks" | jq -e '.[] | select(.title | contains("Task D"))' >/dev/null 2>&1; then
@@ -2720,7 +2720,7 @@ EOF
 
   # Verify total count: original tasks + epic + new tasks
   local total_issues
-  total_issues=$(bd list --label "rl-$label" --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  total_issues=$(bd list --label "spec-$label" --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
   # Expected: 1 epic + 3 original tasks + 2 new tasks = 6
   # But new tasks might not be created if bd mol bond isn't fully implemented
   if [ "$total_issues" -ge 4 ]; then
@@ -2772,7 +2772,7 @@ EOF
 
   # Create an epic (molecule root)
   local epic_json
-  epic_json=$(bd create --title="Discovered Work Feature" --type=epic --labels="rl-$label" --json 2>/dev/null)
+  epic_json=$(bd create --title="Discovered Work Feature" --type=epic --labels="spec-$label" --json 2>/dev/null)
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '.id')
 
@@ -2786,7 +2786,7 @@ EOF
 
   # Create a main task
   local main_task_json
-  main_task_json=$(bd create --title="Main Task - discovers work" --type=task --labels="rl-$label" --json 2>/dev/null)
+  main_task_json=$(bd create --title="Main Task - discovers work" --type=task --labels="spec-$label" --json 2>/dev/null)
   local main_task_id
   main_task_id=$(echo "$main_task_json" | jq -r '.id')
 
@@ -2865,7 +2865,7 @@ EOF
 
   # Reset for next step - create a new task to work on
   local task2_json
-  task2_json=$(bd create --title="Second Task - discovers parallel work" --type=task --labels="rl-$label" --json 2>/dev/null)
+  task2_json=$(bd create --title="Second Task - discovers parallel work" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task2_id
   task2_id=$(echo "$task2_json" | jq -r '.id')
 
@@ -2931,7 +2931,7 @@ EOF
 
   # Count all tasks in the molecule
   local all_tasks
-  all_tasks=$(bd list --label "rl-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  all_tasks=$(bd list --label "spec-$label" --type=task --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   # Should have: main task + second task + discovered sequential + discovered parallel = 4+
   if [ "$all_tasks" -ge 2 ]; then

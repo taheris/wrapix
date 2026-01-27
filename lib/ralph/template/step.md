@@ -25,7 +25,7 @@ Title: {{TITLE}}
    - Unit tests: For specific behaviors, edge cases, integration points
 3. **Implement**: Write code following the spec
 4. **Discovered Work**: If you find tasks outside this issue's scope:
-   - First create the issue: `bd create --title="..." --type=task --labels="rl-{{LABEL}}"`
+   - First create the issue: `bd create --title="..." --type=task --labels="spec-{{LABEL}}"`
    - Then bond it to the molecule with the appropriate type:
      - **Sequential**: `bd mol bond {{MOLECULE_ID}} <new-issue-id> --type sequential`
        Use when discovered work blocks current task completion

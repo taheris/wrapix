@@ -130,7 +130,7 @@ if ! validate_json "$CONFIG" "Config"; then
 fi
 debug "spec.hidden = $SPEC_HIDDEN"
 
-BEAD_LABEL="rl-$LABEL"
+BEAD_LABEL="spec-$LABEL"
 debug "Looking for issues with label: $BEAD_LABEL"
 
 # Find next ready issue with this label (excluding epics - they're containers, not work items)
