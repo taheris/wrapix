@@ -117,7 +117,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
   fi
 
   # Query existing beads with this label
-  EXISTING_BEADS=$(bd list --label "rl-$LABEL" --format json 2>/dev/null || echo "[]")
+  EXISTING_BEADS=$(bd list --label "spec-$LABEL" --format json 2>/dev/null || echo "[]")
   EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
 
   MOLECULE_CONTEXT="Molecule ID: $MOLECULE_ID
@@ -143,7 +143,7 @@ $EXISTING_BEADS
 For each NEW implementation task, create it and bond to the molecule:
 \`\`\`bash
 # Create the new task
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"rl-{{LABEL}}\" --silent)
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
 
 # Bond it to the existing molecule (sequential by default, or use --type parallel)
 bd mol bond $MOLECULE_ID \"\$TASK_ID\" --type sequential
@@ -169,7 +169,7 @@ else
 
 First, create the epic bead and capture its ID (this becomes the molecule root):
 \`\`\`bash
-MOLECULE_ID=\$(bd create --title=\"{{SPEC_TITLE}}\" --type=epic --priority={{PRIORITY}} --labels=\"rl-{{LABEL}}\" --silent)
+MOLECULE_ID=\$(bd create --title=\"{{SPEC_TITLE}}\" --type=epic --priority={{PRIORITY}} --labels=\"spec-{{LABEL}}\" --silent)
 echo \"Created molecule root: \$MOLECULE_ID\"
 \`\`\`
 
@@ -181,7 +181,7 @@ jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_
 Then, for each implementation task, create it and bond to the molecule:
 \`\`\`bash
 # Create the task
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"rl-{{LABEL}}\" --silent)
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
 
 # Bond it to the molecule (sequential by default, or use --type parallel for independent tasks)
 bd mol bond \"\$MOLECULE_ID\" \"\$TASK_ID\" --type sequential
@@ -261,7 +261,7 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
 
   echo ""
   echo "To list created issues:"
-  echo "  bd list --label rl-$LABEL"
+  echo "  bd list --label spec-$LABEL"
   echo ""
   echo "To work through issues:"
   echo "  ralph step      # Work one issue at a time"

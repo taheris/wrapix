@@ -92,7 +92,7 @@ if [ -n "$MOLECULE" ]; then
   fi
 else
   # Fallback: no molecule set, use legacy label-based counting
-  BEAD_LABEL="rl-$LABEL"
+  BEAD_LABEL="spec-$LABEL"
   echo "Beads Progress ($BEAD_LABEL):"
   echo "  (No molecule set - using label-based counting)"
   echo ""
