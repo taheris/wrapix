@@ -75,7 +75,7 @@ in
               # cryptographic hashes), not pulled from untrusted registries.
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
               mkdir -p "$WRAPIX_CACHE"
-              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
+              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
               # Load and capture the digest from output (format: "untagged@sha256:...")
               LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
               LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
