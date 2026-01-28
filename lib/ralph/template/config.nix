@@ -16,8 +16,8 @@
     # Output prefixes (customize the bracket prefixes shown in output)
     prefixes = {
       response = "[response] "; # Prefix for assistant text responses
-      tool-result = "\u001b[32m[result]\u001b[0m "; # Prefix for tool results
-      tool-error = "\u001b[31m[error]\u001b[0m "; # Prefix for tool errors
+      tool-result = "[result] "; # Prefix for tool results
+      tool-error = "[error] "; # Prefix for tool errors
       thinking-start = "<thinking>\n"; # Opening tag for thinking blocks
       thinking-end = "\n</thinking>"; # Closing tag for thinking blocks
       stats-header = "\n[stats]\n"; # Header before stats output
