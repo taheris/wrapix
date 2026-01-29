@@ -30,6 +30,7 @@ let
       nix
       openssh
       patch
+      prek
       procps
       ripgrep
       rsync

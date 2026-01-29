@@ -11,6 +11,13 @@ set -euo pipefail
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 SPECS_DIR="specs"
 
+# Helper to indent each line of output
+indent() {
+  while IFS= read -r line; do
+    printf '  %s\n' "$line"
+  done
+}
+
 # Check if ralph is initialized
 if [ ! -d "$RALPH_DIR" ]; then
   echo "Ralph not initialized. Run 'ralph plan <label>' first."
@@ -67,7 +74,7 @@ if [ -n "$MOLECULE" ]; then
   echo "Progress:"
   if PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE" 2>&1); then
     # Indent each line of progress output
-    echo "$PROGRESS_OUTPUT" | sed 's/^/  /'
+    echo "$PROGRESS_OUTPUT" | indent
   else
     echo "  (unable to get progress)"
   fi
@@ -77,7 +84,7 @@ if [ -n "$MOLECULE" ]; then
   # Current position in DAG
   echo "Current Position:"
   if CURRENT_OUTPUT=$(bd mol current "$MOLECULE" 2>&1); then
-    echo "$CURRENT_OUTPUT" | sed 's/^/  /'
+    echo "$CURRENT_OUTPUT" | indent
   else
     echo "  (unable to get current position)"
   fi
@@ -87,7 +94,7 @@ if [ -n "$MOLECULE" ]; then
   # Check for stale molecules (hygiene warnings)
   if STALE_OUTPUT=$(bd mol stale --quiet 2>&1) && [ -n "$STALE_OUTPUT" ]; then
     echo "Warnings:"
-    echo "$STALE_OUTPUT" | sed 's/^/  /'
+    echo "$STALE_OUTPUT" | indent
     echo ""
   fi
 else
