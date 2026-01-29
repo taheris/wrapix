@@ -46,9 +46,21 @@ in
   # - shellHook: shell setup for PATH and env vars
   # - app: nix app definition for `nix run`
   mkRalph =
-    { profile }:
+    {
+      profile,
+      packages ? [ ],
+      mounts ? [ ],
+      env ? { },
+    }:
     let
-      wrapixBin = mkSandbox { inherit profile; };
+      wrapixBin = mkSandbox {
+        inherit
+          profile
+          packages
+          mounts
+          env
+          ;
+      };
     in
     {
       # Packages to include in devShell (wrapixBin + ralph scripts)
