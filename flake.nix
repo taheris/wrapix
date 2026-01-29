@@ -106,6 +106,7 @@
                 nixfmt
                 nixfmt-tree
                 podman
+                prek
                 statix
               ]
               ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
