@@ -181,6 +181,9 @@ in
             ''
         }
 
+        # Pre-load image quietly to avoid "Copying blob" noise during podman run
+        IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
+
         # shellcheck disable=SC2086 # Intentional word splitting for volume args
         exec podman run --rm -it \
           --cpus="$CPUS" \
@@ -207,7 +210,7 @@ in
           -e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID" \
           ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \
           -w /workspace \
-          docker-archive:${profileImage} \
+          "$IMAGE_ID" \
           /entrypoint.sh
       '';
     };
