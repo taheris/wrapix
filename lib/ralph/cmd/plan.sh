@@ -37,11 +37,16 @@ CURRENT_FILE="$RALPH_DIR/state/current.json"
 
 # Parse arguments
 LABEL=""
+SPEC_NEW="false"
 SPEC_HIDDEN="false"
 UPDATE_SPEC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -n|--new)
+      SPEC_NEW="true"
+      shift
+      ;;
     -h|--hidden)
       SPEC_HIDDEN="true"
       shift
@@ -49,7 +54,7 @@ while [[ $# -gt 0 ]]; do
     -u|--update)
       if [ -z "${2:-}" ]; then
         echo "Error: --update requires a spec name"
-        echo "Usage: ralph plan --update <spec>"
+        echo "Usage: ralph plan -u <spec>"
         exit 1
       fi
       UPDATE_SPEC="$2"
@@ -57,7 +62,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       echo "Error: Unknown option: $1"
-      echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
+      echo "Usage: ralph plan -n <label>           # New spec in specs/"
+      echo "       ralph plan -h <label>           # New spec in state/ (hidden)"
+      echo "       ralph plan -u <spec>            # Update existing spec"
+      echo "       ralph plan -u -h <spec>         # Update existing hidden spec"
       exit 1
       ;;
     *)
@@ -65,7 +73,10 @@ while [[ $# -gt 0 ]]; do
         LABEL="$1"
       else
         echo "Error: Too many arguments"
-        echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
+        echo "Usage: ralph plan -n <label>           # New spec in specs/"
+        echo "       ralph plan -h <label>           # New spec in state/ (hidden)"
+        echo "       ralph plan -u <spec>            # Update existing spec"
+        echo "       ralph plan -u -h <spec>         # Update existing hidden spec"
         exit 1
       fi
       shift
@@ -73,22 +84,76 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate mutually exclusive options
-if [ -n "$UPDATE_SPEC" ] && [ "$SPEC_HIDDEN" = "true" ]; then
-  echo "Error: --hidden and --update cannot be combined"
-  echo "  --hidden creates a new spec in state/"
-  echo "  --update modifies an existing spec in specs/"
+# Validate mode flags: exactly one required, except -u and -h can combine
+# Valid combinations:
+#   -n only         -> new spec in specs/
+#   -h only         -> new spec in state/
+#   -u only         -> update spec in specs/
+#   -u -h           -> update spec in state/
+# Invalid:
+#   -n -h           -> error
+#   -n -u           -> error
+#   no flag         -> error
+
+if [ "$SPEC_NEW" = "true" ] && [ "$SPEC_HIDDEN" = "true" ]; then
+  echo "Error: --new and --hidden cannot be combined"
+  echo "  Use -n for new spec in specs/"
+  echo "  Use -h for new spec in state/ (hidden)"
   exit 1
+fi
+
+if [ "$SPEC_NEW" = "true" ] && [ -n "$UPDATE_SPEC" ]; then
+  echo "Error: --new and --update cannot be combined"
+  echo "  Use -n for new spec"
+  echo "  Use -u for updating existing spec"
+  exit 1
+fi
+
+# Require at least one mode flag (unless resuming from state file)
+if [ "$SPEC_NEW" = "false" ] && [ "$SPEC_HIDDEN" = "false" ] && [ -z "$UPDATE_SPEC" ]; then
+  # Check if we can resume from state file
+  if [ -f "$CURRENT_FILE" ]; then
+    LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+    if [ -n "$LABEL" ]; then
+      # Resuming from state file - read the hidden and update flags too
+      SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
+      UPDATE_MODE=$(jq -r '.update // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
+      if [ "$UPDATE_MODE" = "true" ]; then
+        UPDATE_SPEC="$LABEL"
+      fi
+    fi
+  fi
+
+  # If still no mode flag, error
+  if [ "$SPEC_NEW" = "false" ] && [ "$SPEC_HIDDEN" = "false" ] && [ -z "$UPDATE_SPEC" ]; then
+    echo "Error: Mode flag required"
+    echo ""
+    echo "Usage: ralph plan -n <label>           # New spec in specs/"
+    echo "       ralph plan -h <label>           # New spec in state/ (hidden)"
+    echo "       ralph plan -u <spec>            # Update existing spec"
+    echo "       ralph plan -u -h <spec>         # Update existing hidden spec"
+    echo ""
+    echo "Or resume an existing plan by running 'ralph plan' after a previous session."
+    exit 1
+  fi
 fi
 
 # Handle --update mode: validate spec exists and set label
 if [ -n "$UPDATE_SPEC" ]; then
-  UPDATE_SPEC_PATH="$SPECS_DIR/$UPDATE_SPEC.md"
+  # Determine where to look for the spec based on -h flag
+  if [ "$SPEC_HIDDEN" = "true" ]; then
+    UPDATE_SPEC_PATH="$RALPH_DIR/state/$UPDATE_SPEC.md"
+    SPEC_LOCATION="$RALPH_DIR/state/"
+  else
+    UPDATE_SPEC_PATH="$SPECS_DIR/$UPDATE_SPEC.md"
+    SPEC_LOCATION="$SPECS_DIR/"
+  fi
+
   if [ ! -f "$UPDATE_SPEC_PATH" ]; then
     echo "Error: Spec not found: $UPDATE_SPEC_PATH"
-    echo "Available specs in $SPECS_DIR/:"
+    echo "Available specs in $SPEC_LOCATION:"
     found_specs=false
-    for spec_file in "$SPECS_DIR"/*.md; do
+    for spec_file in "$SPEC_LOCATION"*.md; do
       [ -f "$spec_file" ] || continue
       found_specs=true
       basename "$spec_file" .md | sed 's/^/  /'
@@ -100,26 +165,22 @@ if [ -n "$UPDATE_SPEC" ]; then
   LABEL="$UPDATE_SPEC"
 fi
 
-# If no argument provided, try to read from state file
-if [ -z "$LABEL" ] && [ -f "$CURRENT_FILE" ]; then
-  LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
-  SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
-fi
-
-# Label is required (unless --update was used, which sets it)
+# Label is required (unless --update was used, which sets it, or resuming from state)
 if [ -z "$LABEL" ]; then
   echo "Error: Label is required"
-  echo "Usage: ralph plan [--hidden|-h] [--update|-u <spec>] <label>"
   echo ""
-  echo "Options:"
-  echo "  -h, --hidden        Store spec in state/ instead of specs/"
-  echo "  -u, --update <spec> Update an existing spec in specs/"
+  echo "Usage: ralph plan -n <label>           # New spec in specs/"
+  echo "       ralph plan -h <label>           # New spec in state/ (hidden)"
+  echo "       ralph plan -u <spec>            # Update existing spec"
+  echo "       ralph plan -u -h <spec>         # Update existing hidden spec"
   echo ""
-  echo "Example: ralph plan user-auth"
-  echo "         ralph plan --hidden internal-tool"
-  echo "         ralph plan --update sandbox"
+  echo "Examples:"
+  echo "  ralph plan -n user-auth              # Create specs/user-auth.md"
+  echo "  ralph plan -h internal-tool          # Create state/internal-tool.md (hidden)"
+  echo "  ralph plan -u sandbox                # Update specs/sandbox.md"
+  echo "  ralph plan -u -h internal-tool       # Update state/internal-tool.md"
   echo ""
-  echo "Or resume an existing plan by running 'ralph plan' after 'ralph plan <label>' was run."
+  echo "Or resume an existing plan by running 'ralph plan' after a previous session."
   exit 1
 fi
 
