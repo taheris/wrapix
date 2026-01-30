@@ -88,6 +88,8 @@
 
             wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
+
+            tmux-debug-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
           };
 
           apps = {
