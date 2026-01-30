@@ -3189,10 +3189,14 @@ test_diff_local_modifications() {
 
   setup_test_env "diff-modifications"
 
-  # Copy packaged templates first
+  # Copy ALL packaged templates to match setup templates
+  # (setup_test_env creates templates with different content)
   cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
-  # Modify the local template
+  # Modify ONLY step.md to create a detectable change
   {
     echo "# My Custom Header"
     echo ""
