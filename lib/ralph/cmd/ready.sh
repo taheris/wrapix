@@ -113,20 +113,16 @@ OUTPUT_FORMAT=""
 if [ "$UPDATE_MODE" = "true" ]; then
   MODE="update"
 
-  # Get existing molecule ID from current.json
+  # Get existing molecule ID from current.json (may be empty)
   MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE")
 
-  if [ -z "$MOLECULE_ID" ]; then
-    echo "Error: Update mode requires existing molecule ID in current.json."
-    echo "If this is a new spec, run 'ralph plan $LABEL' (without --update)."
-    exit 1
-  fi
-
-  # Query existing beads with this label
+  # Query existing beads with this label (regardless of whether molecule exists)
   EXISTING_BEADS=$(bd list --label "spec-$LABEL" --format json 2>/dev/null || echo "[]")
   EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
 
-  MOLECULE_CONTEXT="Molecule ID: $MOLECULE_ID
+  if [ -n "$MOLECULE_ID" ]; then
+    # Molecule exists - bond new tasks to it
+    MOLECULE_CONTEXT="Molecule ID: $MOLECULE_ID
 
 ## Existing Tasks
 
@@ -136,7 +132,7 @@ This is an UPDATE to an existing molecule. The following tasks already exist:
 $EXISTING_BEADS
 \`\`\`"
 
-  WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
+    WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
 2. **Identify NEW requirements** not covered by existing tasks
 3. **Create new tasks** and bond them to the existing molecule
 4. **Add dependencies** where new tasks depend on existing or other new tasks
@@ -144,7 +140,7 @@ $EXISTING_BEADS
 
 **IMPORTANT**: Do NOT recreate the epic or any existing tasks. Only create NEW tasks for requirements that are not already covered. If no new tasks are needed, just output RALPH_COMPLETE."
 
-  OUTPUT_FORMAT="## Output Format
+    OUTPUT_FORMAT="## Output Format
 
 For each NEW implementation task, create it and bond to the molecule:
 \`\`\`bash
@@ -159,6 +155,54 @@ Add dependencies between tasks:
 \`\`\`bash
 bd dep add <dependent-task> <depends-on-task>
 \`\`\`"
+  else
+    # Update mode but no molecule - create one while checking for existing tasks
+    MOLECULE_CONTEXT="## Existing Tasks
+
+This is an UPDATE to an existing spec but no molecule exists yet. The following tasks may already exist:
+
+\`\`\`json
+$EXISTING_BEADS
+\`\`\`"
+
+    WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
+2. **Create a parent epic bead** as the molecule root
+3. **Capture the epic ID** for use as the molecule root
+4. **Store the molecule ID** in current.json
+5. **Identify NEW requirements** not covered by existing tasks (if any)
+6. **Create new tasks** and bond them to the molecule
+7. **Add dependencies** where tasks depend on each other
+{{README_INSTRUCTIONS}}
+
+**IMPORTANT**: Do NOT recreate any existing tasks. Only create NEW tasks for requirements that are not already covered."
+
+    OUTPUT_FORMAT="## Output Format
+
+First, create the epic bead and capture its ID (this becomes the molecule root):
+\`\`\`bash
+MOLECULE_ID=\$(bd create --title=\"{{SPEC_TITLE}}\" --type=epic --priority={{PRIORITY}} --labels=\"spec-{{LABEL}}\" --silent)
+echo \"Created molecule root: \$MOLECULE_ID\"
+\`\`\`
+
+**CRITICAL**: Store the molecule ID in current.json:
+\`\`\`bash
+jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
+\`\`\`
+
+Then, for each NEW implementation task, create it and bond to the molecule:
+\`\`\`bash
+# Create the task
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
+
+# Bond it to the molecule (sequential by default, or use --type parallel for independent tasks)
+bd mol bond \"\$MOLECULE_ID\" \"\$TASK_ID\" --type sequential
+\`\`\`
+
+Add dependencies between tasks:
+\`\`\`bash
+bd dep add <dependent-task> <depends-on-task>
+\`\`\`"
+  fi
 else
   # New spec mode - create molecule from scratch
   MOLECULE_CONTEXT=""
@@ -204,8 +248,12 @@ echo "  Label: $LABEL"
 echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
 if [ "$UPDATE_MODE" = "true" ]; then
-  echo "  Mode: UPDATE (bonding new tasks to existing molecule)"
-  echo "  Molecule: $MOLECULE_ID"
+  if [ -n "$MOLECULE_ID" ]; then
+    echo "  Mode: UPDATE (bonding new tasks to existing molecule)"
+    echo "  Molecule: $MOLECULE_ID"
+  else
+    echo "  Mode: UPDATE (creating molecule for existing spec)"
+  fi
   echo "  Existing tasks: $EXISTING_COUNT"
 else
   echo "  Mode: NEW (creating molecule from scratch)"
