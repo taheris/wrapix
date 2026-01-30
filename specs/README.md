@@ -9,6 +9,7 @@ An ordered list of specs and project terminology.
 | [image-builder.md](./image-builder.md) | [`lib/sandbox/image.nix`](../lib/sandbox/image.nix) | — | Nix-based OCI image creation |
 | [linux-builder.md](./linux-builder.md) | [`lib/builder/default.nix`](../lib/builder/default.nix) | wx-ope | Remote Nix builds for macOS |
 | [notifications.md](./notifications.md) | [`lib/notify/`](../lib/notify/) | wx-q6x | Desktop notifications with focus suppression |
+| [pre-commit.md](./pre-commit.md) | [`.pre-commit-config.yaml`](../.pre-commit-config.yaml), [`lib/ralph/cmd/loop.sh`](../lib/ralph/cmd/loop.sh) | wx-t6rh | Git hooks and ralph loop integration |
 | [profiles.md](./profiles.md) | [`lib/sandbox/profiles.nix`](../lib/sandbox/profiles.nix) | — | Pre-configured development environments |
 | [ralph-tests.md](./ralph-tests.md) | [`tests/ralph/`](../tests/ralph/) | wx-hfp | Integration tests for ralph workflow |
 | [ralph-workflow.md](./ralph-workflow.md) | [`lib/ralph/`](../lib/ralph/) | wx-ad9r | Spec-driven AI orchestration |
@@ -23,6 +24,7 @@ An ordered list of specs and project terminology.
 | **Deploy Key** | SSH key for git push operations from container |
 | **Focus-aware** | Notification suppression when terminal is focused |
 | **pasta** | Linux userspace networking for Podman containers |
+| **prek** | Rust-based pre-commit framework (drop-in replacement for pre-commit) |
 | **Profile** | Pre-configured set of packages and environment variables |
 | **Ralph** | Workflow orchestrator for spec-to-implementation |
 | **Sandbox** | Isolated container environment for running Claude Code |
