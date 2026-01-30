@@ -29,6 +29,7 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 8. **Template Validation** — `ralph check` validates all templates and partials
 9. **Template Tuning** — `ralph tune` edits templates (interactive or integration mode)
 10. **Template Diff** — `ralph diff` shows local template changes vs packaged
+11. **Template Sync** — `ralph sync` updates local templates from packaged versions
 
 ### Non-Functional
 
@@ -193,6 +194,41 @@ Pipe to `ralph tune` for integration:
 ```bash
 ralph diff | ralph tune
 ```
+
+### `ralph sync`
+
+```bash
+ralph sync           # Update local templates from packaged
+ralph sync --dry-run # Preview changes without executing
+```
+
+Synchronizes local templates with packaged versions:
+
+1. Creates `.claude/ralph/templates/` with fresh packaged templates
+2. Moves existing customized templates to `.claude/ralph/backup/`
+3. Copies all templates including variants and `partial/` directory
+
+**Directory structure after sync:**
+```
+.claude/ralph/
+├── config.nix
+├── templates/           # Fresh from packaged
+│   ├── partial/
+│   │   ├── context-pinning.md
+│   │   ├── exit-signals.md
+│   │   └── spec-header.md
+│   ├── plan.md
+│   ├── plan-new.md
+│   ├── plan-update.md
+│   ├── ready.md
+│   ├── ready-new.md
+│   ├── ready-update.md
+│   └── step.md
+└── backup/              # User customizations (if any)
+    └── ...
+```
+
+Use `ralph diff` to see what changed, then `ralph tune` to merge customizations from backup.
 
 ## Workflow Phases
 
@@ -529,6 +565,7 @@ Why this feature is needed.
 | `lib/ralph/cmd/check.sh` | Template validation |
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
 | `lib/ralph/cmd/diff.sh` | Template diff |
+| `lib/ralph/cmd/sync.sh` | Template sync from packaged |
 | `lib/ralph/cmd/util.sh` | Shared helper functions |
 | `lib/ralph/template/` | Prompt templates |
 | `lib/ralph/template/default.nix` | Nix template definitions |
@@ -570,6 +607,8 @@ Ralph uses `bd mol` for work tracking:
 - [ ] `ralph tune` (interactive) identifies correct template and makes edits
 - [ ] `ralph tune` (integration) ingests diff and interviews about changes
 - [ ] `ralph diff` shows local template changes vs packaged
+- [ ] `ralph sync` updates templates and backs up customizations
+- [ ] `ralph sync --dry-run` previews without executing
 - [ ] `nix flake check` includes template validation
 - [ ] Templates use Nix-native definitions with static validation
 - [ ] Partials work via `{{> partial-name}}` markers
