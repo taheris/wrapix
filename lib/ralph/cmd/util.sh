@@ -454,3 +454,53 @@ run_claude_interactive() {
   # The prompt is passed as the initial message
   claude --dangerously-skip-permissions "${!prompt_var}"
 }
+
+# Resolve partial markers {{> partial-name}} in template content
+# Usage: resolve_partials "$content" "$partial_dir"
+# Returns: content with partials resolved
+resolve_partials() {
+  local content="$1"
+  local partial_dir="$2"
+
+  if [ -z "$partial_dir" ] || [ ! -d "$partial_dir" ]; then
+    debug "Partial directory not available, returning content unchanged"
+    echo "$content"
+    return 0
+  fi
+
+  # Find all partial references {{> partial-name}}
+  local refs
+  refs=$(echo "$content" | grep -oE '\{\{> [a-z-]+\}\}' | sed 's/{{> //;s/}}//' | sort -u || true)
+
+  if [ -z "$refs" ]; then
+    debug "No partial references found"
+    echo "$content"
+    return 0
+  fi
+
+  # Resolve each partial
+  local result="$content"
+  for ref in $refs; do
+    local partial_path="$partial_dir/${ref}.md"
+    if [ -f "$partial_path" ]; then
+      local partial_content
+      partial_content=$(cat "$partial_path")
+      # Use awk for safe substitution of multi-line content
+      result=$(echo "$result" | awk -v marker="{{> $ref}}" -v replacement="$partial_content" '{
+        idx = index($0, marker)
+        if (idx > 0) {
+          before = substr($0, 1, idx - 1)
+          after = substr($0, idx + length(marker))
+          print before replacement after
+        } else {
+          print
+        }
+      }')
+      debug "Resolved partial: $ref"
+    else
+      warn "Partial not found: $partial_path"
+    fi
+  done
+
+  echo "$result"
+}
