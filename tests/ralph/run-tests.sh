@@ -2075,13 +2075,31 @@ test_config_data_driven() {
     config_assert_loop_pause_on_failure_false
 
   #---------------------------------------------------------------------------
-  # Test case: loop.pre-hook and loop.post-hook
+  # Test case: hooks (pre-loop, pre-step, post-step, post-loop with variables)
   #---------------------------------------------------------------------------
   run_config_test "loop_hooks" \
-    "Config: loop.pre-hook and post-hook" \
+    "Config: hooks with template variables" \
     config_setup_loop_hooks \
     config_run_loop_hooks \
     config_assert_loop_hooks
+
+  #---------------------------------------------------------------------------
+  # Test case: hooks backward compatibility (loop.pre-hook, loop.post-hook)
+  #---------------------------------------------------------------------------
+  run_config_test "loop_hooks_compat" \
+    "Config: hooks backward compatibility" \
+    config_setup_loop_hooks_compat \
+    config_run_loop_hooks_compat \
+    config_assert_loop_hooks_compat
+
+  #---------------------------------------------------------------------------
+  # Test case: hooks-on-failure modes
+  #---------------------------------------------------------------------------
+  run_config_test "hooks_on_failure" \
+    "Config: hooks-on-failure handling" \
+    config_setup_hooks_on_failure \
+    config_run_hooks_on_failure \
+    config_assert_hooks_on_failure
 
   #---------------------------------------------------------------------------
   # Test case: failure-patterns detection
@@ -2415,7 +2433,7 @@ config_assert_loop_pause_on_failure_false() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_hooks
+# Config test case: loop_hooks - tests all four hook points with template vars
 #-----------------------------------------------------------------------------
 config_setup_loop_hooks() {
   CONFIG_LABEL="hooks-test"
@@ -2424,20 +2442,27 @@ config_setup_loop_hooks() {
 # Hooks Test
 
 ## Requirements
-- Test pre-hook and post-hook execution
+- Test all four hook points (pre-loop, pre-step, post-step, post-loop)
+- Test template variable substitution
 EOF
 
   echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  CONFIG_PRE_HOOK_MARKER="$TEST_DIR/pre-hook-marker"
-  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
+  # Marker files for each hook type
+  CONFIG_PRE_LOOP_MARKER="$TEST_DIR/pre-loop-marker"
+  CONFIG_PRE_STEP_MARKER="$TEST_DIR/pre-step-marker"
+  CONFIG_POST_STEP_MARKER="$TEST_DIR/post-step-marker"
+  CONFIG_POST_LOOP_MARKER="$TEST_DIR/post-loop-marker"
 
+  # Use new hooks schema with template variables
   cat > "$RALPH_DIR/config.nix" << EOF
 {
   beads.priority = 2;
-  loop = {
-    pre-hook = "echo pre >> $CONFIG_PRE_HOOK_MARKER";
-    post-hook = "echo post >> $CONFIG_POST_HOOK_MARKER";
+  hooks = {
+    pre-loop = "echo 'pre-loop:{{LABEL}}' >> $CONFIG_PRE_LOOP_MARKER";
+    pre-step = "echo 'pre-step:{{LABEL}}:{{STEP_COUNT}}' >> $CONFIG_PRE_STEP_MARKER";
+    post-step = "echo 'post-step:{{LABEL}}:{{STEP_COUNT}}:{{STEP_EXIT_CODE}}' >> $CONFIG_POST_STEP_MARKER";
+    post-loop = "echo 'post-loop:{{LABEL}}' >> $CONFIG_POST_LOOP_MARKER";
   };
 }
 EOF
@@ -2455,18 +2480,169 @@ config_run_loop_hooks() {
 }
 
 config_assert_loop_hooks() {
-  if [ -f "$CONFIG_PRE_HOOK_MARKER" ]; then
-    test_pass "pre-hook executed (marker file created)"
+  # Test pre-loop hook
+  if [ -f "$CONFIG_PRE_LOOP_MARKER" ]; then
+    local content
+    content=$(cat "$CONFIG_PRE_LOOP_MARKER")
+    if [[ "$content" == *"pre-loop:hooks-test"* ]]; then
+      test_pass "pre-loop hook executed with {{LABEL}} substitution"
+    else
+      test_fail "pre-loop hook {{LABEL}} not substituted: $content"
+    fi
   else
-    echo "  NOTE: loop.pre-hook not yet implemented in loop.sh"
-    test_skip "loop.pre-hook (not yet implemented)"
+    test_fail "pre-loop hook not executed (marker file missing)"
+  fi
+
+  # Test pre-step hook
+  if [ -f "$CONFIG_PRE_STEP_MARKER" ]; then
+    local content
+    content=$(cat "$CONFIG_PRE_STEP_MARKER")
+    if [[ "$content" == *"pre-step:hooks-test:1"* ]]; then
+      test_pass "pre-step hook executed with {{LABEL}} and {{STEP_COUNT}} substitution"
+    else
+      test_fail "pre-step hook variables not substituted: $content"
+    fi
+  else
+    test_fail "pre-step hook not executed (marker file missing)"
+  fi
+
+  # Test post-step hook
+  if [ -f "$CONFIG_POST_STEP_MARKER" ]; then
+    local content
+    content=$(cat "$CONFIG_POST_STEP_MARKER")
+    # Exit code 100 means all work complete (this is first and last step)
+    if [[ "$content" == *"post-step:hooks-test:1:"* ]]; then
+      test_pass "post-step hook executed with all template variables"
+    else
+      test_fail "post-step hook variables not substituted: $content"
+    fi
+  else
+    test_fail "post-step hook not executed (marker file missing)"
+  fi
+
+  # Test post-loop hook
+  if [ -f "$CONFIG_POST_LOOP_MARKER" ]; then
+    local content
+    content=$(cat "$CONFIG_POST_LOOP_MARKER")
+    if [[ "$content" == *"post-loop:hooks-test"* ]]; then
+      test_pass "post-loop hook executed with {{LABEL}} substitution"
+    else
+      test_fail "post-loop hook {{LABEL}} not substituted: $content"
+    fi
+  else
+    test_fail "post-loop hook not executed (marker file missing)"
+  fi
+}
+
+#-----------------------------------------------------------------------------
+# Config test case: loop_hooks_compat - backward compat with loop.pre-hook
+#-----------------------------------------------------------------------------
+config_setup_loop_hooks_compat() {
+  CONFIG_LABEL="hooks-compat"
+
+  cat > "$TEST_DIR/specs/hooks-compat.md" << 'EOF'
+# Hooks Compat Test
+
+## Requirements
+- Test backward compatibility with loop.pre-hook and loop.post-hook
+EOF
+
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  CONFIG_PRE_HOOK_MARKER="$TEST_DIR/pre-hook-marker"
+  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
+
+  # Use old loop.pre-hook / loop.post-hook schema
+  cat > "$RALPH_DIR/config.nix" << EOF
+{
+  beads.priority = 2;
+  loop = {
+    pre-hook = "echo pre >> $CONFIG_PRE_HOOK_MARKER";
+    post-hook = "echo post >> $CONFIG_POST_HOOK_MARKER";
+  };
+}
+EOF
+
+  bd create --title="Hook compat task" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
+  test_pass "Created 1 task"
+}
+
+config_run_loop_hooks_compat() {
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+  set +e
+  ralph-loop >/dev/null 2>&1
+  CONFIG_EXIT_CODE=$?
+  set -e
+}
+
+config_assert_loop_hooks_compat() {
+  if [ -f "$CONFIG_PRE_HOOK_MARKER" ]; then
+    test_pass "loop.pre-hook backward compat (executed as pre-step)"
+  else
+    test_fail "loop.pre-hook backward compat failed (marker missing)"
   fi
 
   if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
-    test_pass "post-hook executed (marker file created)"
+    test_pass "loop.post-hook backward compat (executed as post-step)"
   else
-    echo "  NOTE: loop.post-hook not yet implemented in loop.sh"
-    test_skip "loop.post-hook (not yet implemented)"
+    test_fail "loop.post-hook backward compat failed (marker missing)"
+  fi
+}
+
+#-----------------------------------------------------------------------------
+# Config test case: hooks_on_failure - test warn mode
+#-----------------------------------------------------------------------------
+config_setup_hooks_on_failure() {
+  CONFIG_LABEL="hooks-failure"
+
+  cat > "$TEST_DIR/specs/hooks-failure.md" << 'EOF'
+# Hooks Failure Test
+
+## Requirements
+- Test hooks-on-failure handling
+EOF
+
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
+
+  # Hook that fails, but with warn mode should continue
+  cat > "$RALPH_DIR/config.nix" << EOF
+{
+  beads.priority = 2;
+  hooks = {
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+  };
+  hooks-on-failure = "warn";
+}
+EOF
+
+  bd create --title="Hook failure task" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
+  test_pass "Created 1 task"
+}
+
+config_run_hooks_on_failure() {
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+  set +e
+  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
+  set -e
+}
+
+config_assert_hooks_on_failure() {
+  # With warn mode, the loop should continue despite pre-step hook failure
+  if [ $CONFIG_EXIT_CODE -eq 0 ]; then
+    test_pass "Loop completed despite hook failure (warn mode working)"
+  else
+    test_fail "Loop should continue in warn mode, but exited with $CONFIG_EXIT_CODE"
+  fi
+
+  # post-step should still run after the failed pre-step
+  if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
+    test_pass "post-step hook still executed after pre-step failure"
+  else
+    test_fail "post-step hook should run even when pre-step fails in warn mode"
   fi
 }
 
