@@ -23,6 +23,13 @@ else
   PACKAGED_DIR=""
 fi
 
+# Source templates: if lib/ralph/template exists, we're in the ralph source repo
+# and should edit there instead of .claude/ralph
+SOURCE_TEMPLATE_DIR=""
+if [ -d "lib/ralph/template" ]; then
+  SOURCE_TEMPLATE_DIR="lib/ralph/template"
+fi
+
 show_usage() {
   echo "Usage: ralph tune"
   echo "       ralph diff | ralph tune"
@@ -184,8 +191,16 @@ $template_context
 
 ## File Locations
 
-- Local templates: $RALPH_DIR
-- Packaged templates: $PACKAGED_DIR (read-only reference)
+$(if [ -n "$SOURCE_TEMPLATE_DIR" ]; then
+  echo "**IMPORTANT: You are in the ralph source repo.**"
+  echo ""
+  echo "- Source templates: \`$SOURCE_TEMPLATE_DIR\` ← EDIT THESE (tracked in git)"
+  echo "- Local overrides: \`$RALPH_DIR\` (gitignored, do NOT edit)"
+  echo "- Packaged templates: \`$PACKAGED_DIR\` (read-only, built from source)"
+else
+  echo "- Local templates: \`$RALPH_DIR\`"
+  echo "- Packaged templates: \`$PACKAGED_DIR\` (read-only reference)"
+fi)
 
 Start by asking the user what they'd like to change about their templates.
 EOF
@@ -247,8 +262,16 @@ Wait for user input before proceeding.
 
 ## File Locations
 
-- Local templates: $RALPH_DIR
-- Packaged templates: $PACKAGED_DIR (read-only reference)
+$(if [ -n "$SOURCE_TEMPLATE_DIR" ]; then
+  echo "**IMPORTANT: You are in the ralph source repo.**"
+  echo ""
+  echo "- Source templates: \`$SOURCE_TEMPLATE_DIR\` ← EDIT THESE (tracked in git)"
+  echo "- Local overrides: \`$RALPH_DIR\` (gitignored, do NOT edit)"
+  echo "- Packaged templates: \`$PACKAGED_DIR\` (read-only, built from source)"
+else
+  echo "- Local templates: \`$RALPH_DIR\`"
+  echo "- Packaged templates: \`$PACKAGED_DIR\` (read-only reference)"
+fi)
 
 Start by analyzing the diff and processing the first change.
 EOF

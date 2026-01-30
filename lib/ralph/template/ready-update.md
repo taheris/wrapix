@@ -27,12 +27,24 @@ The following new requirements were gathered during the plan-update conversation
 ## Instructions
 
 1. **Review existing tasks** - Use `bd mol show {{MOLECULE_ID}}` to see current tasks
-2. **Create new tasks** - For each new requirement:
+2. **Create new tasks as children of the molecule** using `--parent`:
    ```bash
-   bd create --title="<task title>" --description="<detailed description>" --type=task --labels="spec-{{LABEL}}"
+   TASK_ID=$(bd create --title="<task title>" --description="<detailed description>" \
+     --type=task --labels="spec-{{LABEL}}" --parent="{{MOLECULE_ID}}" --silent)
    ```
-3. **Bond to molecule** - Use `bd mol bond {{MOLECULE_ID}} <task-id>` for each new task
-4. **Set dependencies** - Use `bd dep add <issue> <depends-on>` if new tasks depend on existing ones
+3. **Set execution order** with `bd dep add` if new tasks depend on existing ones:
+   ```bash
+   bd dep add <new-task> <existing-task>  # new-task waits for existing-task
+   ```
+
+### Key Concepts
+
+| Mechanism | Purpose | Effect |
+|-----------|---------|--------|
+| `--parent` | Links task to molecule | Enables `ralph status` progress tracking |
+| `bd dep add` | Sets execution order | Controls what `bd ready` returns next |
+
+Both are required: `--parent` for visibility, `bd dep add` for ordering.
 
 ## Task Breakdown Guidelines
 
@@ -50,5 +62,5 @@ After creating tasks, update the spec file (`{{SPEC_PATH}}`) to include the new 
 
 {{> exit-signals}}
 
-- `RALPH_COMPLETE` - New tasks created and bonded to molecule, spec updated
+- `RALPH_COMPLETE` - New tasks created as children of molecule, dependencies set, spec updated
 - `RALPH_BLOCKED: <reason>` - Cannot proceed (molecule not found, unclear requirements)
