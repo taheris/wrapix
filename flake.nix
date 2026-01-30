@@ -98,6 +98,8 @@
           };
 
           devShells.default = wrapix.mkDevShell {
+            inherit (ralph) shellHook;
+
             packages =
               with pkgs;
               [
@@ -107,13 +109,11 @@
                 nixfmt-tree
                 podman
                 prek
+                wrapix.scripts
                 shellcheck
                 statix
               ]
-              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ]
-              ++ ralph.packages;
-
-            inherit (ralph) shellHook;
+              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
           };
         };
     };
