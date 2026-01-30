@@ -1,1 +1,760 @@
 //! MCP protocol handling (JSON-RPC over stdio)
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+
+/// JSON-RPC request ID
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RequestId {
+    Number(i64),
+    String(String),
+}
+
+/// JSON-RPC 2.0 Request
+#[derive(Debug, Clone, Deserialize)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: String,
+    pub id: Option<RequestId>,
+    pub method: String,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+/// JSON-RPC 2.0 Response
+#[derive(Debug, Clone, Serialize)]
+pub struct JsonRpcResponse {
+    pub jsonrpc: String,
+    /// The request ID. Always serialized (as null if unknown) per JSON-RPC 2.0 spec.
+    pub id: Option<RequestId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<JsonRpcError>,
+}
+
+/// JSON-RPC 2.0 Error
+#[derive(Debug, Clone, Serialize)]
+pub struct JsonRpcError {
+    pub code: i32,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+impl JsonRpcResponse {
+    pub fn success(id: Option<RequestId>, result: Value) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    pub fn error(id: Option<RequestId>, code: i32, message: impl Into<String>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
+        }
+    }
+}
+
+// Standard JSON-RPC error codes
+pub const PARSE_ERROR: i32 = -32700;
+pub const INVALID_REQUEST: i32 = -32600;
+pub const METHOD_NOT_FOUND: i32 = -32601;
+pub const INVALID_PARAMS: i32 = -32602;
+pub const INTERNAL_ERROR: i32 = -32603;
+
+// --- MCP Protocol Types ---
+
+/// MCP server capabilities
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<ToolsCapability>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolsCapability {}
+
+/// MCP server info
+#[derive(Debug, Clone, Serialize)]
+pub struct ServerInfo {
+    pub name: String,
+    pub version: String,
+}
+
+/// MCP initialize response
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializeResult {
+    pub protocol_version: String,
+    pub capabilities: ServerCapabilities,
+    pub server_info: ServerInfo,
+}
+
+/// MCP tool definition
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: InputSchema,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InputSchema {
+    #[serde(rename = "type")]
+    pub schema_type: String,
+    pub properties: HashMap<String, PropertyDefinition>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub required: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PropertyDefinition {
+    #[serde(rename = "type")]
+    pub prop_type: String,
+    pub description: String,
+}
+
+/// MCP tools/list response
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolsListResult {
+    pub tools: Vec<ToolDefinition>,
+}
+
+/// MCP tool call parameters
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolCallParams {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: HashMap<String, Value>,
+}
+
+/// MCP tool call result content
+#[derive(Debug, Clone, Serialize)]
+pub struct TextContent {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub text: String,
+}
+
+impl TextContent {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            content_type: "text".to_string(),
+            text: text.into(),
+        }
+    }
+}
+
+/// MCP tool call result
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallResult {
+    pub content: Vec<TextContent>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_error: bool,
+}
+
+impl ToolCallResult {
+    pub fn success(text: impl Into<String>) -> Self {
+        Self {
+            content: vec![TextContent::new(text)],
+            is_error: false,
+        }
+    }
+
+    pub fn error(text: impl Into<String>) -> Self {
+        Self {
+            content: vec![TextContent::new(text)],
+            is_error: true,
+        }
+    }
+}
+
+// --- Tool Definitions ---
+
+/// Returns the list of available MCP tools
+pub fn get_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "tmux_create_pane".to_string(),
+            description: "Create a new tmux pane running a command. Use for spawning servers, \
+                          test runners, or interactive shells. Returns a pane ID for subsequent \
+                          operations."
+                .to_string(),
+            input_schema: InputSchema {
+                schema_type: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert(
+                        "command".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Command to run in the pane (e.g., 'RUST_LOG=debug cargo run')"
+                                .to_string(),
+                        },
+                    );
+                    props.insert(
+                        "name".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Optional human-readable name for the pane".to_string(),
+                        },
+                    );
+                    props
+                },
+                required: vec!["command".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "tmux_send_keys".to_string(),
+            description: "Send keystrokes to a tmux pane. Use for interactive input, running \
+                          additional commands, or sending signals (e.g., Ctrl-C as '^C')."
+                .to_string(),
+            input_schema: InputSchema {
+                schema_type: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert(
+                        "pane_id".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Target pane ID from tmux_create_pane or tmux_list_panes"
+                                .to_string(),
+                        },
+                    );
+                    props.insert(
+                        "keys".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Keystrokes to send. Use '^C' for Ctrl-C, 'Enter' for newline."
+                                .to_string(),
+                        },
+                    );
+                    props
+                },
+                required: vec!["pane_id".to_string(), "keys".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "tmux_capture_pane".to_string(),
+            description: "Capture recent output from a tmux pane. Use to read logs, command \
+                          output, or error messages. Works on both running and exited panes."
+                .to_string(),
+            input_schema: InputSchema {
+                schema_type: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert(
+                        "pane_id".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Target pane ID".to_string(),
+                        },
+                    );
+                    props.insert(
+                        "lines".to_string(),
+                        PropertyDefinition {
+                            prop_type: "number".to_string(),
+                            description: "Number of lines to capture (default: 100, max: 1000)"
+                                .to_string(),
+                        },
+                    );
+                    props
+                },
+                required: vec!["pane_id".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "tmux_kill_pane".to_string(),
+            description: "Terminate a tmux pane and its running process. Use for cleanup after \
+                          debugging."
+                .to_string(),
+            input_schema: InputSchema {
+                schema_type: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert(
+                        "pane_id".to_string(),
+                        PropertyDefinition {
+                            prop_type: "string".to_string(),
+                            description: "Target pane ID".to_string(),
+                        },
+                    );
+                    props
+                },
+                required: vec!["pane_id".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "tmux_list_panes".to_string(),
+            description: "List all active tmux panes with their IDs, names, status (running/\
+                          exited), and running commands."
+                .to_string(),
+            input_schema: InputSchema {
+                schema_type: "object".to_string(),
+                properties: HashMap::new(),
+                required: vec![],
+            },
+        },
+    ]
+}
+
+// --- Request Routing ---
+
+/// Parsed MCP method with typed parameters
+#[derive(Debug)]
+pub enum McpMethod {
+    Initialize,
+    Initialized,
+    ToolsList,
+    ToolsCall(ToolCallParams),
+    Unknown(String),
+}
+
+impl McpMethod {
+    /// Parse a JSON-RPC request into a typed MCP method
+    pub fn from_request(request: &JsonRpcRequest) -> Result<Self, String> {
+        match request.method.as_str() {
+            "initialize" => Ok(McpMethod::Initialize),
+            "notifications/initialized" | "initialized" => Ok(McpMethod::Initialized),
+            "tools/list" => Ok(McpMethod::ToolsList),
+            "tools/call" => {
+                let params = request
+                    .params
+                    .as_ref()
+                    .ok_or("tools/call requires params")?;
+                let tool_params: ToolCallParams = serde_json::from_value(params.clone())
+                    .map_err(|e| format!("Invalid tool call params: {}", e))?;
+                Ok(McpMethod::ToolsCall(tool_params))
+            }
+            other => Ok(McpMethod::Unknown(other.to_string())),
+        }
+    }
+}
+
+/// Protocol handler for MCP
+pub struct McpHandler {
+    initialized: bool,
+}
+
+impl McpHandler {
+    pub fn new() -> Self {
+        Self { initialized: false }
+    }
+
+    /// Handle initialize request
+    pub fn handle_initialize(&mut self) -> InitializeResult {
+        self.initialized = true;
+        InitializeResult {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ServerCapabilities {
+                tools: Some(ToolsCapability {}),
+            },
+            server_info: ServerInfo {
+                name: "tmux-debug-mcp".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+        }
+    }
+
+    /// Handle initialized notification (no response needed)
+    pub fn handle_initialized(&mut self) {
+        // Mark as fully initialized, ready for tool calls
+        self.initialized = true;
+    }
+
+    /// Handle tools/list request
+    pub fn handle_tools_list(&self) -> ToolsListResult {
+        ToolsListResult {
+            tools: get_tool_definitions(),
+        }
+    }
+
+    /// Check if a request is valid given current state
+    pub fn validate_request(&self, method: &McpMethod) -> Result<(), &'static str> {
+        match method {
+            McpMethod::Initialize => Ok(()),
+            McpMethod::Initialized => Ok(()),
+            McpMethod::ToolsList | McpMethod::ToolsCall(_) => {
+                if self.initialized {
+                    Ok(())
+                } else {
+                    Err("Server not initialized. Send 'initialize' first.")
+                }
+            }
+            McpMethod::Unknown(_) => Ok(()), // Let routing handle unknown methods
+        }
+    }
+}
+
+impl Default for McpHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parse a line of input as a JSON-RPC request
+pub fn parse_request(line: &str) -> Result<JsonRpcRequest, JsonRpcResponse> {
+    serde_json::from_str(line).map_err(|e| {
+        JsonRpcResponse::error(None, PARSE_ERROR, format!("Parse error: {}", e))
+    })
+}
+
+/// Serialize a response to a JSON string (single line)
+pub fn serialize_response(response: &JsonRpcResponse) -> String {
+    serde_json::to_string(response).unwrap_or_else(|e| {
+        // Fallback error response if serialization fails
+        format!(
+            r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":{},"message":"Serialization error: {}"}}}}"#,
+            INTERNAL_ERROR, e
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Request Parsing Tests ---
+
+    #[test]
+    fn test_parse_initialize_request() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
+        let request = parse_request(json).unwrap();
+
+        assert_eq!(request.jsonrpc, "2.0");
+        assert_eq!(request.id, Some(RequestId::Number(1)));
+        assert_eq!(request.method, "initialize");
+    }
+
+    #[test]
+    fn test_parse_request_with_string_id() {
+        let json = r#"{"jsonrpc":"2.0","id":"abc-123","method":"tools/list"}"#;
+        let request = parse_request(json).unwrap();
+
+        assert_eq!(request.id, Some(RequestId::String("abc-123".to_string())));
+    }
+
+    #[test]
+    fn test_parse_tools_call_request() {
+        let json = r#"{
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "tmux_create_pane",
+                "arguments": {
+                    "command": "cargo run",
+                    "name": "server"
+                }
+            }
+        }"#;
+        let request = parse_request(json).unwrap();
+
+        assert_eq!(request.method, "tools/call");
+        let method = McpMethod::from_request(&request).unwrap();
+        match method {
+            McpMethod::ToolsCall(params) => {
+                assert_eq!(params.name, "tmux_create_pane");
+                assert_eq!(
+                    params.arguments.get("command"),
+                    Some(&Value::String("cargo run".to_string()))
+                );
+            }
+            _ => panic!("Expected ToolsCall"),
+        }
+    }
+
+    #[test]
+    fn test_parse_invalid_json() {
+        let json = "not valid json";
+        let response = parse_request(json).unwrap_err();
+
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, PARSE_ERROR);
+    }
+
+    #[test]
+    fn test_parse_notification_no_id() {
+        let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let request = parse_request(json).unwrap();
+
+        assert!(request.id.is_none());
+        assert_eq!(request.method, "notifications/initialized");
+    }
+
+    // --- Response Serialization Tests ---
+
+    #[test]
+    fn test_serialize_success_response() {
+        let response = JsonRpcResponse::success(
+            Some(RequestId::Number(1)),
+            serde_json::json!({"status": "ok"}),
+        );
+        let json = serialize_response(&response);
+
+        assert!(json.contains(r#""jsonrpc":"2.0""#));
+        assert!(json.contains(r#""id":1"#));
+        assert!(json.contains(r#""result""#));
+        assert!(!json.contains(r#""error""#));
+    }
+
+    #[test]
+    fn test_serialize_error_response() {
+        let response = JsonRpcResponse::error(
+            Some(RequestId::Number(1)),
+            METHOD_NOT_FOUND,
+            "Method not found",
+        );
+        let json = serialize_response(&response);
+
+        assert!(json.contains(r#""error""#));
+        assert!(json.contains(r#""code":-32601"#));
+        assert!(json.contains(r#""message":"Method not found""#));
+        assert!(!json.contains(r#""result""#));
+    }
+
+    #[test]
+    fn test_serialize_response_null_id() {
+        let response = JsonRpcResponse::error(None, PARSE_ERROR, "Parse error");
+        let json = serialize_response(&response);
+
+        assert!(json.contains(r#""id":null"#));
+    }
+
+    // --- Tool Definitions Tests ---
+
+    #[test]
+    fn test_get_tool_definitions_count() {
+        let tools = get_tool_definitions();
+        assert_eq!(tools.len(), 5);
+    }
+
+    #[test]
+    fn test_tool_definitions_names() {
+        let tools = get_tool_definitions();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(names.contains(&"tmux_create_pane"));
+        assert!(names.contains(&"tmux_send_keys"));
+        assert!(names.contains(&"tmux_capture_pane"));
+        assert!(names.contains(&"tmux_kill_pane"));
+        assert!(names.contains(&"tmux_list_panes"));
+    }
+
+    #[test]
+    fn test_tool_definition_create_pane_schema() {
+        let tools = get_tool_definitions();
+        let create_pane = tools.iter().find(|t| t.name == "tmux_create_pane").unwrap();
+
+        assert_eq!(create_pane.input_schema.schema_type, "object");
+        assert!(create_pane.input_schema.properties.contains_key("command"));
+        assert!(create_pane.input_schema.properties.contains_key("name"));
+        assert!(create_pane.input_schema.required.contains(&"command".to_string()));
+        assert!(!create_pane.input_schema.required.contains(&"name".to_string()));
+    }
+
+    #[test]
+    fn test_tool_definition_list_panes_no_required() {
+        let tools = get_tool_definitions();
+        let list_panes = tools.iter().find(|t| t.name == "tmux_list_panes").unwrap();
+
+        assert!(list_panes.input_schema.properties.is_empty());
+        assert!(list_panes.input_schema.required.is_empty());
+    }
+
+    // --- MCP Method Parsing Tests ---
+
+    #[test]
+    fn test_method_from_request_initialize() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(RequestId::Number(1)),
+            method: "initialize".to_string(),
+            params: None,
+        };
+
+        match McpMethod::from_request(&request).unwrap() {
+            McpMethod::Initialize => {}
+            _ => panic!("Expected Initialize"),
+        }
+    }
+
+    #[test]
+    fn test_method_from_request_tools_list() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(RequestId::Number(1)),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+
+        match McpMethod::from_request(&request).unwrap() {
+            McpMethod::ToolsList => {}
+            _ => panic!("Expected ToolsList"),
+        }
+    }
+
+    #[test]
+    fn test_method_from_request_unknown() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(RequestId::Number(1)),
+            method: "some/unknown/method".to_string(),
+            params: None,
+        };
+
+        match McpMethod::from_request(&request).unwrap() {
+            McpMethod::Unknown(m) => assert_eq!(m, "some/unknown/method"),
+            _ => panic!("Expected Unknown"),
+        }
+    }
+
+    #[test]
+    fn test_tools_call_missing_params() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(RequestId::Number(1)),
+            method: "tools/call".to_string(),
+            params: None,
+        };
+
+        let result = McpMethod::from_request(&request);
+        assert!(result.is_err());
+    }
+
+    // --- McpHandler Tests ---
+
+    #[test]
+    fn test_handler_initialize() {
+        let mut handler = McpHandler::new();
+        let result = handler.handle_initialize();
+
+        assert_eq!(result.protocol_version, "2024-11-05");
+        assert_eq!(result.server_info.name, "tmux-debug-mcp");
+        assert!(result.capabilities.tools.is_some());
+    }
+
+    #[test]
+    fn test_handler_tools_list() {
+        let handler = McpHandler::new();
+        let result = handler.handle_tools_list();
+
+        assert_eq!(result.tools.len(), 5);
+    }
+
+    #[test]
+    fn test_handler_validate_before_init() {
+        let handler = McpHandler::new();
+
+        // Initialize is always OK
+        assert!(handler.validate_request(&McpMethod::Initialize).is_ok());
+
+        // Tools calls require initialization
+        let params = ToolCallParams {
+            name: "tmux_list_panes".to_string(),
+            arguments: HashMap::new(),
+        };
+        assert!(handler
+            .validate_request(&McpMethod::ToolsCall(params))
+            .is_err());
+    }
+
+    #[test]
+    fn test_handler_validate_after_init() {
+        let mut handler = McpHandler::new();
+        handler.handle_initialize();
+
+        // Now tools/list should work
+        assert!(handler.validate_request(&McpMethod::ToolsList).is_ok());
+
+        // And tools/call should work
+        let params = ToolCallParams {
+            name: "tmux_list_panes".to_string(),
+            arguments: HashMap::new(),
+        };
+        assert!(handler.validate_request(&McpMethod::ToolsCall(params)).is_ok());
+    }
+
+    // --- ToolCallResult Tests ---
+
+    #[test]
+    fn test_tool_call_result_success() {
+        let result = ToolCallResult::success("Pane created: debug-1");
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(json.contains(r#""type":"text""#));
+        assert!(json.contains(r#""text":"Pane created: debug-1""#));
+        assert!(!json.contains("isError"));
+    }
+
+    #[test]
+    fn test_tool_call_result_error() {
+        let result = ToolCallResult::error("Pane 'debug-1' not found. Use tmux_list_panes to see active panes.");
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(json.contains(r#""isError":true"#));
+        assert!(json.contains("not found"));
+    }
+
+    // --- Full Round-Trip Tests ---
+
+    #[test]
+    fn test_initialize_roundtrip() {
+        let request_json = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}"#;
+
+        let request = parse_request(request_json).unwrap();
+        let method = McpMethod::from_request(&request).unwrap();
+
+        let mut handler = McpHandler::new();
+        match method {
+            McpMethod::Initialize => {
+                let result = handler.handle_initialize();
+                let response = JsonRpcResponse::success(
+                    request.id.clone(),
+                    serde_json::to_value(result).unwrap(),
+                );
+                let response_json = serialize_response(&response);
+
+                assert!(response_json.contains("protocolVersion"));
+                assert!(response_json.contains("tmux-debug-mcp"));
+            }
+            _ => panic!("Expected Initialize"),
+        }
+    }
+
+    #[test]
+    fn test_tools_list_roundtrip() {
+        let request_json = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+
+        let request = parse_request(request_json).unwrap();
+        let handler = McpHandler::new();
+        let result = handler.handle_tools_list();
+        let response = JsonRpcResponse::success(
+            request.id.clone(),
+            serde_json::to_value(result).unwrap(),
+        );
+        let response_json = serialize_response(&response);
+
+        // Verify all 5 tools are in the response
+        assert!(response_json.contains("tmux_create_pane"));
+        assert!(response_json.contains("tmux_send_keys"));
+        assert!(response_json.contains("tmux_capture_pane"));
+        assert!(response_json.contains("tmux_kill_pane"));
+        assert!(response_json.contains("tmux_list_panes"));
+    }
+}
