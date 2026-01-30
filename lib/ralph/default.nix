@@ -1,7 +1,7 @@
 # Ralph Wiggum Loop for AI-driven development.
 #
 # Provides unified ralph command with subcommands:
-#   plan, logs, edit, tune, ready, step, loop, status
+#   plan, logs, edit, tune, ready, step, loop, status, check, diff
 {
   pkgs,
   mkSandbox ? null, # only needed if using mkRalph
@@ -29,6 +29,7 @@ let
     (writeShellScriptBin "ralph-step" (readFile ./cmd/step.sh))
     (writeShellScriptBin "ralph-loop" (readFile ./cmd/loop.sh))
     (writeShellScriptBin "ralph-status" (readFile ./cmd/status.sh))
+    (writeShellScriptBin "ralph-check" (readFile ./cmd/check.sh))
     (writeShellScriptBin "ralph-diff" (readFile ./cmd/diff.sh))
   ];
 
