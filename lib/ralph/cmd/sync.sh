@@ -14,12 +14,90 @@ source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
 
+# GitHub repo and branch for fetching templates when RALPH_TEMPLATE_DIR not set
+RALPH_GITHUB_REPO="${RALPH_GITHUB_REPO:-taheris/wrapix}"
+RALPH_GITHUB_REF="${RALPH_GITHUB_REF:-main}"
+
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists
 if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
   PACKAGED_DIR="$RALPH_TEMPLATE_DIR"
+  FETCH_FROM_GITHUB=false
 else
   PACKAGED_DIR=""
+  FETCH_FROM_GITHUB=true
 fi
+
+# Fetch templates from GitHub to a temp directory
+# Returns: path to temp directory containing templates
+fetch_github_templates() {
+  local temp_dir
+  temp_dir=$(mktemp -d)
+
+  # List of template files to fetch
+  local base_url="https://raw.githubusercontent.com/${RALPH_GITHUB_REPO}/${RALPH_GITHUB_REF}/lib/ralph/template"
+
+  local files=(
+    "config.nix"
+    "plan.md"
+    "plan-new.md"
+    "plan-update.md"
+    "ready.md"
+    "ready-new.md"
+    "ready-update.md"
+    "step.md"
+  )
+
+  local partials=(
+    "context-pinning.md"
+    "exit-signals.md"
+    "spec-header.md"
+  )
+
+  echo "Fetching templates from GitHub: $RALPH_GITHUB_REPO (ref: $RALPH_GITHUB_REF)" >&2
+
+  # Fetch main template files
+  local failed=false
+  for file in "${files[@]}"; do
+    local url="$base_url/$file"
+    local dest="$temp_dir/$file"
+
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "[dry-run] Would fetch: $file" >&2
+    else
+      if ! curl -sSfL "$url" -o "$dest" 2>/dev/null; then
+        warn "Failed to fetch: $file from $url"
+        failed=true
+      else
+        debug "Fetched: $file"
+      fi
+    fi
+  done
+
+  # Fetch partial files
+  mkdir -p "$temp_dir/partial"
+  for file in "${partials[@]}"; do
+    local url="$base_url/partial/$file"
+    local dest="$temp_dir/partial/$file"
+
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "[dry-run] Would fetch: partial/$file" >&2
+    else
+      if ! curl -sSfL "$url" -o "$dest" 2>/dev/null; then
+        warn "Failed to fetch: partial/$file from $url"
+        failed=true
+      else
+        debug "Fetched: partial/$file"
+      fi
+    fi
+  done
+
+  if [ "$failed" = "true" ]; then
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  echo "$temp_dir"
+}
 
 # Parse arguments
 DRY_RUN=false
@@ -49,6 +127,10 @@ while [[ $# -gt 0 ]]; do
       echo "Environment:"
       echo "  RALPH_DIR           Local ralph directory (default: .claude/ralph)"
       echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
+      echo "  RALPH_GITHUB_REPO   GitHub repo for templates (default: taheris/wrapix)"
+      echo "  RALPH_GITHUB_REF    Git ref to fetch (default: main)"
+      echo ""
+      echo "If RALPH_TEMPLATE_DIR is not set, templates are fetched from GitHub."
       exit 0
       ;;
     *)
@@ -58,13 +140,26 @@ Run 'ralph sync --help' for usage."
   esac
 done
 
-# Validate RALPH_TEMPLATE_DIR is set
-if [ -z "$PACKAGED_DIR" ]; then
-  error "RALPH_TEMPLATE_DIR not set or directory doesn't exist.
+# Fetch templates from GitHub if RALPH_TEMPLATE_DIR not set
+CLEANUP_TEMP_DIR=""
+if [ "$FETCH_FROM_GITHUB" = "true" ]; then
+  PACKAGED_DIR=$(fetch_github_templates)
+  if [ -z "$PACKAGED_DIR" ] || [ ! -d "$PACKAGED_DIR" ]; then
+    error "Failed to fetch templates from GitHub.
 
-Run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR.
-Current value: ${RALPH_TEMPLATE_DIR:-<not set>}"
+Check network connectivity or run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR."
+  fi
+  CLEANUP_TEMP_DIR="$PACKAGED_DIR"
 fi
+
+# Cleanup temp directory on exit (only if we created one)
+cleanup() {
+  if [ -n "$CLEANUP_TEMP_DIR" ] && [ -d "$CLEANUP_TEMP_DIR" ]; then
+    rm -rf "$CLEANUP_TEMP_DIR"
+    debug "Cleaned up temp directory: $CLEANUP_TEMP_DIR"
+  fi
+}
+trap cleanup EXIT
 
 # Directories
 TEMPLATES_DIR="$RALPH_DIR/templates"
