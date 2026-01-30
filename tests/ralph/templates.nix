@@ -346,6 +346,7 @@ in
           PINNED_CONTEXT = "# Project Context\nThis is the pinned context.";
           LABEL = "test-feature";
           SPEC_PATH = "specs/test-feature.md";
+          EXIT_SIGNALS = "- RALPH_COMPLETE\n- RALPH_BLOCKED\n- RALPH_CLARIFY";
         };
         # Check that partials were resolved
         checks = assertAll [

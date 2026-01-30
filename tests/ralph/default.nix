@@ -239,4 +239,63 @@ templateTests
         echo "PASS: All ralph scripts have valid syntax"
         mkdir $out
       '';
+
+  # Test: resolve_partials function resolves {{> partial-name}} markers
+  util-resolve-partials =
+    runCommandLocal "ralph-util-resolve-partials"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        source ${utilScript}
+
+        # Create test partial directory
+        mkdir -p partials
+        echo "Hello from greeting!" > partials/greeting.md
+        echo "Goodbye!" > partials/farewell.md
+
+        echo "Test: resolve single partial..."
+        content="Start {{> greeting}} End"
+        result=$(resolve_partials "$content" "partials")
+        expected="Start Hello from greeting! End"
+        if [ "$result" != "$expected" ]; then
+          echo "FAIL: Expected '$expected', got '$result'"
+          exit 1
+        fi
+
+        echo "Test: resolve multiple partials..."
+        content2="{{> greeting}} then {{> farewell}}"
+        result2=$(resolve_partials "$content2" "partials")
+        if ! echo "$result2" | grep -q "Hello from greeting!"; then
+          echo "FAIL: greeting partial not resolved"
+          exit 1
+        fi
+        if ! echo "$result2" | grep -q "Goodbye!"; then
+          echo "FAIL: farewell partial not resolved"
+          exit 1
+        fi
+
+        echo "Test: no partials returns unchanged content..."
+        content3="No partials here"
+        result3=$(resolve_partials "$content3" "partials")
+        if [ "$result3" != "$content3" ]; then
+          echo "FAIL: Content without partials should be unchanged"
+          exit 1
+        fi
+
+        echo "Test: missing partial dir returns unchanged content..."
+        content4="{{> greeting}}"
+        result4=$(resolve_partials "$content4" "nonexistent")
+        if [ "$result4" != "$content4" ]; then
+          echo "FAIL: Content with missing partial dir should be unchanged"
+          exit 1
+        fi
+
+        echo "PASS: resolve_partials tests"
+        mkdir $out
+      '';
 }

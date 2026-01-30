@@ -236,12 +236,16 @@ debug "Molecule ID: ${MOLECULE_ID:-<none>}"
 # Read template content (placeholders are substituted at runtime)
 WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
 
+# Resolve partials ({{> partial-name}})
+WORK_PROMPT=$(resolve_partials "$WORK_PROMPT" "$TEMPLATE/partial")
+
 # Substitute all placeholders at runtime
 WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
 WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
 WORK_PROMPT="${WORK_PROMPT//\{\{MOLECULE_ID\}\}/$MOLECULE_ID}"
+WORK_PROMPT="${WORK_PROMPT//\{\{EXIT_SIGNALS\}\}/}"
 
 # For description and pinned context, use awk for multi-line
 WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/\{\{DESCRIPTION\}\}/, desc); print}')

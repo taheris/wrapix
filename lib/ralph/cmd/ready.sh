@@ -226,6 +226,9 @@ echo ""
 # Read template content (placeholders are substituted at runtime)
 PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
 
+# Resolve partials ({{> partial-name}})
+PROMPT_CONTENT=$(resolve_partials "$PROMPT_CONTENT" "$TEMPLATE/partial")
+
 # Substitute simple placeholders at runtime
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
@@ -233,6 +236,7 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MODE\}\}/$MODE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
 
 # Multi-line substitutions using awk (handles newlines in replacement text)
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, replacement); print}')
