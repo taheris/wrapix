@@ -1,10 +1,6 @@
 # Implementation Step
 
-## Context Pinning
-
-First, read specs/README.md to understand project terminology and context:
-
-{{PINNED_CONTEXT}}
+{{> context-pinning}}
 
 ## Current Spec
 
@@ -41,9 +37,7 @@ Title: {{TITLE}}
 
 Before outputting RALPH_COMPLETE, follow the **Session Protocol** in `AGENTS.md`.
 
-## Exit Signals
-
-Output ONE of these at the end of your response:
+{{> exit-signals}}
 
 - `RALPH_COMPLETE` - Task finished, all quality gates passed
 - `RALPH_BLOCKED: <reason>` - Cannot proceed, explain why
