@@ -83,17 +83,6 @@ if [ ! -f "$SPEC_PATH" ]; then
   exit 1
 fi
 
-# Copy missing template files (handles upgrades where new templates were added)
-if [ -d "$TEMPLATE" ]; then
-  for template_file in plan.md ready.md step.md; do
-    if [ ! -f "$RALPH_DIR/$template_file" ] && [ -f "$TEMPLATE/$template_file" ]; then
-      cp "$TEMPLATE/$template_file" "$RALPH_DIR/$template_file"
-      chmod u+rw "$RALPH_DIR/$template_file"
-      echo "Added missing template: $template_file"
-    fi
-  done
-fi
-
 PROMPT_TEMPLATE="$RALPH_DIR/ready.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
