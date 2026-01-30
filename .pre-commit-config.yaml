@@ -10,7 +10,7 @@ repos:
 
       - id: shellcheck
         name: shellcheck
-        entry: shellcheck
+        entry: shellcheck --external-sources --source-path=lib/ralph/cmd
         language: system
         types: [shell]
         pass_filenames: true
@@ -18,6 +18,13 @@ repos:
       - id: nix-flake-check
         name: nix flake check
         entry: nix flake check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: test
+        name: test
+        entry: nix run .#test
         language: system
         pass_filenames: false
         always_run: true
