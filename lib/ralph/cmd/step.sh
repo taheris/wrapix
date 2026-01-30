@@ -193,7 +193,7 @@ if [ -z "$ISSUE_TITLE" ]; then
 fi
 debug "Issue title: ${ISSUE_TITLE:0:50}..."
 
-PROMPT_TEMPLATE="$RALPH_DIR/templates/step.md"
+PROMPT_TEMPLATE="$RALPH_DIR/template/step.md"
 require_file "$PROMPT_TEMPLATE" "Step prompt template (step.md)"
 
 # Validate template has placeholders, reset from source if corrupted
