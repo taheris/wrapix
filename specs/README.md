@@ -15,6 +15,7 @@ An ordered list of specs and project terminology.
 | [ralph-workflow.md](./ralph-workflow.md) | [`lib/ralph/`](../lib/ralph/) | wx-ad9r | Spec-driven AI orchestration |
 | [sandbox.md](./sandbox.md) | [`lib/sandbox/default.nix`](../lib/sandbox/default.nix) | — | Platform-agnostic container isolation |
 | [security-review.md](./security-review.md) | — | wx-eok | Security tradeoffs and mitigations |
+| [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
 
 ## Terminology Index
 
@@ -28,4 +29,5 @@ An ordered list of specs and project terminology.
 | **Profile** | Pre-configured set of packages and environment variables |
 | **Ralph** | Workflow orchestrator for spec-to-implementation |
 | **Sandbox** | Isolated container environment for running Claude Code |
+| **tmux-debug-mcp** | MCP server for AI-assisted debugging via tmux panes |
 | **virtio-fs** | Shared filesystem for macOS container VMs |
