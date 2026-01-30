@@ -41,15 +41,7 @@ case "$COMMAND" in
     fi
     exec "${EDITOR:-vi}" "$SPEC_FILE"
     ;;
-  tune)
-    PROMPT_FILE="$RALPH_DIR/step.md"
-    if [ ! -f "$PROMPT_FILE" ]; then
-      echo "Prompt file not found: $PROMPT_FILE"
-      echo "Run 'ralph plan <label>' first."
-      exit 1
-    fi
-    exec "${EDITOR:-vi}" "$PROMPT_FILE"
-    ;;
+  tune)  exec ralph-tune "$@" ;;
   # Backwards compatibility: start -> plan, init -> plan
   start|init)
     echo "Note: 'ralph $COMMAND' is now 'ralph plan <label>'"
@@ -68,7 +60,7 @@ case "$COMMAND" in
     echo "Template Commands:"
     echo "  check           Validate all templates (syntax, partials, rendering)"
     echo "  diff [name]     Show local template changes vs packaged"
-    echo "  tune            Edit step prompt template (step.md)"
+    echo "  tune            AI-assisted template editing (interactive or via diff)"
     echo ""
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"
