@@ -206,6 +206,8 @@ copy_file() {
       rm -f "$dst"
     fi
     cp "$src" "$dst"
+    # Make writable (Nix store files are read-only 444)
+    chmod 644 "$dst"
   fi
 }
 
