@@ -427,7 +427,7 @@ EOF
   # Symlink ralph commands from SOURCE (not installed) to test latest code
   # This ensures tests verify the actual source, not a potentially stale build
   RALPH_SRC_DIR="$REPO_ROOT/lib/ralph/cmd"
-  for cmd in ralph-step ralph-loop ralph-ready ralph-plan ralph-status; do
+  for cmd in ralph-step ralph-loop ralph-ready ralph-plan ralph-status ralph-diff; do
     local script_name="${cmd#ralph-}"  # Remove 'ralph-' prefix
     if [ -f "$RALPH_SRC_DIR/$script_name.sh" ]; then
       ln -sf "$RALPH_SRC_DIR/$script_name.sh" "$TEST_DIR/bin/$cmd"
@@ -441,7 +441,7 @@ EOF
 
   # Symlink other required commands from installed location
   # Include core utilities (grep, cat, etc.) that may be in the wrapix profile
-  for cmd in bd jq nix grep cat sed awk mkdir rm cp mv ls chmod touch date script echo; do
+  for cmd in bd jq nix grep cat sed awk mkdir rm cp mv ls chmod touch date script echo diff; do
     if cmd_path=$(command -v "$cmd" 2>/dev/null); then
       ln -sf "$cmd_path" "$TEST_DIR/bin/$cmd"
     fi
@@ -472,6 +472,9 @@ EOF
   # Set ralph directory
   export RALPH_DIR=".claude/ralph"
 
+  # Set template directory for diff/sync/check commands
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
   echo "  Test environment: $TEST_DIR"
 }
 
@@ -487,7 +490,7 @@ teardown_test_env() {
   fi
 
   # Unset test environment variables
-  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR
+  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
 }
 
 #-----------------------------------------------------------------------------
@@ -3060,6 +3063,216 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
+# Ralph Diff Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph diff with no local changes (templates match packaged)
+test_diff_no_changes() {
+  CURRENT_TEST="diff_no_changes"
+  test_header "ralph diff - no local changes"
+
+  setup_test_env "diff-no-changes"
+
+  # Copy packaged templates to local directory (simulates fresh install)
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
+
+  # Run ralph diff
+  set +e
+  local output
+  output=$(ralph-diff 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph diff should succeed"
+
+  # Output should indicate no changes
+  if echo "$output" | grep -qi "no local template changes\|no changes"; then
+    test_pass "Output indicates no changes found"
+  else
+    test_fail "Output should indicate no changes (got: $output)"
+  fi
+
+  # Should NOT contain diff markers
+  if echo "$output" | grep -q "^---\|^+++\|^@@"; then
+    test_fail "Output should not contain diff markers when no changes"
+  else
+    test_pass "No diff markers in output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph diff detects local modifications
+test_diff_local_modifications() {
+  CURRENT_TEST="diff_local_modifications"
+  test_header "ralph diff - local modifications detected"
+
+  setup_test_env "diff-modifications"
+
+  # Copy packaged templates first
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
+
+  # Modify the local template
+  {
+    echo "# My Custom Header"
+    echo ""
+    echo "This is a local customization."
+  } >> "$RALPH_DIR/step.md"
+
+  # Run ralph diff
+  set +e
+  local output
+  output=$(ralph-diff 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph diff should succeed"
+
+  # Output should indicate changes found
+  if echo "$output" | grep -q "Local Template Changes"; then
+    test_pass "Output indicates local template changes"
+  else
+    test_fail "Output should indicate local template changes"
+  fi
+
+  # Should show the step.md template name
+  if echo "$output" | grep -q "step\.md\|step"; then
+    test_pass "Output shows step template"
+  else
+    test_fail "Output should mention step template"
+  fi
+
+  # Should contain our custom text in the diff
+  if echo "$output" | grep -q "My Custom Header\|local customization"; then
+    test_pass "Diff shows our custom changes"
+  else
+    test_fail "Diff should show our custom changes"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph diff with specific template name
+test_diff_specific_template() {
+  CURRENT_TEST="diff_specific_template"
+  test_header "ralph diff - specific template (ralph diff step)"
+
+  setup_test_env "diff-specific"
+
+  # Copy all templates
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
+
+  # Modify both templates
+  echo "# Step modification" >> "$RALPH_DIR/step.md"
+  echo "# Plan modification" >> "$RALPH_DIR/plan.md"
+
+  # Run ralph diff for just step
+  set +e
+  local output
+  output=$(ralph-diff step 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph diff step should succeed"
+
+  # Should show step template changes
+  if echo "$output" | grep -q "step\|Step"; then
+    test_pass "Output mentions step template"
+  else
+    test_fail "Output should mention step template"
+  fi
+
+  # Should NOT show plan template changes (we only asked for step)
+  if echo "$output" | grep -qi "plan.*modification"; then
+    test_fail "Output should NOT show plan modifications when diffing just step"
+  else
+    test_pass "Output correctly excludes other templates"
+  fi
+
+  # Verify it works with .md suffix too
+  set +e
+  local output_with_suffix
+  output_with_suffix=$(ralph-diff step.md 2>&1)
+  local exit_code2=$?
+  set -e
+
+  assert_exit_code 0 $exit_code2 "ralph diff step.md should succeed (normalized)"
+
+  teardown_test_env
+}
+
+# Test: ralph diff handles missing local templates gracefully
+test_diff_missing_local_templates() {
+  CURRENT_TEST="diff_missing_local_templates"
+  test_header "ralph diff - missing local templates handled"
+
+  setup_test_env "diff-missing"
+
+  # Copy packaged config to match (no diff for config.nix)
+  cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
+
+  # Remove markdown templates to simulate partial installation
+  rm -f "$RALPH_DIR/step.md" "$RALPH_DIR/plan.md" "$RALPH_DIR/ready.md"
+
+  # Run ralph diff
+  set +e
+  local output
+  output=$(ralph-diff 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0 (not an error, just no local files to compare)
+  assert_exit_code 0 $exit_code "ralph diff should succeed even with missing templates"
+
+  # Output should indicate no local changes (since nothing to compare)
+  if echo "$output" | grep -qi "no local template changes\|no changes\|match"; then
+    test_pass "Output indicates no local changes when templates missing"
+  else
+    test_fail "Unexpected output when templates missing: ${output:0:200}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph diff rejects invalid template name
+test_diff_invalid_template() {
+  CURRENT_TEST="diff_invalid_template"
+  test_header "ralph diff - invalid template name rejected"
+
+  setup_test_env "diff-invalid"
+
+  # Run ralph diff with invalid template name
+  set +e
+  local output
+  output=$(ralph-diff nonexistent 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit non-zero
+  if [ $exit_code -ne 0 ]; then
+    test_pass "ralph diff exits with error for invalid template"
+  else
+    test_fail "ralph diff should fail for invalid template name"
+  fi
+
+  # Should mention valid templates
+  if echo "$output" | grep -qi "unknown\|valid\|plan\|ready\|step\|config"; then
+    test_pass "Error message mentions valid template options"
+  else
+    test_fail "Error should mention valid templates"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -3093,6 +3306,11 @@ ALL_TESTS=(
   test_config_loop_pause_on_failure_false
   test_config_loop_hooks
   test_config_failure_patterns
+  test_diff_no_changes
+  test_diff_local_modifications
+  test_diff_specific_template
+  test_diff_missing_local_templates
+  test_diff_invalid_template
 )
 
 # Run a single test in isolation and write results to file
