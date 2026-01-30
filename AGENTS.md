@@ -21,15 +21,50 @@ nix build .#wrapix-python  # With Python profile
 
 **Use `bd` for ALL issue tracking.** Do NOT use markdown TODOs or external trackers.
 
+### Finding Work
+
 ```bash
-bd ready                             # Show unblocked work
-bd show <id>                         # Issue details
-bd create --title="..." --type=task  # Create issue
-bd update <id> --status=in_progress  # Claim work
-bd close <id>                        # Complete work
+bd ready                        # Show unblocked issues ready to work
+bd list --status=open           # All open issues
+bd list --status=in_progress    # Currently active work
+bd show <id>                    # Issue details with dependencies
 ```
 
-**Key concepts:** Priority P0-P4 (critical to backlog). Types: task, bug, feature, epic, question, docs.
+### Creating Issues
+
+```bash
+bd create --title="..." --type=task --priority=2
+bd create --title="..." --type=bug --priority=1
+bd create --title="..." --type=feature
+```
+
+- **Priority:** 0=critical, 1=high, 2=medium (default), 3=low, 4=backlog
+- **Types:** task, bug, feature, epic, question, docs
+
+### Updating Issues
+
+```bash
+bd update <id> --status=in_progress   # Claim work (do this before starting)
+bd update <id> --status=open          # Release work
+bd update <id> --title="new title"    # Update title
+bd update <id> --description="..."    # Update description
+bd close <id>                         # Mark complete
+bd close <id> --reason="explanation"  # Close with reason
+```
+
+### Dependencies
+
+```bash
+bd dep add <issue> <depends-on>   # issue depends on depends-on
+bd blocked                        # Show all blocked issues
+```
+
+### Workflow
+
+1. `bd ready` — Find available work
+2. `bd update <id> --status=in_progress` — Claim it before starting
+3. Implement the task
+4. `bd close <id>` — Mark complete when done
 
 ## Session Protocol
 
