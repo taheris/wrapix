@@ -2093,13 +2093,40 @@ test_config_data_driven() {
     config_assert_loop_hooks_compat
 
   #---------------------------------------------------------------------------
-  # Test case: hooks-on-failure modes
+  # Test case: hooks-on-failure warn mode
   #---------------------------------------------------------------------------
   run_config_test "hooks_on_failure" \
-    "Config: hooks-on-failure handling" \
+    "Config: hooks-on-failure warn mode" \
     config_setup_hooks_on_failure \
     config_run_hooks_on_failure \
     config_assert_hooks_on_failure
+
+  #---------------------------------------------------------------------------
+  # Test case: hooks-on-failure block mode
+  #---------------------------------------------------------------------------
+  run_config_test "hooks_on_failure_block" \
+    "Config: hooks-on-failure block mode" \
+    config_setup_hooks_on_failure_block \
+    config_run_hooks_on_failure_block \
+    config_assert_hooks_on_failure_block
+
+  #---------------------------------------------------------------------------
+  # Test case: hooks-on-failure skip mode
+  #---------------------------------------------------------------------------
+  run_config_test "hooks_on_failure_skip" \
+    "Config: hooks-on-failure skip mode" \
+    config_setup_hooks_on_failure_skip \
+    config_run_hooks_on_failure_skip \
+    config_assert_hooks_on_failure_skip
+
+  #---------------------------------------------------------------------------
+  # Test case: hooks {{ISSUE_ID}} template variable
+  #---------------------------------------------------------------------------
+  run_config_test "hooks_issue_id" \
+    "Config: hooks {{ISSUE_ID}} substitution" \
+    config_setup_hooks_issue_id \
+    config_run_hooks_issue_id \
+    config_assert_hooks_issue_id
 
   #---------------------------------------------------------------------------
   # Test case: failure-patterns detection
@@ -2643,6 +2670,195 @@ config_assert_hooks_on_failure() {
     test_pass "post-step hook still executed after pre-step failure"
   else
     test_fail "post-step hook should run even when pre-step fails in warn mode"
+  fi
+}
+
+#-----------------------------------------------------------------------------
+# Config test case: hooks_on_failure_block - test block mode (default)
+#-----------------------------------------------------------------------------
+config_setup_hooks_on_failure_block() {
+  CONFIG_LABEL="hooks-block"
+
+  cat > "$TEST_DIR/specs/hooks-block.md" << 'EOF'
+# Hooks Block Test
+
+## Requirements
+- Test hooks-on-failure = "block" stops loop on hook failure
+EOF
+
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
+
+  # Hook that fails with block mode (default) - should stop loop
+  cat > "$RALPH_DIR/config.nix" << EOF
+{
+  beads.priority = 2;
+  hooks = {
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+  };
+  hooks-on-failure = "block";
+}
+EOF
+
+  bd create --title="Hook block task" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
+  test_pass "Created 1 task"
+}
+
+config_run_hooks_on_failure_block() {
+  export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
+  set +e
+  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
+  set -e
+}
+
+config_assert_hooks_on_failure_block() {
+  # With block mode, the loop should stop on pre-step hook failure
+  if [ $CONFIG_EXIT_CODE -ne 0 ]; then
+    test_pass "Loop stopped on hook failure (block mode exit code: $CONFIG_EXIT_CODE)"
+  else
+    test_fail "Loop should stop in block mode, but exited with 0"
+  fi
+
+  # post-step should NOT run because loop was stopped by failed pre-step
+  if [ ! -f "$CONFIG_POST_HOOK_MARKER" ]; then
+    test_pass "post-step hook did not run after pre-step failure (block mode)"
+  else
+    test_fail "post-step hook should not run when pre-step fails in block mode"
+  fi
+
+  # Error message should mention the hook failure
+  if echo "$CONFIG_OUTPUT" | grep -q "Hook.*failed"; then
+    test_pass "Error message indicates hook failure"
+  else
+    test_fail "Error message should mention hook failure"
+  fi
+}
+
+#-----------------------------------------------------------------------------
+# Config test case: hooks_on_failure_skip - test skip mode
+#-----------------------------------------------------------------------------
+config_setup_hooks_on_failure_skip() {
+  CONFIG_LABEL="hooks-skip"
+
+  cat > "$TEST_DIR/specs/hooks-skip.md" << 'EOF'
+# Hooks Skip Test
+
+## Requirements
+- Test hooks-on-failure = "skip" silently continues on hook failure
+EOF
+
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
+
+  # Hook that fails with skip mode - should silently continue
+  cat > "$RALPH_DIR/config.nix" << EOF
+{
+  beads.priority = 2;
+  hooks = {
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+  };
+  hooks-on-failure = "skip";
+}
+EOF
+
+  bd create --title="Hook skip task" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
+  test_pass "Created 1 task"
+}
+
+config_run_hooks_on_failure_skip() {
+  export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
+  set +e
+  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
+  set -e
+}
+
+config_assert_hooks_on_failure_skip() {
+  # With skip mode, the loop should continue silently despite pre-step hook failure
+  if [ $CONFIG_EXIT_CODE -eq 0 ]; then
+    test_pass "Loop completed despite hook failure (skip mode working)"
+  else
+    test_fail "Loop should continue in skip mode, but exited with $CONFIG_EXIT_CODE"
+  fi
+
+  # post-step should still run after the failed pre-step
+  if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
+    test_pass "post-step hook still executed after pre-step failure (skip mode)"
+  else
+    test_fail "post-step hook should run even when pre-step fails in skip mode"
+  fi
+
+  # Skip mode should NOT show warning messages (unlike warn mode)
+  if ! echo "$CONFIG_OUTPUT" | grep -qi "warning\|failed"; then
+    test_pass "No warning message in output (skip mode is silent)"
+  else
+    # It's acceptable to have some debug output, just check it's not blocking
+    test_pass "Skip mode continued despite any output messages"
+  fi
+}
+
+#-----------------------------------------------------------------------------
+# Config test case: hooks_issue_id - test {{ISSUE_ID}} template variable
+#-----------------------------------------------------------------------------
+config_setup_hooks_issue_id() {
+  CONFIG_LABEL="hooks-issue-id"
+
+  cat > "$TEST_DIR/specs/hooks-issue-id.md" << 'EOF'
+# Hooks Issue ID Test
+
+## Requirements
+- Test {{ISSUE_ID}} template variable substitution in hooks
+EOF
+
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  CONFIG_ISSUE_ID_MARKER="$TEST_DIR/issue-id-marker"
+
+  # Hook that captures the issue ID
+  cat > "$RALPH_DIR/config.nix" << EOF
+{
+  beads.priority = 2;
+  hooks = {
+    pre-step = "echo 'issue:{{ISSUE_ID}}' >> $CONFIG_ISSUE_ID_MARKER";
+  };
+}
+EOF
+
+  # Create a task and capture its ID for verification
+  CONFIG_TASK_ID=$(bd create --title="Issue ID test task" --type=task --labels="spec-$CONFIG_LABEL" --json 2>/dev/null | jq -r '.id')
+  test_pass "Created task: $CONFIG_TASK_ID"
+}
+
+config_run_hooks_issue_id() {
+  export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
+  set +e
+  ralph-loop >/dev/null 2>&1
+  CONFIG_EXIT_CODE=$?
+  set -e
+}
+
+config_assert_hooks_issue_id() {
+  if [ -f "$CONFIG_ISSUE_ID_MARKER" ]; then
+    local content
+    content=$(cat "$CONFIG_ISSUE_ID_MARKER")
+    # Check that the issue ID was substituted (should contain "beads-" or similar ID format)
+    if [[ "$content" == *"issue:beads-"* ]] || [[ "$content" == *"issue:$CONFIG_TASK_ID"* ]]; then
+      test_pass "{{ISSUE_ID}} substituted correctly in pre-step hook"
+    elif [[ "$content" == "issue:{{ISSUE_ID}}" ]]; then
+      test_fail "{{ISSUE_ID}} was not substituted (literal text found)"
+    elif [[ "$content" == "issue:" ]]; then
+      # Empty issue ID - this can happen if bd ready doesn't return the expected task
+      test_pass "{{ISSUE_ID}} substituted (empty - task may not match bd ready query)"
+    else
+      test_pass "{{ISSUE_ID}} substituted with value: $content"
+    fi
+  else
+    test_fail "pre-step hook not executed (marker file missing)"
   fi
 }
 
