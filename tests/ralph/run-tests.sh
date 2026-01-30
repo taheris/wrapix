@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Ralph integration test harness
 # Runs ralph workflow tests with mock Claude in isolated environments
+# shellcheck disable=SC2329,SC2086,SC2034  # SC2329: functions invoked via ALL_TESTS; SC2086: numeric vars; SC2034: unused var
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1725,7 +1726,7 @@ test_happy_path() {
   export SPEC_PATH="specs/$label.md"
 
   set +e
-  OUTPUT=$(ralph-plan "$label" 2>&1)
+  OUTPUT=$(ralph-plan -n "$label" 2>&1)
   EXIT_CODE=$?
   set -e
 
@@ -2036,7 +2037,7 @@ test_config_spec_hidden_true() {
 # Test: no --hidden flag (default) places spec in specs/
 test_config_spec_hidden_false() {
   CURRENT_TEST="config_spec_hidden_false"
-  test_header "Default: no --hidden flag"
+  test_header "Flag: -n creates spec in specs/"
 
   setup_test_env "spec-hidden-false"
 
@@ -2047,16 +2048,16 @@ test_config_spec_hidden_false() {
   # Use happy-path scenario which creates spec file
   export MOCK_SCENARIO="$SCENARIOS_DIR/happy-path.sh"
 
-  # Run ralph plan without --hidden flag
+  # Run ralph plan with -n flag (new spec in specs/)
   set +e
-  ralph-plan "$label" >/dev/null 2>&1
+  ralph-plan -n "$label" >/dev/null 2>&1
   set -e
 
   # Check that spec was created in specs/ (visible location)
   if [ -f "specs/$label.md" ]; then
     test_pass "Spec created in specs/ directory (visible)"
   else
-    test_fail "Spec should be created in specs/ without --hidden flag"
+    test_fail "Spec should be created in specs/ with -n flag"
   fi
 
   # Check that spec was NOT created in state/
@@ -2471,6 +2472,120 @@ EOF
     test_pass "Failure pattern detected, task stayed in_progress"
   else
     test_fail "Unexpected task status: $task_status"
+  fi
+
+  teardown_test_env
+}
+
+# Test: plan flag validation - ralph plan requires mode flag
+# Verifies:
+# 1. ralph plan with no flags errors with usage help
+# 2. ralph plan -n <label> works for new spec
+# 3. ralph plan -h <label> works for hidden spec
+# 4. ralph plan -n -h errors (invalid combination)
+# 5. ralph plan -n -u errors (invalid combination)
+test_plan_flag_validation() {
+  CURRENT_TEST="plan_flag_validation"
+  test_header "Plan Flag Validation"
+
+  setup_test_env "plan-flags"
+
+  # Test 1: No flags should error
+  set +e
+  local output
+  output=$(ralph-plan test-label 2>&1)
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "ralph plan with no flag errors (exit $exit_code)"
+  else
+    test_fail "ralph plan with no flag should error"
+  fi
+
+  # Verify error message mentions mode flag requirement
+  if echo "$output" | grep -qi "mode flag required\|Usage:"; then
+    test_pass "Error message shows usage help"
+  else
+    test_fail "Error message should show usage help"
+  fi
+
+  # Test 2: -n flag should work (but will need interactive claude, so just check args parsing)
+  # We test by checking that it doesn't fail on arg parsing - it will fail later due to no RALPH_TEMPLATE_DIR
+  set +e
+  output=$(ralph-plan -n test-feature 2>&1)
+  exit_code=$?
+  set -e
+
+  # Should not fail with "Mode flag required" error
+  if echo "$output" | grep -qi "mode flag required"; then
+    test_fail "-n flag should be accepted as valid mode"
+  else
+    test_pass "-n flag accepted as valid mode"
+  fi
+
+  # Test 3: -n -h should error (invalid combination)
+  set +e
+  output=$(ralph-plan -n -h test-feature 2>&1)
+  exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "-n -h combination errors (exit $exit_code)"
+  else
+    test_fail "-n -h combination should error"
+  fi
+
+  if echo "$output" | grep -qi "cannot be combined"; then
+    test_pass "-n -h error message mentions cannot be combined"
+  else
+    test_fail "-n -h error should mention cannot be combined"
+  fi
+
+  # Test 4: -n -u should error (invalid combination)
+  set +e
+  output=$(ralph-plan -n -u existing-spec 2>&1)
+  exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "-n -u combination errors (exit $exit_code)"
+  else
+    test_fail "-n -u combination should error"
+  fi
+
+  if echo "$output" | grep -qi "cannot be combined"; then
+    test_pass "-n -u error message mentions cannot be combined"
+  else
+    test_fail "-n -u error should mention cannot be combined"
+  fi
+
+  # Test 5: -h alone should work (hidden mode)
+  set +e
+  output=$(ralph-plan -h test-hidden 2>&1)
+  exit_code=$?
+  set -e
+
+  if echo "$output" | grep -qi "mode flag required"; then
+    test_fail "-h flag should be accepted as valid mode"
+  else
+    test_pass "-h flag accepted as valid mode"
+  fi
+
+  # Test 6: -u -h should work (update hidden spec) - valid combination per spec
+  # Create a hidden spec first
+  mkdir -p "$RALPH_DIR/state"
+  echo "# Test Hidden Spec" > "$RALPH_DIR/state/hidden-spec.md"
+
+  set +e
+  output=$(ralph-plan -u -h hidden-spec 2>&1)
+  exit_code=$?
+  set -e
+
+  if echo "$output" | grep -qi "cannot be combined"; then
+    test_fail "-u -h should be valid combination"
+  else
+    test_pass "-u -h combination accepted as valid"
   fi
 
   teardown_test_env
@@ -3003,6 +3118,7 @@ ALL_TESTS=(
   test_malformed_bd_output_parsing
   test_partial_epic_completion
   test_happy_path
+  test_plan_flag_validation
   test_update_mode
   test_discovered_work
   test_config_spec_hidden_true
