@@ -3543,9 +3543,9 @@ test_diff_no_changes() {
   setup_test_env "diff-no-changes"
 
   # Copy packaged templates to local directory (simulates fresh install)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/templates/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/template/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Run ralph diff
@@ -3584,9 +3584,9 @@ test_diff_local_modifications() {
 
   # Copy ALL packaged templates to match setup templates
   # (setup_test_env creates templates with different content)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/templates/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/template/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Modify ONLY step.md to create a detectable change
@@ -3594,7 +3594,7 @@ test_diff_local_modifications() {
     echo "# My Custom Header"
     echo ""
     echo "This is a local customization."
-  } >> "$RALPH_DIR/templates/step.md"
+  } >> "$RALPH_DIR/template/step.md"
 
   # Run ralph diff
   set +e
@@ -3638,12 +3638,12 @@ test_diff_specific_template() {
   setup_test_env "diff-specific"
 
   # Copy all templates
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
 
   # Modify both templates
-  echo "# Step modification" >> "$RALPH_DIR/templates/step.md"
-  echo "# Plan modification" >> "$RALPH_DIR/templates/plan.md"
+  echo "# Step modification" >> "$RALPH_DIR/template/step.md"
+  echo "# Plan modification" >> "$RALPH_DIR/template/plan.md"
 
   # Run ralph diff for just step
   set +e
@@ -3692,7 +3692,7 @@ test_diff_missing_local_templates() {
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Remove markdown templates to simulate partial installation
-  rm -f "$RALPH_DIR/templates/step.md" "$RALPH_DIR/templates/plan.md" "$RALPH_DIR/templates/ready.md"
+  rm -f "$RALPH_DIR/template/step.md" "$RALPH_DIR/template/plan.md" "$RALPH_DIR/template/ready.md"
 
   # Run ralph diff
   set +e
@@ -3757,7 +3757,7 @@ test_sync_fresh() {
   setup_test_env "sync-fresh"
 
   # Remove templates and config created by setup_test_env (simulates fresh project)
-  rm -rf "$RALPH_DIR/templates"
+  rm -rf "$RALPH_DIR/template"
   rm -f "$RALPH_DIR/config.nix"
 
   # Run ralph sync
@@ -3771,20 +3771,20 @@ test_sync_fresh() {
   assert_exit_code 0 $exit_code "ralph sync should succeed"
 
   # Should create templates directory
-  if [ -d "$RALPH_DIR/templates" ]; then
+  if [ -d "$RALPH_DIR/template" ]; then
     test_pass "Templates directory created"
   else
     test_fail "Templates directory should be created"
   fi
 
   # Should copy step.md, plan.md, ready.md
-  assert_file_exists "$RALPH_DIR/templates/step.md" "step.md should be copied"
-  assert_file_exists "$RALPH_DIR/templates/plan.md" "plan.md should be copied"
-  assert_file_exists "$RALPH_DIR/templates/ready.md" "ready.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/step.md" "step.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/plan.md" "plan.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/ready.md" "ready.md should be copied"
 
   # Should copy variant templates
-  assert_file_exists "$RALPH_DIR/templates/plan-new.md" "plan-new.md should be copied"
-  assert_file_exists "$RALPH_DIR/templates/ready-new.md" "ready-new.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/plan-new.md" "plan-new.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/ready-new.md" "ready-new.md should be copied"
 
   # Should NOT create backup directory (nothing to backup)
   if [ -d "$RALPH_DIR/backup" ]; then
@@ -3811,16 +3811,16 @@ test_sync_backup() {
   setup_test_env "sync-backup"
 
   # Create templates directory with customized content
-  mkdir -p "$RALPH_DIR/templates"
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
+  mkdir -p "$RALPH_DIR/template"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
 
   # Add local customizations to step.md
   {
     echo ""
     echo "# My Custom Instructions"
     echo "This is a local customization that should be backed up."
-  } >> "$RALPH_DIR/templates/step.md"
+  } >> "$RALPH_DIR/template/step.md"
 
   # Run ralph sync
   set +e
@@ -3850,7 +3850,7 @@ test_sync_backup() {
   fi
 
   # Templates should now match packaged (fresh copy)
-  if diff -q "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md" >/dev/null 2>&1; then
+  if diff -q "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md" >/dev/null 2>&1; then
     test_pass "Templates updated to match packaged"
   else
     test_fail "Templates should match packaged after sync"
@@ -3881,13 +3881,13 @@ test_sync_dry_run() {
   setup_test_env "sync-dry-run"
 
   # Create templates directory with customized content
-  mkdir -p "$RALPH_DIR/templates"
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
-  echo "# My Customization" >> "$RALPH_DIR/templates/step.md"
+  mkdir -p "$RALPH_DIR/template"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  echo "# My Customization" >> "$RALPH_DIR/template/step.md"
 
   # Record state before dry-run
   local original_content
-  original_content=$(cat "$RALPH_DIR/templates/step.md")
+  original_content=$(cat "$RALPH_DIR/template/step.md")
 
   # Run ralph sync --dry-run
   set +e
@@ -3908,7 +3908,7 @@ test_sync_dry_run() {
 
   # Templates should NOT have changed
   local current_content
-  current_content=$(cat "$RALPH_DIR/templates/step.md")
+  current_content=$(cat "$RALPH_DIR/template/step.md")
   if [ "$original_content" = "$current_content" ]; then
     test_pass "Templates unchanged in dry-run mode"
   else
@@ -3940,7 +3940,7 @@ test_sync_partials() {
   setup_test_env "sync-partials"
 
   # Remove any existing templates
-  rm -rf "$RALPH_DIR/templates"
+  rm -rf "$RALPH_DIR/template"
 
   # Run ralph sync
   set +e
@@ -3953,19 +3953,19 @@ test_sync_partials() {
   assert_exit_code 0 $exit_code "ralph sync should succeed"
 
   # Should create partial directory
-  if [ -d "$RALPH_DIR/templates/partial" ]; then
+  if [ -d "$RALPH_DIR/template/partial" ]; then
     test_pass "Partial directory created"
   else
     test_fail "Partial directory should be created"
   fi
 
   # Should copy partial templates
-  assert_file_exists "$RALPH_DIR/templates/partial/context-pinning.md" "context-pinning.md partial should be copied"
-  assert_file_exists "$RALPH_DIR/templates/partial/exit-signals.md" "exit-signals.md partial should be copied"
-  assert_file_exists "$RALPH_DIR/templates/partial/spec-header.md" "spec-header.md partial should be copied"
+  assert_file_exists "$RALPH_DIR/template/partial/context-pinning.md" "context-pinning.md partial should be copied"
+  assert_file_exists "$RALPH_DIR/template/partial/exit-signals.md" "exit-signals.md partial should be copied"
+  assert_file_exists "$RALPH_DIR/template/partial/spec-header.md" "spec-header.md partial should be copied"
 
   # Now test backup of customized partials
-  echo "# My Custom Context" >> "$RALPH_DIR/templates/partial/context-pinning.md"
+  echo "# My Custom Context" >> "$RALPH_DIR/template/partial/context-pinning.md"
 
   # Run sync again
   set +e
@@ -3992,7 +3992,7 @@ test_sync_partials() {
   fi
 
   # Templates should be fresh (match packaged)
-  if diff -q "$RALPH_TEMPLATE_DIR/partial/context-pinning.md" "$RALPH_DIR/templates/partial/context-pinning.md" >/dev/null 2>&1; then
+  if diff -q "$RALPH_TEMPLATE_DIR/partial/context-pinning.md" "$RALPH_DIR/template/partial/context-pinning.md" >/dev/null 2>&1; then
     test_pass "Partial templates refreshed to match packaged"
   else
     test_fail "Partial templates should match packaged after sync"
@@ -4250,6 +4250,78 @@ test_check_exit_codes() {
   teardown_test_env
 }
 
+# Test: default config template has hooks configured
+test_default_config_has_hooks() {
+  CURRENT_TEST="default_config_has_hooks"
+  test_header "Default config template has hooks configured"
+
+  setup_test_env "default-config-hooks"
+
+  # This test verifies that the packaged config.nix template includes
+  # the hooks section with pre-loop and post-step hooks that run prek.
+  # This ensures ralph loop will block on test/lint failures by default.
+
+  # Read the packaged config.nix template
+  local config_file="$RALPH_TEMPLATE_DIR/config.nix"
+
+  if [ ! -f "$config_file" ]; then
+    test_fail "Packaged config.nix not found at $config_file"
+    teardown_test_env
+    return
+  fi
+
+  # Parse config with nix eval
+  local config
+  config=$(nix eval --json --file "$config_file" 2>/dev/null || echo "{}")
+
+  # Check hooks.pre-loop is defined and runs prek
+  local pre_loop
+  pre_loop=$(echo "$config" | jq -r '.hooks."pre-loop" // empty' 2>/dev/null || true)
+  if [ -n "$pre_loop" ] && echo "$pre_loop" | grep -q "prek"; then
+    test_pass "hooks.pre-loop runs prek (validates before loop starts)"
+  else
+    test_fail "hooks.pre-loop should run prek to validate before loop starts"
+  fi
+
+  # Check hooks.pre-step is defined (bd sync)
+  local pre_step
+  pre_step=$(echo "$config" | jq -r '.hooks."pre-step" // empty' 2>/dev/null || true)
+  if [ -n "$pre_step" ]; then
+    test_pass "hooks.pre-step is defined"
+  else
+    test_fail "hooks.pre-step should be defined"
+  fi
+
+  # Check hooks.post-step is defined and runs prek
+  local post_step
+  post_step=$(echo "$config" | jq -r '.hooks."post-step" // empty' 2>/dev/null || true)
+  if [ -n "$post_step" ] && echo "$post_step" | grep -q "prek"; then
+    test_pass "hooks.post-step runs prek (validates after each step)"
+  else
+    test_fail "hooks.post-step should run prek to validate after each step"
+  fi
+
+  # Check hooks.post-loop is defined (commit and push)
+  local post_loop
+  post_loop=$(echo "$config" | jq -r '.hooks."post-loop" // empty' 2>/dev/null || true)
+  if [ -n "$post_loop" ] && echo "$post_loop" | grep -q "git commit"; then
+    test_pass "hooks.post-loop includes git commit"
+  else
+    test_fail "hooks.post-loop should include git commit"
+  fi
+
+  # Check hooks-on-failure defaults to "block"
+  local on_failure
+  on_failure=$(echo "$config" | jq -r '."hooks-on-failure" // empty' 2>/dev/null || true)
+  if [ "$on_failure" = "block" ]; then
+    test_pass "hooks-on-failure defaults to 'block'"
+  else
+    test_fail "hooks-on-failure should default to 'block' (got: $on_failure)"
+  fi
+
+  teardown_test_env
+}
+
 #-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
@@ -4291,6 +4363,7 @@ ALL_TESTS=(
   test_check_missing_partial
   test_check_invalid_nix_syntax
   test_check_exit_codes
+  test_default_config_has_hooks
 )
 
 # Run a single test in isolation and write results to file
