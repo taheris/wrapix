@@ -2004,51 +2004,155 @@ test_happy_path() {
   teardown_test_env
 }
 
+# Data-driven configuration tests
+# Consolidates 8 configuration tests into 1 parameterized test:
+# - test_config_spec_hidden_true/false
+# - test_config_beads_priority
+# - test_config_loop_max_iterations
+# - test_config_loop_pause_on_failure_true/false
+# - test_config_loop_hooks
+# - test_config_failure_patterns
+test_config_data_driven() {
+  CURRENT_TEST="config_data_driven"
+  test_header "Config: Data-driven tests"
+
+  # Test case definitions: name, setup function, run function, assertion function
+  # Each test case runs in its own setup/teardown cycle
+
+  #---------------------------------------------------------------------------
+  # Test case: spec.hidden=true (--hidden flag)
+  #---------------------------------------------------------------------------
+  run_config_test "spec_hidden_true" \
+    "Flag: --hidden creates spec in state/" \
+    config_setup_spec_hidden_true \
+    config_run_spec_hidden_true \
+    config_assert_spec_hidden_true
+
+  #---------------------------------------------------------------------------
+  # Test case: spec.hidden=false (-n flag)
+  #---------------------------------------------------------------------------
+  run_config_test "spec_hidden_false" \
+    "Flag: -n creates spec in specs/" \
+    config_setup_spec_hidden_false \
+    config_run_spec_hidden_false \
+    config_assert_spec_hidden_false
+
+  #---------------------------------------------------------------------------
+  # Test case: beads.priority affects issue priority
+  #---------------------------------------------------------------------------
+  run_config_test "beads_priority" \
+    "Config: beads.priority" \
+    config_setup_beads_priority \
+    config_run_beads_priority \
+    config_assert_beads_priority
+
+  #---------------------------------------------------------------------------
+  # Test case: loop.max-iterations limits iterations
+  #---------------------------------------------------------------------------
+  run_config_test "loop_max_iterations" \
+    "Config: loop.max-iterations" \
+    config_setup_loop_max_iterations \
+    config_run_loop_max_iterations \
+    config_assert_loop_max_iterations
+
+  #---------------------------------------------------------------------------
+  # Test case: loop.pause-on-failure=true stops on failure
+  #---------------------------------------------------------------------------
+  run_config_test "loop_pause_on_failure_true" \
+    "Config: loop.pause-on-failure=true" \
+    config_setup_loop_pause_on_failure_true \
+    config_run_loop_pause_on_failure_true \
+    config_assert_loop_pause_on_failure_true
+
+  #---------------------------------------------------------------------------
+  # Test case: loop.pause-on-failure=false continues on failure
+  #---------------------------------------------------------------------------
+  run_config_test "loop_pause_on_failure_false" \
+    "Config: loop.pause-on-failure=false" \
+    config_setup_loop_pause_on_failure_false \
+    config_run_loop_pause_on_failure_false \
+    config_assert_loop_pause_on_failure_false
+
+  #---------------------------------------------------------------------------
+  # Test case: loop.pre-hook and loop.post-hook
+  #---------------------------------------------------------------------------
+  run_config_test "loop_hooks" \
+    "Config: loop.pre-hook and post-hook" \
+    config_setup_loop_hooks \
+    config_run_loop_hooks \
+    config_assert_loop_hooks
+
+  #---------------------------------------------------------------------------
+  # Test case: failure-patterns detection
+  #---------------------------------------------------------------------------
+  run_config_test "failure_patterns" \
+    "Config: failure-patterns" \
+    config_setup_failure_patterns \
+    config_run_failure_patterns \
+    config_assert_failure_patterns
+}
+
+# Helper: run a single config test case with setup/teardown
+run_config_test() {
+  local test_name="$1"
+  local description="$2"
+  local setup_fn="$3"
+  local run_fn="$4"
+  local assert_fn="$5"
+
+  echo ""
+  echo -e "  ${CYAN}--- $description ---${NC}"
+
+  setup_test_env "config-$test_name"
+
+  # Run setup, execution, and assertion phases
+  "$setup_fn"
+  "$run_fn"
+  "$assert_fn"
+
+  teardown_test_env
+}
+
 #-----------------------------------------------------------------------------
-# Config Behavior Tests
+# Config test case: spec_hidden_true
 #-----------------------------------------------------------------------------
-
-# Test: --hidden flag places spec in state/ and doesn't update README
-test_config_spec_hidden_true() {
-  CURRENT_TEST="config_spec_hidden_true"
-  test_header "Flag: --hidden"
-
-  setup_test_env "spec-hidden-true"
-
-  local label="hidden-test"
-  export LABEL="$label"
-  export SPEC_PATH="$RALPH_DIR/state/$label.md"
-
-  # Use happy-path scenario which creates spec file
+config_setup_spec_hidden_true() {
+  CONFIG_LABEL="hidden-test"
+  export LABEL="$CONFIG_LABEL"
+  export SPEC_PATH="$RALPH_DIR/state/$CONFIG_LABEL.md"
   export MOCK_SCENARIO="$SCENARIOS_DIR/happy-path.sh"
+}
 
-  # Run ralph plan with --hidden flag
+config_run_spec_hidden_true() {
   set +e
-  ralph-plan --hidden "$label" >/dev/null 2>&1
+  ralph-plan --hidden "$CONFIG_LABEL" >/dev/null 2>&1
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # Check that spec was created in state/ (hidden location)
-  if [ -f "$RALPH_DIR/state/$label.md" ]; then
+config_assert_spec_hidden_true() {
+  # Spec created in state/ (hidden location)
+  if [ -f "$RALPH_DIR/state/$CONFIG_LABEL.md" ]; then
     test_pass "Spec created in state/ directory (hidden)"
   else
     test_fail "Spec should be created in state/ when --hidden flag used"
   fi
 
-  # Check that spec was NOT created in specs/
-  if [ ! -f "specs/$label.md" ]; then
+  # Spec NOT created in specs/
+  if [ ! -f "specs/$CONFIG_LABEL.md" ]; then
     test_pass "Spec NOT created in specs/ (correct for --hidden)"
   else
     test_fail "Spec should NOT be created in specs/ when --hidden flag used"
   fi
 
-  # Check that specs/README.md was NOT updated with this label
+  # README.md not updated
   if [ -f "specs/README.md" ]; then
-    assert_file_not_contains "specs/README.md" "$label" "README should not mention hidden spec"
+    assert_file_not_contains "specs/README.md" "$CONFIG_LABEL" "README should not mention hidden spec"
   else
     test_pass "README.md unchanged (expected for hidden spec)"
   fi
 
-  # Verify current.json has hidden=true
+  # current.json has hidden=true
   local hidden_value
   hidden_value=$(jq -r '.hidden // false' "$RALPH_DIR/state/current.json" 2>/dev/null || echo "false")
   if [ "$hidden_value" = "true" ]; then
@@ -2056,44 +2160,41 @@ test_config_spec_hidden_true() {
   else
     test_fail "current.json should have hidden=true"
   fi
-
-  teardown_test_env
 }
 
-# Test: no --hidden flag (default) places spec in specs/
-test_config_spec_hidden_false() {
-  CURRENT_TEST="config_spec_hidden_false"
-  test_header "Flag: -n creates spec in specs/"
-
-  setup_test_env "spec-hidden-false"
-
-  local label="visible-test"
-  export LABEL="$label"
-  export SPEC_PATH="specs/$label.md"
-
-  # Use happy-path scenario which creates spec file
+#-----------------------------------------------------------------------------
+# Config test case: spec_hidden_false
+#-----------------------------------------------------------------------------
+config_setup_spec_hidden_false() {
+  CONFIG_LABEL="visible-test"
+  export LABEL="$CONFIG_LABEL"
+  export SPEC_PATH="specs/$CONFIG_LABEL.md"
   export MOCK_SCENARIO="$SCENARIOS_DIR/happy-path.sh"
+}
 
-  # Run ralph plan with -n flag (new spec in specs/)
+config_run_spec_hidden_false() {
   set +e
-  ralph-plan -n "$label" >/dev/null 2>&1
+  ralph-plan -n "$CONFIG_LABEL" >/dev/null 2>&1
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # Check that spec was created in specs/ (visible location)
-  if [ -f "specs/$label.md" ]; then
+config_assert_spec_hidden_false() {
+  # Spec created in specs/ (visible location)
+  if [ -f "specs/$CONFIG_LABEL.md" ]; then
     test_pass "Spec created in specs/ directory (visible)"
   else
     test_fail "Spec should be created in specs/ with -n flag"
   fi
 
-  # Check that spec was NOT created in state/
-  if [ ! -f "$RALPH_DIR/state/$label.md" ]; then
+  # Spec NOT created in state/
+  if [ ! -f "$RALPH_DIR/state/$CONFIG_LABEL.md" ]; then
     test_pass "Spec NOT created in state/ (correct for default)"
   else
     test_fail "Spec should NOT be created in state/ without --hidden flag"
   fi
 
-  # Verify current.json has hidden=false
+  # current.json has hidden=false
   local hidden_value
   hidden_value=$(jq -r '.hidden // false' "$RALPH_DIR/state/current.json" 2>/dev/null || echo "false")
   if [ "$hidden_value" = "false" ]; then
@@ -2101,16 +2202,13 @@ test_config_spec_hidden_false() {
   else
     test_fail "current.json should have hidden=false"
   fi
-
-  teardown_test_env
 }
 
-# Test: beads.priority configuration affects issue priority
-test_config_beads_priority() {
-  CURRENT_TEST="config_beads_priority"
-  test_header "Config: beads.priority"
-
-  setup_test_env "beads-priority"
+#-----------------------------------------------------------------------------
+# Config test case: beads_priority
+#-----------------------------------------------------------------------------
+config_setup_beads_priority() {
+  CONFIG_LABEL="priority-test"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/priority-test.md" << 'EOF'
@@ -2120,50 +2218,37 @@ test_config_beads_priority() {
 - Task with configured priority
 EOF
 
-  # Set up label
-  local label="priority-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
-  export LABEL="$label"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  export LABEL="$CONFIG_LABEL"
 
-  # Test 1: Create issue with priority 1 (high)
+  # Config with priority 1
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
   beads.priority = 1;
 }
 EOF
-
-  # Create a task directly with priority 1
-  TASK1_ID=$(bd create --title="High priority task" --type=task --labels="spec-$label" --priority=1 --json 2>/dev/null | jq -r '.id')
-  test_pass "Created task with priority 1: $TASK1_ID"
-
-  # Verify priority is 1
-  assert_bead_priority "$TASK1_ID" "1" "Task should have priority 1 (high)"
-
-  # Test 2: Create issue with priority 3 (low)
-  TASK2_ID=$(bd create --title="Low priority task" --type=task --labels="spec-$label" --priority=3 --json 2>/dev/null | jq -r '.id')
-  test_pass "Created task with priority 3: $TASK2_ID"
-
-  # Verify priority is 3
-  assert_bead_priority "$TASK2_ID" "3" "Task should have priority 3 (low)"
-
-  # Test 3: Create issue with default priority (2)
-  TASK3_ID=$(bd create --title="Default priority task" --type=task --labels="spec-$label" --json 2>/dev/null | jq -r '.id')
-  test_pass "Created task with default priority: $TASK3_ID"
-
-  # Default priority should be 2
-  assert_bead_priority "$TASK3_ID" "2" "Task should have default priority 2"
-
-  teardown_test_env
 }
 
-# Test: loop.max-iterations stops loop after N iterations
-test_config_loop_max_iterations() {
-  CURRENT_TEST="config_loop_max_iterations"
-  test_header "Config: loop.max-iterations"
+config_run_beads_priority() {
+  # Create tasks with different priorities
+  TASK1_ID=$(bd create --title="High priority task" --type=task --labels="spec-$CONFIG_LABEL" --priority=1 --json 2>/dev/null | jq -r '.id')
+  TASK2_ID=$(bd create --title="Low priority task" --type=task --labels="spec-$CONFIG_LABEL" --priority=3 --json 2>/dev/null | jq -r '.id')
+  TASK3_ID=$(bd create --title="Default priority task" --type=task --labels="spec-$CONFIG_LABEL" --json 2>/dev/null | jq -r '.id')
+  test_pass "Created tasks with priorities 1, 3, and default"
+}
 
-  setup_test_env "loop-max-iter"
+config_assert_beads_priority() {
+  assert_bead_priority "$TASK1_ID" "1" "Task should have priority 1 (high)"
+  assert_bead_priority "$TASK2_ID" "3" "Task should have priority 3 (low)"
+  assert_bead_priority "$TASK3_ID" "2" "Task should have default priority 2"
+}
 
-  # Create a spec file
+#-----------------------------------------------------------------------------
+# Config test case: loop_max_iterations
+#-----------------------------------------------------------------------------
+config_setup_loop_max_iterations() {
+  CONFIG_LABEL="iter-test"
+
   cat > "$TEST_DIR/specs/iter-test.md" << 'EOF'
 # Iteration Test
 
@@ -2171,11 +2256,8 @@ test_config_loop_max_iterations() {
 - Multiple tasks to test iteration limit
 EOF
 
-  # Set up label
-  local label="iter-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create config with max-iterations = 2
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
   beads.priority = 2;
@@ -2188,56 +2270,43 @@ EOF
 
   # Create 5 tasks (more than max-iterations)
   for i in 1 2 3 4 5; do
-    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
   done
-
   test_pass "Created 5 tasks"
 
-  # Count initial open tasks
-  local initial_count
-  initial_count=$(bd list --label "spec-$label" --status=open --json 2>/dev/null | jq 'length')
-  test_pass "Initial open tasks: $initial_count"
+  CONFIG_INITIAL_COUNT=$(bd list --label "spec-$CONFIG_LABEL" --status=open --json 2>/dev/null | jq 'length')
+  test_pass "Initial open tasks: $CONFIG_INITIAL_COUNT"
+}
 
-  # Use complete scenario
+config_run_loop_max_iterations() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
-
-  # Run ralph loop - it should stop after 2 iterations due to max-iterations
-  # Note: The current loop.sh doesn't implement max-iterations yet
-  # This test documents the expected behavior and will pass when implemented
   set +e
-  OUTPUT=$(timeout 30 ralph-loop 2>&1)
-  EXIT_CODE=$?
+  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # Count remaining open tasks
+config_assert_loop_max_iterations() {
   local final_count
-  final_count=$(bd list --label "spec-$label" --status=open --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  final_count=$(bd list --label "spec-$CONFIG_LABEL" --status=open --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
-  # NOTE: Current loop.sh doesn't implement max-iterations
-  # When not implemented, all 5 tasks get completed
-  # When implemented, only 2 should be completed (3 remaining)
   if [ "$final_count" -eq 3 ]; then
     test_pass "Loop stopped after max-iterations (3 tasks remain)"
   elif [ "$final_count" -eq 0 ]; then
-    # Current behavior: loop.sh doesn't read max-iterations config
     echo "  NOTE: max-iterations not yet implemented in loop.sh"
     echo "        Expected 3 remaining tasks, but loop completed all"
     test_skip "loop.max-iterations (not yet implemented)"
   else
     test_fail "Expected 3 remaining tasks after max-iterations=2, got $final_count"
   fi
-
-  teardown_test_env
 }
 
-# Test: loop.pause-on-failure=true stops loop on step failure
-test_config_loop_pause_on_failure_true() {
-  CURRENT_TEST="config_loop_pause_on_failure_true"
-  test_header "Config: loop.pause-on-failure=true"
+#-----------------------------------------------------------------------------
+# Config test case: loop_pause_on_failure_true
+#-----------------------------------------------------------------------------
+config_setup_loop_pause_on_failure_true() {
+  CONFIG_LABEL="pause-test"
 
-  setup_test_env "pause-on-failure"
-
-  # Create a spec file
   cat > "$TEST_DIR/specs/pause-test.md" << 'EOF'
 # Pause Test
 
@@ -2245,11 +2314,8 @@ test_config_loop_pause_on_failure_true() {
 - Test pause on failure behavior
 EOF
 
-  # Set up label
-  local label="pause-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create config with pause-on-failure = true (default)
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
   beads.priority = 2;
@@ -2259,32 +2325,29 @@ EOF
 }
 EOF
 
-  # Create 3 tasks
   for i in 1 2 3; do
-    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
   done
-
   test_pass "Created 3 tasks"
+}
 
-  # Use blocked scenario which returns RALPH_BLOCKED
+config_run_loop_pause_on_failure_true() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/blocked.sh"
-
-  # Run ralph loop - should stop after first failure
   set +e
-  OUTPUT=$(timeout 30 ralph-loop 2>&1)
-  EXIT_CODE=$?
+  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # Loop should exit non-zero due to the blocked signal
-  if [ "$EXIT_CODE" -ne 0 ]; then
-    test_pass "Loop exited with non-zero on failure (exit code: $EXIT_CODE)"
+config_assert_loop_pause_on_failure_true() {
+  if [ "$CONFIG_EXIT_CODE" -ne 0 ]; then
+    test_pass "Loop exited with non-zero on failure (exit code: $CONFIG_EXIT_CODE)"
   else
     test_fail "Loop should exit non-zero when pause-on-failure=true and step fails"
   fi
 
-  # Check that only 1 task was attempted (marked in_progress)
   local in_progress_count
-  in_progress_count=$(bd list --label "spec-$label" --status=in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  in_progress_count=$(bd list --label "spec-$CONFIG_LABEL" --status=in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   if [ "$in_progress_count" -ge 1 ]; then
     test_pass "At least 1 task was attempted (found $in_progress_count in_progress)"
@@ -2292,27 +2355,22 @@ EOF
     test_fail "Expected at least 1 task to be in_progress"
   fi
 
-  # Verify loop paused (didn't process all tasks)
   local closed_count
-  closed_count=$(bd list --label "spec-$label" --status=closed --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+  closed_count=$(bd list --label "spec-$CONFIG_LABEL" --status=closed --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
   if [ "$closed_count" -eq 0 ]; then
     test_pass "Loop paused - no tasks closed (correct for RALPH_BLOCKED)"
   else
     test_fail "Expected 0 closed tasks when blocked, got $closed_count"
   fi
-
-  teardown_test_env
 }
 
-# Test: loop.pause-on-failure=false continues after failure
-test_config_loop_pause_on_failure_false() {
-  CURRENT_TEST="config_loop_pause_on_failure_false"
-  test_header "Config: loop.pause-on-failure=false"
+#-----------------------------------------------------------------------------
+# Config test case: loop_pause_on_failure_false
+#-----------------------------------------------------------------------------
+config_setup_loop_pause_on_failure_false() {
+  CONFIG_LABEL="continue-test"
 
-  setup_test_env "continue-on-failure"
-
-  # Create a spec file
   cat > "$TEST_DIR/specs/continue-test.md" << 'EOF'
 # Continue Test
 
@@ -2320,11 +2378,8 @@ test_config_loop_pause_on_failure_false() {
 - Test continue on failure behavior
 EOF
 
-  # Set up label
-  local label="continue-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create config with pause-on-failure = false
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
   beads.priority = 2;
@@ -2334,48 +2389,36 @@ EOF
 }
 EOF
 
-  # Create 3 tasks
   for i in 1 2 3; do
-    bd create --title="Task $i" --type=task --labels="spec-$label" >/dev/null 2>&1
+    bd create --title="Task $i" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
   done
-
   test_pass "Created 3 tasks"
+}
 
-  # NOTE: Current loop.sh always pauses on failure (doesn't read config)
-  # This test documents expected behavior when pause-on-failure=false is implemented
-  # When implemented, loop should skip failed task and continue with others
-
-  # Use blocked scenario for first task, then complete for others
-  # Since we can't change scenario mid-run, this test verifies current behavior
+config_run_loop_pause_on_failure_false() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/blocked.sh"
-
   set +e
-  OUTPUT=$(timeout 30 ralph-loop 2>&1)
-  EXIT_CODE=$?
+  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # Current behavior: loop exits on first failure regardless of config
-  # Expected behavior when implemented: loop continues after failure
-  if [ "$EXIT_CODE" -ne 0 ]; then
+config_assert_loop_pause_on_failure_false() {
+  if [ "$CONFIG_EXIT_CODE" -ne 0 ]; then
     echo "  NOTE: pause-on-failure=false not yet implemented in loop.sh"
     echo "        Loop currently always pauses on failure"
     test_skip "loop.pause-on-failure=false (not yet implemented)"
   else
-    # If it passes, the feature was implemented
     test_pass "Loop continued despite failure (pause-on-failure=false working)"
   fi
-
-  teardown_test_env
 }
 
-# Test: loop.pre-hook and loop.post-hook execute around iterations
-test_config_loop_hooks() {
-  CURRENT_TEST="config_loop_hooks"
-  test_header "Config: loop.pre-hook and post-hook"
+#-----------------------------------------------------------------------------
+# Config test case: loop_hooks
+#-----------------------------------------------------------------------------
+config_setup_loop_hooks() {
+  CONFIG_LABEL="hooks-test"
 
-  setup_test_env "loop-hooks"
-
-  # Create a spec file
   cat > "$TEST_DIR/specs/hooks-test.md" << 'EOF'
 # Hooks Test
 
@@ -2383,66 +2426,55 @@ test_config_loop_hooks() {
 - Test pre-hook and post-hook execution
 EOF
 
-  # Set up label
-  local label="hooks-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create marker file paths
-  local pre_hook_marker="$TEST_DIR/pre-hook-marker"
-  local post_hook_marker="$TEST_DIR/post-hook-marker"
+  CONFIG_PRE_HOOK_MARKER="$TEST_DIR/pre-hook-marker"
+  CONFIG_POST_HOOK_MARKER="$TEST_DIR/post-hook-marker"
 
-  # Create config with hooks that write to marker files
   cat > "$RALPH_DIR/config.nix" << EOF
 {
   beads.priority = 2;
   loop = {
-    pre-hook = "echo pre >> $pre_hook_marker";
-    post-hook = "echo post >> $post_hook_marker";
+    pre-hook = "echo pre >> $CONFIG_PRE_HOOK_MARKER";
+    post-hook = "echo post >> $CONFIG_POST_HOOK_MARKER";
   };
 }
 EOF
 
-  # Create a single task
-  bd create --title="Hook test task" --type=task --labels="spec-$label" >/dev/null 2>&1
-
+  bd create --title="Hook test task" --type=task --labels="spec-$CONFIG_LABEL" >/dev/null 2>&1
   test_pass "Created 1 task"
+}
 
-  # Use complete scenario
+config_run_loop_hooks() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
-
-  # Run ralph loop
   set +e
   ralph-loop >/dev/null 2>&1
-  EXIT_CODE=$?
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # NOTE: Current loop.sh doesn't implement hooks
-  # Check if hooks were executed by looking for marker files
-  if [ -f "$pre_hook_marker" ]; then
+config_assert_loop_hooks() {
+  if [ -f "$CONFIG_PRE_HOOK_MARKER" ]; then
     test_pass "pre-hook executed (marker file created)"
   else
     echo "  NOTE: loop.pre-hook not yet implemented in loop.sh"
     test_skip "loop.pre-hook (not yet implemented)"
   fi
 
-  if [ -f "$post_hook_marker" ]; then
+  if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
     test_pass "post-hook executed (marker file created)"
   else
     echo "  NOTE: loop.post-hook not yet implemented in loop.sh"
     test_skip "loop.post-hook (not yet implemented)"
   fi
-
-  teardown_test_env
 }
 
-# Test: failure-patterns configuration triggers actions
-test_config_failure_patterns() {
-  CURRENT_TEST="config_failure_patterns"
-  test_header "Config: failure-patterns"
+#-----------------------------------------------------------------------------
+# Config test case: failure_patterns
+#-----------------------------------------------------------------------------
+config_setup_failure_patterns() {
+  CONFIG_LABEL="pattern-test"
 
-  setup_test_env "failure-patterns"
-
-  # Create a spec file
   cat > "$TEST_DIR/specs/pattern-test.md" << 'EOF'
 # Pattern Test
 
@@ -2450,11 +2482,8 @@ test_config_failure_patterns() {
 - Test failure pattern detection
 EOF
 
-  # Set up label
-  local label="pattern-test"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+  echo "{\"label\":\"$CONFIG_LABEL\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create config with custom failure patterns
   cat > "$RALPH_DIR/config.nix" << 'EOF'
 {
   beads.priority = 2;
@@ -2465,42 +2494,32 @@ EOF
 }
 EOF
 
-  # Create a task
-  TASK_ID=$(bd create --title="Pattern test task" --type=task --labels="spec-$label" --json 2>/dev/null | jq -r '.id')
+  CONFIG_TASK_ID=$(bd create --title="Pattern test task" --type=task --labels="spec-$CONFIG_LABEL" --json 2>/dev/null | jq -r '.id')
+  test_pass "Created task: $CONFIG_TASK_ID"
+}
 
-  test_pass "Created task: $TASK_ID"
-
-  # Use failure-pattern scenario that outputs CUSTOM_ERROR:
+config_run_failure_patterns() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/failure-pattern.sh"
   export MOCK_FAILURE_OUTPUT="CUSTOM_ERROR: Something went wrong"
-
-  # Run ralph step
   set +e
-  OUTPUT=$(ralph-step 2>&1)
-  EXIT_CODE=$?
+  CONFIG_OUTPUT=$(ralph-step 2>&1)
+  CONFIG_EXIT_CODE=$?
   set -e
+}
 
-  # NOTE: Current step.sh doesn't implement failure-pattern detection
-  # It only looks for RALPH_COMPLETE, RALPH_BLOCKED, etc.
-
-  # The task completes because RALPH_COMPLETE is still output
-  # Failure patterns would need to be checked in addition to exit signals
+config_assert_failure_patterns() {
   local task_status
-  task_status=$(bd show "$TASK_ID" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+  task_status=$(bd show "$CONFIG_TASK_ID" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
 
   if [ "$task_status" = "closed" ]; then
-    # Task closed means RALPH_COMPLETE was detected, but failure pattern wasn't
     echo "  NOTE: failure-patterns detection not yet implemented"
     echo "        Task completed despite CUSTOM_ERROR: pattern in output"
     test_skip "failure-patterns (not yet implemented)"
   elif [ "$task_status" = "in_progress" ]; then
-    # If task stayed in_progress, failure pattern was detected
     test_pass "Failure pattern detected, task stayed in_progress"
   else
     test_fail "Unexpected task status: $task_status"
   fi
-
-  teardown_test_env
 }
 
 # Test: plan flag validation - ralph plan requires mode flag
@@ -3861,14 +3880,7 @@ ALL_TESTS=(
   test_plan_flag_validation
   test_update_mode
   test_discovered_work
-  test_config_spec_hidden_true
-  test_config_spec_hidden_false
-  test_config_beads_priority
-  test_config_loop_max_iterations
-  test_config_loop_pause_on_failure_true
-  test_config_loop_pause_on_failure_false
-  test_config_loop_hooks
-  test_config_failure_patterns
+  test_config_data_driven
   test_diff_no_changes
   test_diff_local_modifications
   test_diff_specific_template
