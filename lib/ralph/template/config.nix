@@ -40,9 +40,22 @@
   loop = {
     max-iterations = 0; # 0 = infinite
     pause-on-failure = true;
-    pre-hook = ""; # Command to run before each iteration
-    post-hook = ""; # Command to run after each iteration
+    # Legacy hooks (deprecated, use 'hooks' section instead)
+    pre-hook = ""; # Command to run before each iteration (maps to hooks.pre-step)
+    post-hook = ""; # Command to run after each iteration (maps to hooks.post-step)
   };
+
+  # Hook points for ralph loop (FR2)
+  # Template variables: {{LABEL}}, {{ISSUE_ID}}, {{STEP_COUNT}}, {{STEP_EXIT_CODE}}
+  hooks = {
+    pre-loop = ""; # Before any work starts
+    pre-step = ""; # Before each ralph-step
+    post-step = ""; # After each ralph-step
+    post-loop = ""; # After all work complete
+  };
+
+  # Hook failure handling (FR5): block | warn | skip
+  hooks-on-failure = "block";
 
   history = {
     enabled = true;
