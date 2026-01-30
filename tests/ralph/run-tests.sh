@@ -427,7 +427,7 @@ EOF
   # Symlink ralph commands from SOURCE (not installed) to test latest code
   # This ensures tests verify the actual source, not a potentially stale build
   RALPH_SRC_DIR="$REPO_ROOT/lib/ralph/cmd"
-  for cmd in ralph-step ralph-loop ralph-ready ralph-plan ralph-status ralph-diff; do
+  for cmd in ralph-step ralph-loop ralph-ready ralph-plan ralph-status ralph-diff ralph-sync; do
     local script_name="${cmd#ralph-}"  # Remove 'ralph-' prefix
     if [ -f "$RALPH_SRC_DIR/$script_name.sh" ]; then
       ln -sf "$RALPH_SRC_DIR/$script_name.sh" "$TEST_DIR/bin/$cmd"
@@ -3330,6 +3330,262 @@ test_diff_invalid_template() {
 }
 
 #-----------------------------------------------------------------------------
+# Ralph Sync Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph sync - fresh project with no existing templates
+test_sync_fresh() {
+  CURRENT_TEST="sync_fresh"
+  test_header "ralph sync - fresh project (no existing templates)"
+
+  setup_test_env "sync-fresh"
+
+  # Remove templates created by setup_test_env (simulates fresh project)
+  rm -rf "$RALPH_DIR/templates"
+  rm -f "$RALPH_DIR/step.md" "$RALPH_DIR/plan.md" "$RALPH_DIR/ready.md"
+
+  # Run ralph sync
+  set +e
+  local output
+  output=$(ralph-sync 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph sync should succeed"
+
+  # Should create templates directory
+  if [ -d "$RALPH_DIR/templates" ]; then
+    test_pass "Templates directory created"
+  else
+    test_fail "Templates directory should be created"
+  fi
+
+  # Should copy step.md, plan.md, ready.md
+  assert_file_exists "$RALPH_DIR/templates/step.md" "step.md should be copied"
+  assert_file_exists "$RALPH_DIR/templates/plan.md" "plan.md should be copied"
+  assert_file_exists "$RALPH_DIR/templates/ready.md" "ready.md should be copied"
+
+  # Should copy variant templates
+  assert_file_exists "$RALPH_DIR/templates/plan-new.md" "plan-new.md should be copied"
+  assert_file_exists "$RALPH_DIR/templates/ready-new.md" "ready-new.md should be copied"
+
+  # Should NOT create backup directory (nothing to backup)
+  if [ -d "$RALPH_DIR/backup" ]; then
+    test_fail "Backup directory should NOT be created for fresh project"
+  else
+    test_pass "No backup directory for fresh project"
+  fi
+
+  # Output should indicate copying
+  if echo "$output" | grep -qi "copying\|copied\|fresh"; then
+    test_pass "Output indicates templates were copied"
+  else
+    test_fail "Output should mention copying templates"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph sync - existing project with customizations (backup created)
+test_sync_backup() {
+  CURRENT_TEST="sync_backup"
+  test_header "ralph sync - existing project with customizations (backup created)"
+
+  setup_test_env "sync-backup"
+
+  # Create templates directory with customized content
+  mkdir -p "$RALPH_DIR/templates"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
+
+  # Add local customizations to step.md
+  {
+    echo ""
+    echo "# My Custom Instructions"
+    echo "This is a local customization that should be backed up."
+  } >> "$RALPH_DIR/templates/step.md"
+
+  # Run ralph sync
+  set +e
+  local output
+  output=$(ralph-sync 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph sync should succeed"
+
+  # Should create backup directory
+  if [ -d "$RALPH_DIR/backup" ]; then
+    test_pass "Backup directory created"
+  else
+    test_fail "Backup directory should be created for customized templates"
+  fi
+
+  # Should backup the customized step.md
+  assert_file_exists "$RALPH_DIR/backup/step.md" "Customized step.md should be backed up"
+
+  # Backup should contain our customization
+  if grep -q "My Custom Instructions" "$RALPH_DIR/backup/step.md" 2>/dev/null; then
+    test_pass "Backup contains local customizations"
+  else
+    test_fail "Backup should contain local customizations"
+  fi
+
+  # Templates should now match packaged (fresh copy)
+  if diff -q "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md" >/dev/null 2>&1; then
+    test_pass "Templates updated to match packaged"
+  else
+    test_fail "Templates should match packaged after sync"
+  fi
+
+  # plan.md should NOT be backed up (no local changes)
+  if [ -f "$RALPH_DIR/backup/plan.md" ]; then
+    test_fail "Unmodified plan.md should NOT be backed up"
+  else
+    test_pass "Unmodified templates not backed up"
+  fi
+
+  # Output should indicate backup
+  if echo "$output" | grep -qi "backup\|backed up"; then
+    test_pass "Output indicates backup was created"
+  else
+    test_fail "Output should mention backup"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph sync --dry-run - shows changes but doesn't execute
+test_sync_dry_run() {
+  CURRENT_TEST="sync_dry_run"
+  test_header "ralph sync --dry-run - shows changes but doesn't execute"
+
+  setup_test_env "sync-dry-run"
+
+  # Create templates directory with customized content
+  mkdir -p "$RALPH_DIR/templates"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
+  echo "# My Customization" >> "$RALPH_DIR/templates/step.md"
+
+  # Record state before dry-run
+  local original_content
+  original_content=$(cat "$RALPH_DIR/templates/step.md")
+
+  # Run ralph sync --dry-run
+  set +e
+  local output
+  output=$(ralph-sync --dry-run 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph sync --dry-run should succeed"
+
+  # Output should indicate dry-run mode
+  if echo "$output" | grep -qi "dry.run\|DRY RUN\|dry run"; then
+    test_pass "Output indicates dry-run mode"
+  else
+    test_fail "Output should mention dry-run mode"
+  fi
+
+  # Templates should NOT have changed
+  local current_content
+  current_content=$(cat "$RALPH_DIR/templates/step.md")
+  if [ "$original_content" = "$current_content" ]; then
+    test_pass "Templates unchanged in dry-run mode"
+  else
+    test_fail "Dry-run should not modify templates"
+  fi
+
+  # Backup directory should NOT be created
+  if [ -d "$RALPH_DIR/backup" ]; then
+    test_fail "Backup should NOT be created in dry-run mode"
+  else
+    test_pass "No backup created in dry-run mode"
+  fi
+
+  # Output should show what would be done
+  if echo "$output" | grep -qi "backup\|copying\|step"; then
+    test_pass "Dry-run shows planned actions"
+  else
+    test_fail "Dry-run should show what would be done"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph sync - partial directory handling
+test_sync_partials() {
+  CURRENT_TEST="sync_partials"
+  test_header "ralph sync - partial directory handling"
+
+  setup_test_env "sync-partials"
+
+  # Remove any existing templates
+  rm -rf "$RALPH_DIR/templates"
+
+  # Run ralph sync
+  set +e
+  local output
+  output=$(ralph-sync 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph sync should succeed"
+
+  # Should create partial directory
+  if [ -d "$RALPH_DIR/templates/partial" ]; then
+    test_pass "Partial directory created"
+  else
+    test_fail "Partial directory should be created"
+  fi
+
+  # Should copy partial templates
+  assert_file_exists "$RALPH_DIR/templates/partial/context-pinning.md" "context-pinning.md partial should be copied"
+  assert_file_exists "$RALPH_DIR/templates/partial/exit-signals.md" "exit-signals.md partial should be copied"
+  assert_file_exists "$RALPH_DIR/templates/partial/spec-header.md" "spec-header.md partial should be copied"
+
+  # Now test backup of customized partials
+  echo "# My Custom Context" >> "$RALPH_DIR/templates/partial/context-pinning.md"
+
+  # Run sync again
+  set +e
+  output=$(ralph-sync 2>&1)
+  exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "Second ralph sync should succeed"
+
+  # Should backup customized partial
+  if [ -d "$RALPH_DIR/backup/partial" ]; then
+    test_pass "Backup partial directory created"
+  else
+    test_fail "Backup should include partial directory for customized partials"
+  fi
+
+  assert_file_exists "$RALPH_DIR/backup/partial/context-pinning.md" "Customized partial should be backed up"
+
+  # Backup should contain customization
+  if grep -q "My Custom Context" "$RALPH_DIR/backup/partial/context-pinning.md" 2>/dev/null; then
+    test_pass "Partial backup contains customizations"
+  else
+    test_fail "Partial backup should contain customizations"
+  fi
+
+  # Templates should be fresh (match packaged)
+  if diff -q "$RALPH_TEMPLATE_DIR/partial/context-pinning.md" "$RALPH_DIR/templates/partial/context-pinning.md" >/dev/null 2>&1; then
+    test_pass "Partial templates refreshed to match packaged"
+  else
+    test_fail "Partial templates should match packaged after sync"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -3369,6 +3625,10 @@ ALL_TESTS=(
   test_diff_specific_template
   test_diff_missing_local_templates
   test_diff_invalid_template
+  test_sync_fresh
+  test_sync_backup
+  test_sync_dry_run
+  test_sync_partials
 )
 
 # Run a single test in isolation and write results to file
