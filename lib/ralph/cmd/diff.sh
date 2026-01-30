@@ -44,7 +44,7 @@ show_usage() {
   echo "  RALPH_DIR           Ralph directory (default: .claude/ralph)"
   echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
   echo ""
-  echo "Local templates are at: \$RALPH_DIR/templates/"
+  echo "Local templates are at: \$RALPH_DIR/template/"
 }
 
 # Check for help flag
@@ -108,7 +108,7 @@ diff_output=""
 
 for template in "${TEMPLATES[@]}"; do
   ext=$(get_extension "$template")
-  local_file="$RALPH_DIR/templates/${template}${ext}"
+  local_file="$RALPH_DIR/template/${template}${ext}"
   packaged_file="$PACKAGED_DIR/${template}${ext}"
 
   # Skip if local file doesn't exist (not customized)
