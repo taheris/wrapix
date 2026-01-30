@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 COUNT="${1:-5}"
 
 LOGS_PATTERN="$RALPH_DIR/logs/work-*.log"

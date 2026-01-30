@@ -204,15 +204,15 @@ ralph sync --dry-run # Preview changes without executing
 
 Synchronizes local templates with packaged versions:
 
-1. Creates `.claude/ralph/templates/` with fresh packaged templates
-2. Moves existing customized templates to `.claude/ralph/backup/`
+1. Creates `.ralph/template/` with fresh packaged templates
+2. Moves existing customized templates to `.ralph/backup/`
 3. Copies all templates including variants and `partial/` directory
 
 **Directory structure after sync:**
 ```
-.claude/ralph/
+.ralph/
 ├── config.nix
-├── templates/           # Fresh from packaged
+├── template/            # Fresh from packaged
 │   ├── partial/
 │   │   ├── context-pinning.md
 │   │   ├── exit-signals.md
@@ -342,7 +342,7 @@ lib/ralph/template/
 
 ## Project Configuration
 
-Projects configure ralph via `.ralph/config.nix`:
+Projects configure ralph via `.ralph/config.nix` (local project overrides):
 
 ```nix
 # .ralph/config.nix

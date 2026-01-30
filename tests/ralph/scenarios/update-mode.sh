@@ -16,7 +16,7 @@
 # State tracking (set by test harness)
 # LABEL - feature label (e.g., "test-feature")
 # TEST_DIR - test directory root
-# RALPH_DIR - ralph directory (typically .claude/ralph)
+# RALPH_DIR - ralph directory (typically .ralph)
 
 phase_plan() {
   # In update mode, we're refining an existing spec
@@ -31,7 +31,7 @@ phase_plan() {
 phase_ready() {
   # Get label from state or environment
   local label="${LABEL:-update-mode-test}"
-  local ralph_dir="${RALPH_DIR:-.claude/ralph}"
+  local ralph_dir="${RALPH_DIR:-.ralph}"
   local current_file="$ralph_dir/state/current.json"
 
   # Get existing molecule ID from current.json (set up by test harness)

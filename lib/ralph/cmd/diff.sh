@@ -11,7 +11,7 @@ set -euo pipefail
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists
 if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
@@ -41,7 +41,7 @@ show_usage() {
   echo "  ralph diff | ralph tune  # Pipe to tune for integration mode"
   echo ""
   echo "Environment:"
-  echo "  RALPH_DIR           Ralph directory (default: .claude/ralph)"
+  echo "  RALPH_DIR           Ralph directory (default: .ralph)"
   echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
   echo ""
   echo "Local templates are at: \$RALPH_DIR/template/"

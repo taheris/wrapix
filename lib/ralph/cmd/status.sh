@@ -8,7 +8,7 @@ set -euo pipefail
 # - Current position in DAG
 # - Stale molecule warnings
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 SPECS_DIR="specs"
 
 # Helper to indent each line of output

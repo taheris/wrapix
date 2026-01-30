@@ -222,7 +222,7 @@ phase_step() {
 # Usage: run_status_wrapper_test <test_name>
 run_status_wrapper_test() {
   local test_name="${1:-default}"
-  local ralph_dir="${RALPH_DIR:-.claude/ralph}"
+  local ralph_dir="${RALPH_DIR:-.ralph}"
   local current_file="$ralph_dir/state/current.json"
   local log_file="${TEST_DIR:-/tmp}/bd-mock.log"
   local mock_responses="${TEST_DIR:-/tmp}/mock-responses"

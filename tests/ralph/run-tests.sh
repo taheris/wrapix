@@ -287,9 +287,9 @@ setup_test_env() {
 
   # Create project structure
   mkdir -p "$TEST_DIR/specs"
-  mkdir -p "$TEST_DIR/.claude/ralph/state"
-  mkdir -p "$TEST_DIR/.claude/ralph/logs"
-  mkdir -p "$TEST_DIR/.claude/ralph/templates"
+  mkdir -p "$TEST_DIR/.ralph/state"
+  mkdir -p "$TEST_DIR/.ralph/logs"
+  mkdir -p "$TEST_DIR/.ralph/template"
   mkdir -p "$TEST_DIR/.beads"
 
   # Create minimal specs/README.md
@@ -301,14 +301,14 @@ setup_test_env() {
 EOF
 
   # Create minimal ralph config (spec.hidden removed - now uses --hidden flag)
-  cat > "$TEST_DIR/.claude/ralph/config.nix" << 'EOF'
+  cat > "$TEST_DIR/.ralph/config.nix" << 'EOF'
 {
   beads.priority = 2;
 }
 EOF
 
   # Create step.md template
-  cat > "$TEST_DIR/.claude/ralph/templates/step.md" << 'EOF'
+  cat > "$TEST_DIR/.ralph/template/step.md" << 'EOF'
 # Implementation Step
 
 ## Context Pinning
@@ -350,7 +350,7 @@ Output ONE of these when done:
 EOF
 
   # Create ready.md template
-  cat > "$TEST_DIR/.claude/ralph/templates/ready.md" << 'EOF'
+  cat > "$TEST_DIR/.ralph/template/ready.md" << 'EOF'
 # Convert Spec to Tasks
 
 Read: {{SPEC_PATH}}
@@ -376,7 +376,7 @@ Output `RALPH_COMPLETE` when all issues are created.
 EOF
 
   # Create plan.md template
-  cat > "$TEST_DIR/.claude/ralph/templates/plan.md" << 'EOF'
+  cat > "$TEST_DIR/.ralph/template/plan.md" << 'EOF'
 # Specification Interview
 
 You are conducting a specification interview.
@@ -471,7 +471,7 @@ EOF
   cd "$TEST_DIR"
 
   # Set ralph directory
-  export RALPH_DIR=".claude/ralph"
+  export RALPH_DIR=".ralph"
 
   # Set template directory for diff/sync/check commands
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"

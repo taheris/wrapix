@@ -9,7 +9,7 @@ set -euo pipefail
 # Note: No container check here - each ralph-step call enters its own
 # fresh container, which is the intended behavior for context isolation.
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 
 # Get feature name from argument or state
 FEATURE_NAME="${1:-}"

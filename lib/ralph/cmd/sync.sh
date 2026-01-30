@@ -3,8 +3,8 @@ set -euo pipefail
 
 # ralph sync [--dry-run]
 # Synchronizes local templates with packaged versions
-# - Creates .claude/ralph/template/ with fresh packaged templates
-# - Backs up existing customized templates to .claude/ralph/backup/
+# - Creates .ralph/template/ with fresh packaged templates
+# - Backs up existing customized templates to .ralph/backup/
 # - Copies all templates including partial/ directory
 # - Verbose by default (prints actions taken)
 
@@ -12,7 +12,7 @@ set -euo pipefail
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 
 # GitHub repo and branch for fetching templates when RALPH_TEMPLATE_DIR not set
 RALPH_GITHUB_REPO="${RALPH_GITHUB_REPO:-taheris/wrapix}"
@@ -117,15 +117,15 @@ while [[ $# -gt 0 ]]; do
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Actions:"
-      echo "  1. Creates .claude/ralph/template/ with fresh packaged templates"
-      echo "  2. Backs up existing customized templates to .claude/ralph/backup/"
+      echo "  1. Creates .ralph/template/ with fresh packaged templates"
+      echo "  2. Backs up existing customized templates to .ralph/backup/"
       echo "  3. Copies all templates including partial/ directory"
       echo ""
       echo "After sync, use 'ralph diff' to see what changed,"
       echo "then 'ralph tune' to merge customizations from backup."
       echo ""
       echo "Environment:"
-      echo "  RALPH_DIR           Local ralph directory (default: .claude/ralph)"
+      echo "  RALPH_DIR           Local ralph directory (default: .ralph)"
       echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
       echo "  RALPH_GITHUB_REPO   GitHub repo for templates (default: taheris/wrapix)"
       echo "  RALPH_GITHUB_REF    Git ref to fetch (default: main)"
