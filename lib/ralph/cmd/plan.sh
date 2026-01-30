@@ -226,7 +226,7 @@ if [ ! -d "$RALPH_DIR" ]; then
 fi
 
 # Ensure required directories exist
-mkdir -p "$RALPH_DIR/history" "$RALPH_DIR/logs" "$RALPH_DIR/state"
+mkdir -p "$RALPH_DIR/history" "$RALPH_DIR/logs" "$RALPH_DIR/state" "$RALPH_DIR/templates"
 
 # Create specs directory if not exists
 if [ ! -d "$SPECS_DIR" ]; then
@@ -295,7 +295,7 @@ After creating the epic, update the WIP table entry with the bead ID:
 fi
 
 # Read template and substitute ALL placeholders at runtime (fresh each time)
-PROMPT_TEMPLATE="$RALPH_DIR/plan.md"
+PROMPT_TEMPLATE="$RALPH_DIR/templates/plan.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Plan prompt template not found: $PROMPT_TEMPLATE"
   echo ""

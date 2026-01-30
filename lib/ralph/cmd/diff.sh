@@ -41,8 +41,10 @@ show_usage() {
   echo "  ralph diff | ralph tune  # Pipe to tune for integration mode"
   echo ""
   echo "Environment:"
-  echo "  RALPH_DIR           Local template directory (default: .claude/ralph)"
+  echo "  RALPH_DIR           Ralph directory (default: .claude/ralph)"
   echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
+  echo ""
+  echo "Local templates are at: \$RALPH_DIR/templates/"
 }
 
 # Check for help flag
@@ -106,7 +108,7 @@ diff_output=""
 
 for template in "${TEMPLATES[@]}"; do
   ext=$(get_extension "$template")
-  local_file="$RALPH_DIR/${template}${ext}"
+  local_file="$RALPH_DIR/templates/${template}${ext}"
   packaged_file="$PACKAGED_DIR/${template}${ext}"
 
   # Skip if local file doesn't exist (not customized)
