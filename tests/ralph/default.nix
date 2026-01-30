@@ -15,8 +15,15 @@ let
 
   utilScript = ../.. + "/lib/ralph/cmd/util.sh";
 
+  # Import template tests
+  templateTests = import ./templates.nix {
+    inherit pkgs;
+    inherit (pkgs) lib;
+  };
+
 in
-{
+templateTests
+// {
   # Test: validate_json function correctly validates JSON
   util-validate-json =
     runCommandLocal "ralph-util-validate-json"
