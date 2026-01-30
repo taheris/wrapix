@@ -29,6 +29,7 @@ let
     (writeShellScriptBin "ralph-step" (readFile ./cmd/step.sh))
     (writeShellScriptBin "ralph-loop" (readFile ./cmd/loop.sh))
     (writeShellScriptBin "ralph-status" (readFile ./cmd/status.sh))
+    (writeShellScriptBin "ralph-diff" (readFile ./cmd/diff.sh))
   ];
 
   ralphEnv = buildEnv {
