@@ -40,9 +40,6 @@
   loop = {
     max-iterations = 0; # 0 = infinite
     pause-on-failure = true;
-    # Legacy hooks (deprecated, use 'hooks' section instead)
-    pre-hook = ""; # Command to run before each iteration (maps to hooks.pre-step)
-    post-hook = ""; # Command to run after each iteration (maps to hooks.post-step)
   };
 
   # Hook points for ralph loop (FR2)
