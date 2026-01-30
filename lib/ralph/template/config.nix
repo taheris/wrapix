@@ -48,10 +48,18 @@
   # Hook points for ralph loop (FR2)
   # Template variables: {{LABEL}}, {{ISSUE_ID}}, {{STEP_COUNT}}, {{STEP_EXIT_CODE}}
   hooks = {
-    pre-loop = ""; # Before any work starts
-    pre-step = ""; # Before each ralph-step
-    post-step = ""; # After each ralph-step
-    post-loop = ""; # After all work complete
+    pre-loop = "prek run";
+    pre-step = "bd sync";
+    post-step = "prek run && git add -A && bd sync";
+    post-loop = ''
+      git add -A
+      bd sync
+      git commit -m "feat({{LABEL}}): implementation complete"
+      git push
+      git -C .git/beads-worktrees/beads add -A
+      git -C .git/beads-worktrees/beads commit -m "bd sync"
+      git push origin beads
+    '';
   };
 
   # Hook failure handling (FR5): block | warn | skip
