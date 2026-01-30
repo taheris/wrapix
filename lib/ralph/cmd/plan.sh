@@ -60,6 +60,17 @@ while [[ $# -gt 0 ]]; do
       UPDATE_SPEC="$2"
       shift 2
       ;;
+    -uh|-hu)
+      # Combined flags: update + hidden
+      if [ -z "${2:-}" ]; then
+        echo "Error: -uh requires a spec name"
+        echo "Usage: ralph plan -uh <spec>"
+        exit 1
+      fi
+      SPEC_HIDDEN="true"
+      UPDATE_SPEC="$2"
+      shift 2
+      ;;
     -*)
       echo "Error: Unknown option: $1"
       echo "Usage: ralph plan -n <label>           # New spec in specs/"
