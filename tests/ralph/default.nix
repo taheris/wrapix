@@ -295,6 +295,49 @@ templateTests
           exit 1
         fi
 
+        echo "Test: nested/multiline content preserved..."
+        cat > partials/complex.md << 'PARTIAL'
+        ## Section Header
+
+        - List item 1
+        - List item 2
+
+        ```bash
+        echo "code block"
+        ```
+        PARTIAL
+        content5="Before {{> complex}} After"
+        result5=$(resolve_partials "$content5" "partials")
+        if ! echo "$result5" | grep -q "Section Header"; then
+          echo "FAIL: Section header not preserved"
+          exit 1
+        fi
+        if ! echo "$result5" | grep -q "List item 1"; then
+          echo "FAIL: List items not preserved"
+          exit 1
+        fi
+        if ! echo "$result5" | grep -q 'echo "code block"'; then
+          echo "FAIL: Code block not preserved"
+          exit 1
+        fi
+        if ! echo "$result5" | grep -q "Before"; then
+          echo "FAIL: Content before partial not preserved"
+          exit 1
+        fi
+        if ! echo "$result5" | grep -q "After"; then
+          echo "FAIL: Content after partial not preserved"
+          exit 1
+        fi
+
+        echo "Test: missing partial file handled gracefully..."
+        content6="Start {{> nonexistent-partial}} End"
+        # Should warn but not fail - partial reference stays in output
+        result6=$(resolve_partials "$content6" "partials" 2>&1)
+        if ! echo "$result6" | grep -q "nonexistent-partial"; then
+          echo "FAIL: Missing partial should be preserved in output"
+          exit 1
+        fi
+
         echo "PASS: resolve_partials tests"
         mkdir $out
       '';
