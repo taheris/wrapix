@@ -84,6 +84,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# If a label was provided without a mode flag, error immediately
+# (don't fall through to resume logic which would be confusing)
+if [ -n "$LABEL" ] && [ "$SPEC_NEW" = "false" ] && [ "$SPEC_HIDDEN" = "false" ] && [ -z "$UPDATE_SPEC" ]; then
+  echo "Error: Mode flag required when providing a label"
+  echo ""
+  echo "Usage: ralph plan -n <label>           # New spec in specs/"
+  echo "       ralph plan -h <label>           # New spec in state/ (hidden)"
+  echo "       ralph plan -u <spec>            # Update existing spec"
+  echo "       ralph plan -u -h <spec>         # Update existing hidden spec"
+  echo "       ralph plan                      # Resume previous plan session"
+  exit 1
+fi
+
 # Validate mode flags: exactly one required, except -u and -h can combine
 # Valid combinations:
 #   -n only         -> new spec in specs/
