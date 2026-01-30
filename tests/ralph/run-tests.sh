@@ -289,6 +289,7 @@ setup_test_env() {
   mkdir -p "$TEST_DIR/specs"
   mkdir -p "$TEST_DIR/.claude/ralph/state"
   mkdir -p "$TEST_DIR/.claude/ralph/logs"
+  mkdir -p "$TEST_DIR/.claude/ralph/templates"
   mkdir -p "$TEST_DIR/.beads"
 
   # Create minimal specs/README.md
@@ -307,7 +308,7 @@ EOF
 EOF
 
   # Create step.md template
-  cat > "$TEST_DIR/.claude/ralph/step.md" << 'EOF'
+  cat > "$TEST_DIR/.claude/ralph/templates/step.md" << 'EOF'
 # Implementation Step
 
 ## Context Pinning
@@ -349,7 +350,7 @@ Output ONE of these when done:
 EOF
 
   # Create ready.md template
-  cat > "$TEST_DIR/.claude/ralph/ready.md" << 'EOF'
+  cat > "$TEST_DIR/.claude/ralph/templates/ready.md" << 'EOF'
 # Convert Spec to Tasks
 
 Read: {{SPEC_PATH}}
@@ -375,7 +376,7 @@ Output `RALPH_COMPLETE` when all issues are created.
 EOF
 
   # Create plan.md template
-  cat > "$TEST_DIR/.claude/ralph/plan.md" << 'EOF'
+  cat > "$TEST_DIR/.claude/ralph/templates/plan.md" << 'EOF'
 # Specification Interview
 
 You are conducting a specification interview.
@@ -3150,9 +3151,9 @@ test_diff_no_changes() {
   setup_test_env "diff-no-changes"
 
   # Copy packaged templates to local directory (simulates fresh install)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/templates/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Run ralph diff
@@ -3191,9 +3192,9 @@ test_diff_local_modifications() {
 
   # Copy ALL packaged templates to match setup templates
   # (setup_test_env creates templates with different content)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/ready.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/templates/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Modify ONLY step.md to create a detectable change
@@ -3201,7 +3202,7 @@ test_diff_local_modifications() {
     echo "# My Custom Header"
     echo ""
     echo "This is a local customization."
-  } >> "$RALPH_DIR/step.md"
+  } >> "$RALPH_DIR/templates/step.md"
 
   # Run ralph diff
   set +e
@@ -3245,12 +3246,12 @@ test_diff_specific_template() {
   setup_test_env "diff-specific"
 
   # Copy all templates
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/step.md"
-  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/plan.md"
+  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/templates/step.md"
+  cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/templates/plan.md"
 
   # Modify both templates
-  echo "# Step modification" >> "$RALPH_DIR/step.md"
-  echo "# Plan modification" >> "$RALPH_DIR/plan.md"
+  echo "# Step modification" >> "$RALPH_DIR/templates/step.md"
+  echo "# Plan modification" >> "$RALPH_DIR/templates/plan.md"
 
   # Run ralph diff for just step
   set +e
@@ -3299,7 +3300,7 @@ test_diff_missing_local_templates() {
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Remove markdown templates to simulate partial installation
-  rm -f "$RALPH_DIR/step.md" "$RALPH_DIR/plan.md" "$RALPH_DIR/ready.md"
+  rm -f "$RALPH_DIR/templates/step.md" "$RALPH_DIR/templates/plan.md" "$RALPH_DIR/templates/ready.md"
 
   # Run ralph diff
   set +e
@@ -3365,7 +3366,6 @@ test_sync_fresh() {
 
   # Remove templates and config created by setup_test_env (simulates fresh project)
   rm -rf "$RALPH_DIR/templates"
-  rm -f "$RALPH_DIR/step.md" "$RALPH_DIR/plan.md" "$RALPH_DIR/ready.md"
   rm -f "$RALPH_DIR/config.nix"
 
   # Run ralph sync

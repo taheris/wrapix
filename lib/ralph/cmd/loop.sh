@@ -20,7 +20,7 @@ if [ -z "$FEATURE_NAME" ]; then
   fi
 fi
 
-echo "Ralph Wiggum Work Loop starting..."
+echo "Ralph Wiggum work loop starting..."
 if [ -n "$FEATURE_NAME" ]; then
   echo "  Feature: $FEATURE_NAME"
 fi
