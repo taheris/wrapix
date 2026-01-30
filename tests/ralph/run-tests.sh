@@ -3359,9 +3359,10 @@ test_sync_fresh() {
 
   setup_test_env "sync-fresh"
 
-  # Remove templates created by setup_test_env (simulates fresh project)
+  # Remove templates and config created by setup_test_env (simulates fresh project)
   rm -rf "$RALPH_DIR/templates"
   rm -f "$RALPH_DIR/step.md" "$RALPH_DIR/plan.md" "$RALPH_DIR/ready.md"
+  rm -f "$RALPH_DIR/config.nix"
 
   # Run ralph sync
   set +e

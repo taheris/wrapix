@@ -25,7 +25,7 @@ fi
 DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dry-run|-n)
+    --dry-run|-d)
       DRY_RUN=true
       shift
       ;;
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
       echo "Synchronizes local templates with packaged versions."
       echo ""
       echo "Options:"
-      echo "  --dry-run, -n  Preview changes without executing"
+      echo "  --dry-run, -d  Preview changes without executing"
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Actions:"
@@ -228,11 +228,11 @@ copy_fresh_templates() {
   while IFS= read -r src_file; do
     [ -f "$src_file" ] || continue
 
-    # Skip default.nix - it's the Nix template definitions, not a user template
+    # Skip Nix internals - not user templates
     local name
     name=$(basename "$src_file")
-    if [ "$name" = "default.nix" ]; then
-      debug "Skipping $name: internal Nix definitions"
+    if [ "$name" = "default.nix" ] || [ "$name" = "config.nix" ]; then
+      debug "Skipping $name: internal Nix file"
       continue
     fi
 
@@ -279,6 +279,27 @@ backup_existing "$TEMPLATES_DIR" "$BACKUP_DIR" "$PACKAGED_DIR"
 
 # Step 2: Copy fresh templates
 copy_fresh_templates "$PACKAGED_DIR" "$TEMPLATES_DIR"
+
+# Step 3: Sync config.nix to ralph root (not templates directory)
+packaged_config="$PACKAGED_DIR/config.nix"
+local_config="$RALPH_DIR/config.nix"
+if [ -f "$packaged_config" ]; then
+  echo ""
+  echo "Syncing config.nix to: $RALPH_DIR"
+
+  # Backup if local differs from packaged
+  if [ -f "$local_config" ]; then
+    if ! diff -q "$packaged_config" "$local_config" >/dev/null 2>&1; then
+      ensure_dir "$BACKUP_DIR"
+      action "Backing up: config.nix (has local changes)"
+      if [ "$DRY_RUN" = "false" ]; then
+        cp "$local_config" "$BACKUP_DIR/config.nix"
+      fi
+    fi
+  fi
+
+  copy_file "$packaged_config" "$local_config" "config.nix"
+fi
 
 echo ""
 if [ "$DRY_RUN" = "true" ]; then
