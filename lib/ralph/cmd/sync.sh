@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ralph sync [--dry-run]
 # Synchronizes local templates with packaged versions
-# - Creates .claude/ralph/templates/ with fresh packaged templates
+# - Creates .claude/ralph/template/ with fresh packaged templates
 # - Backs up existing customized templates to .claude/ralph/backup/
 # - Copies all templates including partial/ directory
 # - Verbose by default (prints actions taken)
@@ -117,7 +117,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Actions:"
-      echo "  1. Creates .claude/ralph/templates/ with fresh packaged templates"
+      echo "  1. Creates .claude/ralph/template/ with fresh packaged templates"
       echo "  2. Backs up existing customized templates to .claude/ralph/backup/"
       echo "  3. Copies all templates including partial/ directory"
       echo ""
@@ -162,7 +162,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Directories
-TEMPLATES_DIR="$RALPH_DIR/templates"
+TEMPLATES_DIR="$RALPH_DIR/template"
 BACKUP_DIR="$RALPH_DIR/backup"
 
 # Prefix for dry-run output

@@ -83,7 +83,7 @@ if [ ! -f "$SPEC_PATH" ]; then
   exit 1
 fi
 
-PROMPT_TEMPLATE="$RALPH_DIR/templates/ready.md"
+PROMPT_TEMPLATE="$RALPH_DIR/template/ready.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
   echo "Make sure ready.md exists in your ralph directory."
