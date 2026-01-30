@@ -11,7 +11,7 @@ An ordered list of specs and project terminology.
 | [notifications.md](./notifications.md) | [`lib/notify/`](../lib/notify/) | wx-q6x | Desktop notifications with focus suppression |
 | [profiles.md](./profiles.md) | [`lib/sandbox/profiles.nix`](../lib/sandbox/profiles.nix) | — | Pre-configured development environments |
 | [ralph-tests.md](./ralph-tests.md) | [`tests/ralph/`](../tests/ralph/) | wx-hfp | Integration tests for ralph workflow |
-| [ralph-workflow.md](./ralph-workflow.md) | [`lib/ralph/`](../lib/ralph/) | wx-cds | Spec-driven AI orchestration |
+| [ralph-workflow.md](./ralph-workflow.md) | [`lib/ralph/`](../lib/ralph/) | wx-ad9r | Spec-driven AI orchestration |
 | [sandbox.md](./sandbox.md) | [`lib/sandbox/default.nix`](../lib/sandbox/default.nix) | — | Platform-agnostic container isolation |
 | [security-review.md](./security-review.md) | — | wx-eok | Security tradeoffs and mitigations |
 

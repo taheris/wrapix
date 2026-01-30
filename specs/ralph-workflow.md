@@ -16,20 +16,183 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 
 ### Functional
 
-1. **Spec Interview** - `ralph plan <label>` initializes feature and conducts requirements gathering
-2. **Spec Update** - `ralph plan --update <label>` refines existing specs for additional work
-3. **Molecule Creation** - `ralph ready` converts specs to beads molecules
-4. **Single-Issue Work** - `ralph step` works on one issue in fresh context
-5. **Continuous Work** - `ralph loop` processes issues until complete
-6. **Progress Tracking** - `ralph status` wraps `bd mol` commands for unified view
-7. **Log Access** - `ralph logs` shows recent command output
-8. **Prompt Tuning** - `ralph tune` edits prompt templates
+1. **Spec Interview** — `ralph plan` initializes feature and conducts requirements gathering
+2. **Plan Modes** — `ralph plan` requires exactly one mode flag:
+   - `-n/--new`: New spec in `specs/`
+   - `-h/--hidden`: New spec in `state/` (not committed)
+   - `-u/--update`: Refine existing spec (combinable with `-h`)
+3. **Molecule Creation** — `ralph ready` converts specs to beads molecules
+4. **Single-Issue Work** — `ralph step` works on one issue in fresh context
+5. **Continuous Work** — `ralph loop` processes issues until complete
+6. **Progress Tracking** — `ralph status` shows molecule progress
+7. **Log Access** — `ralph logs` shows recent command output
+8. **Template Validation** — `ralph check` validates all templates and partials
+9. **Template Tuning** — `ralph tune` edits templates (interactive or integration mode)
+10. **Template Diff** — `ralph diff` shows local template changes vs packaged
 
 ### Non-Functional
 
-1. **Context Efficiency** - Each step starts with minimal, focused context
-2. **Resumable** - Work can stop and resume across sessions
-3. **Observable** - Clear visibility into current state and progress via molecules
+1. **Context Efficiency** — Each step starts with minimal, focused context
+2. **Resumable** — Work can stop and resume across sessions
+3. **Observable** — Clear visibility into current state and progress via molecules
+4. **Validated** — Templates statically checked at build time and after edits
+
+## Commands
+
+### `ralph plan`
+
+```bash
+ralph plan -n <label>           # New spec in specs/
+ralph plan -h <label>           # New spec in state/ (hidden)
+ralph plan -u <label>           # Update existing spec in specs/
+ralph plan -u -h <label>        # Update existing spec in state/
+```
+
+**Flags (exactly one mode required, except -u and -h can combine):**
+
+| Flag | Location | Mode | Template |
+|------|----------|------|----------|
+| `-n/--new` | `specs/` | create | `plan-new.md` |
+| `-h/--hidden` | `state/` | create | `plan-new.md` |
+| `-u/--update` | auto-detect | update | `plan-update.md` |
+| `-u -h` | `state/` | update | `plan-update.md` |
+
+**Validation:**
+- `-u/--update`: Error if spec doesn't exist at expected location
+- No flag or invalid combination: Error with usage help
+
+**Behavior:**
+- Creates `state/current.json` with feature metadata
+- Runs spec interview using appropriate template
+- Outputs `RALPH_COMPLETE` when done
+
+### `ralph ready`
+
+```bash
+ralph ready
+```
+
+Reads `state/current.json` to determine mode:
+- **New spec**: Creates molecule (epic + child issues)
+- **Update mode**: Loads existing molecule, diffs spec to find new work, bonds new tasks
+
+Stores molecule ID in `state/current.json`.
+
+### `ralph step`
+
+```bash
+ralph step
+```
+
+- Selects next ready issue from molecule
+- Loads step template with issue context
+- Implements in fresh Claude session
+- Updates issue status on completion
+
+### `ralph loop`
+
+```bash
+ralph loop
+```
+
+- Runs `ralph step` repeatedly until all issues complete
+- Uses project sandbox configuration (see Project Configuration)
+- Handles discovered work via `bd mol bond`
+
+### `ralph status`
+
+```bash
+ralph status
+```
+
+Shows molecule progress:
+```
+Ralph Status: my-feature
+===============================
+Molecule: bd-xyz123
+Spec: specs/my-feature.md
+
+Progress:
+  [####------] 40% (4/10)
+
+Current Position:
+  [done]    Setup project structure
+  [done]    Implement core feature
+  [current] Write tests         <- you are here
+  [ready]   Update documentation
+  [blocked] Final review (waiting on tests)
+```
+
+### `ralph logs`
+
+```bash
+ralph logs           # Recent output
+ralph logs -f        # Follow mode
+```
+
+### `ralph check`
+
+```bash
+ralph check
+```
+
+Validates all templates:
+- Partial files exist
+- Body files parse correctly
+- No syntax errors in Nix expressions
+- Dry-run render with dummy values to catch placeholder typos
+
+Exit codes: 0 = valid, 1 = errors (with details)
+
+Also runs as part of `nix flake check`.
+
+### `ralph tune`
+
+**Interactive mode** (no stdin):
+```bash
+ralph tune
+> What would you like to change?
+> "Add guidance about handling blocked beads"
+>
+> Analyzing templates...
+> This should go in step.md, section "Instructions"
+>
+> [makes edit to .ralph/template/step.md]
+> [runs ralph check]
+> ✓ Template valid
+```
+
+**Integration mode** (stdin with diff):
+```bash
+ralph diff | ralph tune
+> Analyzing diff...
+>
+> Change 1/2: step.md lines 35-40
+> + 6. **Blocked vs Waiting**: ...
+>
+> Where should this go?
+>   1. Keep in step.md
+>   2. Move to partial
+>   3. Create new partial
+> > 1
+>
+> Accept this change? [Y/n] y
+> ✓ Change applied
+```
+
+AI-driven interview that asks questions until user accepts or abandons.
+
+### `ralph diff`
+
+```bash
+ralph diff           # Show local template changes vs packaged
+ralph diff step      # Show diff for specific template
+```
+
+Pipe to `ralph tune` for integration:
+```bash
+ralph diff | ralph tune
+```
 
 ## Workflow Phases
 
@@ -48,127 +211,273 @@ plan --update → ready → loop/step → (done)
       └─ Refine spec, gather new requirements
 ```
 
-### 1. Plan
+## Template System
 
-```bash
-ralph plan my-feature           # New spec
-ralph plan --update my-feature  # Update existing spec
-```
+### Nix-Native Templates
 
-Combines workspace setup and spec interview into a single idempotent command:
+Templates are defined as Nix expressions with static validation:
 
-- **Setup** (idempotent — safe to rerun):
-  - Creates feature workspace directory if not exists
-  - Initializes state files (`state/current.json`)
-  - Creates `specs/my-feature.md` (or hidden in `state/` if configured)
-- **Interview**:
-  - Substitutes template placeholders fresh each run
-  - Conducts spec-gathering conversation with AI
-  - Writes requirements to spec file
-  - Outputs `RALPH_COMPLETE` when done
-
-**Update Mode** (`--update`):
-- For specs that have already been implemented but need additional work
-- During planning: discuss and capture NEW requirements only
-- Do NOT write to spec file during planning conversation
-- `ralph ready` updates spec and creates/bonds new tasks
-
-### 2. Ready
-
-```bash
-ralph ready
-```
-
-- Reads completed spec
-- **New spec**: Creates molecule (epic + child issues)
-- **Update mode**: Bonds new tasks to existing molecule
-- Stores molecule ID in `state/current.json`
-- Sets appropriate priorities and dependencies
-
-**Molecule tracking in current.json:**
-```json
-{
-  "label": "my-feature",
-  "molecule": "bd-xyz123",
-  "update": false
+```nix
+# lib/ralph/template/default.nix
+{ lib }:
+let
+  mkTemplate = { body, partials ? [], variables }:
+    let
+      resolvedPartials = map (p: builtins.readFile p) partials;
+      content = builtins.readFile body;
+    in {
+      inherit content variables partials;
+      render = vars:
+        assert lib.assertMsg
+          (builtins.all (v: vars ? ${v}) variables)
+          "Missing required variables: ${builtins.toJSON variables}";
+        lib.replaceStrings
+          (map (v: "{{${v}}}") variables)
+          (map (v: vars.${v}) variables)
+          content;
+    };
+in {
+  plan-new = mkTemplate {
+    body = ./plan-new.md;
+    partials = [ ./partial/context-pinning.md ./partial/exit-signals.md ];
+    variables = [ "PINNED_CONTEXT" "LABEL" "SPEC_PATH" ];
+  };
+  # ... other templates
 }
 ```
 
-### 3. Step / Loop
+### Partials
 
-```bash
-ralph step    # Work on single issue
-ralph loop    # Work until all issues complete
+Shared content via `{{> partial-name}}` markers:
+
+```markdown
+## Instructions
+
+{{> context-pinning}}
+
+1. Read the spec...
 ```
 
-- Selects issue from `bd ready` within the molecule
-- Loads step prompt with issue context
-- Implements in fresh Claude session
-- Updates issue status on completion
+Resolved during template rendering.
 
-**Discovered work** during implementation:
-```bash
-# Sequential (blocks current work)
-bd mol bond <molecule> <new-issue> --type sequential
-
-# Parallel (independent work)
-bd mol bond <molecule> <new-issue> --type parallel
-```
-
-### 4. Status
-
-```bash
-ralph status
-```
-
-Convenience wrapper that calls `bd mol` commands with the current molecule:
+### Template Structure
 
 ```
-Ralph Status: my-feature
-===============================
-Molecule: bd-xyz123
-Spec: specs/my-feature.md
-
-Progress:
-  ▓▓▓▓▓▓▓▓░░ 80% (8/10)
-  Rate: 2.5 steps/hour
-  ETA: ~48 min
-
-Current Position:
-  [done]    Setup project structure
-  [done]    Implement core feature
-  [current] Write tests         ← you are here
-  [ready]   Update documentation
-  [blocked] Final review (waiting on tests)
+lib/ralph/template/
+├── default.nix              # Template definitions + validation
+├── partial/
+│   ├── context-pinning.md   # Project context loading
+│   ├── exit-signals.md      # Exit signal format
+│   └── spec-header.md       # Label, spec path block
+├── plan-new.md              # New spec interview
+├── plan-update.md           # Update existing spec
+├── ready-new.md             # Create molecule
+├── ready-update.md          # Bond new tasks
+└── step.md                  # Single-issue implementation
 ```
 
-Under the hood:
-```bash
-MOLECULE=$(jq -r '.molecule' "$CURRENT_FILE")
-bd mol progress "$MOLECULE"
-bd mol current "$MOLECULE"
-bd mol stale --quiet
+### Template Variables
+
+| Variable | Source | Used By |
+|----------|--------|---------|
+| `PINNED_CONTEXT` | Read from `pinnedContext` file | all |
+| `LABEL` | From command args | all |
+| `SPEC_PATH` | Computed from label + mode | all |
+| `SPEC_CONTENT` | Read from spec file | ready-*, step |
+| `EXISTING_SPEC` | Read from existing spec | plan-update |
+| `MOLECULE_ID` | From `state/current.json` | ready-update, step |
+| `ISSUE_ID` | From `bd ready` | step |
+| `TITLE` | From issue | step |
+| `DESCRIPTION` | From issue | step |
+| `EXIT_SIGNALS` | Template-specific list | all (via partial) |
+
+### Flake Check Integration
+
+```nix
+# flake.nix
+{
+  checks.${system} = {
+    ralph-templates = ralph.lib.validateTemplates {
+      templates = ./lib/ralph/template;
+    };
+  };
+}
 ```
 
-### 5. Cleanup
+## Project Configuration
 
-Users call `bd mol` directly for cleanup operations:
+Projects configure ralph via `.ralph/config.nix`:
 
-```bash
-bd mol squash <molecule> --summary "..."  # Archive completed work
-bd mol burn <molecule>                     # Abandon failed work
-bd mol stale                               # Find orphaned molecules
+```nix
+# .ralph/config.nix
+{
+  # Sandbox flake reference (for ralph loop)
+  sandbox = ".#packages.x86_64-linux.default";
+
+  # Context pinning - file read for {{PINNED_CONTEXT}}
+  pinnedContext = ./specs/README.md;
+
+  # Spec locations
+  specDir = ./specs;
+  stateDir = ./state;
+
+  # Template overlay (optional, for local customizations)
+  templateDir = ./.ralph/template;  # null = use packaged only
+}
 ```
 
-## Prompt Templates
+**Defaults** (when no config exists):
+```nix
+{
+  sandbox = null;           # Error if ralph loop needs it
+  pinnedContext = ./specs/README.md;
+  specDir = ./specs;
+  stateDir = ./state;
+  templateDir = null;       # Use packaged templates only
+}
+```
 
-Located in `lib/ralph/template/`:
+**Template loading order:**
+1. Check `templateDir` (local overlay) first
+2. Fall back to packaged templates
 
-| Template | Phase | Purpose |
-|----------|-------|---------|
-| `plan.md` | plan | Spec gathering (planning only, no implementation) |
-| `ready.md` | ready | Spec-to-issues conversion |
-| `step.md` | step/loop | Single-issue implementation |
+## Template Content Requirements
+
+### Partials
+
+**`partial/context-pinning.md`:**
+```markdown
+## Context Pinning
+
+First, read specs/README.md to understand project terminology:
+
+{{PINNED_CONTEXT}}
+```
+
+**`partial/exit-signals.md`:**
+```markdown
+## Exit Signals
+
+Output ONE of these at the end of your response:
+
+{{EXIT_SIGNALS}}
+```
+
+**`partial/spec-header.md`:**
+```markdown
+## Current Feature
+
+Label: {{LABEL}}
+Spec file: {{SPEC_PATH}}
+```
+
+### plan-new.md
+
+**Purpose:** Conduct spec interview for new features
+
+**Required sections:**
+1. Role statement — "You are conducting a specification interview"
+2. Planning-only warning — No code, only spec output
+3. `{{> context-pinning}}`
+4. `{{> spec-header}}`
+5. Interview guidelines — One question at a time, capture terminology, identify code locations, clarify scope, define success criteria
+6. Interview flow — Describe idea → clarify → write spec → RALPH_COMPLETE
+7. Spec file format — Title, problem, requirements, affected files, success criteria, out of scope
+8. Implementation notes section — Optional transient context, stripped on finalize
+9. `{{> exit-signals}}`
+
+**Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
+
+### plan-update.md
+
+**Purpose:** Gather additional requirements for existing specs
+
+**Required sections:**
+1. Role statement — "You are refining an existing specification"
+2. Planning-only warning — No code, no spec edits during conversation
+3. `{{> context-pinning}}`
+4. `{{> spec-header}}`
+5. Existing spec display — Show current spec for reference
+6. Update guidelines — Discuss NEW requirements only
+7. Output — Summarize new requirements (ralph ready handles spec update)
+8. `{{> exit-signals}}`
+
+**Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
+
+### ready-new.md
+
+**Purpose:** Convert spec to molecule with tasks
+
+**Required sections:**
+1. Role statement — "You are decomposing a specification into tasks"
+2. `{{> context-pinning}}`
+3. `{{> spec-header}}`
+4. Spec content — Full spec to decompose
+5. Task breakdown guidelines — Self-contained, ordered by deps, one objective per task
+6. Molecule creation — Create epic, child tasks, set dependencies
+7. README update — Add molecule ID to specs/README.md
+8. `{{> exit-signals}}`
+
+**Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
+
+### ready-update.md
+
+**Purpose:** Add new tasks to existing molecule
+
+**Required sections:**
+1. Role statement — "You are adding tasks to an existing molecule"
+2. `{{> context-pinning}}`
+3. `{{> spec-header}}`
+4. Existing molecule info — ID, current tasks, progress
+5. New requirements — From plan-update conversation
+6. Task creation — Create tasks, bond to molecule, set dependencies
+7. Spec update — Append new requirements to spec file
+8. `{{> exit-signals}}`
+
+**Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
+
+### step.md
+
+**Purpose:** Implement single issue in fresh context
+
+**Required sections:**
+1. `{{> context-pinning}}`
+2. `{{> spec-header}}`
+3. Issue details — ID, title, description
+4. Instructions:
+   1. **Understand** — Read spec and issue before changes
+   2. **Test strategy** — Property-based vs unit tests
+   3. **Implement** — Write code following spec
+   4. **Discovered work** — Create issue, bond to molecule (sequential vs parallel)
+   5. **Quality gates** — Tests pass, lint passes, changes committed
+   6. **Blocked vs waiting** — Distinguish dependency blocks from true blocks:
+      - Need user input? → `RALPH_BLOCKED: <reason>`
+      - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
+5. Land the plane — Follow session protocol
+6. `{{> exit-signals}}`
+
+**Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
+
+## State Management
+
+**`state/current.json`:**
+```json
+{
+  "label": "my-feature",
+  "update": false,
+  "hidden": false,
+  "spec_path": "specs/my-feature.md",
+  "molecule": "bd-xyz123"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `label` | Feature identifier |
+| `update` | Whether this is an update to existing spec |
+| `hidden` | Whether spec is in `state/` (not committed) |
+| `spec_path` | Full path to spec file |
+| `molecule` | Beads molecule ID (set by `ralph ready`) |
 
 ## Spec File Format
 
@@ -217,42 +526,53 @@ Why this feature is needed.
 | `lib/ralph/cmd/loop.sh` | Continuous work |
 | `lib/ralph/cmd/status.sh` | Progress display |
 | `lib/ralph/cmd/logs.sh` | Log viewer |
+| `lib/ralph/cmd/check.sh` | Template validation |
+| `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
+| `lib/ralph/cmd/diff.sh` | Template diff |
 | `lib/ralph/cmd/util.sh` | Shared helper functions |
 | `lib/ralph/template/` | Prompt templates |
+| `lib/ralph/template/default.nix` | Nix template definitions |
 
 ## Integration with Beads Molecules
 
-Ralph uses `bd mol` (beads molecules) for work tracking:
+Ralph uses `bd mol` for work tracking:
 
-- **Specs are NOT molecules** - Specs are persistent markdown files; molecules are work batches
-- **Each `ralph ready` creates a molecule** - The epic becomes the molecule root
-- **Update mode bonds to existing molecules** - New tasks attach to prior work
-- **Molecule ID stored in current.json** - Enables `ralph status` convenience wrapper
+- **Specs are NOT molecules** — Specs are persistent markdown; molecules are work batches
+- **Each `ralph ready` creates/updates a molecule** — Epic becomes molecule root
+- **Update mode bonds to existing molecules** — New tasks attach to prior work
+- **Molecule ID stored in current.json** — Enables `ralph status` convenience wrapper
 
 **Key molecule commands used by Ralph:**
 
 | Command | Used by | Purpose |
 |---------|---------|---------|
 | `bd create --type=epic` | `ralph ready` | Create molecule root |
-| `bd mol progress` | `ralph status` | Show completion %, rate, ETA |
+| `bd mol progress` | `ralph status` | Show completion % |
 | `bd mol current` | `ralph status` | Show position in DAG |
 | `bd mol bond` | `ralph step` | Attach discovered work |
 | `bd mol stale` | `ralph status` | Warn about orphaned molecules |
 
 **Not used by Ralph** (user calls directly):
-- `bd mol pour/wisp` - Ralph doesn't use formulas
-- `bd mol squash` - User decides when to archive
-- `bd mol burn` - User decides when to abandon
+- `bd mol squash` — User decides when to archive
+- `bd mol burn` — User decides when to abandon
 
 ## Success Criteria
 
-- [ ] `ralph plan <label>` initializes workspace and produces complete specifications
-- [ ] `ralph plan --update <label>` refines existing specs without overwriting
+- [ ] `ralph plan -n <label>` creates new spec in `specs/`
+- [ ] `ralph plan -h <label>` creates new spec in `state/`
+- [ ] `ralph plan -u <label>` validates spec exists before updating
+- [ ] `ralph plan -u -h <label>` updates hidden spec
 - [ ] `ralph ready` creates molecule and stores ID in current.json
 - [ ] `ralph ready` in update mode bonds new tasks to existing molecule
-- [ ] `ralph step` completes single issues and can bond discovered work
-- [ ] `ralph loop` processes all ready issues in molecule
-- [ ] `ralph status` shows molecule progress via `bd mol` commands
+- [ ] `ralph step` completes single issues with blocked-vs-waiting guidance
+- [ ] `ralph loop` uses project sandbox from `.ralph/config.nix`
+- [ ] `ralph check` validates all templates and partials
+- [ ] `ralph tune` (interactive) identifies correct template and makes edits
+- [ ] `ralph tune` (integration) ingests diff and interviews about changes
+- [ ] `ralph diff` shows local template changes vs packaged
+- [ ] `nix flake check` includes template validation
+- [ ] Templates use Nix-native definitions with static validation
+- [ ] Partials work via `{{> partial-name}}` markers
 
 ## Out of Scope
 
@@ -260,3 +580,4 @@ Ralph uses `bd mol` (beads molecules) for work tracking:
 - Automated testing integration
 - PR creation automation
 - Formula-based workflows (Ralph uses specs, not formulas)
+- Cross-repo automation for template propagation (manual diff + tune)
