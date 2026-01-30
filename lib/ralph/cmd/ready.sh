@@ -24,7 +24,13 @@ fi
 source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
-TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
+
+# Template directory: use RALPH_TEMPLATE_DIR if set and exists
+if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
+  TEMPLATE="$RALPH_TEMPLATE_DIR"
+else
+  TEMPLATE=""
+fi
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
