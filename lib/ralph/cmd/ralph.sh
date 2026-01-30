@@ -12,6 +12,7 @@ case "$COMMAND" in
   step)  exec ralph-step "$@" ;;
   loop)  exec ralph-loop "$@" ;;
   status) exec ralph-status "$@" ;;
+  diff)  exec ralph-diff "$@" ;;
   edit)
     # Get current label and hidden flag from current.json
     CURRENT_FILE="$RALPH_DIR/state/current.json"
@@ -63,10 +64,13 @@ case "$COMMAND" in
     echo "  loop [feature]  Loop through all steps until done"
     echo "  status          Show current workflow state"
     echo ""
+    echo "Template Commands:"
+    echo "  diff [name]     Show local template changes vs packaged"
+    echo "  tune            Edit step prompt template (step.md)"
+    echo ""
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"
     echo "  edit            Edit current spec file"
-    echo "  tune            Edit step prompt template (step.md)"
     echo ""
     echo "Workflow:"
     echo "  1. ralph plan my-feature   # Start feature and run spec interview"
