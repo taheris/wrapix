@@ -68,6 +68,30 @@ fi
 
 echo ""
 
+# Helper function for label-based progress (fallback when molecule commands fail)
+show_label_progress() {
+  local bead_label="spec-$LABEL"
+
+  # Count by status
+  local open_count in_progress_count closed_count ready_count total
+  open_count=$(bd list --label "$bead_label" --status=open 2>/dev/null | wc -l) || open_count=0
+  in_progress_count=$(bd list --label "$bead_label" --status=in_progress 2>/dev/null | wc -l) || in_progress_count=0
+  closed_count=$(bd list --label "$bead_label" --status=closed 2>/dev/null | wc -l) || closed_count=0
+  ready_count=$(bd list --label "$bead_label" --ready 2>/dev/null | wc -l) || ready_count=0
+  total=$((open_count + in_progress_count + closed_count))
+
+  echo "  Open:        $open_count"
+  echo "  In Progress: $in_progress_count"
+  echo "  Closed:      $closed_count"
+  echo "  Ready:       $ready_count"
+  echo "  Total:       $total"
+
+  if [ "$total" -gt 0 ]; then
+    local percent=$((closed_count * 100 / total))
+    echo "  Progress:    $percent% complete"
+  fi
+}
+
 # If molecule is set, use bd mol commands for progress tracking
 if [ -n "$MOLECULE" ]; then
   # Progress section
@@ -76,7 +100,9 @@ if [ -n "$MOLECULE" ]; then
     # Indent each line of progress output
     echo "$PROGRESS_OUTPUT" | indent
   else
-    echo "  (unable to get progress)"
+    # Fallback to label-based counting when molecule commands fail
+    echo "  (molecule progress unavailable, using label counts)"
+    show_label_progress
   fi
 
   echo ""
@@ -86,17 +112,33 @@ if [ -n "$MOLECULE" ]; then
   if CURRENT_OUTPUT=$(bd mol current "$MOLECULE" 2>&1); then
     echo "$CURRENT_OUTPUT" | indent
   else
-    echo "  (unable to get current position)"
+    # Fallback: show next ready task
+    BEAD_LABEL="spec-$LABEL"
+    NEXT_ISSUE=$(bd list --label "$BEAD_LABEL" --ready --sort priority --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty') || true
+    if [ -n "$NEXT_ISSUE" ]; then
+      NEXT_TITLE=$(bd show "$NEXT_ISSUE" --json 2>/dev/null | jq -r '.[0].title // empty') || NEXT_TITLE=""
+      echo "  Next ready: $NEXT_ISSUE - $NEXT_TITLE"
+    else
+      IN_PROGRESS=$(bd list --label "$BEAD_LABEL" --status=in_progress --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty') || true
+      if [ -n "$IN_PROGRESS" ]; then
+        IN_PROGRESS_TITLE=$(bd show "$IN_PROGRESS" --json 2>/dev/null | jq -r '.[0].title // empty') || IN_PROGRESS_TITLE=""
+        echo "  In progress: $IN_PROGRESS - $IN_PROGRESS_TITLE"
+      else
+        echo "  (no tasks ready or in progress)"
+      fi
+    fi
   fi
 
   echo ""
 
   # Check for stale molecules (hygiene warnings)
+  echo "Warnings:"
   if STALE_OUTPUT=$(bd mol stale --quiet 2>&1) && [ -n "$STALE_OUTPUT" ]; then
-    echo "Warnings:"
     echo "$STALE_OUTPUT" | indent
-    echo ""
+  else
+    echo "  No stale molecules found."
   fi
+  echo ""
 else
   # Fallback: no molecule set, use legacy label-based counting
   BEAD_LABEL="spec-$LABEL"
