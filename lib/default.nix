@@ -14,7 +14,7 @@ let
 in
 {
   inherit (sandbox) profiles mkSandbox;
-  inherit (ralph) mkRalph;
+  inherit (ralph) mkRalph scripts;
 
   deriveProfile =
     baseProfile: extensions:
