@@ -247,6 +247,70 @@ let
     in
     all checkTemplate templateNames;
 
+  # Create a flake check derivation that validates templates
+  # This runs as part of 'nix flake check' to catch template errors at build time
+  #
+  # Arguments:
+  #   pkgs: nixpkgs set (for runCommandLocal)
+  #
+  # Validates:
+  #   - All partials referenced in templates exist
+  #   - All templates can be loaded without errors
+  #   - Dry-run render with dummy values to catch placeholder typos
+  mkTemplatesCheck =
+    pkgs:
+    pkgs.runCommandLocal "ralph-templates-check" { } ''
+      set -e
+      echo "Validating ralph templates..."
+
+      # Force evaluation of validateTemplates (triggers all validation)
+      ${
+        if validateTemplates then
+          ''
+            echo "✓ All templates loaded successfully"
+          ''
+        else
+          ''
+            echo "✗ Template validation failed"
+            exit 1
+          ''
+      }
+
+      # Test dry-run rendering with dummy values for each template
+      ${concatStringsSep "\n" (
+        map (name: ''
+          echo "  Checking ${name}..."
+          ${
+            let
+              t = templates.${name};
+              # Create dummy values for all variables
+              dummyVars = listToAttrs (
+                map (v: {
+                  name = v;
+                  value = "DUMMY_${v}";
+                }) t.variables
+              );
+              # Force render to catch any placeholder typos
+              rendered = t.render dummyVars;
+              # Check that rendered content is non-empty
+              isValid = stringLength rendered > 0;
+            in
+            if isValid then
+              "echo '    ✓ ${name} renders correctly'"
+            else
+              ''
+                echo '    ✗ ${name} failed to render'
+                exit 1
+              ''
+          }
+        '') (attrNames templates)
+      )}
+
+      echo ""
+      echo "All ralph templates validated successfully"
+      mkdir $out
+    '';
+
 in
 {
   inherit
@@ -256,5 +320,6 @@ in
     resolvePartials
     templates
     validateTemplates
+    mkTemplatesCheck
     ;
 }
