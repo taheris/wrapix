@@ -49,7 +49,7 @@ case "$COMMAND" in
     echo "Usage: ralph <command> [args]"
     echo ""
     echo "Spec-Driven Workflow Commands:"
-    echo "  plan <label>    Start/continue a feature (sets label, runs spec interview)"
+    echo "  plan -n <label> New spec in specs/ (or -h for hidden, -uh to update hidden)"
     echo "  ready           Convert spec to beads issues"
     echo "  step [feature]  Work one issue (fresh context), then exit"
     echo "  loop [feature]  Loop through all steps until done"
