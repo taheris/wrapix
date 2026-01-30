@@ -1038,6 +1038,63 @@ EOF
   teardown_test_env
 }
 
+# Test: RALPH_CLARIFY signal handling
+test_step_handles_clarify_signal() {
+  CURRENT_TEST="step_handles_clarify_signal"
+  test_header "Step Handles RALPH_CLARIFY Signal"
+
+  setup_test_env "step-clarify"
+
+  # Create a spec file
+  cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
+# Test Feature
+
+## Requirements
+- Implement the test feature
+EOF
+
+  # Set up label state
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
+
+  # Create a task bead
+  TASK_ID=$(bd create --title="Clarify task" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+
+  test_pass "Created task: $TASK_ID"
+
+  # Use scenario that outputs RALPH_CLARIFY
+  export MOCK_SCENARIO="$SCENARIOS_DIR/clarify.sh"
+
+  # Run ralph step (should fail - clarify is not completion)
+  set +e
+  ralph-step 2>&1
+  EXIT_CODE=$?
+  set -e
+
+  # Step should exit non-zero (like RALPH_BLOCKED)
+  if [ "$EXIT_CODE" -ne 0 ]; then
+    test_pass "Step exits non-zero on RALPH_CLARIFY"
+  else
+    test_fail "Step should exit non-zero on RALPH_CLARIFY"
+  fi
+
+  # Issue should remain in_progress (not closed)
+  assert_bead_status "$TASK_ID" "in_progress" "Issue should remain in_progress after RALPH_CLARIFY"
+
+  # Verify the log file contains RALPH_CLARIFY (distinct from RALPH_BLOCKED)
+  LOG_FILE="$RALPH_DIR/logs/work-$TASK_ID.log"
+  if [ -f "$LOG_FILE" ]; then
+    if jq -e 'select(.type == "result") | .result | contains("RALPH_CLARIFY")' "$LOG_FILE" >/dev/null 2>&1; then
+      test_pass "Log contains RALPH_CLARIFY signal"
+    else
+      test_fail "Log should contain RALPH_CLARIFY signal"
+    fi
+  else
+    test_fail "Log file not found: $LOG_FILE"
+  fi
+
+  teardown_test_env
+}
+
 # Test: dependency ordering in step
 # NOTE: bd list --ready currently doesn't filter blocked issues correctly.
 # This test verifies that dependencies are SET UP correctly and that step
@@ -3287,6 +3344,7 @@ ALL_TESTS=(
   test_step_no_close_without_signal
   test_step_exits_100_when_complete
   test_step_handles_blocked_signal
+  test_step_handles_clarify_signal
   test_step_respects_dependencies
   test_loop_processes_all
   test_parallel_agent_simulation
