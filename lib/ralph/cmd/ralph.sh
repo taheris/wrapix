@@ -14,6 +14,7 @@ case "$COMMAND" in
   status) exec ralph-status "$@" ;;
   check) exec ralph-check "$@" ;;
   diff)  exec ralph-diff "$@" ;;
+  sync)  exec ralph-sync "$@" ;;
   edit)
     # Get current label and hidden flag from current.json
     CURRENT_FILE="$RALPH_DIR/state/current.json"
@@ -60,6 +61,7 @@ case "$COMMAND" in
     echo "Template Commands:"
     echo "  check           Validate all templates (syntax, partials, rendering)"
     echo "  diff [name]     Show local template changes vs packaged"
+    echo "  sync            Update local templates from packaged (backs up customizations)"
     echo "  tune            AI-assisted template editing (interactive or via diff)"
     echo ""
     echo "Utility Commands:"
