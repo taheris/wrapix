@@ -2,6 +2,7 @@
 
 let
   ralph = import ../ralph { inherit pkgs; };
+  tmuxMcp = import ../mcp/tmux { inherit pkgs; };
 
   # Base packages included in all profiles
   basePackages = with pkgs; [
@@ -136,4 +137,78 @@ in
       }
     ];
   };
+
+  # Debug profile with tmux MCP server for AI-assisted debugging
+  debug =
+    mkProfile {
+      name = "debug";
+
+      packages = [
+        pkgs.tmux
+        tmuxMcp.package
+      ];
+    }
+    // {
+      mcp = {
+        servers.tmux-debug = {
+          command = "tmux-debug-mcp";
+        };
+      };
+    };
+
+  # Rust profile with debug capabilities
+  # Example of profile composition
+  rust-debug =
+    let
+      rustBase = mkProfile {
+        name = "rust-debug";
+
+        packages = with pkgs; [
+          # Rust packages
+          gcc
+          openssl
+          openssl.dev
+          pkg-config
+          postgresql.lib
+          rustup
+          # Debug packages
+          tmux
+          tmuxMcp.package
+        ];
+
+        env = {
+          CARGO_HOME = "/workspace/.cargo";
+          LIBRARY_PATH = "${pkgs.postgresql.lib}/lib";
+          OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+          RUSTUP_HOME = "/workspace/.rustup";
+        };
+
+        mounts = [
+          {
+            source = "~/.cargo/registry";
+            dest = "~/.cargo/registry";
+            mode = "ro";
+            optional = true;
+          }
+          {
+            source = "~/.cargo/git";
+            dest = "~/.cargo/git";
+            mode = "ro";
+            optional = true;
+          }
+        ];
+      };
+    in
+    rustBase
+    // {
+      mcp = {
+        servers.tmux-debug = {
+          command = "tmux-debug-mcp";
+        };
+      };
+    };
+
+  # Helper to create audited debug profile
+  inherit (tmuxMcp) mkAuditedDebug;
 }
