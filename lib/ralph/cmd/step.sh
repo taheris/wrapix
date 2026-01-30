@@ -27,7 +27,7 @@ source "$(dirname "$0")/util.sh"
 debug "Syncing beads database..."
 bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists
 if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
