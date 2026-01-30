@@ -134,7 +134,7 @@ $EXISTING_BEADS
 
     WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
 2. **Identify NEW requirements** not covered by existing tasks
-3. **Create new tasks** and bond them to the existing molecule
+3. **Create new tasks as children of the molecule** using --parent flag
 4. **Add dependencies** where new tasks depend on existing or other new tasks
 {{README_INSTRUCTIONS}}
 
@@ -142,13 +142,10 @@ $EXISTING_BEADS
 
     OUTPUT_FORMAT="## Output Format
 
-For each NEW implementation task, create it and bond to the molecule:
+For each NEW implementation task, create it as a child of the molecule:
 \`\`\`bash
-# Create the new task
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
-
-# Bond it to the existing molecule (sequential by default, or use --type parallel)
-bd mol bond $MOLECULE_ID \"\$TASK_ID\" --type sequential
+# Create the new task as a child of the molecule
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -189,13 +186,10 @@ echo \"Created molecule root: \$MOLECULE_ID\"
 jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
 \`\`\`
 
-Then, for each NEW implementation task, create it and bond to the molecule:
+Then, for each NEW implementation task, create it as a child of the molecule:
 \`\`\`bash
-# Create the task
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
-
-# Bond it to the molecule (sequential by default, or use --type parallel for independent tasks)
-bd mol bond \"\$MOLECULE_ID\" \"\$TASK_ID\" --type sequential
+# Create the task as a child of the molecule (this enables molecule progress tracking)
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"\$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -211,7 +205,7 @@ else
 2. **Create a parent epic bead** as the molecule root
 3. **Capture the epic ID** for use as the molecule root
 4. **Store the molecule ID** in current.json
-5. **Create tasks** and **bond them to the molecule** using bd mol bond
+5. **Create tasks as children of the epic** using --parent flag
 6. **Add dependencies** where tasks depend on each other
 {{README_INSTRUCTIONS}}"
 
@@ -228,13 +222,10 @@ echo \"Created molecule root: \$MOLECULE_ID\"
 jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
 \`\`\`
 
-Then, for each implementation task, create it and bond to the molecule:
+Then, for each implementation task, create it as a child of the molecule:
 \`\`\`bash
-# Create the task
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --silent)
-
-# Bond it to the molecule (sequential by default, or use --type parallel for independent tasks)
-bd mol bond \"\$MOLECULE_ID\" \"\$TASK_ID\" --type sequential
+# Create the task as a child of the molecule (this enables molecule progress tracking)
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"\$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -305,6 +296,18 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
     echo ""
     echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
     echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
+  fi
+
+  # Commit the spec file
+  if [ -f "$FINAL_SPEC_PATH" ]; then
+    echo ""
+    echo "Committing spec..."
+    git add "$FINAL_SPEC_PATH" "$SPECS_README" 2>/dev/null || true
+    if git diff --cached --quiet 2>/dev/null; then
+      echo "  (no changes to commit)"
+    else
+      git commit -m "Add $LABEL specification" >/dev/null 2>&1 && echo "  Committed: $FINAL_SPEC_PATH" || echo "  (commit failed or nothing to commit)"
+    fi
   fi
 
   # Display the molecule ID if available
