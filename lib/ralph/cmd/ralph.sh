@@ -12,6 +12,7 @@ case "$COMMAND" in
   step)  exec ralph-step "$@" ;;
   loop)  exec ralph-loop "$@" ;;
   status) exec ralph-status "$@" ;;
+  check) exec ralph-check "$@" ;;
   diff)  exec ralph-diff "$@" ;;
   edit)
     # Get current label and hidden flag from current.json
@@ -65,6 +66,7 @@ case "$COMMAND" in
     echo "  status          Show current workflow state"
     echo ""
     echo "Template Commands:"
+    echo "  check           Validate all templates (syntax, partials, rendering)"
     echo "  diff [name]     Show local template changes vs packaged"
     echo "  tune            Edit step prompt template (step.md)"
     echo ""
