@@ -19,23 +19,26 @@ Before implementing features, consult `specs/README.md`. Key points:
 - **Build with Python:** `nix build .#wrapix-python`
 - **Run directly:** `nix run github:taheris/wrapix`
 
-### Formatting
-
-- **Format Nix:** `nix fmt`
-- **Check format:** `nix flake check`
-
 ## Issue Tracking (Beads)
 
 **Use `bd` for ALL issue tracking.** Do NOT use markdown TODOs or external trackers.
 
-### CRITICAL: Session Start
+### Syncing Beads
 
-**ALWAYS run `bd sync` BEFORE any other bd command.** The local database may be stale.
-Without syncing first, `bd ready` and `bd list` will show outdated or empty results.
+The `bd sync --full` command is legacy and has bugs ([beads#812](https://github.com/steveyegge/beads/issues/812)). Use manual git operations instead:
 
+**Pull (session start):**
 ```bash
-bd sync    # MUST run this first every session
-bd ready   # Now shows accurate results
+git -C .git/beads-worktrees/beads pull
+bd sync --import
+```
+
+**Push (session end):**
+```bash
+bd sync
+git -C .git/beads-worktrees/beads add -A
+git -C .git/beads-worktrees/beads commit -m "bd sync: $(date '+%Y-%m-%d %H:%M:%S')"
+git push origin beads
 ```
 
 ### Essential Commands
@@ -46,17 +49,7 @@ bd show <id>                         # Issue details
 bd create --title="..." --type=task  # Create issue
 bd update <id> --status=in_progress  # Claim work
 bd close <id>                        # Complete work
-bd sync                              # Sync with remote
 ```
-
-### Workflow
-
-1. `bd sync` — Pull latest issues
-2. `bd ready` — Find actionable work
-3. `bd update <id> --status=in_progress` — Claim it
-4. Implement the task
-5. `bd close <id>` — Mark complete
-6. `bd sync` — Push changes
 
 ### Key Concepts
 
@@ -66,25 +59,23 @@ bd sync                              # Sync with remote
 
 ## Session Protocol
 
-**When ending a session or when the user says "land the plane", complete ALL steps:**
+**When ending a session or when the user says "land the plane":**
 
 ```bash
-nix run .#test          # Run all tests (must pass)
-nix fmt                 # Format code
-git status              # Check changes
-git add <files>         # Stage code
-bd sync                 # Sync beads
-git commit -m "..."     # Commit
-bd sync                 # Sync any new beads changes
-git push                # Push to remote
-git status              # Verify "up to date"
+git add <files>         # Stage code changes
+bd sync                 # Export beads to JSONL
+git commit -m "..."     # Commit (prek hooks run: nixfmt, shellcheck, flake check, tests)
+git push                # Push code to remote
+# Push beads separately:
+git -C .git/beads-worktrees/beads add -A
+git -C .git/beads-worktrees/beads commit -m "bd sync: $(date '+%Y-%m-%d %H:%M:%S')"
+git push origin beads
 ```
 
 **Rules:**
-- Tests MUST pass before committing
-- Work is NOT complete until `git push` succeeds
+- Pre-commit hooks run automatically: nixfmt, shellcheck, nix flake check, tests
+- Work is NOT complete until both `git push` and `git push origin beads` succeed
 - NEVER stop before pushing
-- If push fails, resolve and retry
 
 ## Code Style
 
