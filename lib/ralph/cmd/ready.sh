@@ -267,12 +267,12 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
 
 # Multi-line substitutions using awk (handles newlines in replacement text)
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/\{\{README_INSTRUCTIONS\}\}/, replacement); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/\{\{README_UPDATE_SECTION\}\}/, replacement); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$MOLECULE_CONTEXT" '{gsub(/\{\{MOLECULE_CONTEXT\}\}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$WORKFLOW_INSTRUCTIONS" '{gsub(/\{\{WORKFLOW_INSTRUCTIONS\}\}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$OUTPUT_FORMAT" '{gsub(/\{\{OUTPUT_FORMAT\}\}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/{{README_INSTRUCTIONS}}/, replacement); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/{{README_UPDATE_SECTION}}/, replacement); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$MOLECULE_CONTEXT" '{gsub(/{{MOLECULE_CONTEXT}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$WORKFLOW_INSTRUCTIONS" '{gsub(/{{WORKFLOW_INSTRUCTIONS}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$OUTPUT_FORMAT" '{gsub(/{{OUTPUT_FORMAT}}/, ctx); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 

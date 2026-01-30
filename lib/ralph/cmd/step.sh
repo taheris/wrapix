@@ -237,8 +237,8 @@ WORK_PROMPT="${WORK_PROMPT//\{\{MOLECULE_ID\}\}/$MOLECULE_ID}"
 WORK_PROMPT="${WORK_PROMPT//\{\{EXIT_SIGNALS\}\}/}"
 
 # For description and pinned context, use awk for multi-line
-WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/\{\{DESCRIPTION\}\}/, desc); print}')
-WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/\{\{PINNED_CONTEXT\}\}/, ctx); print}')
+WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/{{DESCRIPTION}}/, desc); print}')
+WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
 
 mkdir -p "$RALPH_DIR/logs"
 LOG="$RALPH_DIR/logs/work-$NEXT_ISSUE.log"
