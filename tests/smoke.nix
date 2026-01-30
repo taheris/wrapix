@@ -42,7 +42,8 @@ let
   };
 
   sandboxLib = import ../lib { inherit pkgs system linuxPkgs; };
-  wrapix = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+  sandbox = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+  wrapix = sandbox.package;
 
 in
 {

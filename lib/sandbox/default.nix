@@ -97,27 +97,33 @@ let
     let
       finalProfile = extendProfile profile { inherit packages mounts env; };
 
+      package =
+        if isLinux then
+          linuxSandbox.mkSandbox {
+            profile = finalProfile;
+            inherit cpus memoryMb deployKey;
+            profileImage = mkImage {
+              profile = finalProfile;
+              entrypointSh = ./linux/entrypoint.sh;
+            };
+          }
+        else if isDarwin then
+          darwinSandbox.mkSandbox {
+            profile = finalProfile;
+            inherit cpus memoryMb deployKey;
+            profileImage = mkImage {
+              profile = finalProfile;
+              entrypointSh = ./darwin/entrypoint.sh;
+            };
+          }
+        else
+          throw "Unsupported system: ${system}";
+
     in
-    if isLinux then
-      linuxSandbox.mkSandbox {
-        profile = finalProfile;
-        inherit cpus memoryMb deployKey;
-        profileImage = mkImage {
-          profile = finalProfile;
-          entrypointSh = ./linux/entrypoint.sh;
-        };
-      }
-    else if isDarwin then
-      darwinSandbox.mkSandbox {
-        profile = finalProfile;
-        inherit cpus memoryMb deployKey;
-        profileImage = mkImage {
-          profile = finalProfile;
-          entrypointSh = ./darwin/entrypoint.sh;
-        };
-      }
-    else
-      throw "Unsupported system: ${system}";
+    {
+      inherit package;
+      profile = finalProfile;
+    };
 
 in
 {

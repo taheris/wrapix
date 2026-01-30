@@ -80,11 +80,11 @@
           };
 
           packages = {
-            default = wrapix.mkSandbox { profile = wrapix.profiles.base; };
+            default = (wrapix.mkSandbox { profile = wrapix.profiles.base; }).package;
 
-            wrapix = wrapix.mkSandbox { profile = wrapix.profiles.base; };
-            wrapix-rust = wrapix.mkSandbox { profile = wrapix.profiles.rust; };
-            wrapix-python = wrapix.mkSandbox { profile = wrapix.profiles.python; };
+            wrapix = (wrapix.mkSandbox { profile = wrapix.profiles.base; }).package;
+            wrapix-rust = (wrapix.mkSandbox { profile = wrapix.profiles.rust; }).package;
+            wrapix-python = (wrapix.mkSandbox { profile = wrapix.profiles.python; }).package;
 
             wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
