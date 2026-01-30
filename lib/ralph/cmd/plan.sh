@@ -24,7 +24,13 @@ fi
 source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
-TEMPLATE="${RALPH_TEMPLATE_DIR:-/etc/wrapix/ralph-template}"
+
+# Template directory: use RALPH_TEMPLATE_DIR if set and exists
+if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
+  TEMPLATE="$RALPH_TEMPLATE_DIR"
+else
+  TEMPLATE=""
+fi
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
 CURRENT_FILE="$RALPH_DIR/state/current.json"
@@ -119,9 +125,11 @@ fi
 
 # Ensure ralph directory structure exists (idempotent)
 if [ ! -d "$RALPH_DIR" ]; then
-  if [ ! -d "$TEMPLATE" ]; then
-    echo "Error: Template directory not found at $TEMPLATE"
-    echo "This usually means ralph is not properly installed."
+  if [ -z "$TEMPLATE" ]; then
+    echo "Error: Cannot initialize ralph - RALPH_TEMPLATE_DIR not set or doesn't exist."
+    [ -n "${RALPH_TEMPLATE_DIR:-}" ] && echo "  RALPH_TEMPLATE_DIR=$RALPH_TEMPLATE_DIR (not found)"
+    echo ""
+    echo "Run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR."
     exit 1
   fi
 
@@ -216,8 +224,18 @@ fi
 PROMPT_TEMPLATE="$RALPH_DIR/plan.md"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Plan prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure plan.md exists in your ralph directory."
-  exit 1
+  echo ""
+  if [ -n "$TEMPLATE" ]; then
+    echo "Copying from $TEMPLATE..."
+    cp "$TEMPLATE/plan.md" "$PROMPT_TEMPLATE"
+    chmod u+rw "$PROMPT_TEMPLATE"
+  else
+    echo "RALPH_TEMPLATE_DIR not set or doesn't exist - cannot copy template."
+    [ -n "${RALPH_TEMPLATE_DIR:-}" ] && echo "  RALPH_TEMPLATE_DIR=$RALPH_TEMPLATE_DIR (not found)"
+    echo ""
+    echo "Run from 'nix develop' shell to restore templates."
+    exit 1
+  fi
 fi
 
 # Validate template has placeholders, reset from source if corrupted
