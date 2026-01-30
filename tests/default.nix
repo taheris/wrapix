@@ -56,6 +56,9 @@ let
   # Shell utility tests run on all platforms
   shellTests = import ./shell.nix { inherit pkgs system; };
 
+  # tmux-mcp tests (Rust unit tests and shell script syntax)
+  tmuxMcpTests = import ./tmux-mcp.nix { inherit pkgs system src; };
+
   # Lint checks run on all platforms
   lintChecks = import ./lint.nix { inherit pkgs src; };
 
@@ -73,6 +76,7 @@ let
     // ralphTests
     // ralphTemplatesCheck
     // shellTests
+    // tmuxMcpTests
     // lintChecks
     // readmeTest;
 
@@ -279,6 +283,7 @@ in
     ralphTests
     ralphTemplatesCheck
     shellTests
+    tmuxMcpTests
     lintChecks
     readmeTest
     ;
