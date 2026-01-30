@@ -14,7 +14,7 @@ set -euo pipefail
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.claude/ralph}"
+RALPH_DIR="${RALPH_DIR:-.ralph}"
 
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists
 if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
@@ -24,7 +24,7 @@ else
 fi
 
 # Source templates: if lib/ralph/template exists, we're in the ralph source repo
-# and should edit there instead of .claude/ralph
+# and should edit there instead of .ralph
 SOURCE_TEMPLATE_DIR=""
 if [ -d "lib/ralph/template" ]; then
   SOURCE_TEMPLATE_DIR="lib/ralph/template"
@@ -48,7 +48,7 @@ show_usage() {
   echo "Both modes run 'ralph check' after edits to validate templates."
   echo ""
   echo "Environment:"
-  echo "  RALPH_DIR           Local template directory (default: .claude/ralph)"
+  echo "  RALPH_DIR           Local template directory (default: .ralph)"
   echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
 }
 

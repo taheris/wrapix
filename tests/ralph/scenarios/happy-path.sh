@@ -11,7 +11,7 @@
 # State tracking (set by test harness)
 # LABEL - feature label (e.g., "test-feature")
 # TEST_DIR - test directory root
-# RALPH_DIR - ralph directory (typically .claude/ralph)
+# RALPH_DIR - ralph directory (typically .ralph)
 
 phase_plan() {
   # Create the spec file
@@ -60,7 +60,7 @@ SPEC_EOF
 phase_ready() {
   # Get label from state or environment
   local label="${LABEL:-happy-path-test}"
-  local ralph_dir="${RALPH_DIR:-.claude/ralph}"
+  local ralph_dir="${RALPH_DIR:-.ralph}"
 
   # Create an epic for this feature (epic becomes the molecule root)
   local epic_json
