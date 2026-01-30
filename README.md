@@ -40,9 +40,10 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
         { system, ... }:
         let
           wrapix = inputs.wrapix.legacyPackages.${system}.lib;
+          sandbox = wrapix.mkSandbox { };
         in
         {
-          packages.default = wrapix.mkSandbox { };
+          packages.default = sandbox.package;
         };
     };
 }
@@ -70,9 +71,8 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
           # sandbox runs Linux; use Linux packages even on Darwin
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
           linuxPkgs = import inputs.nixpkgs { system = linuxSystem; };
-        in
-        {
-          packages.default = wrapix.mkSandbox {
+
+          sandbox = wrapix.mkSandbox {
             profile = wrapix.profiles.rust;
             deployKey = "myproject"; # for git push (see scripts/setup-deploy-key)
 
@@ -92,9 +92,47 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
               }
             ];
           };
+        in
+        {
+          packages.default = sandbox.package;
         };
     };
 }
+```
+
+### Composing sandbox with ralph
+
+`mkSandbox` returns `{ package, profile }`, allowing you to share the effective profile with `mkRalph`:
+
+```nix
+let
+  wrapix = inputs.wrapix.legacyPackages.${system}.lib;
+
+  # Create sandbox with customizations
+  sandbox = wrapix.mkSandbox {
+    profile = wrapix.profiles.rust;
+    packages = [ linuxPkgs.sqlx-cli ];
+  };
+
+  # Ralph uses the same sandbox (shares profile)
+  ralph = wrapix.mkRalph { inherit sandbox; };
+in
+{
+  packages.default = sandbox.package;
+
+  apps.ralph = ralph.app;
+
+  devShells.default = pkgs.mkShell {
+    packages = ralph.packages;
+    shellHook = ralph.shellHook;
+  };
+}
+```
+
+Alternatively, pass a profile directly to `mkRalph` (creates its own sandbox):
+
+```nix
+ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
 ```
 
 ## Profiles

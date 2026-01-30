@@ -43,29 +43,47 @@ in
   # Usage: ralph.lib.mkTemplatesCheck pkgs
   mkTemplatesCheck = templateModule.mkTemplatesCheck pkgs;
 
-  # Create ralph support for a given wrapix profile
-  # Returns: { packages, shellHook, app }
+  # Create ralph support for a given sandbox or profile
+  # Returns: { packages, shellHook, app, sandbox }
   # - packages: list to add to devShell
   # - shellHook: shell setup for PATH and env vars
   # - app: nix app definition for `nix run`
+  # - sandbox: the sandbox used (with package and profile)
+  #
+  # Usage:
+  #   mkRalph { sandbox = mySandbox; }              # Use existing sandbox
+  #   mkRalph { profile = profiles.rust; }          # Create sandbox from profile
+  #   mkRalph { profile = profiles.rust; env = {}; } # Profile with extensions
   mkRalph =
     {
-      profile,
+      sandbox ? null,
+      profile ? null,
       packages ? [ ],
       mounts ? [ ],
       env ? { },
     }:
     let
-      wrapixBin = mkSandbox {
-        inherit
-          env
-          mounts
-          packages
-          profile
-          ;
-      };
+      effectiveSandbox =
+        if sandbox != null then
+          sandbox
+        else if profile != null then
+          mkSandbox {
+            inherit
+              env
+              mounts
+              packages
+              profile
+              ;
+          }
+        else
+          throw "mkRalph requires either 'sandbox' or 'profile' argument";
+
+      wrapixBin = effectiveSandbox.package;
     in
     {
+      inherit (effectiveSandbox) profile;
+      sandbox = effectiveSandbox;
+
       # Packages to include in devShell
       packages = [
         scripts
