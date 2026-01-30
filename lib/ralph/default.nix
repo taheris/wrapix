@@ -8,44 +8,36 @@
 }:
 
 let
-  inherit (builtins) readFile;
-  inherit (pkgs) buildEnv writeShellScriptBin;
+  inherit (pkgs) runCommand;
 
   templateDir = ./template;
 
   # Import template module for validation
   templateModule = import ./template/default.nix { inherit (pkgs) lib; };
 
-  # Shared utilities - must be first so other scripts can source it
-  utilScript = pkgs.writeTextFile {
-    name = "util.sh";
-    text = readFile ./cmd/util.sh;
-    destination = "/bin/util.sh";
-  };
-
-  scripts = [
-    utilScript
-    (writeShellScriptBin "ralph" (readFile ./cmd/ralph.sh))
-    (writeShellScriptBin "ralph-plan" (readFile ./cmd/plan.sh))
-    (writeShellScriptBin "ralph-logs" (readFile ./cmd/logs.sh))
-    (writeShellScriptBin "ralph-ready" (readFile ./cmd/ready.sh))
-    (writeShellScriptBin "ralph-step" (readFile ./cmd/step.sh))
-    (writeShellScriptBin "ralph-loop" (readFile ./cmd/loop.sh))
-    (writeShellScriptBin "ralph-status" (readFile ./cmd/status.sh))
-    (writeShellScriptBin "ralph-check" (readFile ./cmd/check.sh))
-    (writeShellScriptBin "ralph-diff" (readFile ./cmd/diff.sh))
-    (writeShellScriptBin "ralph-sync" (readFile ./cmd/sync.sh))
-    (writeShellScriptBin "ralph-tune" (readFile ./cmd/tune.sh))
-  ];
-
-  ralphEnv = buildEnv {
-    name = "ralph-env";
-    paths = scripts;
-  };
+  # All ralph scripts bundled in a single derivation
+  scripts = runCommand "ralph-scripts" { } ''
+    mkdir -p $out/bin
+    for script in ${./cmd}/*.sh; do
+      name=$(basename "$script" .sh)
+      if [ "$name" = "util" ]; then
+        # util.sh is sourced, not executed directly
+        cp "$script" $out/bin/util.sh
+      elif [ "$name" = "ralph" ]; then
+        # main entry point has no prefix
+        cp "$script" $out/bin/ralph
+        chmod +x $out/bin/ralph
+      else
+        # subcommands get ralph- prefix
+        cp "$script" $out/bin/ralph-$name
+        chmod +x $out/bin/ralph-$name
+      fi
+    done
+  '';
 
 in
 {
-  inherit templateDir scripts;
+  inherit scripts templateDir;
 
   # Template validation for flake checks
   # Usage: ralph.lib.mkTemplatesCheck pkgs
@@ -66,20 +58,23 @@ in
     let
       wrapixBin = mkSandbox {
         inherit
-          profile
-          packages
-          mounts
           env
+          mounts
+          packages
+          profile
           ;
       };
     in
     {
-      # Packages to include in devShell (wrapixBin + ralph scripts)
-      packages = [ wrapixBin ] ++ scripts;
+      # Packages to include in devShell
+      packages = [
+        scripts
+        wrapixBin
+      ];
 
       # Shell hook that ensures correct PATH ordering
       shellHook = ''
-        export PATH="${ralphEnv}/bin:${wrapixBin}/bin:$PATH"
+        export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
         export RALPH_TEMPLATE_DIR="${templateDir}"
       '';
 
@@ -87,8 +82,8 @@ in
       app = {
         meta.description = "Ralph Wiggum loop in a sandbox";
         type = "app";
-        program = "${writeShellScriptBin "ralph-runner" ''
-          export PATH="${ralphEnv}/bin:${wrapixBin}/bin:$PATH"
+        program = "${pkgs.writeShellScriptBin "ralph-runner" ''
+          export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
           exec ralph "$@"
         ''}/bin/ralph-runner";
       };
