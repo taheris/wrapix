@@ -41,6 +41,15 @@ Title: {{TITLE}}
    - Need user input? → `RALPH_BLOCKED: <reason>`
    - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
 
+## Quality Gates
+
+Before outputting RALPH_COMPLETE:
+- [ ] Tests written and passing
+- [ ] Lint checks pass
+- [ ] Changes staged (`git add`)
+
+Post-step hooks verify compliance automatically.
+
 ## Land the Plane
 
 Before outputting RALPH_COMPLETE, follow the **Session Protocol** in `AGENTS.md`.
