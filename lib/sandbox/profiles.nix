@@ -14,6 +14,7 @@ let
     file
     findutils
     gawk
+    gh
     git
     gnugrep
     gnused
