@@ -2,6 +2,8 @@
 
 {{> context-pinning}}
 
+{{> spec-header}}
+
 ## Current Spec
 
 Read: {{SPEC_PATH}}
@@ -32,6 +34,9 @@ Title: {{TITLE}}
    - [ ] All tests pass
    - [ ] Lint checks pass
    - [ ] Changes committed
+6. **Blocked vs Waiting**: Distinguish dependency blocks from true blocks:
+   - Need user input? → `RALPH_BLOCKED: <reason>`
+   - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
 
 ## Land the Plane
 
