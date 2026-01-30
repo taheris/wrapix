@@ -193,17 +193,6 @@ if [ -z "$ISSUE_TITLE" ]; then
 fi
 debug "Issue title: ${ISSUE_TITLE:0:50}..."
 
-# Copy missing template files (handles upgrades where new templates were added)
-if [ -d "$TEMPLATE" ]; then
-  for template_file in plan.md ready.md step.md; do
-    if [ ! -f "$RALPH_DIR/$template_file" ] && [ -f "$TEMPLATE/$template_file" ]; then
-      cp "$TEMPLATE/$template_file" "$RALPH_DIR/$template_file"
-      chmod u+rw "$RALPH_DIR/$template_file"
-      echo "Added missing template: $template_file"
-    fi
-  done
-fi
-
 PROMPT_TEMPLATE="$RALPH_DIR/step.md"
 require_file "$PROMPT_TEMPLATE" "Step prompt template (step.md)"
 
