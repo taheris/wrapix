@@ -40,6 +40,19 @@ let
   # Ralph utility function tests run on all platforms
   ralphTests = import ./ralph { inherit pkgs system; };
 
+  # Ralph template validation check (runs as part of nix flake check)
+  # Uses mkTemplatesCheck from lib/ralph to validate all templates
+  ralphTemplatesCheck =
+    let
+      ralph = import ../lib/ralph {
+        inherit pkgs;
+        mkSandbox = null; # not needed for template validation
+      };
+    in
+    {
+      ralph-templates = ralph.mkTemplatesCheck;
+    };
+
   # Shell utility tests run on all platforms
   shellTests = import ./shell.nix { inherit pkgs system; };
 
@@ -58,6 +71,7 @@ let
     // darwinNetworkTests
     // integrationTests
     // ralphTests
+    // ralphTemplatesCheck
     // shellTests
     // lintChecks
     // readmeTest;
@@ -263,6 +277,7 @@ in
     darwinNetworkTests
     integrationTests
     ralphTests
+    ralphTemplatesCheck
     shellTests
     lintChecks
     readmeTest

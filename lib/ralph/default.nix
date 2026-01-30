@@ -13,6 +13,9 @@ let
 
   templateDir = ./template;
 
+  # Import template module for validation
+  templateModule = import ./template/default.nix { inherit (pkgs) lib; };
+
   # Shared utilities - must be first so other scripts can source it
   utilScript = pkgs.writeTextFile {
     name = "util.sh";
@@ -41,6 +44,10 @@ let
 in
 {
   inherit templateDir scripts;
+
+  # Template validation for flake checks
+  # Usage: ralph.lib.mkTemplatesCheck pkgs
+  mkTemplatesCheck = templateModule.mkTemplatesCheck pkgs;
 
   # Create ralph support for a given wrapix profile
   # Returns: { packages, shellHook, app }
