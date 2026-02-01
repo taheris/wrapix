@@ -1,0 +1,7 @@
+{
+  "label": "ralph-workflow",
+  "update": true,
+  "hidden": false,
+  "spec_path": "specs/ralph-workflow.md",
+  "molecule": "wx-zay1"
+}
