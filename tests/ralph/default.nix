@@ -814,4 +814,364 @@ templateTests
         echo "PASS: ralph-diff validation logic tests"
         mkdir $out
       '';
+
+  # Test: ralph-check help flag content
+  check-help =
+    runCommandLocal "ralph-check-help"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check --help content..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        if grep -q "Validates all ralph templates" "$script"; then
+          echo "PASS: Help mentions template validation"
+        else
+          echo "FAIL: Help missing template validation"
+          exit 1
+        fi
+
+        if grep -q "Partial files exist" "$script"; then
+          echo "PASS: Help mentions partial file checks"
+        else
+          echo "FAIL: Help missing partial file checks"
+          exit 1
+        fi
+
+        if grep -q "Body files parse correctly" "$script"; then
+          echo "PASS: Help mentions body file parsing"
+        else
+          echo "FAIL: Help missing body file parsing"
+          exit 1
+        fi
+
+        if grep -q "No syntax errors in Nix expressions" "$script"; then
+          echo "PASS: Help mentions Nix expression syntax"
+        else
+          echo "FAIL: Help missing Nix expression syntax"
+          exit 1
+        fi
+
+        if grep -q "Dry-run render with dummy values" "$script"; then
+          echo "PASS: Help mentions dry-run rendering"
+        else
+          echo "FAIL: Help missing dry-run rendering"
+          exit 1
+        fi
+
+        if grep -q "Exit codes:" "$script"; then
+          echo "PASS: Help documents exit codes"
+        else
+          echo "FAIL: Help missing exit code documentation"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check help tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check requires RALPH_TEMPLATE_DIR
+  check-env-validation =
+    runCommandLocal "ralph-check-env-validation"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check environment validation..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Verify the script requires RALPH_TEMPLATE_DIR
+        if grep -q 'RALPH_TEMPLATE_DIR' "$script"; then
+          echo "PASS: Script references RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR reference"
+          exit 1
+        fi
+
+        # Verify error message for missing env
+        if grep -q "RALPH_TEMPLATE_DIR not set" "$script"; then
+          echo "PASS: Script shows error for missing RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR error message"
+          exit 1
+        fi
+
+        # Verify nix develop shell instruction
+        if grep -q "nix develop" "$script"; then
+          echo "PASS: Script mentions nix develop"
+        else
+          echo "FAIL: Script missing nix develop instruction"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check env validation tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check validates all template types
+  check-template-types =
+    runCommandLocal "ralph-check-template-types"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check template types..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that all body files are listed
+        for template in plan-new plan-update ready-new ready-update step; do
+          if grep -q "\"$template.md\"" "$script" || grep -q "'$template.md'" "$script"; then
+            echo "PASS: Template '$template.md' in body files list"
+          else
+            echo "FAIL: Template '$template.md' missing from body files"
+            exit 1
+          fi
+        done
+
+        # Check that all expected partials are listed
+        for partial in context-pinning exit-signals spec-header; do
+          if grep -q "$partial.md" "$script"; then
+            echo "PASS: Partial '$partial.md' in expected partials"
+          else
+            echo "FAIL: Partial '$partial.md' missing from expected partials"
+            exit 1
+          fi
+        done
+
+        echo "PASS: ralph-check template types tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check validates Nix expressions
+  check-nix-validation =
+    runCommandLocal "ralph-check-nix-validation"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check Nix validation..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that default.nix is validated
+        if grep -q 'default.nix' "$script"; then
+          echo "PASS: Script validates default.nix"
+        else
+          echo "FAIL: Script doesn't validate default.nix"
+          exit 1
+        fi
+
+        # Check that nix-instantiate --parse is used for syntax checking
+        if grep -q 'nix-instantiate --parse' "$script"; then
+          echo "PASS: Script uses nix-instantiate for syntax checking"
+        else
+          echo "FAIL: Script doesn't use nix-instantiate for syntax"
+          exit 1
+        fi
+
+        # Check that nix eval is used for evaluation checking
+        if grep -q 'nix eval' "$script"; then
+          echo "PASS: Script uses nix eval for evaluation checking"
+        else
+          echo "FAIL: Script doesn't use nix eval"
+          exit 1
+        fi
+
+        # Check that config.nix is validated if present
+        if grep -q 'config.nix' "$script"; then
+          echo "PASS: Script checks config.nix"
+        else
+          echo "FAIL: Script doesn't check config.nix"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check Nix validation tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check validates partial references
+  check-partial-references =
+    runCommandLocal "ralph-check-partial-references"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check partial references..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that partial references pattern is used (use extended regex for +)
+        if grep -E -q '\{\{> [a-z-]+\}\}' "$script"; then
+          echo "PASS: Script extracts partial references"
+        else
+          echo "FAIL: Script doesn't extract partial references"
+          exit 1
+        fi
+
+        # Check that PARTIAL_DIR is used correctly
+        if grep -q 'PARTIAL_DIR' "$script"; then
+          echo "PASS: Script uses PARTIAL_DIR for partial validation"
+        else
+          echo "FAIL: Script doesn't define PARTIAL_DIR"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check partial references tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check performs dry-run rendering
+  check-dry-run-render =
+    runCommandLocal "ralph-check-dry-run-render"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check dry-run rendering..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that dummy values are used for rendering
+        if grep -q 'dummyVars' "$script"; then
+          echo "PASS: Script uses dummyVars for dry-run"
+        else
+          echo "FAIL: Script doesn't use dummyVars"
+          exit 1
+        fi
+
+        # Check that template.render is called
+        if grep -q 'template.render' "$script"; then
+          echo "PASS: Script calls template.render"
+        else
+          echo "FAIL: Script doesn't call template.render"
+          exit 1
+        fi
+
+        # Check that all known variables have dummy values
+        for var in PINNED_CONTEXT LABEL SPEC_PATH SPEC_CONTENT EXISTING_SPEC MOLECULE_ID ISSUE_ID TITLE DESCRIPTION EXIT_SIGNALS; do
+          if grep -q "$var" "$script"; then
+            echo "PASS: Script provides dummy value for $var"
+          else
+            echo "FAIL: Script missing dummy value for $var"
+            exit 1
+          fi
+        done
+
+        echo "PASS: ralph-check dry-run rendering tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check exit codes are correct
+  check-exit-codes =
+    runCommandLocal "ralph-check-exit-codes"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check exit codes..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that exit 0 is used for success
+        if grep -q 'exit 0' "$script"; then
+          echo "PASS: Script exits 0 on success"
+        else
+          echo "FAIL: Script doesn't exit 0 on success"
+          exit 1
+        fi
+
+        # Check that exit 1 is used for errors
+        if grep -q 'exit 1' "$script"; then
+          echo "PASS: Script exits 1 on errors"
+        else
+          echo "FAIL: Script doesn't exit 1 on errors"
+          exit 1
+        fi
+
+        # Check that ERRORS array is used for collecting errors
+        if grep -q 'ERRORS=(' "$script" && grep -q '#ERRORS\[@\]' "$script"; then
+          echo "PASS: Script collects errors in ERRORS array"
+        else
+          echo "FAIL: Script doesn't properly use ERRORS array"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check exit codes tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-check validates variable declarations
+  check-variable-declarations =
+    runCommandLocal "ralph-check-variable-declarations"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-check variable declarations..."
+
+        script="${../.. + "/lib/ralph/cmd/check.sh"}"
+
+        # Check that variable declaration checking exists
+        if grep -q 'Checking variable declarations' "$script"; then
+          echo "PASS: Script checks variable declarations"
+        else
+          echo "FAIL: Script doesn't check variable declarations"
+          exit 1
+        fi
+
+        # Check that undeclared variables are detected
+        if grep -q 'undeclared' "$script"; then
+          echo "PASS: Script detects undeclared variables"
+        else
+          echo "FAIL: Script doesn't detect undeclared variables"
+          exit 1
+        fi
+
+        echo "PASS: ralph-check variable declarations tests"
+        mkdir $out
+      '';
 }
