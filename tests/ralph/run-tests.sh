@@ -4322,6 +4322,208 @@ test_default_config_has_hooks() {
   teardown_test_env
 }
 
+# Test: detect_profile function returns correct profiles for various specs
+test_detect_profile() {
+  CURRENT_TEST="detect_profile"
+  test_header "Profile Detection - detect_profile function"
+
+  setup_test_env "detect-profile"
+
+  # Source util.sh to get detect_profile function
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Test 1: Rust signals - .rs files
+  local rust_spec="
+# Rust Parser
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| src/parser.rs | Main parser |
+| Cargo.toml | Dependencies |
+"
+  local profile
+  profile=$(detect_profile "$rust_spec")
+  if [ "$profile" = "rust" ]; then
+    test_pass "Detected 'rust' profile from .rs files and Cargo.toml"
+  else
+    test_fail "Expected 'rust' profile for Rust spec, got '$profile'"
+  fi
+
+  # Test 2: Python signals - .py files
+  local python_spec="
+# Python Tool
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| src/main.py | Entry point |
+| tests/test_main.py | Tests |
+| pyproject.toml | Config |
+"
+  profile=$(detect_profile "$python_spec")
+  if [ "$profile" = "python" ]; then
+    test_pass "Detected 'python' profile from .py files and pyproject.toml"
+  else
+    test_fail "Expected 'python' profile for Python spec, got '$profile'"
+  fi
+
+  # Test 3: Python keywords (pytest, pip, venv)
+  local pytest_spec="
+# Testing Feature
+
+Run tests with pytest and install dependencies with pip.
+"
+  profile=$(detect_profile "$pytest_spec")
+  if [ "$profile" = "python" ]; then
+    test_pass "Detected 'python' profile from pytest/pip keywords"
+  else
+    test_fail "Expected 'python' profile from pytest/pip keywords, got '$profile'"
+  fi
+
+  # Test 4: Rust keywords (cargo, rustc)
+  local cargo_spec="
+# Build System
+
+Build with cargo build and run tests with cargo test.
+"
+  profile=$(detect_profile "$cargo_spec")
+  if [ "$profile" = "rust" ]; then
+    test_pass "Detected 'rust' profile from cargo keywords"
+  else
+    test_fail "Expected 'rust' profile from cargo keywords, got '$profile'"
+  fi
+
+  # Test 5: Nix only - should be base
+  local nix_spec="
+# Nix Configuration
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| flake.nix | Main flake |
+| default.nix | Package |
+"
+  profile=$(detect_profile "$nix_spec")
+  if [ "$profile" = "base" ]; then
+    test_pass "Detected 'base' profile for Nix-only spec"
+  else
+    test_fail "Expected 'base' profile for Nix-only spec, got '$profile'"
+  fi
+
+  # Test 6: Mixed Rust and Python - should be base
+  local mixed_spec="
+# Polyglot Project
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| src/main.rs | Rust code |
+| scripts/tool.py | Python scripts |
+"
+  profile=$(detect_profile "$mixed_spec")
+  if [ "$profile" = "base" ]; then
+    test_pass "Detected 'base' profile for mixed Rust/Python spec"
+  else
+    test_fail "Expected 'base' profile for mixed spec, got '$profile'"
+  fi
+
+  # Test 7: Empty spec - should be base
+  profile=$(detect_profile "")
+  if [ "$profile" = "base" ]; then
+    test_pass "Detected 'base' profile for empty spec"
+  else
+    test_fail "Expected 'base' profile for empty spec, got '$profile'"
+  fi
+
+  # Test 8: Shell script spec - should be base
+  local shell_spec="
+# Shell Scripts
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| scripts/build.sh | Build script |
+| lib/helpers.sh | Helper functions |
+"
+  profile=$(detect_profile "$shell_spec")
+  if [ "$profile" = "base" ]; then
+    test_pass "Detected 'base' profile for shell script spec"
+  else
+    test_fail "Expected 'base' profile for shell spec, got '$profile'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: detect_task_profile returns correct per-task profiles
+test_detect_task_profile() {
+  CURRENT_TEST="detect_task_profile"
+  test_header "Profile Detection - detect_task_profile function"
+
+  setup_test_env "detect-task-profile"
+
+  # Source util.sh to get detect_task_profile function
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  local spec_content="
+# Feature with multiple languages
+
+## Affected Files
+
+| File | Role |
+|------|------|
+| src/core.rs | Rust core |
+| tools/helper.py | Python tool |
+"
+  local default_profile
+  default_profile=$(detect_profile "$spec_content")
+
+  # Test 1: Task mentioning Rust gets rust profile
+  local rust_task="Implement the parser in src/parser.rs using Rust"
+  local profile
+  profile=$(detect_task_profile "$rust_task" "$spec_content" "$default_profile")
+  if [ "$profile" = "rust" ]; then
+    test_pass "Task mentioning .rs file gets 'rust' profile"
+  else
+    test_fail "Expected 'rust' profile for Rust task, got '$profile'"
+  fi
+
+  # Test 2: Task mentioning Python gets python profile
+  local python_task="Write pytest tests for the helper.py script"
+  profile=$(detect_task_profile "$python_task" "$spec_content" "$default_profile")
+  if [ "$profile" = "python" ]; then
+    test_pass "Task mentioning pytest gets 'python' profile"
+  else
+    test_fail "Expected 'python' profile for Python task, got '$profile'"
+  fi
+
+  # Test 3: Generic task falls back to default (base for mixed spec)
+  local generic_task="Update documentation"
+  profile=$(detect_task_profile "$generic_task" "$spec_content" "$default_profile")
+  if [ "$profile" = "$default_profile" ]; then
+    test_pass "Generic task falls back to default profile '$default_profile'"
+  else
+    test_fail "Expected '$default_profile' for generic task, got '$profile'"
+  fi
+
+  # Test 4: Task with explicit default override
+  local override_task="Add configuration"
+  profile=$(detect_task_profile "$override_task" "$spec_content" "rust")
+  if [ "$profile" = "rust" ]; then
+    test_pass "Generic task uses provided default 'rust'"
+  else
+    test_fail "Expected 'rust' for task with rust default, got '$profile'"
+  fi
+
+  teardown_test_env
+}
+
 #-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
@@ -4364,6 +4566,8 @@ ALL_TESTS=(
   test_check_invalid_nix_syntax
   test_check_exit_codes
   test_default_config_has_hooks
+  test_detect_profile
+  test_detect_task_profile
 )
 
 # Run a single test in isolation and write results to file

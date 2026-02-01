@@ -13,6 +13,7 @@ First, read specs/README.md for project terminology and context:
 Label: {{LABEL}}
 Spec file: {{SPEC_PATH}}
 Mode: {{MODE}}
+Default profile: {{DEFAULT_PROFILE}}
 {{MOLECULE_CONTEXT}}
 
 ## Instructions
