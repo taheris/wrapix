@@ -16,13 +16,23 @@ source "$(dirname "$0")/util.sh"
 RALPH_DIR="${RALPH_DIR:-.ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 
-# Get feature name from argument or state
+# Get feature name and molecule ID from argument or state
 FEATURE_NAME="${1:-}"
-if [ -z "$FEATURE_NAME" ]; then
-  CURRENT_FILE="$RALPH_DIR/state/current.json"
-  if [ -f "$CURRENT_FILE" ]; then
+MOLECULE_ID=""
+CURRENT_FILE="$RALPH_DIR/state/current.json"
+
+if [ -f "$CURRENT_FILE" ]; then
+  if [ -z "$FEATURE_NAME" ]; then
     FEATURE_NAME=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
   fi
+  MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
+fi
+
+# Validate we have either a molecule ID or feature label for querying
+if [ -z "$MOLECULE_ID" ] && [ -z "$FEATURE_NAME" ]; then
+  echo "Error: No molecule ID or feature label found." >&2
+  echo "Run 'ralph ready' first to create a molecule." >&2
+  exit 1
 fi
 
 # Load config for hooks if available
@@ -104,6 +114,9 @@ echo "Ralph Wiggum work loop starting..."
 if [ -n "$FEATURE_NAME" ]; then
   echo "  Feature: $FEATURE_NAME"
 fi
+if [ -n "$MOLECULE_ID" ]; then
+  echo "  Molecule: $MOLECULE_ID"
+fi
 echo ""
 
 # Run pre-loop hook
@@ -116,8 +129,13 @@ while true; do
   echo "=== Step $step_count ==="
 
   # Get current issue ID for hook variable substitution
-  # This queries beads for the next ready issue with the feature label
-  if [ -n "$FEATURE_NAME" ]; then
+  # Query using molecule ID (preferred) or fall back to feature label
+  if [ -n "$MOLECULE_ID" ]; then
+    # Use bd ready with molecule filter - more direct and accurate
+    current_issue_id=$(bd ready --mol "$MOLECULE_ID" --limit 1 --sort priority 2>/dev/null | \
+      grep -oE '^[a-z]+-[a-zA-Z0-9.]+' | head -1 || true)
+  elif [ -n "$FEATURE_NAME" ]; then
+    # Fall back to label-based query for backward compatibility
     current_issue_id=$(bd list --label "spec-$FEATURE_NAME" --ready --sort priority --json 2>/dev/null | \
       jq -r '[.[] | select(.issue_type == "epic" | not)][0].id // empty' 2>/dev/null || true)
   fi
