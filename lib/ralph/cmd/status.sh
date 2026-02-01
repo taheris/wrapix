@@ -8,6 +8,11 @@ set -euo pipefail
 # - Current position in DAG
 # - Stale molecule warnings
 
+# Source shared utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=util.sh
+source "$SCRIPT_DIR/util.sh"
+
 RALPH_DIR="${RALPH_DIR:-.ralph}"
 SPECS_DIR="specs"
 
@@ -16,6 +21,33 @@ indent() {
   while IFS= read -r line; do
     printf '  %s\n' "$line"
   done
+}
+
+# Generate a visual progress bar
+# Usage: progress_bar <completed> <total> [<width>]
+# Example: progress_bar 4 10 10 => "[####------] 40% (4/10)"
+progress_bar() {
+  local completed="${1:-0}"
+  local total="${2:-0}"
+  local width="${3:-10}"
+
+  # Handle edge cases
+  if [ "$total" -eq 0 ]; then
+    printf "[%s] 0%% (0/0)" "$(printf '%*s' "$width" '' | tr ' ' '-')"
+    return
+  fi
+
+  # Calculate percentage and filled width
+  local percent=$((completed * 100 / total))
+  local filled=$((completed * width / total))
+  local empty=$((width - filled))
+
+  # Build the bar
+  local bar_filled bar_empty
+  bar_filled=$(printf '%*s' "$filled" '' | tr ' ' '#')
+  bar_empty=$(printf '%*s' "$empty" '' | tr ' ' '-')
+
+  printf "[%s%s] %d%% (%d/%d)" "$bar_filled" "$bar_empty" "$percent" "$completed" "$total"
 }
 
 # Check if ralph is initialized
@@ -94,11 +126,17 @@ show_label_progress() {
 
 # If molecule is set, use bd mol commands for progress tracking
 if [ -n "$MOLECULE" ]; then
-  # Progress section
+  # Progress section - use JSON for reliable parsing
   echo "Progress:"
-  if PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE" 2>&1); then
-    # Indent each line of progress output
-    echo "$PROGRESS_OUTPUT" | indent
+  PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE" --json 2>&1) || true
+  PROGRESS_JSON=$(extract_json "$PROGRESS_OUTPUT")
+  if [ -n "$PROGRESS_JSON" ] && echo "$PROGRESS_JSON" | jq empty 2>/dev/null; then
+    # Extract stats from JSON
+    COMPLETED=$(echo "$PROGRESS_JSON" | jq -r '.completed // 0')
+    TOTAL=$(echo "$PROGRESS_JSON" | jq -r '.total // 0')
+
+    # Display visual progress bar
+    echo "  $(progress_bar "$COMPLETED" "$TOTAL")"
   else
     # Fallback to label-based counting when molecule commands fail
     echo "  (molecule progress unavailable, using label counts)"
@@ -107,10 +145,11 @@ if [ -n "$MOLECULE" ]; then
 
   echo ""
 
-  # Current position in DAG
+  # Current position in DAG - use the formatted text output
   echo "Current Position:"
   if CURRENT_OUTPUT=$(bd mol current "$MOLECULE" 2>&1); then
-    echo "$CURRENT_OUTPUT" | indent
+    # Skip the header lines and just show the task list (already indented by bd mol current)
+    echo "$CURRENT_OUTPUT" | grep -E '^\s*\[(done|current|ready|blocked|pending)\]'
   else
     # Fallback: show next ready task
     BEAD_LABEL="spec-$LABEL"
@@ -136,7 +175,7 @@ if [ -n "$MOLECULE" ]; then
   if STALE_OUTPUT=$(bd mol stale --quiet 2>&1) && [ -n "$STALE_OUTPUT" ]; then
     echo "$STALE_OUTPUT" | indent
   else
-    echo "  No stale molecules found."
+    echo "  (none)"
   fi
   echo ""
 else

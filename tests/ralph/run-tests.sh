@@ -822,11 +822,24 @@ SPEC_EOF
         # Create mock responses directory
         mkdir -p "$mock_responses"
 
-        # Set up mock progress output (per spec format)
+        # Set up mock progress JSON output (used by status.sh --json query)
+        cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
+{
+  "completed": 8,
+  "current_step_id": "test-step-3",
+  "in_progress": 1,
+  "molecule_id": "test-mol-abc123",
+  "molecule_title": "Test Feature",
+  "percent": 80,
+  "total": 10
+}
+MOCK_EOF
+
+        # Set up mock progress text output (fallback)
         cat > "$mock_responses/mol-progress.txt" << 'MOCK_EOF'
-▓▓▓▓▓▓▓▓░░ 80% (8/10)
-Rate: 2.5 steps/hour
-ETA: ~48 min
+Molecule: test-mol-abc123 (Test Feature)
+Progress: 8 / 10 (80%)
+Current step: test-step-3
 MOCK_EOF
 
         # Set up mock current output (per spec format)
@@ -914,11 +927,18 @@ MOCK_EOF
           test_fail "[$test_case] Missing Progress section"
         fi
 
-        # Verify output format - progress bar from mock
-        if echo "$status_output" | grep -q "80%"; then
-          test_pass "[$test_case] Progress output includes percentage"
+        # Verify output format - visual progress bar pattern [####----] N% (X/Y)
+        if echo "$status_output" | grep -qE '\[[#-]+\] [0-9]+% \([0-9]+/[0-9]+\)'; then
+          test_pass "[$test_case] Progress shows visual bar format"
         else
-          test_fail "[$test_case] Progress output missing percentage"
+          test_fail "[$test_case] Progress missing visual bar format (expected [####----] N% (X/Y))"
+        fi
+
+        # Verify output format - correct percentage from mock (80%)
+        if echo "$status_output" | grep -q "80%"; then
+          test_pass "[$test_case] Progress output includes correct percentage"
+        else
+          test_fail "[$test_case] Progress output missing or incorrect percentage"
         fi
 
         # Verify output format - current position section
