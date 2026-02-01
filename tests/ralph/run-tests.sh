@@ -3505,8 +3505,9 @@ test_check_invalid_nix_syntax() {
   local temp_template_dir="$TEST_DIR/templates"
   mkdir -p "$temp_template_dir/partial"
 
-  # Copy all files
+  # Copy all files and make writable (Nix store files are read-only)
   cp -r "$RALPH_TEMPLATE_DIR"/* "$temp_template_dir/"
+  chmod -R u+w "$temp_template_dir"
 
   # Break the Nix syntax in default.nix
   # Add an unclosed brace
@@ -3946,12 +3947,15 @@ run_tests_parallel() {
 
   # Wait for all tests to complete
   local all_passed=true
+  declare -A exit_codes
   for i in "${!pids[@]}"; do
     local pid="${pids[$i]}"
     local test_func="${test_names[$i]}"
 
     if wait "$pid"; then
-      : # Test subprocess exited cleanly
+      exit_codes[$test_func]=0
+    else
+      exit_codes[$test_func]=$?
     fi
 
     # Show output
@@ -3969,7 +3973,9 @@ run_tests_parallel() {
 
   for test_func in "${ALL_TESTS[@]}"; do
     local result_file="$results_dir/${test_func}.result"
-    if [ -f "$result_file" ]; then
+    local exit_code="${exit_codes[$test_func]:-1}"
+
+    if [ -f "$result_file" ] && [ -s "$result_file" ]; then
       local p f s
       p=$(grep "^passed=" "$result_file" | cut -d= -f2)
       f=$(grep "^failed=" "$result_file" | cut -d= -f2)
@@ -3981,6 +3987,11 @@ run_tests_parallel() {
       while IFS= read -r line; do
         all_failed_tests+=("${line#failed_test=}")
       done < <(grep "^failed_test=" "$result_file")
+    elif [ "$exit_code" -ne 0 ]; then
+      # Test subprocess crashed before writing results
+      total_failed=$((total_failed + 1))
+      all_failed_tests+=("$test_func: CRASHED (exit code $exit_code)")
+      echo -e "  ${RED}CRASH${NC}: $test_func (subprocess exited with code $exit_code)"
     fi
   done
 
