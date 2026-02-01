@@ -83,15 +83,47 @@ if [ ! -f "$SPEC_PATH" ]; then
   exit 1
 fi
 
-PROMPT_TEMPLATE="$RALPH_DIR/template/ready.md"
+# Path for new requirements in update mode (written by ralph plan -u)
+NEW_REQUIREMENTS_PATH="$RALPH_DIR/state/$LABEL.md"
+NEW_REQUIREMENTS=""
+
+# In update mode, check for state/<label>.md with new requirements
+if [ "$UPDATE_MODE" = "true" ]; then
+  if [ ! -f "$NEW_REQUIREMENTS_PATH" ]; then
+    echo "No new requirements found at $NEW_REQUIREMENTS_PATH"
+    echo ""
+    echo "To add new requirements to this spec, run:"
+    echo "  ralph plan -u $LABEL"
+    echo ""
+    echo "This will gather new requirements and write them to $NEW_REQUIREMENTS_PATH,"
+    echo "which ralph ready will then process."
+    exit 0
+  fi
+  NEW_REQUIREMENTS=$(cat "$NEW_REQUIREMENTS_PATH")
+fi
+
+# Select template based on mode: ready-new.md for new specs, ready-update.md for updates
+if [ "$UPDATE_MODE" = "true" ]; then
+  TEMPLATE_NAME="ready-update.md"
+else
+  TEMPLATE_NAME="ready-new.md"
+fi
+PROMPT_TEMPLATE="$RALPH_DIR/template/$TEMPLATE_NAME"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
-  echo "Make sure ready.md exists in your ralph directory."
-  exit 1
+  echo ""
+  if [ -n "$TEMPLATE" ]; then
+    echo "Copying from $TEMPLATE..."
+    cp "$TEMPLATE/$TEMPLATE_NAME" "$PROMPT_TEMPLATE"
+    chmod u+rw "$PROMPT_TEMPLATE"
+  else
+    echo "Make sure $TEMPLATE_NAME exists in your ralph template directory."
+    exit 1
+  fi
 fi
 
 # Validate template has placeholders, reset from source if corrupted
-validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/ready.md" "ready.md"
+validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/$TEMPLATE_NAME" "$TEMPLATE_NAME"
 
 mkdir -p "$RALPH_DIR/logs"
 
@@ -269,6 +301,12 @@ PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
 # Resolve partials ({{> partial-name}})
 PROMPT_CONTENT=$(resolve_partials "$PROMPT_CONTENT" "$TEMPLATE/partial")
 
+# Read existing spec content for template (for update mode context)
+EXISTING_SPEC=""
+if [ -f "$SPEC_PATH" ]; then
+  EXISTING_SPEC=$(cat "$SPEC_PATH")
+fi
+
 # Substitute simple placeholders at runtime
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
@@ -278,6 +316,7 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MODE\}\}/$MODE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{DEFAULT_PROFILE\}\}/$DEFAULT_PROFILE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{NEW_REQUIREMENTS_PATH\}\}/$NEW_REQUIREMENTS_PATH}"
 
 # Multi-line substitutions using awk (handles newlines in replacement text)
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/{{README_INSTRUCTIONS}}/, replacement); print}')
@@ -286,6 +325,8 @@ PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$MOLECULE_CONTEXT" '{gsub(/{{MOLECULE_CONTEXT}}/, ctx); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$WORKFLOW_INSTRUCTIONS" '{gsub(/{{WORKFLOW_INSTRUCTIONS}}/, ctx); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$OUTPUT_FORMAT" '{gsub(/{{OUTPUT_FORMAT}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{EXISTING_SPEC}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$NEW_REQUIREMENTS" '{gsub(/{{NEW_REQUIREMENTS}}/, ctx); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
@@ -300,15 +341,46 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
   echo ""
   echo "Molecule creation complete!"
 
-  # Strip Implementation Notes section from spec if present
   FINAL_SPEC_PATH="$SPECS_DIR/$LABEL.md"
-  SPEC_CONTENT=$(cat "$SPEC_PATH")
-  FINAL_CONTENT=$(strip_implementation_notes "$SPEC_CONTENT")
 
-  if [ "$SPEC_CONTENT" != "$FINAL_CONTENT" ]; then
+  # In update mode, merge new requirements into spec and cleanup state file
+  if [ "$UPDATE_MODE" = "true" ] && [ -f "$NEW_REQUIREMENTS_PATH" ]; then
     echo ""
-    echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
-    echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
+    echo "Merging new requirements into $FINAL_SPEC_PATH..."
+
+    # Append new requirements to spec file (Claude should have already done this,
+    # but we ensure the state file content is captured if not)
+    if [ -f "$FINAL_SPEC_PATH" ]; then
+      # Check if new requirements are already in the spec (Claude may have merged)
+      # by looking for a unique marker from the new requirements
+      FIRST_REQ_LINE=$(head -5 "$NEW_REQUIREMENTS_PATH" | grep -v '^#' | grep -v '^$' | head -1 || true)
+      if [ -n "$FIRST_REQ_LINE" ] && ! grep -qF "$FIRST_REQ_LINE" "$FINAL_SPEC_PATH" 2>/dev/null; then
+        echo ""
+        echo "  (appending new requirements that weren't merged by Claude)"
+        {
+          echo ""
+          echo "## Updates"
+          echo ""
+          cat "$NEW_REQUIREMENTS_PATH"
+        } >> "$FINAL_SPEC_PATH"
+      fi
+    fi
+
+    # Delete the state file after successful processing
+    echo "  Cleaning up $NEW_REQUIREMENTS_PATH..."
+    rm -f "$NEW_REQUIREMENTS_PATH"
+  else
+    # New spec mode: strip Implementation Notes section if present
+    if [ -f "$SPEC_PATH" ]; then
+      SPEC_CONTENT=$(cat "$SPEC_PATH")
+      FINAL_CONTENT=$(strip_implementation_notes "$SPEC_CONTENT")
+
+      if [ "$SPEC_CONTENT" != "$FINAL_CONTENT" ]; then
+        echo ""
+        echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
+        echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
+      fi
+    fi
   fi
 
   # Commit the spec file
@@ -319,7 +391,11 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
     if git diff --cached --quiet 2>/dev/null; then
       echo "  (no changes to commit)"
     else
-      git commit -m "Add $LABEL specification" >/dev/null 2>&1 && echo "  Committed: $FINAL_SPEC_PATH" || echo "  (commit failed or nothing to commit)"
+      COMMIT_MSG="Add $LABEL specification"
+      if [ "$UPDATE_MODE" = "true" ]; then
+        COMMIT_MSG="Update $LABEL specification"
+      fi
+      git commit -m "$COMMIT_MSG" >/dev/null 2>&1 && echo "  Committed: $FINAL_SPEC_PATH" || echo "  (commit failed or nothing to commit)"
     fi
   fi
 
