@@ -4524,6 +4524,177 @@ test_detect_task_profile() {
   teardown_test_env
 }
 
+# Test: ralph step profile-based container selection
+# Tests the profile detection logic in ralph step:
+# 1. Profile from bead's profile:X label
+# 2. --profile=X flag override
+# 3. Fallback to base
+test_step_profile_selection() {
+  CURRENT_TEST="step_profile_selection"
+  test_header "Profile-Based Container Selection in ralph step"
+
+  setup_test_env "step-profile"
+
+  local label="profile-test-feature"
+
+  # Set up current.json
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  # Create spec file
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Profile Test Feature
+
+## Requirements
+- Test profile selection
+
+## Affected Files
+| File | Role |
+|------|------|
+| lib/test.rs | Test |
+SPEC_EOF
+
+  # Create an epic for this feature
+  local epic_id
+  epic_id=$(bd create --title="Profile Test Epic" --type=epic --labels="spec-$label" --silent 2>/dev/null)
+  test_pass "Created epic: $epic_id"
+
+  # Test 1: Task with profile:rust label should be detected
+  local rust_task_id
+  rust_task_id=$(bd create --title="Rust Task" --type=task --labels="spec-$label,profile:rust" --silent 2>/dev/null)
+  test_pass "Created Rust task with profile:rust label: $rust_task_id"
+
+  # Verify the label was set correctly
+  local task_labels
+  task_labels=$(bd show "$rust_task_id" --json 2>/dev/null | jq -r '.[0].labels | join(",")' 2>/dev/null || echo "")
+  if echo "$task_labels" | grep -q "profile:rust"; then
+    test_pass "Task has profile:rust label"
+  else
+    test_fail "Task missing profile:rust label (got: $task_labels)"
+  fi
+
+  # Test 2: Verify jq profile extraction works on bd list output
+  # This is the same jq query used in step.sh
+  local next_issue_json
+  next_issue_json=$(bd list --label "spec-$label" --ready --sort priority --json 2>/dev/null || echo "[]")
+
+  local profile_from_jq
+  profile_from_jq=$(echo "$next_issue_json" | jq -r '
+    [.[] | select(.issue_type == "epic" | not)][0].labels // []
+    | map(select(startswith("profile:")))
+    | .[0]
+    | if . then split(":")[1] else empty end
+  ' 2>/dev/null || echo "")
+
+  if [ "$profile_from_jq" = "rust" ]; then
+    test_pass "jq query extracts profile:rust from bead labels"
+  else
+    test_fail "Expected profile:rust from jq, got '$profile_from_jq'"
+  fi
+
+  # Test 3: Task with profile:python label
+  bd close "$rust_task_id" 2>/dev/null || true
+  local python_task_id
+  python_task_id=$(bd create --title="Python Task" --type=task --labels="spec-$label,profile:python" --silent 2>/dev/null)
+  test_pass "Created Python task with profile:python label: $python_task_id"
+
+  next_issue_json=$(bd list --label "spec-$label" --ready --sort priority --json 2>/dev/null || echo "[]")
+  profile_from_jq=$(echo "$next_issue_json" | jq -r '
+    [.[] | select(.issue_type == "epic" | not)][0].labels // []
+    | map(select(startswith("profile:")))
+    | .[0]
+    | if . then split(":")[1] else empty end
+  ' 2>/dev/null || echo "")
+
+  if [ "$profile_from_jq" = "python" ]; then
+    test_pass "jq query extracts profile:python from bead labels"
+  else
+    test_fail "Expected profile:python from jq, got '$profile_from_jq'"
+  fi
+
+  # Test 4: Task with no profile label should return empty (fallback to base)
+  bd close "$python_task_id" 2>/dev/null || true
+  local base_task_id
+  base_task_id=$(bd create --title="Base Task" --type=task --labels="spec-$label" --silent 2>/dev/null)
+  test_pass "Created task without profile label: $base_task_id"
+
+  next_issue_json=$(bd list --label "spec-$label" --ready --sort priority --json 2>/dev/null || echo "[]")
+  profile_from_jq=$(echo "$next_issue_json" | jq -r '
+    [.[] | select(.issue_type == "epic" | not)][0].labels // []
+    | map(select(startswith("profile:")))
+    | .[0]
+    | if . then split(":")[1] else empty end
+  ' 2>/dev/null || echo "")
+
+  if [ -z "$profile_from_jq" ] || [ "$profile_from_jq" = "null" ]; then
+    test_pass "jq query returns empty for task without profile label (triggers base fallback)"
+  else
+    test_fail "Expected empty profile from jq for untagged task, got '$profile_from_jq'"
+  fi
+
+  # Test 5: Verify --profile flag parsing in step.sh
+  # This tests the arg parsing logic directly by sourcing step.sh components
+  # We can't run the full step.sh (needs wrapix), but we can test the parsing
+
+  # Create a mock test for arg parsing
+  local test_args_script="$TEST_DIR/test-args.sh"
+  cat > "$test_args_script" << 'SCRIPT_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Parse --profile flag (extracted from step.sh)
+PROFILE_OVERRIDE=""
+STEP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --profile=*)
+      PROFILE_OVERRIDE="${arg#--profile=}"
+      ;;
+    *)
+      STEP_ARGS+=("$arg")
+      ;;
+  esac
+done
+
+echo "PROFILE_OVERRIDE=$PROFILE_OVERRIDE"
+echo "STEP_ARGS=${STEP_ARGS[*]:-}"
+SCRIPT_EOF
+  chmod +x "$test_args_script"
+
+  # Test with --profile=rust
+  local parse_output
+  parse_output=$("$test_args_script" --profile=rust feature-name 2>&1)
+  if echo "$parse_output" | grep -q "PROFILE_OVERRIDE=rust"; then
+    test_pass "--profile=rust flag is parsed correctly"
+  else
+    test_fail "Failed to parse --profile=rust flag"
+  fi
+
+  # Verify feature-name is preserved in STEP_ARGS
+  if echo "$parse_output" | grep -q "STEP_ARGS=feature-name"; then
+    test_pass "Feature name preserved after --profile parsing"
+  else
+    test_fail "Feature name not preserved after --profile parsing"
+  fi
+
+  # Test with --profile=python and no feature name
+  parse_output=$("$test_args_script" --profile=python 2>&1)
+  if echo "$parse_output" | grep -q "PROFILE_OVERRIDE=python"; then
+    test_pass "--profile=python flag is parsed correctly"
+  else
+    test_fail "Failed to parse --profile=python flag"
+  fi
+
+  # Test with no --profile flag
+  parse_output=$("$test_args_script" my-feature 2>&1)
+  if echo "$parse_output" | grep -q "PROFILE_OVERRIDE=$"; then
+    test_pass "No --profile flag results in empty PROFILE_OVERRIDE"
+  else
+    test_fail "PROFILE_OVERRIDE should be empty without --profile flag"
+  fi
+
+  teardown_test_env
+}
+
 #-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
@@ -4568,6 +4739,7 @@ ALL_TESTS=(
   test_default_config_has_hooks
   test_detect_profile
   test_detect_task_profile
+  test_step_profile_selection
 )
 
 # Run a single test in isolation and write results to file
