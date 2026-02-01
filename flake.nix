@@ -85,8 +85,6 @@
             wrapix = (wrapix.mkSandbox { profile = wrapix.profiles.base; }).package;
             wrapix-rust = (wrapix.mkSandbox { profile = wrapix.profiles.rust; }).package;
             wrapix-python = (wrapix.mkSandbox { profile = wrapix.profiles.python; }).package;
-            wrapix-debug = (wrapix.mkSandbox { profile = wrapix.profiles.debug; }).package;
-            wrapix-rust-debug = (wrapix.mkSandbox { profile = wrapix.profiles.rust-debug; }).package;
 
             wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
