@@ -2,13 +2,10 @@
 # Test: Exited pane handling
 #
 # Tests:
-# 1. Create pane with long-running process
-# 2. Use bash with trap to detect when we send exit
-# 3. Verify status transitions
-#
-# NOTE: There is a known bug (wx-ck1s) where remain-on-exit is not
-# properly inherited by new windows. This test works around that
-# by using a different approach.
+# 1. Create pane with short-lived command
+# 2. Verify pane remains after process exits (remain-on-exit)
+# 3. Verify status transitions to "exited"
+# 4. Verify output can still be captured from exited pane
 
 set -euo pipefail
 
@@ -77,37 +74,85 @@ main() {
     assert_contains "$content" "goodbye world" "Output should be captured"
     log_pass "Output captured while running"
 
-    # Note: We can't easily test the "exited" status without fixing bug wx-ck1s
-    # The remain-on-exit option isn't being properly inherited by new windows.
-    # For now, we verify the pane can be captured and killed normally.
+    # Test 5: Exit the shell and verify pane remains (remain-on-exit works)
+    log_test "Test 5: Exit shell and verify pane remains with 'exited' status..."
+    response=$(mcp_send_keys "$pane_id" "exit")
+    assert_success "$response"
+    response=$(mcp_send_keys "$pane_id" "Enter")
+    assert_success "$response"
 
-    # Test 5: Kill the pane (simulating cleanup)
-    log_test "Test 5: Kill pane..."
+    # Wait for process to exit
+    sleep 1
+
+    # Verify pane still exists with "exited" status
+    response=$(mcp_list_panes)
+    assert_success "$response" "List panes should succeed"
+    content=$(get_content_text "$response")
+
+    pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id\")" 2>/dev/null) || {
+        log_fail "Pane should still exist after process exits (remain-on-exit)"
+        exit 1
+    }
+
+    status=$(echo "$pane_data" | jq -r '.status')
+    assert_eq "exited" "$status" "Pane status should be 'exited' after process terminates"
+    log_pass "Pane status is 'exited'"
+
+    # Test 6: Capture output from exited pane (verify final output preserved)
+    log_test "Test 6: Capture output from exited pane..."
+    response=$(mcp_capture_pane "$pane_id" 50)
+    assert_success "$response" "Capture from exited pane should succeed"
+
+    content=$(get_content_text "$response")
+    assert_contains "$content" "goodbye world" "Final output should be preserved in exited pane"
+    log_pass "Output captured from exited pane"
+
+    # Test 7: Kill the exited pane
+    log_test "Test 7: Kill exited pane..."
     response=$(mcp_kill_pane "$pane_id")
-    assert_success "$response" "Kill pane should succeed"
+    assert_success "$response" "Kill exited pane should succeed"
 
     response=$(mcp_list_panes)
     content=$(get_content_text "$response")
     assert_not_contains "$content" "$pane_id" "Pane should be removed after kill"
-    log_pass "Pane killed successfully"
+    log_pass "Exited pane killed successfully"
 
-    # Test 6: Verify we can create another pane after killing one
-    log_test "Test 6: Create new pane after killing previous..."
-    response=$(mcp_create_pane "sleep 60" "new-pane")
-    assert_success "$response" "Create new pane should succeed"
+    # Test 8: Create pane with command that exits immediately
+    log_test "Test 8: Create pane with immediately-exiting command..."
+    response=$(mcp_create_pane "echo 'final message' && exit 0" "quick-exit")
+    assert_success "$response" "Create pane should succeed"
 
     local pane_id2
     pane_id2=$(extract_pane_id "$response")
-    assert_ne "" "$pane_id2" "New pane ID should be extracted"
-    assert_ne "$pane_id" "$pane_id2" "New pane should have different ID"
-    log_pass "New pane created: $pane_id2"
+    assert_ne "" "$pane_id2" "Pane ID should be extracted"
+    log_pass "Created quick-exit pane: $pane_id2"
+
+    # Wait for process to exit
+    sleep 1
+
+    # Verify pane exists with exited status
+    response=$(mcp_list_panes)
+    content=$(get_content_text "$response")
+    pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id2\")" 2>/dev/null) || {
+        log_fail "Quick-exit pane should still exist after process exits"
+        exit 1
+    }
+
+    status=$(echo "$pane_data" | jq -r '.status')
+    assert_eq "exited" "$status" "Quick-exit pane status should be 'exited'"
+
+    # Verify output from quick-exit pane
+    response=$(mcp_capture_pane "$pane_id2" 50)
+    assert_success "$response"
+    content=$(get_content_text "$response")
+    assert_contains "$content" "final message" "Quick-exit pane should preserve output"
+    log_pass "Quick-exit pane preserved output"
 
     # Cleanup
     log_test "Cleanup: killing remaining panes..."
     mcp_kill_pane "$pane_id2" >/dev/null
 
     echo ""
-    log_warn "Note: Full exited pane status testing blocked by bug wx-ck1s"
     log_pass "All exited_pane tests passed!"
     return 0
 }
