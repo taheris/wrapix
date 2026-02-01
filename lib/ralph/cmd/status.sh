@@ -149,7 +149,7 @@ if [ -n "$MOLECULE" ]; then
   echo "Current Position:"
   if CURRENT_OUTPUT=$(bd mol current "$MOLECULE" 2>&1); then
     # Skip the header lines and just show the task list (already indented by bd mol current)
-    echo "$CURRENT_OUTPUT" | grep -E '^\s*\[(done|current|ready|blocked|pending)\]'
+    echo "$CURRENT_OUTPUT" | grep -E '^\s*\[(done|current|ready|blocked|pending)\]' || echo "  (no position markers found)"
   else
     # Fallback: show next ready task
     BEAD_LABEL="spec-$LABEL"

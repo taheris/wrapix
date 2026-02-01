@@ -232,7 +232,6 @@ Synchronizes local templates with packaged versions:
 │   ├── plan.md
 │   ├── plan-new.md
 │   ├── plan-update.md
-│   ├── ready.md
 │   ├── ready-new.md
 │   ├── ready-update.md
 │   └── step.md
