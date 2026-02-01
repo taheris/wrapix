@@ -67,6 +67,8 @@ ralph plan -u -h <label>        # Update existing spec in state/
 - Creates `state/current.json` with feature metadata
 - Launches wrapix container with base profile
 - Runs spec interview using appropriate template
+- **New mode**: Writes spec to target location (`specs/` or `state/`)
+- **Update mode**: Writes NEW requirements only to `state/<label>.md` (not the original spec)
 - Outputs `RALPH_COMPLETE` when done
 
 ### `ralph ready`
@@ -76,12 +78,12 @@ ralph ready
 ```
 
 Launches wrapix container with base profile. Reads `state/current.json` to determine mode:
-- **New spec**: Creates molecule (epic + child issues)
-- **Update mode**: Loads existing molecule, diffs spec to find new work, bonds new tasks
+- **New spec**: Creates molecule (epic + child issues) from `specs/<label>.md`
+- **Update mode**: Reads NEW requirements from `state/<label>.md`, creates tasks only for those, then merges into `specs/<label>.md`
 
-**Profile detection:** Analyzes spec content for language/toolchain mentions (Rust, Cargo, Python, etc.) and assigns `profile:X` labels to each task based on implementation needs.
+**Profile assignment:** The LLM analyzes each task's requirements and assigns appropriate `profile:X` labels based on implementation needs (e.g., tasks touching `.rs` files get `profile:rust`). This happens per-task, not per-spec.
 
-Stores molecule ID in `state/current.json`.
+Stores molecule ID in `state/current.json`. In update mode, cleans up `state/<label>.md` after successful merge.
 
 ### `ralph step`
 
@@ -247,14 +249,17 @@ plan → ready → loop/step → (done)
   │       │        │          │
   │       │        │          └─ bd mol squash (archive)
   │       │        └─ Implementation + bd mol bond (discovered work)
-  │       └─ Molecule creation
-  └─ Spec interview
+  │       └─ Molecule creation from specs/<label>.md
+  └─ Spec interview → writes specs/<label>.md
 
 Update cycle (for existing specs):
 plan --update → ready → loop/step → (done)
       │            │
-      │            └─ Bond new tasks to existing molecule
-      └─ Refine spec, gather new requirements
+      │            ├─ Read new reqs from state/<label>.md
+      │            ├─ Create tasks ONLY for new requirements
+      │            ├─ Merge state/<label>.md → specs/<label>.md
+      │            └─ Delete state/<label>.md
+      └─ Gather NEW requirements → writes state/<label>.md
 ```
 
 ## Container Execution
@@ -295,14 +300,15 @@ Profiles determine which language toolchains are available in the wrapix contain
 
 ### Profile Assignment Flow
 
-1. **`ralph ready`** analyzes spec content for language/toolchain indicators:
-   - File extensions in "Affected Files" (`.rs` → rust, `.py` → python)
-   - Keywords (Cargo, rustc, pytest, pip)
-   - Explicit mentions in requirements
+1. **`ralph ready`** — LLM analyzes each task and assigns `profile:X` label based on:
+   - Files the task will touch (`.rs` → rust, `.py` → python, `.nix` → base)
+   - Tools required (cargo, pytest, etc.)
+   - Task description context
 
 2. **Task creation** includes profile label:
    ```bash
-   bd create --title="Implement parser" --labels profile:rust ...
+   bd create --title="Implement parser" --labels "spec:my-feature,profile:rust" ...
+   bd create --title="Update docs" --labels "spec:my-feature,profile:base" ...
    ```
 
 3. **`ralph step`** reads profile from bead:
@@ -317,18 +323,18 @@ Profiles determine which language toolchains are available in the wrapix contain
    ralph step --profile=rust  # Ignore bead label, use rust
    ```
 
-### Profile Detection Heuristics
+### Per-Task Profiles
 
-`ralph ready` uses these signals to assign profiles:
+Different tasks in the same molecule may have different profiles. The LLM decides per-task based on what that specific task needs:
 
-| Signal | Profile |
-|--------|---------|
-| `.rs` files, `Cargo.toml`, "Rust", "cargo" | `rust` |
-| `.py` files, `pyproject.toml`, "Python", "pytest" | `python` |
-| `.nix` files only | `base` |
-| Mixed or unclear | `base` |
+| Task | Profile |
+|------|---------|
+| "Implement Rust parser" | `profile:rust` |
+| "Write Python test harness" | `profile:python` |
+| "Update Nix build config" | `profile:base` |
+| "Add documentation" | `profile:base` |
 
-If multiple profiles match, prefer the more specific one. Tasks within the same molecule may have different profiles.
+This is more accurate than spec-level detection because tasks often span multiple languages.
 
 ## Template System
 
@@ -402,8 +408,9 @@ lib/ralph/template/
 | `PINNED_CONTEXT` | Read from `pinnedContext` file | all |
 | `LABEL` | From command args | all |
 | `SPEC_PATH` | Computed from label + mode | all |
-| `SPEC_CONTENT` | Read from spec file | ready-*, step |
-| `EXISTING_SPEC` | Read from existing spec | plan-update |
+| `SPEC_CONTENT` | Read from spec file | ready-new, step |
+| `EXISTING_SPEC` | Read from `specs/<label>.md` | plan-update, ready-update |
+| `NEW_REQUIREMENTS` | Read from `state/<label>.md` | ready-update |
 | `MOLECULE_ID` | From `state/current.json` | ready-update, step |
 | `ISSUE_ID` | From `bd ready` | step |
 | `TITLE` | From issue | step |
@@ -517,13 +524,18 @@ Spec file: {{SPEC_PATH}}
 
 **Required sections:**
 1. Role statement — "You are refining an existing specification"
-2. Planning-only warning — No code, no spec edits during conversation
+2. Planning-only warning — No code, original spec not modified
 3. `{{> context-pinning}}`
 4. `{{> spec-header}}`
-5. Existing spec display — Show current spec for reference
+5. Existing spec display — Show current spec from `specs/<label>.md` for reference
 6. Update guidelines — Discuss NEW requirements only
-7. Output — Summarize new requirements (ralph ready handles spec update)
+7. Output — Write new requirements to `state/<label>.md` (ralph ready merges into spec)
 8. `{{> exit-signals}}`
+
+**Output file:** `state/<label>.md` contains only the NEW requirements gathered during the interview. This file is consumed by `ralph ready` which:
+1. Creates tasks for only these new requirements
+2. Merges the content into `specs/<label>.md`
+3. Deletes `state/<label>.md`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
 
@@ -537,9 +549,13 @@ Spec file: {{SPEC_PATH}}
 3. `{{> spec-header}}`
 4. Spec content — Full spec to decompose
 5. Task breakdown guidelines — Self-contained, ordered by deps, one objective per task
-6. Molecule creation — Create epic, child tasks, set dependencies
-7. README update — Add molecule ID to specs/README.md
-8. `{{> exit-signals}}`
+6. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs:
+   - Tasks touching `.rs` files or using cargo → `profile:rust`
+   - Tasks touching `.py` files or using pytest/pip → `profile:python`
+   - Tasks touching only `.nix`, `.sh`, `.md` files → `profile:base`
+7. Molecule creation — Create epic, child tasks with profile labels, set dependencies
+8. README update — Add molecule ID to specs/README.md
+9. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
 
@@ -551,11 +567,16 @@ Spec file: {{SPEC_PATH}}
 1. Role statement — "You are adding tasks to an existing molecule"
 2. `{{> context-pinning}}`
 3. `{{> spec-header}}`
-4. Existing molecule info — ID, current tasks, progress
-5. New requirements — From plan-update conversation
-6. Task creation — Create tasks, bond to molecule, set dependencies
-7. Spec update — Append new requirements to spec file
-8. `{{> exit-signals}}`
+4. Existing spec — Show `specs/<label>.md` for context (what's already implemented)
+5. Existing molecule info — ID, current tasks, progress
+6. New requirements — Show `state/<label>.md` content (what to create tasks for)
+7. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs
+8. Task creation — Create tasks ONLY for new requirements, bond to molecule
+9. Spec merge — Append `state/<label>.md` content to `specs/<label>.md`
+10. Cleanup — Delete `state/<label>.md` after successful merge
+11. `{{> exit-signals}}`
+
+**Key behavior:** Only create tasks for requirements in `state/<label>.md`. The existing spec is shown for context but should NOT generate new tasks.
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
 
@@ -601,6 +622,16 @@ Spec file: {{SPEC_PATH}}
 | `hidden` | Whether spec is in `state/` (not committed) |
 | `spec_path` | Full path to spec file |
 | `molecule` | Beads molecule ID (set by `ralph ready`) |
+
+**`state/<label>.md`** (update mode only):
+
+When `ralph plan --update` runs, it writes NEW requirements to `state/<label>.md`. This file:
+- Contains only the requirements gathered during the update interview
+- Is separate from the original spec in `specs/<label>.md`
+- Gets merged into `specs/<label>.md` by `ralph ready`
+- Is deleted after successful merge
+
+This separation ensures `ralph ready` knows exactly what's new and only creates tasks for those requirements.
 
 ## Spec File Format
 
@@ -685,12 +716,17 @@ Ralph uses `bd mol` for work tracking:
 - [ ] `ralph plan -n <label>` creates new spec in `specs/`
 - [ ] `ralph plan -h <label>` creates new spec in `state/`
 - [ ] `ralph plan -u <label>` validates spec exists before updating
+- [ ] `ralph plan -u <label>` writes NEW requirements to `state/<label>.md`
 - [ ] `ralph plan -u -h <label>` updates hidden spec
 - [ ] `ralph plan` runs Claude in wrapix container with base profile
 - [ ] `ralph ready` creates molecule and stores ID in current.json
-- [ ] `ralph ready` in update mode bonds new tasks to existing molecule
+- [ ] `ralph ready` (new mode) creates tasks from `specs/<label>.md`
+- [ ] `ralph ready` (update mode) reads NEW requirements from `state/<label>.md`
+- [ ] `ralph ready` (update mode) creates tasks ONLY for new requirements
+- [ ] `ralph ready` (update mode) merges `state/<label>.md` into `specs/<label>.md`
+- [ ] `ralph ready` (update mode) deletes `state/<label>.md` after merge
 - [ ] `ralph ready` runs Claude in wrapix container with base profile
-- [ ] `ralph ready` detects profile from spec and assigns `profile:X` labels to tasks
+- [ ] `ralph ready` LLM assigns `profile:X` labels per-task based on implementation needs
 - [ ] `ralph step` reads `profile:X` label from bead and uses that profile
 - [ ] `ralph step --profile=X` overrides bead profile label
 - [ ] `ralph step` falls back to base profile when no label present
