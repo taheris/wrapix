@@ -79,47 +79,43 @@
               ;
           };
 
-          packages = {
-            default = (wrapix.mkSandbox { profile = wrapix.profiles.base; }).package;
+          packages =
+            let
+              inherit (builtins) mapAttrs;
+              inherit (wrapix) profiles;
 
-            wrapix = (wrapix.mkSandbox { profile = wrapix.profiles.base; }).package;
-            wrapix-rust = (wrapix.mkSandbox { profile = wrapix.profiles.rust; }).package;
-            wrapix-python = (wrapix.mkSandbox { profile = wrapix.profiles.python; }).package;
-
-            # Debug profiles: base profile + MCP opt-in for tmux-debug
-            wrapix-debug =
-              (wrapix.mkSandbox {
-                profile = wrapix.profiles.base;
-                mcp = {
-                  tmux-debug = { };
+              # Sandbox configurations: profile + optional MCP servers
+              sandboxes = {
+                wrapix = {
+                  profile = profiles.base;
                 };
-              }).package;
-
-            # Rust + debug: rust profile + MCP opt-in for tmux-debug
-            wrapix-rust-debug =
-              (wrapix.mkSandbox {
-                profile = wrapix.profiles.rust;
-                mcp = {
-                  tmux-debug = { };
+                wrapix-rust = {
+                  profile = profiles.rust;
                 };
-              }).package;
-
-            # Debug with audit logging: for testing audit configuration
-            wrapix-debug-audited =
-              (wrapix.mkSandbox {
-                profile = wrapix.profiles.base;
-                mcp = {
-                  tmux-debug = {
-                    audit = "/workspace/.debug-audit.log";
-                  };
+                wrapix-python = {
+                  profile = profiles.python;
                 };
-              }).package;
-
-            wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
-            wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
-
-            tmux-debug-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
-          };
+                wrapix-debug = {
+                  profile = profiles.base;
+                  mcp.tmux-debug = { };
+                };
+                wrapix-rust-debug = {
+                  profile = profiles.rust;
+                  mcp.tmux-debug = { };
+                };
+                wrapix-debug-audited = {
+                  profile = profiles.base;
+                  mcp.tmux-debug.audit = "/workspace/.debug-audit.log";
+                };
+              };
+            in
+            mapAttrs (_: cfg: (wrapix.mkSandbox cfg).package) sandboxes
+            // {
+              default = (wrapix.mkSandbox { profile = profiles.base; }).package;
+              wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
+              wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
+              tmux-debug-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
+            };
 
           apps = {
             ralph = ralph.app;

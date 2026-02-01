@@ -66,3 +66,14 @@ Hooks enforce formatting (nixfmt, shellcheck). Follow these conventions:
 - **Nix:** Use `inherit` for scope; keep expressions pure
 - **Shell:** `set -euo pipefail`; quote variables; prefer `[[` over `[`
 - **Docs:** Specs in `specs/`; update `specs/README.md` when adding
+
+## Formatting
+
+**IMPORTANT:** Use `nix fmt` to format Nix files, NOT `nixfmt` directly.
+
+```bash
+nix fmt             # Format all Nix files (works outside devShell)
+nix fmt flake.nix   # Format specific file
+```
+
+The `nixfmt` command is only available inside `nix develop`.

@@ -15,7 +15,7 @@ repos:
       # Fast hooks (pre-commit stage)
       - id: nixfmt
         name: nixfmt
-        entry: nixfmt --check
+        entry: nix fmt -- --fail-on-change
         language: system
         files: \.nix$
         pass_filenames: true
