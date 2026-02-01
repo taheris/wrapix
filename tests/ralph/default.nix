@@ -535,4 +535,283 @@ templateTests
         echo "PASS: ralph-tune prompt building tests"
         mkdir $out
       '';
+
+  # Test: ralph-diff help flag content
+  diff-help =
+    runCommandLocal "ralph-diff-help"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff --help content..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        if grep -q "Shows local template changes vs packaged templates" "$script"; then
+          echo "PASS: Help mentions showing local template changes"
+        else
+          echo "FAIL: Help missing description"
+          exit 1
+        fi
+
+        if grep -q "plan-new" "$script" && grep -q "plan-update" "$script"; then
+          echo "PASS: Help lists plan variants"
+        else
+          echo "FAIL: Help missing plan variants"
+          exit 1
+        fi
+
+        if grep -q "ready-new" "$script" && grep -q "ready-update" "$script"; then
+          echo "PASS: Help lists ready variants"
+        else
+          echo "FAIL: Help missing ready variants"
+          exit 1
+        fi
+
+        if grep -q "context-pinning" "$script"; then
+          echo "PASS: Help lists partials"
+        else
+          echo "FAIL: Help missing partials"
+          exit 1
+        fi
+
+        if grep -q "ralph tune" "$script"; then
+          echo "PASS: Help mentions piping to ralph tune"
+        else
+          echo "FAIL: Help missing ralph tune integration"
+          exit 1
+        fi
+
+        echo "PASS: ralph-diff help tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-diff template list includes all variants
+  diff-template-list =
+    runCommandLocal "ralph-diff-template-list"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff template list..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        # Check all template variants are listed
+        for template in plan plan-new plan-update ready ready-new ready-update step; do
+          if grep -q "\"$template\"" "$script"; then
+            echo "PASS: Template '$template' in list"
+          else
+            echo "FAIL: Template '$template' missing from list"
+            exit 1
+          fi
+        done
+
+        # Check all partials are listed
+        for partial in context-pinning exit-signals spec-header; do
+          if grep -q "\"$partial\"" "$script"; then
+            echo "PASS: Partial '$partial' in list"
+          else
+            echo "FAIL: Partial '$partial' missing from list"
+            exit 1
+          fi
+        done
+
+        echo "PASS: ralph-diff template list tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-diff partial handling
+  diff-partial-handling =
+    runCommandLocal "ralph-diff-partial-handling"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff partial handling..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        # Check diff_partial function exists
+        if grep -q "diff_partial()" "$script"; then
+          echo "PASS: Script has diff_partial function"
+        else
+          echo "FAIL: Script missing diff_partial function"
+          exit 1
+        fi
+
+        # Check partial directory path is correct
+        if grep -q 'template/partial/' "$script"; then
+          echo "PASS: Script uses correct partial directory path"
+        else
+          echo "FAIL: Script missing partial directory path"
+          exit 1
+        fi
+
+        # Check FILTER_PARTIAL handling for specific partial diff
+        if grep -q 'FILTER_PARTIAL' "$script"; then
+          echo "PASS: Script handles filtered partial diffing"
+        else
+          echo "FAIL: Script missing FILTER_PARTIAL handling"
+          exit 1
+        fi
+
+        echo "PASS: ralph-diff partial handling tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-diff requires RALPH_TEMPLATE_DIR
+  diff-env-validation =
+    runCommandLocal "ralph-diff-env-validation"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff environment validation..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        # Verify the script requires RALPH_TEMPLATE_DIR
+        if grep -q 'RALPH_TEMPLATE_DIR' "$script"; then
+          echo "PASS: Script references RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR reference"
+          exit 1
+        fi
+
+        # Verify error message for missing env
+        if grep -q "RALPH_TEMPLATE_DIR not set" "$script"; then
+          echo "PASS: Script shows error for missing RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR error message"
+          exit 1
+        fi
+
+        # Verify RALPH_DIR is used
+        if grep -q 'RALPH_DIR' "$script"; then
+          echo "PASS: Script uses RALPH_DIR"
+        else
+          echo "FAIL: Script missing RALPH_DIR usage"
+          exit 1
+        fi
+
+        echo "PASS: ralph-diff env validation tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-diff output format is pipe-friendly
+  diff-output-format =
+    runCommandLocal "ralph-diff-output-format"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff output format..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        # Check for markdown-friendly output headers
+        if grep -q '# Local Template Changes' "$script"; then
+          echo "PASS: Script outputs markdown header"
+        else
+          echo "FAIL: Script missing markdown header"
+          exit 1
+        fi
+
+        # Check for code fence around diffs
+        if grep -q '\`\`\`diff' "$script"; then
+          echo "PASS: Script uses diff code fence"
+        else
+          echo "FAIL: Script missing diff code fence"
+          exit 1
+        fi
+
+        # Check for TTY-only hint
+        if grep -q '\[ -t 1 \]' "$script"; then
+          echo "PASS: Script checks for TTY before hint"
+        else
+          echo "FAIL: Script missing TTY check"
+          exit 1
+        fi
+
+        echo "PASS: ralph-diff output format tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-diff validation logic for templates and partials
+  diff-validation-logic =
+    runCommandLocal "ralph-diff-validation-logic"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-diff validation logic..."
+
+        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+
+        # Check that both templates and partials are validated
+        if grep -q 'valid_template' "$script" && grep -q 'valid_partial' "$script"; then
+          echo "PASS: Script validates both templates and partials"
+        else
+          echo "FAIL: Script missing template or partial validation"
+          exit 1
+        fi
+
+        # Check error message includes both valid options
+        if grep -q 'Valid templates:' "$script" && grep -q 'Valid partials:' "$script"; then
+          echo "PASS: Error message shows valid options"
+        else
+          echo "FAIL: Error message missing valid options"
+          exit 1
+        fi
+
+        # Check that specific template filters out partials
+        if grep -q 'PARTIALS=()' "$script"; then
+          echo "PASS: Script clears partials when template is specified"
+        else
+          echo "FAIL: Script doesn't clear partials for template filter"
+          exit 1
+        fi
+
+        # Check that specific partial filters out templates
+        if grep -q 'TEMPLATES=()' "$script"; then
+          echo "PASS: Script clears templates when partial is specified"
+        else
+          echo "FAIL: Script doesn't clear templates for partial filter"
+          exit 1
+        fi
+
+        echo "PASS: ralph-diff validation logic tests"
+        mkdir $out
+      '';
 }
