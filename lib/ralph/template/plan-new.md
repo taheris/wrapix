@@ -38,7 +38,7 @@ When you have gathered enough information, create the spec file with:
 3. **Requirements** - Functional and non-functional requirements
 4. **Affected files/modules** - What parts of the codebase will change
 5. **Success criteria** - Checkboxes for what "done" looks like
-6. **Out of scope** - What this feature will NOT do
+6. **Out of scope** - What this feature will NOT do (important for boundaries)
 
 ## Implementation Notes Section
 
