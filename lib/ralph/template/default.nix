@@ -184,6 +184,7 @@ let
         "LABEL"
         "SPEC_PATH"
         "EXISTING_SPEC"
+        "NEW_REQUIREMENTS_PATH"
         "EXIT_SIGNALS"
       ];
     };
@@ -208,10 +209,11 @@ let
         "PINNED_CONTEXT"
         "LABEL"
         "SPEC_PATH"
-        "SPEC_CONTENT"
+        "EXISTING_SPEC"
         "MOLECULE_ID"
         "MOLECULE_PROGRESS"
         "NEW_REQUIREMENTS"
+        "NEW_REQUIREMENTS_PATH"
         "EXIT_SIGNALS"
       ];
     };
