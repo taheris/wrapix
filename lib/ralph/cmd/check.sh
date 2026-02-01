@@ -199,6 +199,7 @@ let
     SPEC_CONTENT = "# Dummy Spec Content";
     EXISTING_SPEC = "# Existing Spec";
     CURRENT_FILE = ".ralph/state/current.json";
+    NEW_REQUIREMENTS_PATH = ".ralph/state/test-feature.md";
     MOLECULE_ID = "test-mol123";
     MOLECULE_PROGRESS = "50% (5/10)";
     NEW_REQUIREMENTS = "- New requirement 1";
