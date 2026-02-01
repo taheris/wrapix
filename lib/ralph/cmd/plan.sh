@@ -294,14 +294,22 @@ After creating the epic, update the WIP table entry with the bead ID:
 \`\`\`"
 fi
 
-# Read template and substitute ALL placeholders at runtime (fresh each time)
-PROMPT_TEMPLATE="$RALPH_DIR/template/plan.md"
+# Path for new requirements in update mode (separate from main spec)
+NEW_REQUIREMENTS_PATH="$RALPH_DIR/state/$LABEL.md"
+
+# Select template based on mode: plan-new.md for new specs, plan-update.md for updates
+if [ "$UPDATE_MODE" = "true" ]; then
+  TEMPLATE_NAME="plan-update.md"
+else
+  TEMPLATE_NAME="plan-new.md"
+fi
+PROMPT_TEMPLATE="$RALPH_DIR/template/$TEMPLATE_NAME"
 if [ ! -f "$PROMPT_TEMPLATE" ]; then
   echo "Error: Plan prompt template not found: $PROMPT_TEMPLATE"
   echo ""
   if [ -n "$TEMPLATE" ]; then
     echo "Copying from $TEMPLATE..."
-    cp "$TEMPLATE/plan.md" "$PROMPT_TEMPLATE"
+    cp "$TEMPLATE/$TEMPLATE_NAME" "$PROMPT_TEMPLATE"
     chmod u+rw "$PROMPT_TEMPLATE"
   else
     echo "RALPH_TEMPLATE_DIR not set or doesn't exist - cannot copy template."
@@ -313,7 +321,7 @@ if [ ! -f "$PROMPT_TEMPLATE" ]; then
 fi
 
 # Validate template has placeholders, reset from source if corrupted
-validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/plan.md" "plan.md"
+validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/$TEMPLATE_NAME" "$TEMPLATE_NAME"
 
 # Pin context from specs/README.md
 PINNED_CONTEXT=""
@@ -368,14 +376,18 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{NEW_REQUIREMENTS_PATH\}\}/$NEW_REQUIREMENTS_PATH}"
 
 # Multi-line substitutions using awk
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/{{README_INSTRUCTIONS}}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/{{README_UPDATE_SECTION}}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{EXISTING_SPEC}}/, ctx); print}')
 
-# Append continuation context if resuming an existing spec
-PROMPT_CONTENT="${PROMPT_CONTENT}${CONTINUATION_CONTEXT}"
+# Append continuation context if resuming an existing spec (only for non-update mode)
+if [ "$UPDATE_MODE" != "true" ]; then
+  PROMPT_CONTENT="${PROMPT_CONTENT}${CONTINUATION_CONTEXT}"
+fi
 
 # Open interactive Claude console with the plan prompt
 export PROMPT_CONTENT

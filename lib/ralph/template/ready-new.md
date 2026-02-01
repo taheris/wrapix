@@ -18,6 +18,19 @@ create a beads molecule (epic + child issues) that breaks down the work.
 - Keep tasks **focused** - one clear objective per task
 - Include **test tasks** where appropriate
 - Consider: setup, implementation, tests, documentation
+- **Assign profile per-task** based on what that specific task needs
+
+## Profile Assignment
+
+Each task needs a `profile:X` label to select the right container toolchain in `ralph step`:
+
+| Task Type | Profile | When to Use |
+|-----------|---------|-------------|
+| Rust implementation | `profile:rust` | Tasks touching `.rs` files or using cargo |
+| Python implementation | `profile:python` | Tasks touching `.py` files or using pytest/pip |
+| Nix/shell/docs | `profile:base` | Tasks touching only `.nix`, `.sh`, `.md` files |
+
+Different tasks in the same molecule can have different profiles. Assign based on what each specific task needs.
 
 ## Instructions
 
@@ -30,10 +43,10 @@ create a beads molecule (epic + child issues) that breaks down the work.
    ```bash
    jq --arg mol "$MOLECULE_ID" '.molecule = $mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
    ```
-4. **Create child tasks** with `--parent` to link them to the molecule:
+4. **Create child tasks** with `--parent` and appropriate `profile:X` label:
    ```bash
    TASK_ID=$(bd create --title="<task title>" --description="<detailed description>" \
-     --type=task --labels="spec-{{LABEL}}" --parent="$MOLECULE_ID" --silent)
+     --type=task --labels="spec-{{LABEL}},profile:rust" --parent="$MOLECULE_ID" --silent)
    ```
 5. **Set execution order** with `bd dep add` for tasks that must run sequentially:
    ```bash
@@ -46,8 +59,9 @@ create a beads molecule (epic + child issues) that breaks down the work.
 |-----------|---------|--------|
 | `--parent` | Links task to molecule | Enables `ralph status` progress tracking |
 | `bd dep add` | Sets execution order | Controls what `bd ready` returns next |
+| `profile:X` | Selects container profile | Determines toolchain available in `ralph step` |
 
-Both are required: `--parent` for visibility, `bd dep add` for ordering.
+Both `--parent` and `bd dep add` are required: `--parent` for visibility, `bd dep add` for ordering.
 
 ## Output Format
 
