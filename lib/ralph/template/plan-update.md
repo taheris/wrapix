@@ -3,7 +3,7 @@
 You are refining an existing specification. Your goal is to gather additional
 requirements that will be added to the existing spec.
 
-**IMPORTANT: This is a planning-only phase. Do NOT write or modify any code. Do NOT edit the spec file during this conversation. Your role is to discuss and capture NEW requirements only.**
+**IMPORTANT: This is a planning-only phase. Do NOT write or modify any code. Do NOT modify the original spec file at `specs/{{LABEL}}.md`. Your role is to discuss and capture NEW requirements only.**
 
 {{> context-pinning}}
 
@@ -11,14 +11,14 @@ requirements that will be added to the existing spec.
 
 ## Existing Specification
 
-The current spec file contains:
+The current spec file (`specs/{{LABEL}}.md`) contains:
 
 {{EXISTING_SPEC}}
 
 ## Update Guidelines
 
 1. **Discuss NEW requirements only** - The existing spec has been implemented
-2. **Do NOT modify the spec file** during this conversation
+2. **Do NOT modify the original spec file** - Write new requirements to `{{NEW_REQUIREMENTS_PATH}}`
 3. **Ask clarifying questions** to understand the additional work needed
 4. **Capture scope clearly** - What new functionality is being added?
 
@@ -29,20 +29,39 @@ The current spec file contains:
    - What problem does the new work solve?
    - How does it relate to existing functionality?
    - What are the success criteria for the new work?
-3. Summarize the new requirements when complete
+3. When complete, write the new requirements to `{{NEW_REQUIREMENTS_PATH}}`
 4. Output RALPH_COMPLETE when the user confirms
 
 ## Output
 
-When the conversation is complete, summarize the new requirements. Do NOT edit any files.
+When the conversation is complete:
 
-`ralph ready` will:
-1. Update the spec file with new requirements
-2. Create new tasks for the additional work
-3. Bond those tasks to the existing molecule
+1. **Write new requirements** to `{{NEW_REQUIREMENTS_PATH}}` in markdown format:
+   ```markdown
+   # New Requirements for {{LABEL}}
+
+   ## Requirements
+   - [List the new requirements gathered]
+
+   ## Success Criteria
+   - [Specific criteria for the new work]
+
+   ## Affected Files
+   - [Files that will need changes]
+   ```
+
+2. Confirm with the user that the new requirements are correct.
+
+3. Output `RALPH_COMPLETE` when confirmed.
+
+`ralph ready` will then:
+1. Read new requirements from `{{NEW_REQUIREMENTS_PATH}}`
+2. Create tasks ONLY for those new requirements
+3. Merge the new requirements into `specs/{{LABEL}}.md`
+4. Delete `{{NEW_REQUIREMENTS_PATH}}` after successful merge
 
 {{> exit-signals}}
 
-- `RALPH_COMPLETE` - New requirements gathered and confirmed
+- `RALPH_COMPLETE` - New requirements written to state file and confirmed
 - `RALPH_BLOCKED: <reason>` - Cannot proceed without additional information
 - `RALPH_CLARIFY: <question>` - Need clarification on something specific
