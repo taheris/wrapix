@@ -164,36 +164,40 @@ The debug MCP is **not** registered in the main session. Instead:
 5. Subagent returns summary to main session
 6. Main session continues with lean context
 
-### Debug Profile
+### MCP Opt-in
 
-A wrapix profile that includes debugging capabilities:
+Debugging is enabled per-sandbox via the `mcp` parameter, not via dedicated profiles:
 
 ```nix
-{
-  profiles.debug = {
-    packages = with pkgs; [
-      tmux
-      tmux-debug-mcp
-    ];
+# Enable tmux-debug with defaults
+mkSandbox {
+  profile = profiles.rust;
+  mcp = {
+    tmux-debug = { };
+  };
+}
 
-    mcp = {
-      servers.tmux-debug = {
-        command = "tmux-debug-mcp";
-      };
+# Enable with auditing
+mkSandbox {
+  profile = profiles.rust;
+  mcp = {
+    tmux-debug = { audit = "/workspace/.debug-audit.log"; };
+  };
+}
+
+# Full capture logging
+mkSandbox {
+  profile = profiles.rust;
+  mcp = {
+    tmux-debug = {
+      audit = "/workspace/.debug-audit.log";
+      auditFull = "/workspace/.debug-audit/";
     };
   };
 }
 ```
 
-Profiles can compose debugging with other capabilities:
-
-```nix
-{
-  profiles.rust-debug = {
-    imports = [ profiles.rust profiles.debug ];
-  };
-}
-```
+This eliminates profile proliferation — consumers add MCP servers to existing profiles rather than creating debug variants.
 
 ### Example Flow
 
@@ -287,10 +291,13 @@ TMUX_DEBUG_AUDIT_FULL=/workspace/.debug-audit/
 ```
 lib/
   mcp/
+    default.nix              # MCP registry: { tmux-debug = import ./tmux; }
     tmux/
-      default.nix      # Module entry point
-      mcp-server.nix   # MCP server package
-      profile.nix      # Debug profile definition
+      default.nix            # Server definition: { name, package, mkServerConfig }
+      mcp-server.nix         # MCP server Rust package
+  sandbox/
+    default.nix              # mkSandbox accepts `mcp` parameter
+    profiles.nix             # Base profiles (rust, python, base) - no debug variants
 ```
 
 ### MCP Server Implementation
@@ -343,16 +350,17 @@ tmux kill-session -t debug-12345
 
 ## Client Configuration
 
-Projects consuming wrapix debugging can customize behavior via their wrapix config:
+Projects consuming wrapix debugging enable MCP servers via the `mcp` parameter:
 
 ```nix
 # In client project's flake.nix
 {
-  wrapix.profiles.default = {
-    imports = [ wrapix.profiles.rust-debug ];
-
-    mcp.servers.tmux-debug.env = {
-      TMUX_DEBUG_AUDIT = "/workspace/.debug-audit.log";
+  devShells.debug = wrapix.mkSandbox {
+    profile = wrapix.profiles.rust;
+    mcp = {
+      tmux-debug = {
+        audit = "/workspace/.debug-audit.log";
+      };
     };
   };
 }
