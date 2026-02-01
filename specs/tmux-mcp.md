@@ -236,19 +236,7 @@ Enabled via environment variable:
 TMUX_DEBUG_AUDIT=/workspace/.debug-audit.log
 ```
 
-Or in profile configuration:
-
-```nix
-{
-  profiles.debug-audited = {
-    imports = [ profiles.debug ];
-
-    mcp.servers.tmux-debug.env = {
-      TMUX_DEBUG_AUDIT = "/workspace/.debug-audit.log";
-    };
-  };
-}
-```
+Or in the `mcp` parameter (see MCP Opt-in section above).
 
 ### Log Format
 
@@ -404,9 +392,9 @@ Located in `tests/tmux-mcp/e2e/`:
 
 | Test | Description |
 |------|-------------|
-| `test_sandbox_debug_profile.sh` | Build wrapix image with debug profile, verify tmux and MCP server present |
+| `test_sandbox_debug_profile.sh` | Build wrapix image with MCP opt-in, verify tmux and MCP server present |
 | `test_mcp_in_sandbox.sh` | Run MCP server inside sandbox, create pane, send keys, capture output |
-| `test_profile_composition.sh` | Build rust-debug profile, verify both rust toolchain and debug tools available |
+| `test_profile_composition.sh` | Build rust profile with MCP opt-in, verify both rust toolchain and debug tools available |
 | `test_filesystem_isolation.sh` | Verify pane commands can only access `/workspace` |
 
 These tests use `nix build` to create sandbox images and `podman run` to execute inside containers.
@@ -436,7 +424,7 @@ nix flake check
 5. **Sandbox contained**: All pane commands run within wrapix isolation
 6. **Audit works**: When enabled, all operations logged correctly
 7. **Cleanup**: Panes and session terminated on MCP server exit
-8. **Profile composition**: Debug profile composes cleanly with rust/python/base profiles
+8. **MCP integration**: MCP servers integrate cleanly with any profile via `mcp` parameter
 9. **Tests pass**: All unit, integration, and e2e tests pass
 
 ## Out of Scope

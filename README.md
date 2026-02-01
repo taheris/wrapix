@@ -143,6 +143,43 @@ ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
 | `rust` | base + rustup, gcc, openssl, pkg-config |
 | `python` | base + python3, uv, ty, ruff |
 
+## MCP Servers
+
+MCP (Model Context Protocol) servers can be enabled per-sandbox via the `mcp` parameter. This avoids profile proliferation by adding capabilities to existing profiles.
+
+### tmux-debug
+
+Provides tmux pane management for AI-assisted debugging. Run servers in one pane, send test requests from another, capture logs.
+
+```bash
+nix run github:taheris/wrapix#wrapix-debug       # base + tmux-debug
+nix run github:taheris/wrapix#wrapix-rust-debug  # rust + tmux-debug
+```
+
+### Flake usage
+
+```nix
+sandbox = wrapix.mkSandbox {
+  profile = wrapix.profiles.rust;
+  mcp = {
+    tmux-debug = { };  # enable with defaults
+  };
+};
+
+# With audit logging
+sandbox = wrapix.mkSandbox {
+  profile = wrapix.profiles.rust;
+  mcp = {
+    tmux-debug = {
+      audit = "/workspace/.debug-audit.log";
+      auditFull = "/workspace/.debug-audit/";  # full capture logs
+    };
+  };
+};
+```
+
+See [specs/tmux-mcp.md](specs/tmux-mcp.md) for the full specification.
+
 ## Notifications
 
 Desktop notifications when Claude needs attention. See
