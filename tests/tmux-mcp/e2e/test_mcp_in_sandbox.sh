@@ -8,6 +8,9 @@
 # 4. Capture output from the pane
 # 5. Kill the pane
 #
+# Uses MCP opt-in:
+#   mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+#
 # Prerequisites:
 # - nix (with flakes enabled)
 # - podman
@@ -58,12 +61,13 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix debug profile image..."
+log_info "Building wrapix image with MCP opt-in (tmux-debug)..."
 
-# Build the debug profile image
+# Build the debug profile image using MCP opt-in
+# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
 IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-debug image"
-    log_warn "The debug profile may not be defined yet"
+    log_warn "Check that the mcp parameter is properly configured in lib/sandbox/default.nix"
     exit 1
 }
 
