@@ -37,6 +37,7 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 2. **Resumable** — Work can stop and resume across sessions
 3. **Observable** — Clear visibility into current state and progress via molecules
 4. **Validated** — Templates statically checked at build time and after edits
+5. **Isolated** — Claude-calling commands run inside wrapix containers for security and reproducibility
 
 ## Commands
 
@@ -64,6 +65,7 @@ ralph plan -u -h <label>        # Update existing spec in state/
 
 **Behavior:**
 - Creates `state/current.json` with feature metadata
+- Launches wrapix container with base profile
 - Runs spec interview using appropriate template
 - Outputs `RALPH_COMPLETE` when done
 
@@ -73,19 +75,24 @@ ralph plan -u -h <label>        # Update existing spec in state/
 ralph ready
 ```
 
-Reads `state/current.json` to determine mode:
+Launches wrapix container with base profile. Reads `state/current.json` to determine mode:
 - **New spec**: Creates molecule (epic + child issues)
 - **Update mode**: Loads existing molecule, diffs spec to find new work, bonds new tasks
+
+**Profile detection:** Analyzes spec content for language/toolchain mentions (Rust, Cargo, Python, etc.) and assigns `profile:X` labels to each task based on implementation needs.
 
 Stores molecule ID in `state/current.json`.
 
 ### `ralph step`
 
 ```bash
-ralph step
+ralph step                  # Use profile from bead label (or base)
+ralph step --profile=rust   # Override profile
 ```
 
 - Selects next ready issue from molecule
+- Reads `profile:X` label from bead to determine container profile (fallback: base)
+- Launches wrapix container with selected profile
 - Loads step template with issue context
 - Implements in fresh Claude session
 - Updates issue status on completion
@@ -96,8 +103,11 @@ ralph step
 ralph loop
 ```
 
-- Runs `ralph step` repeatedly until all issues complete
-- Uses project sandbox configuration (see Project Configuration)
+Runs on host as orchestrator (not in container):
+- Queries for next ready issue from molecule
+- Spawns `ralph step` in fresh wrapix container (profile per-step)
+- Waits for step completion
+- Repeats until all issues complete
 - Handles discovered work via `bd mol bond`
 
 ### `ralph status`
@@ -247,6 +257,79 @@ plan --update → ready → loop/step → (done)
       └─ Refine spec, gather new requirements
 ```
 
+## Container Execution
+
+Ralph runs Claude-calling commands inside wrapix containers for isolation and reproducibility.
+
+| Command | Execution | Profile |
+|---------|-----------|---------|
+| `ralph plan` | wrapix container | base |
+| `ralph ready` | wrapix container | base |
+| `ralph step` | wrapix container | from bead label or `--profile` flag (fallback: base) |
+| `ralph loop` | host | N/A (orchestrates containerized steps) |
+| `ralph status` | host | N/A (utility) |
+| `ralph logs` | host | N/A (utility) |
+| `ralph check` | host | N/A (utility) |
+| `ralph tune` | host | N/A (utility) |
+| `ralph diff` | host | N/A (utility) |
+| `ralph sync` | host | N/A (utility) |
+
+**Rationale:**
+- `plan` and `ready` involve AI decision-making that benefits from isolation
+- `step` performs implementation work requiring language toolchains
+- `loop` is a simple orchestrator that spawns containerized steps
+- Utility commands don't invoke Claude and run directly on host
+
+## Profile Selection
+
+Profiles determine which language toolchains are available in the wrapix container.
+
+### Available Profiles
+
+| Profile | Includes |
+|---------|----------|
+| `base` | Core tools, git, standard utilities |
+| `rust` | base + Rust toolchain, cargo |
+| `python` | base + Python, pip, venv |
+| `debug` | base + debugging tools (see tmux-mcp spec) |
+
+### Profile Assignment Flow
+
+1. **`ralph ready`** analyzes spec content for language/toolchain indicators:
+   - File extensions in "Affected Files" (`.rs` → rust, `.py` → python)
+   - Keywords (Cargo, rustc, pytest, pip)
+   - Explicit mentions in requirements
+
+2. **Task creation** includes profile label:
+   ```bash
+   bd create --title="Implement parser" --labels profile:rust ...
+   ```
+
+3. **`ralph step`** reads profile from bead:
+   ```bash
+   # Get profile label from bead
+   profile=$(bd show "$issue_id" --json | jq -r '.labels[] | select(startswith("profile:")) | split(":")[1]')
+   profile="${profile:-base}"
+   ```
+
+4. **Override** via `--profile` flag takes precedence:
+   ```bash
+   ralph step --profile=rust  # Ignore bead label, use rust
+   ```
+
+### Profile Detection Heuristics
+
+`ralph ready` uses these signals to assign profiles:
+
+| Signal | Profile |
+|--------|---------|
+| `.rs` files, `Cargo.toml`, "Rust", "cargo" | `rust` |
+| `.py` files, `pyproject.toml`, "Python", "pytest" | `python` |
+| `.nix` files only | `base` |
+| Mixed or unclear | `base` |
+
+If multiple profiles match, prefer the more specific one. Tasks within the same molecule may have different profiles.
+
 ## Template System
 
 ### Nix-Native Templates
@@ -347,8 +430,8 @@ Projects configure ralph via `.ralph/config.nix` (local project overrides):
 ```nix
 # .ralph/config.nix
 {
-  # Sandbox flake reference (for ralph loop)
-  sandbox = ".#packages.x86_64-linux.default";
+  # Wrapix flake reference (provides container profiles)
+  wrapix = "github:user/wrapix";  # or local path
 
   # Context pinning - file read for {{PINNED_CONTEXT}}
   pinnedContext = ./specs/README.md;
@@ -365,7 +448,7 @@ Projects configure ralph via `.ralph/config.nix` (local project overrides):
 **Defaults** (when no config exists):
 ```nix
 {
-  sandbox = null;           # Error if ralph loop needs it
+  wrapix = null;            # Error if container commands need it
   pinnedContext = ./specs/README.md;
   specDir = ./specs;
   stateDir = ./state;
@@ -376,6 +459,10 @@ Projects configure ralph via `.ralph/config.nix` (local project overrides):
 **Template loading order:**
 1. Check `templateDir` (local overlay) first
 2. Fall back to packaged templates
+
+**Profile resolution:**
+- Profiles (base, rust, python, debug) are defined in wrapix (see profiles.md spec)
+- Ralph references profiles by name; wrapix provides the actual container configuration
 
 ## Template Content Requirements
 
@@ -599,10 +686,16 @@ Ralph uses `bd mol` for work tracking:
 - [ ] `ralph plan -h <label>` creates new spec in `state/`
 - [ ] `ralph plan -u <label>` validates spec exists before updating
 - [ ] `ralph plan -u -h <label>` updates hidden spec
+- [ ] `ralph plan` runs Claude in wrapix container with base profile
 - [ ] `ralph ready` creates molecule and stores ID in current.json
 - [ ] `ralph ready` in update mode bonds new tasks to existing molecule
+- [ ] `ralph ready` runs Claude in wrapix container with base profile
+- [ ] `ralph ready` detects profile from spec and assigns `profile:X` labels to tasks
+- [ ] `ralph step` reads `profile:X` label from bead and uses that profile
+- [ ] `ralph step --profile=X` overrides bead profile label
+- [ ] `ralph step` falls back to base profile when no label present
 - [ ] `ralph step` completes single issues with blocked-vs-waiting guidance
-- [ ] `ralph loop` uses project sandbox from `.ralph/config.nix`
+- [ ] `ralph loop` runs on host, spawning containerized `ralph step` per issue
 - [ ] `ralph check` validates all templates and partials
 - [ ] `ralph tune` (interactive) identifies correct template and makes edits
 - [ ] `ralph tune` (integration) ingests diff and interviews about changes
