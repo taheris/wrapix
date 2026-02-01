@@ -2909,7 +2909,6 @@ test_diff_no_changes() {
   # Copy packaged templates to local directory (simulates fresh install)
   cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/template/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Run ralph diff
@@ -2950,7 +2949,6 @@ test_diff_local_modifications() {
   # (setup_test_env creates templates with different content)
   cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
-  cp "$RALPH_TEMPLATE_DIR/ready.md" "$RALPH_DIR/template/ready.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Modify ONLY step.md to create a detectable change
@@ -3056,7 +3054,7 @@ test_diff_missing_local_templates() {
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Remove markdown templates to simulate partial installation
-  rm -f "$RALPH_DIR/template/step.md" "$RALPH_DIR/template/plan.md" "$RALPH_DIR/template/ready.md"
+  rm -f "$RALPH_DIR/template/step.md" "$RALPH_DIR/template/plan.md"
 
   # Run ralph diff
   set +e
