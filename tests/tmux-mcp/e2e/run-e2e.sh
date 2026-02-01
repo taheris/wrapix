@@ -39,14 +39,16 @@ declare -A TESTS=(
     ["mcp_in_sandbox"]="test_mcp_in_sandbox.sh"
     ["profile_composition"]="test_profile_composition.sh"
     ["filesystem_isolation"]="test_filesystem_isolation.sh"
+    ["mcp_audit_config"]="test_mcp_audit_config.sh"
 )
 
 # Test descriptions
 declare -A TEST_DESCRIPTIONS=(
-    ["sandbox_debug_profile"]="Build debug profile image, verify tmux+MCP present"
+    ["sandbox_debug_profile"]="Build sandbox with MCP opt-in, verify tmux+MCP present"
     ["mcp_in_sandbox"]="Run MCP server inside sandbox, exercise all tools"
-    ["profile_composition"]="Build rust-debug profile, verify composition works"
+    ["profile_composition"]="Build rust + MCP opt-in, verify composition works"
     ["filesystem_isolation"]="Verify pane commands only access /workspace"
+    ["mcp_audit_config"]="Verify MCP audit configuration is passed correctly"
 )
 
 log_info() {
@@ -213,6 +215,7 @@ main() {
         # Sort tests by dependency order
         tests_to_run=(
             "sandbox_debug_profile"    # Basic: does image build?
+            "mcp_audit_config"          # Config: is audit param passed?
             "filesystem_isolation"      # Security: is sandbox isolated?
             "mcp_in_sandbox"            # Function: does MCP work?
             "profile_composition"       # Advanced: do profiles compose?

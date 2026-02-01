@@ -86,6 +86,35 @@
             wrapix-rust = (wrapix.mkSandbox { profile = wrapix.profiles.rust; }).package;
             wrapix-python = (wrapix.mkSandbox { profile = wrapix.profiles.python; }).package;
 
+            # Debug profiles: base profile + MCP opt-in for tmux-debug
+            wrapix-debug =
+              (wrapix.mkSandbox {
+                profile = wrapix.profiles.base;
+                mcp = {
+                  tmux-debug = { };
+                };
+              }).package;
+
+            # Rust + debug: rust profile + MCP opt-in for tmux-debug
+            wrapix-rust-debug =
+              (wrapix.mkSandbox {
+                profile = wrapix.profiles.rust;
+                mcp = {
+                  tmux-debug = { };
+                };
+              }).package;
+
+            # Debug with audit logging: for testing audit configuration
+            wrapix-debug-audited =
+              (wrapix.mkSandbox {
+                profile = wrapix.profiles.base;
+                mcp = {
+                  tmux-debug = {
+                    audit = "/workspace/.debug-audit.log";
+                  };
+                };
+              }).package;
+
             wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
             wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
 
