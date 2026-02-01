@@ -8,17 +8,19 @@
         ]
       },
       "locked": {
-        "lastModified": 1769405733,
-        "narHash": "sha256-WpROnW0dRi5ub0SlpKrMBs3pYlSBY4xw22hnTNvBMgI=",
-        "owner": "steveyegge",
-        "repo": "beads",
-        "rev": "6e82d1e2eea121ce5dc0964d554879f8b0c08563",
-        "type": "github"
+        "lastModified": 1769403857,
+        "narHash": "sha256-roOyTMy9nKxH2Bk8MnP4h2CDjStwK6z0ThQhFcM64QI=",
+        "ref": "refs/tags/v0.49.1",
+        "rev": "0d99d15370030b953a8df0ea67cd3d1b845bb07b",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/steveyegge/beads.git"
       },
       "original": {
-        "owner": "steveyegge",
-        "repo": "beads",
-        "type": "github"
+        "ref": "refs/tags/v0.49.1",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/steveyegge/beads.git"
       }
     },
     "flake-parts": {
@@ -30,15 +32,17 @@
       "locked": {
         "lastModified": 1768135262,
         "narHash": "sha256-PVvu7OqHBGWN16zSi6tEmPwwHQ4rLPU9Plvs8/1TUBY=",
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
+        "ref": "main",
         "rev": "80daad04eddbbf5a4d883996a73f3f542fa437ac",
-        "type": "github"
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/hercules-ci/flake-parts.git"
       },
       "original": {
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "type": "github"
+        "ref": "main",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/hercules-ci/flake-parts.git"
       }
     },
     "flake-utils": {
@@ -61,18 +65,19 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1769170682,
-        "narHash": "sha256-oMmN1lVQU0F0W2k6OI3bgdzp2YOHWYUAw79qzDSjenU=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "c5296fdd05cfa2c187990dd909864da9658df755",
-        "type": "github"
+        "lastModified": 1769789167,
+        "narHash": "sha256-kKB3bqYJU5nzYeIROI82Ef9VtTbu4uA3YydSk/Bioa8=",
+        "ref": "nixos-unstable",
+        "rev": "62c8382960464ceb98ea593cb8321a2cf8f9e3e5",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/NixOS/nixpkgs.git"
       },
       "original": {
-        "owner": "NixOS",
         "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/NixOS/nixpkgs.git"
       }
     },
     "root": {

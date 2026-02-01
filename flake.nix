@@ -2,15 +2,15 @@
   description = "Cross-platform sandbox for Claude Code";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "git+ssh://git@github.com/NixOS/nixpkgs.git?ref=nixos-unstable&shallow=1";
 
     beads = {
-      url = "github:steveyegge/beads";
+      url = "git+ssh://git@github.com/steveyegge/beads.git?ref=refs/tags/v0.49.1&shallow=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     flake-parts = {
-      url = "github:hercules-ci/flake-parts";
+      url = "git+ssh://git@github.com/hercules-ci/flake-parts.git?ref=main&shallow=1";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
   };
