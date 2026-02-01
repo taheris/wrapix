@@ -44,16 +44,37 @@ if [ "${1:-}" = "mol" ]; then
 
   case "$subcommand" in
     progress)
-      # Check for custom response
+      # Check for --json flag
+      if [[ " $* " == *" --json "* ]]; then
+        # Check for custom JSON response
+        if [ -n "$MOCK_RESPONSES" ] && [ -f "$MOCK_RESPONSES/mol-progress.json" ]; then
+          cat "$MOCK_RESPONSES/mol-progress.json"
+          exit 0
+        fi
+        # Default JSON mock response
+        cat << EOF
+{
+  "completed": 8,
+  "current_step_id": "test-step-3",
+  "in_progress": 1,
+  "molecule_id": "$molecule",
+  "molecule_title": "Test Molecule",
+  "percent": 80,
+  "total": 10
+}
+EOF
+        exit 0
+      fi
+      # Check for custom text response
       if [ -n "$MOCK_RESPONSES" ] && [ -f "$MOCK_RESPONSES/mol-progress.txt" ]; then
         cat "$MOCK_RESPONSES/mol-progress.txt"
         exit 0
       fi
-      # Default mock response
+      # Default text mock response
       cat << EOF
-▓▓▓▓▓▓▓▓░░ 80% (8/10)
-Rate: 2.5 steps/hour
-ETA: ~48 min
+Molecule: $molecule (Test Molecule)
+Progress: 8 / 10 (80%)
+Current step: test-step-3
 EOF
       exit 0
       ;;
@@ -199,6 +220,34 @@ assert_output_format() {
   return $has_errors
 }
 
+# Verify output has visual progress bar with correct format
+# Usage: assert_progress_bar <output> <expected_pattern>
+# Expected pattern: e.g., "[########--] 80% (8/10)"
+assert_progress_bar() {
+  local output="$1"
+  local expected_percent="${2:-}"
+
+  # Check for progress bar pattern: [#...] N% (X/Y)
+  if echo "$output" | grep -qE '\[[#-]+\] [0-9]+% \([0-9]+/[0-9]+\)'; then
+    echo "PASS: Output has visual progress bar"
+    # If expected percent provided, verify it
+    if [ -n "$expected_percent" ]; then
+      if echo "$output" | grep -q "$expected_percent%"; then
+        echo "PASS: Progress bar shows $expected_percent%"
+      else
+        echo "FAIL: Expected $expected_percent% in progress bar"
+        echo "  Got: $(echo "$output" | grep -E '\[[#-]+\]')"
+        return 1
+      fi
+    fi
+    return 0
+  else
+    echo "FAIL: Missing visual progress bar"
+    echo "  Expected format: [####------] N% (X/Y)"
+    return 1
+  fi
+}
+
 # Test phase functions (for mock-claude compatibility if needed)
 # These are not used since ralph status doesn't use Claude,
 # but included for consistency with other scenarios.
@@ -258,6 +307,11 @@ run_status_wrapper_test() {
       echo ""
       echo "Verifying output format..."
       assert_output_format "$status_output"
+
+      # Verify visual progress bar (80% from mock)
+      echo ""
+      echo "Verifying visual progress bar..."
+      assert_progress_bar "$status_output" "80"
 
       echo ""
       echo "STATUS_WRAPPER_TEST_PASSED"
