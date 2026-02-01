@@ -186,6 +186,10 @@ impl<E: CommandExecutor> TmuxSession<E> {
         let target = format!("{}:{}", self.session_name, name);
         self.run_tmux(&["new-window", "-t", &self.session_name, "-n", name])?;
 
+        // Set remain-on-exit for this window so pane stays after process exits
+        // Note: session-level remain-on-exit doesn't apply to windows created after it's set
+        self.run_tmux(&["set-option", "-t", &target, "remain-on-exit", "on"])?;
+
         // Send the command to the window
         self.run_tmux(&["send-keys", "-t", &target, command, "Enter"])?;
 
@@ -502,15 +506,15 @@ mod tests {
 
         let calls = session.executor.get_calls();
 
-        // Should have: new-session, set-option, new-window, send-keys
-        assert!(calls.len() >= 4);
+        // Should have: new-session, set-option (session), new-window, set-option (window), send-keys
+        assert!(calls.len() >= 5);
 
         // First call should be new-session
         assert_eq!(calls[0][0], "new-session");
         assert!(calls[0].contains(&"-d".to_string()));
         assert!(calls[0].contains(&"-s".to_string()));
 
-        // Second call should be set-option for remain-on-exit
+        // Second call should be set-option for remain-on-exit (session level)
         assert_eq!(calls[1][0], "set-option");
         assert!(calls[1].contains(&"remain-on-exit".to_string()));
         assert!(calls[1].contains(&"on".to_string()));
@@ -520,10 +524,17 @@ mod tests {
         assert!(calls[2].contains(&"-n".to_string()));
         assert!(calls[2].contains(&"server".to_string()));
 
-        // Fourth call should be send-keys
-        assert_eq!(calls[3][0], "send-keys");
-        assert!(calls[3].contains(&"cargo run".to_string()));
-        assert!(calls[3].contains(&"Enter".to_string()));
+        // Fourth call should be set-option for remain-on-exit on the window
+        assert_eq!(calls[3][0], "set-option");
+        assert!(calls[3].contains(&"remain-on-exit".to_string()));
+        assert!(calls[3].contains(&"on".to_string()));
+        // Should target the specific window
+        assert!(calls[3].iter().any(|s| s.contains("server")));
+
+        // Fifth call should be send-keys
+        assert_eq!(calls[4][0], "send-keys");
+        assert!(calls[4].contains(&"cargo run".to_string()));
+        assert!(calls[4].contains(&"Enter".to_string()));
     }
 
     #[test]
