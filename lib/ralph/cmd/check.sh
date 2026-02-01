@@ -279,8 +279,8 @@ if var_check=$(RALPH_CHECK_NIX_FILE="$NIX_FILE" nix eval --impure --json --file 
       echo "  ✓ $template (all variables declared)"
     else
       undeclared_list=$(echo "$var_check" | jq -r ".\"$template\".undeclared | join(\", \")" 2>/dev/null)
-      echo "  ⚠ $template (undeclared variables: $undeclared_list)"
-      # This is a warning, not an error - partials may use variables not in template.variables
+      echo "  ✗ $template (undeclared variables: $undeclared_list)"
+      ERRORS+=("Template $template uses undeclared variables: $undeclared_list")
     fi
   done
 else
