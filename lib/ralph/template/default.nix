@@ -196,6 +196,7 @@ let
         "LABEL"
         "SPEC_PATH"
         "SPEC_CONTENT"
+        "CURRENT_FILE"
         "EXIT_SIGNALS"
       ];
     };
