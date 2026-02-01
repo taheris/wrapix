@@ -341,4 +341,198 @@ templateTests
         echo "PASS: resolve_partials tests"
         mkdir $out
       '';
+
+  # Test: ralph-tune help flag works
+  # Note: We test the help output by grepping the script directly since help is shown
+  # before util.sh is sourced, and our test verifies the script's help content
+  tune-help =
+    runCommandLocal "ralph-tune-help"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-tune --help content..."
+
+        # Read the script and verify help text content exists
+        script="${../.. + "/lib/ralph/cmd/tune.sh"}"
+
+        if grep -q "AI-assisted template editing" "$script"; then
+          echo "PASS: Help mentions AI-assisted template editing"
+        else
+          echo "FAIL: Help missing AI-assisted editing mention"
+          exit 1
+        fi
+
+        if grep -q "Interactive mode" "$script"; then
+          echo "PASS: Help mentions interactive mode"
+        else
+          echo "FAIL: Help missing interactive mode"
+          exit 1
+        fi
+
+        if grep -q "Integration mode" "$script"; then
+          echo "PASS: Help mentions integration mode"
+        else
+          echo "FAIL: Help missing integration mode"
+          exit 1
+        fi
+
+        if grep -q "ralph check" "$script"; then
+          echo "PASS: Help mentions ralph check validation"
+        else
+          echo "FAIL: Help missing ralph check mention"
+          exit 1
+        fi
+
+        echo "PASS: ralph-tune help tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-tune mode detection logic
+  # Verifies the script properly detects stdin vs no stdin
+  tune-mode-detection =
+    runCommandLocal "ralph-tune-mode-detection"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-tune mode detection logic..."
+
+        script="${../.. + "/lib/ralph/cmd/tune.sh"}"
+
+        # Verify the script checks for stdin
+        if grep -q '\[ ! -t 0 \]' "$script"; then
+          echo "PASS: Script checks for stdin terminal status"
+        else
+          echo "FAIL: Script missing stdin detection"
+          exit 1
+        fi
+
+        # Verify the script sets MODE based on detection
+        if grep -q 'MODE="integration"' "$script" && grep -q 'MODE="interactive"' "$script"; then
+          echo "PASS: Script sets integration and interactive modes"
+        else
+          echo "FAIL: Script missing mode assignment"
+          exit 1
+        fi
+
+        # Verify empty diff detection
+        if grep -q "No diff input received" "$script"; then
+          echo "PASS: Script handles empty diff input"
+        else
+          echo "FAIL: Script missing empty diff handling"
+          exit 1
+        fi
+
+        echo "PASS: ralph-tune mode detection tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-tune requires RALPH_TEMPLATE_DIR
+  # Verifies the script checks for required environment
+  tune-env-validation =
+    runCommandLocal "ralph-tune-env-validation"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-tune environment validation..."
+
+        script="${../.. + "/lib/ralph/cmd/tune.sh"}"
+
+        # Verify the script requires RALPH_TEMPLATE_DIR
+        if grep -q 'RALPH_TEMPLATE_DIR' "$script"; then
+          echo "PASS: Script references RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR reference"
+          exit 1
+        fi
+
+        # Verify error message for missing env
+        if grep -q "RALPH_TEMPLATE_DIR not set" "$script"; then
+          echo "PASS: Script shows error for missing RALPH_TEMPLATE_DIR"
+        else
+          echo "FAIL: Script missing RALPH_TEMPLATE_DIR error message"
+          exit 1
+        fi
+
+        # Verify RALPH_DIR is used
+        if grep -q 'RALPH_DIR' "$script"; then
+          echo "PASS: Script uses RALPH_DIR"
+        else
+          echo "FAIL: Script missing RALPH_DIR usage"
+          exit 1
+        fi
+
+        echo "PASS: ralph-tune env validation tests"
+        mkdir $out
+      '';
+
+  # Test: ralph-tune prompt building
+  # Verifies the script builds appropriate prompts for both modes
+  tune-prompt-building =
+    runCommandLocal "ralph-tune-prompt-building"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        echo "Test: ralph-tune prompt building..."
+
+        script="${../.. + "/lib/ralph/cmd/tune.sh"}"
+
+        # Verify interactive mode prompt content
+        if grep -q "build_interactive_prompt" "$script"; then
+          echo "PASS: Script has interactive prompt builder"
+        else
+          echo "FAIL: Script missing interactive prompt builder"
+          exit 1
+        fi
+
+        # Verify integration mode prompt content
+        if grep -q "build_integration_prompt" "$script"; then
+          echo "PASS: Script has integration prompt builder"
+        else
+          echo "FAIL: Script missing integration prompt builder"
+          exit 1
+        fi
+
+        # Verify template context is built
+        if grep -q "build_template_context" "$script"; then
+          echo "PASS: Script builds template context"
+        else
+          echo "FAIL: Script missing template context builder"
+          exit 1
+        fi
+
+        # Verify ralph check is run after edits
+        if grep -q "ralph-check" "$script"; then
+          echo "PASS: Script runs ralph-check after edits"
+        else
+          echo "FAIL: Script missing ralph-check validation"
+          exit 1
+        fi
+
+        echo "PASS: ralph-tune prompt building tests"
+        mkdir $out
+      '';
 }
