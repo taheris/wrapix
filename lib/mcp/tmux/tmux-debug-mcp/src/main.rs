@@ -17,7 +17,11 @@ use mcp::{
 use panes::{PaneManager, PaneStatus};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tmux::{CommandExecutor, RealExecutor, TmuxSession};
+
+/// Global flag to signal shutdown
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Application state shared across tool handlers
 struct AppState<E: CommandExecutor = RealExecutor> {
@@ -345,8 +349,28 @@ fn process_request<E: CommandExecutor>(
     }
 }
 
+/// Set up signal handlers for graceful shutdown
+fn setup_signal_handlers() {
+    #[cfg(unix)]
+    {
+        // Set up SIGTERM and SIGINT handlers for graceful shutdown
+        unsafe {
+            libc::signal(libc::SIGTERM, signal_handler as libc::sighandler_t);
+            libc::signal(libc::SIGINT, signal_handler as libc::sighandler_t);
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" fn signal_handler(_: libc::c_int) {
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+}
+
 /// Main server loop - reads JSON-RPC requests from stdin, writes responses to stdout
 fn run_server() -> io::Result<()> {
+    // Set up signal handlers for graceful shutdown
+    setup_signal_handlers();
+
     let mut state = AppState::new();
 
     let stdin = io::stdin();
@@ -354,6 +378,11 @@ fn run_server() -> io::Result<()> {
 
     // Read lines from stdin
     for line in stdin.lock().lines() {
+        // Check for shutdown request
+        if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+            break;
+        }
+
         let line = line?;
 
         // Skip empty lines
@@ -369,7 +398,10 @@ fn run_server() -> io::Result<()> {
         }
     }
 
-    // Cleanup on exit (tmux session is cleaned up by Drop impl on TmuxSession)
+    // Explicit cleanup - Drop will be called when state goes out of scope
+    // This ensures tmux session is cleaned up even on signal
+    drop(state);
+
     Ok(())
 }
 
