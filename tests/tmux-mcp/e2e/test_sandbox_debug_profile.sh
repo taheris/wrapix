@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Test: Build wrapix image with debug profile, verify tmux and MCP server present
+# Test: Build wrapix image with MCP opt-in, verify tmux and MCP server present
 #
-# This test builds a sandbox image with the debug profile and verifies that:
+# This test builds a sandbox image using mkSandbox with the mcp parameter
+# and verifies that MCP servers are properly included:
+#
 # 1. The image builds successfully with nix build
 # 2. tmux is present and executable inside the container
 # 3. tmux-debug-mcp is present and executable inside the container
+#
+# The flake output uses MCP opt-in:
+#   mkSandbox {
+#     profile = profiles.base;
+#     mcp = { tmux-debug = {}; };
+#   }
 #
 # Prerequisites:
 # - nix (with flakes enabled)
@@ -59,14 +67,14 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix debug profile image..."
+log_info "Building wrapix image with MCP opt-in (tmux-debug)..."
 
-# Build the debug profile image
-# Note: This assumes .#wrapix-debug is defined in the flake outputs
+# Build the debug profile image using MCP opt-in
+# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
 IMAGE_FILE=$(mktemp --suffix=.tar)
 if ! nix build "${REPO_ROOT}#wrapix-debug" --out-link "${IMAGE_FILE%.tar}" 2>&1; then
     log_error "Failed to build wrapix-debug image"
-    log_warn "The debug profile may not be defined yet. Check lib/sandbox/profiles.nix"
+    log_warn "Check that the mcp parameter is properly configured in lib/sandbox/default.nix"
     exit 1
 fi
 

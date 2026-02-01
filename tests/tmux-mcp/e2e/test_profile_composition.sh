@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Test: Build rust-debug profile, verify both rust toolchain and debug tools available
+# Test: Build rust profile with MCP opt-in, verify both rust toolchain and debug tools available
 #
-# This test verifies profile composition works correctly:
-# 1. Build rust-debug profile (combines rust + debug profiles)
+# This test verifies MCP opt-in composition with language profiles:
+# 1. Build rust + tmux-debug using MCP opt-in:
+#    mkSandbox { profile = rust; mcp = { tmux-debug = {}; }; }
 # 2. Verify rust toolchain is present (rustc, cargo, rustup)
 # 3. Verify debug tools are present (tmux, tmux-debug-mcp)
 # 4. Verify all base tools are still present
+#
+# This demonstrates that MCP servers can be added to any profile
+# without requiring dedicated debug variants.
 #
 # Prerequisites:
 # - nix (with flakes enabled)
@@ -57,13 +61,14 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix rust-debug profile image..."
+log_info "Building wrapix rust profile with MCP opt-in (tmux-debug)..."
 
-# Build the rust-debug profile image (combines rust + debug)
+# Build the rust + debug image using MCP opt-in
+# The flake defines: mkSandbox { profile = rust; mcp = { tmux-debug = {}; }; }
 IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-rust-debug" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-rust-debug image"
-    log_warn "The rust-debug profile may not be defined yet"
-    log_warn "Profile composition requires defining profiles.rust-debug in lib/sandbox/profiles.nix"
+    log_warn "MCP opt-in composition may not be configured correctly"
+    log_warn "Check that the mcp parameter is properly handled in lib/sandbox/default.nix"
     exit 1
 }
 
@@ -180,10 +185,10 @@ check_command "pkg-config" "pkg-config"
 check_command "gcc" "gcc"
 
 echo ""
-log_info "=== Profile composition validation ==="
+log_info "=== MCP opt-in composition validation ==="
 
-# Verify that profile env vars from both profiles are present
-log_info "Checking that environment from both profiles is merged..."
+# Verify that rust profile env vars and MCP server are both present
+log_info "Checking that rust profile environment and MCP packages are merged..."
 
 # Create a test script to dump all relevant env vars
 cat > "${WORKSPACE}/check_env.sh" << 'SCRIPT'
@@ -219,16 +224,16 @@ echo "$ENV_OUTPUT"
 echo ""
 echo "========================================="
 if [[ $FAILED -eq 0 ]]; then
-    log_info "SUCCESS: All profile composition checks passed!"
+    log_info "SUCCESS: All MCP opt-in composition checks passed!"
     echo ""
     echo "Summary:"
-    echo "  - rust-debug profile builds successfully"
+    echo "  - rust + tmux-debug MCP opt-in builds successfully"
     echo "  - Rust toolchain (rustup, cargo) available"
-    echo "  - Debug tools (tmux, tmux-debug-mcp) available"
+    echo "  - MCP server (tmux, tmux-debug-mcp) available"
     echo "  - Base profile tools (git, jq, curl, etc.) available"
-    echo "  - Environment variables from both profiles merged correctly"
+    echo "  - Rust environment and MCP packages merged correctly"
     exit 0
 else
-    log_error "FAILED: Some profile composition checks failed"
+    log_error "FAILED: Some MCP opt-in composition checks failed"
     exit 1
 fi
