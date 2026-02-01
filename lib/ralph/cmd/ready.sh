@@ -104,6 +104,14 @@ fi
 # Extract title from spec file (first heading)
 SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$SPEC_NAME")
 
+# Read spec content for profile detection
+SPEC_CONTENT_FOR_PROFILE=$(cat "$SPEC_PATH")
+
+# Detect default profile from spec content
+# This profile will be assigned to tasks via profile:X labels
+DEFAULT_PROFILE=$(detect_profile "$SPEC_CONTENT_FOR_PROFILE")
+debug "Detected profile: $DEFAULT_PROFILE"
+
 # Build mode-specific content for the template
 MODE="new"
 MOLECULE_CONTEXT=""
@@ -145,7 +153,8 @@ $EXISTING_BEADS
 For each NEW implementation task, create it as a child of the molecule:
 \`\`\`bash
 # Create the new task as a child of the molecule
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"$MOLECULE_ID\" --silent)
+# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -189,7 +198,8 @@ jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_
 Then, for each NEW implementation task, create it as a child of the molecule:
 \`\`\`bash
 # Create the task as a child of the molecule (this enables molecule progress tracking)
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"\$MOLECULE_ID\" --silent)
+# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"\$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -225,7 +235,8 @@ jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_
 Then, for each implementation task, create it as a child of the molecule:
 \`\`\`bash
 # Create the task as a child of the molecule (this enables molecule progress tracking)
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}}\" --parent=\"\$MOLECULE_ID\" --silent)
+# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
+TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"\$MOLECULE_ID\" --silent)
 \`\`\`
 
 Add dependencies between tasks:
@@ -238,6 +249,7 @@ echo "Ralph Ready: Converting spec to molecule..."
 echo "  Label: $LABEL"
 echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
+echo "  Profile: $DEFAULT_PROFILE"
 if [ "$UPDATE_MODE" = "true" ]; then
   if [ -n "$MOLECULE_ID" ]; then
     echo "  Mode: UPDATE (bonding new tasks to existing molecule)"
@@ -264,6 +276,7 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MODE\}\}/$MODE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{DEFAULT_PROFILE\}\}/$DEFAULT_PROFILE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
 
 # Multi-line substitutions using awk (handles newlines in replacement text)
