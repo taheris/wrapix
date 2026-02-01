@@ -5,7 +5,7 @@
 }:
 
 let
-  inherit (builtins) elem;
+  inherit (builtins) elem mapAttrs attrValues;
 
   isDarwin = system == "aarch64-darwin";
   isLinux = elem system [
@@ -19,6 +19,9 @@ let
   # Profiles must use Linux packages (they contain Linux-only tools like iproute2)
   profiles = import ./profiles.nix { pkgs = linuxPkgs; };
 
+  # MCP server registry (uses Linux packages for server binaries)
+  mcpRegistry = import ../mcp { pkgs = linuxPkgs; };
+
   # Claude config (~/.claude.json) - onboarding state and runtime flags
   claudeConfig = {
     bypassPermissionsModeAccepted = true;
@@ -29,7 +32,8 @@ let
   };
 
   # Claude settings (~/.claude/settings.json) - user preferences
-  claudeSettings = {
+  # Base settings that can be extended with MCP servers
+  baseClaudeSettings = {
     "$schema" = "https://json.schemastore.org/claude-code-settings.json";
     autoUpdates = false;
     env = {
@@ -57,7 +61,11 @@ let
   # Build the container image using Linux packages
   # On Darwin, this will use a remote Linux builder if configured
   mkImage =
-    { profile, entrypointSh }:
+    {
+      profile,
+      entrypointSh,
+      claudeSettings ? baseClaudeSettings,
+    }:
     import ./image.nix {
       pkgs = linuxPkgs;
       inherit
@@ -84,6 +92,31 @@ let
       env = (profile.env or { }) // env;
     };
 
+  # Build MCP server configurations from the mcp attrset
+  # Returns { packages, mcpServers } where:
+  #   - packages: list of server packages to add to the sandbox
+  #   - mcpServers: attrset of server configs for claudeSettings
+  buildMcpConfig =
+    mcp:
+    let
+      # For each enabled server, look up definition and build config
+      serverConfigs = mapAttrs (
+        name: userConfig:
+        let
+          serverDef = mcpRegistry.${name} or (throw "Unknown MCP server: ${name}");
+          serverConfig = serverDef.mkServerConfig userConfig;
+        in
+        {
+          inherit (serverDef) package;
+          config = serverConfig;
+        }
+      ) mcp;
+    in
+    {
+      packages = map (s: s.package) (attrValues serverConfigs);
+      mcpServers = mapAttrs (_name: s: s.config) serverConfigs;
+    };
+
   mkSandbox =
     {
       profile ? profiles.base,
@@ -93,9 +126,22 @@ let
       packages ? [ ],
       mounts ? [ ],
       env ? { },
+      mcp ? { },
     }:
     let
-      finalProfile = extendProfile profile { inherit packages mounts env; };
+      # Build MCP configuration from enabled servers
+      mcpConfig = buildMcpConfig mcp;
+
+      # Extend profile with user packages + MCP server packages
+      finalProfile = extendProfile profile {
+        packages = packages ++ mcpConfig.packages;
+        inherit mounts env;
+      };
+
+      # Merge MCP servers into Claude settings
+      finalClaudeSettings = baseClaudeSettings // {
+        inherit (mcpConfig) mcpServers;
+      };
 
       package =
         if isLinux then
@@ -105,6 +151,7 @@ let
             profileImage = mkImage {
               profile = finalProfile;
               entrypointSh = ./linux/entrypoint.sh;
+              claudeSettings = finalClaudeSettings;
             };
           }
         else if isDarwin then
@@ -114,6 +161,7 @@ let
             profileImage = mkImage {
               profile = finalProfile;
               entrypointSh = ./darwin/entrypoint.sh;
+              claudeSettings = finalClaudeSettings;
             };
           }
         else
