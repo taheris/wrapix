@@ -21,7 +21,23 @@ else
 fi
 
 # Templates to compare (base names without .md)
-TEMPLATES=("plan" "ready" "step" "config")
+# Main templates in .ralph/template/
+TEMPLATES=(
+  "plan"
+  "plan-new"
+  "plan-update"
+  "ready"
+  "ready-new"
+  "ready-update"
+  "step"
+)
+
+# Partials in .ralph/template/partial/
+PARTIALS=(
+  "context-pinning"
+  "exit-signals"
+  "spec-header"
+)
 
 # Parse arguments
 TEMPLATE_NAME="${1:-}"
@@ -32,13 +48,20 @@ show_usage() {
   echo "Shows local template changes vs packaged templates."
   echo ""
   echo "Arguments:"
-  echo "  template-name  Optional: diff specific template (plan, ready, step, config)"
-  echo "                 If omitted, diffs all templates"
+  echo "  template-name  Optional: diff specific template or partial"
+  echo "                 If omitted, diffs all templates and partials"
+  echo ""
+  echo "Templates:"
+  echo "  plan, plan-new, plan-update, ready, ready-new, ready-update, step"
+  echo ""
+  echo "Partials:"
+  echo "  context-pinning, exit-signals, spec-header"
   echo ""
   echo "Examples:"
-  echo "  ralph diff           # Show all template changes"
-  echo "  ralph diff step      # Show step.md changes only"
-  echo "  ralph diff | ralph tune  # Pipe to tune for integration mode"
+  echo "  ralph diff                    # Show all template changes"
+  echo "  ralph diff step               # Show step.md changes only"
+  echo "  ralph diff context-pinning    # Show partial changes"
+  echo "  ralph diff | ralph tune       # Pipe to tune for integration mode"
   echo ""
   echo "Environment:"
   echo "  RALPH_DIR           Ralph directory (default: .ralph)"
@@ -68,38 +91,53 @@ if [ ! -d "$RALPH_DIR" ]; then
   exit 0
 fi
 
+# Track if we're diffing a specific partial
+FILTER_PARTIAL=""
+
 # If specific template requested, validate it
 if [ -n "$TEMPLATE_NAME" ]; then
-  # Normalize: remove .md or .nix suffix if provided
+  # Normalize: remove .md suffix if provided
   TEMPLATE_NAME="${TEMPLATE_NAME%.md}"
-  TEMPLATE_NAME="${TEMPLATE_NAME%.nix}"
 
-  valid=false
+  # Check if it's a template
+  valid_template=false
   for t in "${TEMPLATES[@]}"; do
     if [ "$t" = "$TEMPLATE_NAME" ]; then
-      valid=true
+      valid_template=true
       break
     fi
   done
 
-  if [ "$valid" = "false" ]; then
-    error "Unknown template: $TEMPLATE_NAME
+  # Check if it's a partial
+  valid_partial=false
+  for p in "${PARTIALS[@]}"; do
+    if [ "$p" = "$TEMPLATE_NAME" ]; then
+      valid_partial=true
+      break
+    fi
+  done
 
-Valid templates: ${TEMPLATES[*]}"
+  if [ "$valid_template" = "false" ] && [ "$valid_partial" = "false" ]; then
+    error "Unknown template or partial: $TEMPLATE_NAME
+
+Valid templates: ${TEMPLATES[*]}
+Valid partials: ${PARTIALS[*]}"
   fi
 
-  # Only diff the requested template
-  TEMPLATES=("$TEMPLATE_NAME")
+  if [ "$valid_template" = "true" ]; then
+    # Only diff the requested template
+    TEMPLATES=("$TEMPLATE_NAME")
+    PARTIALS=()
+  else
+    # Only diff the requested partial
+    TEMPLATES=()
+    FILTER_PARTIAL="$TEMPLATE_NAME"
+  fi
 fi
 
-# Get file extension for template
+# All templates and partials are markdown
 get_extension() {
-  local name="$1"
-  if [ "$name" = "config" ]; then
-    echo ".nix"
-  else
-    echo ".md"
-  fi
+  echo ".md"
 }
 
 # Perform diff and collect results
@@ -146,6 +184,57 @@ $diff_result
     debug "$template: no changes"
   fi
 done
+
+# Diff partials
+diff_partial() {
+  local partial="$1"
+  local local_file="$RALPH_DIR/template/partial/${partial}.md"
+  local packaged_file="$PACKAGED_DIR/partial/${partial}.md"
+
+  # Skip if local file doesn't exist (not customized)
+  if [ ! -f "$local_file" ]; then
+    debug "Skipping partial/$partial: no local file"
+    return
+  fi
+
+  # Skip if packaged file doesn't exist (shouldn't happen)
+  if [ ! -f "$packaged_file" ]; then
+    warn "Packaged partial not found: $packaged_file"
+    return
+  fi
+
+  # Compare files
+  if ! diff -q "$packaged_file" "$local_file" >/dev/null 2>&1; then
+    has_changes=true
+
+    # Generate unified diff with header
+    local diff_result
+    diff_result=$(diff -u \
+      --label "packaged/partial/${partial}.md" \
+      --label "local/partial/${partial}.md" \
+      "$packaged_file" "$local_file" 2>/dev/null || true)
+
+    if [ -n "$diff_result" ]; then
+      diff_output+="
+### Partial: partial/${partial}.md
+\`\`\`diff
+$diff_result
+\`\`\`
+"
+    fi
+  else
+    debug "partial/$partial: no changes"
+  fi
+}
+
+# Diff partials (either all or filtered)
+if [ -n "$FILTER_PARTIAL" ]; then
+  diff_partial "$FILTER_PARTIAL"
+else
+  for partial in "${PARTIALS[@]}"; do
+    diff_partial "$partial"
+  done
+fi
 
 # Output results
 if [ "$has_changes" = "true" ]; then
