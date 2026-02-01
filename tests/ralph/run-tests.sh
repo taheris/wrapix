@@ -3434,18 +3434,10 @@ test_check_valid_templates() {
     test_fail "Output should show Nix checks"
   fi
 
-  # Note: Exit code may be non-zero due to dry-run render checks failing
-  # from network issues. We verify structural checks individually above.
   if [ $exit_code -eq 0 ]; then
     test_pass "Exit code 0 (all checks passed)"
   else
-    # Check if failure is only from render checks (network dependent)
-    if echo "$output" | grep -q "render failed" && \
-       ! echo "$output" | grep -q "✗.*partial.*missing\|✗.*syntax"; then
-      test_pass "Exit code non-zero due to render checks (network dependent, structural checks passed)"
-    else
-      test_fail "Exit code non-zero due to structural failures (got $exit_code)"
-    fi
+    test_fail "Exit code should be 0 (got $exit_code)"
   fi
 
   teardown_test_env
