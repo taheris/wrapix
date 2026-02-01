@@ -1,13 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph step [feature-name]
+# ralph step [--profile=X] [feature-name]
 # Executes work with test strategy selection and quality gates
 # - Pins context (read specs/README.md)
 # - Gets spec name from argument or state
 # - Picks next ready bead with current label
+# - Reads profile:X label from bead (or uses --profile override)
+# - Launches wrapix container with selected profile
 # - Implements the task with quality gates
 # - If this was the last bead, triggers completion (WIP -> REVIEW)
+
+# Parse --profile flag before container detection
+PROFILE_OVERRIDE=""
+STEP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --profile=*)
+      PROFILE_OVERRIDE="${arg#--profile=}"
+      ;;
+    *)
+      STEP_ARGS+=("$arg")
+      ;;
+  esac
+done
+# Replace positional params with filtered args
+set -- "${STEP_ARGS[@]+"${STEP_ARGS[@]}"}"
 
 # Container detection: if not in container and wrapix is available, re-launch in container
 # /etc/wrapix/claude-config.json only exists inside containers (baked into image)
@@ -15,7 +33,66 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   export RALPH_MODE=1
   export RALPH_CMD=step
   export RALPH_ARGS="${*:-}"
-  exec wrapix
+
+  # Determine profile to use:
+  # 1. --profile=X flag takes precedence
+  # 2. Otherwise, read profile:X label from the next ready bead
+  # 3. Fall back to 'base' if neither
+  SELECTED_PROFILE="${PROFILE_OVERRIDE:-}"
+
+  if [ -z "$SELECTED_PROFILE" ]; then
+    # Get label from argument or current.json
+    RALPH_DIR="${RALPH_DIR:-.ralph}"
+    CURRENT_FILE="$RALPH_DIR/state/current.json"
+    STEP_LABEL=""
+
+    if [ -n "${1:-}" ]; then
+      STEP_LABEL="$1"
+    elif [ -f "$CURRENT_FILE" ]; then
+      STEP_LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+    fi
+
+    if [ -n "$STEP_LABEL" ]; then
+      # Find next ready issue and extract profile label
+      BEAD_LABEL="spec-$STEP_LABEL"
+      NEXT_ISSUE_JSON=$(bd list --label "$BEAD_LABEL" --ready --sort priority --json 2>/dev/null || echo "[]")
+
+      # Filter out epics and get first work item with profile label
+      PROFILE_FROM_BEAD=$(echo "$NEXT_ISSUE_JSON" | jq -r '
+        [.[] | select(.issue_type == "epic" | not)][0].labels // []
+        | map(select(startswith("profile:")))
+        | .[0]
+        | if . then split(":")[1] else empty end
+      ' 2>/dev/null || true)
+
+      SELECTED_PROFILE="${PROFILE_FROM_BEAD:-base}"
+    else
+      SELECTED_PROFILE="base"
+    fi
+  fi
+
+  # Select wrapix command based on profile
+  # Available: wrapix (base), wrapix-rust, wrapix-python
+  case "$SELECTED_PROFILE" in
+    base)
+      WRAPIX_CMD="wrapix"
+      ;;
+    rust|python)
+      WRAPIX_CMD="wrapix-${SELECTED_PROFILE}"
+      ;;
+    *)
+      echo "Warning: Unknown profile '$SELECTED_PROFILE', falling back to base" >&2
+      WRAPIX_CMD="wrapix"
+      ;;
+  esac
+
+  # Check if the profile-specific wrapix command exists
+  if ! command -v "$WRAPIX_CMD" &>/dev/null; then
+    echo "Warning: $WRAPIX_CMD not found, falling back to wrapix" >&2
+    WRAPIX_CMD="wrapix"
+  fi
+
+  exec "$WRAPIX_CMD"
 fi
 
 # Load shared helpers
