@@ -104,7 +104,8 @@ Packaged templates: \`$PACKAGED_DIR\`
 | Template | Purpose |
 |----------|---------|
 | plan.md | Feature initialization and spec interview |
-| ready.md | Issue creation from spec |
+| ready-new.md | Issue creation from new spec |
+| ready-update.md | Add tasks to existing spec |
 | step.md | Single-issue implementation |
 | config.nix | Project configuration |
 

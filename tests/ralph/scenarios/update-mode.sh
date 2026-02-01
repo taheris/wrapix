@@ -19,12 +19,41 @@
 # RALPH_DIR - ralph directory (typically .ralph)
 
 phase_plan() {
-  # In update mode, we're refining an existing spec
-  # This phase should NOT write to the spec file during planning
-  # It just discusses new requirements
+  # In update mode, we gather NEW requirements and write to state/<label>.md
+  # (NOT to the main spec file - that happens in ready phase after merge)
+  local label="${LABEL:-update-mode-test}"
+  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local state_file="$ralph_dir/state/$label.md"
+
   echo "Reviewing existing spec for updates..."
   echo "Discussing new requirements with user..."
   echo "New requirement identified: Add validation feature"
+  echo "DEBUG: cwd=$(pwd), state_file=$state_file" >&2
+
+  # Write new requirements to state file (ralph ready will read this)
+  mkdir -p "$ralph_dir/state"
+  cat > "$state_file" << 'REQEOF'
+# New Requirements for update-mode-test
+
+## Requirements
+
+1. **Task D** - Add input validation feature
+2. **Task E** - Write validation tests
+
+## Success Criteria
+
+- Input validation catches invalid data before processing
+- All validation rules are covered by tests
+
+## Affected Files
+
+| File | Change |
+|------|--------|
+| `src/validator.sh` | New validation module |
+| `tests/validator_test.sh` | Validation tests |
+REQEOF
+
+  echo "Wrote new requirements to $state_file"
   echo "RALPH_COMPLETE"
 }
 

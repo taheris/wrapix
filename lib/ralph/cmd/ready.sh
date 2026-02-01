@@ -60,20 +60,11 @@ fi
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
-# Compute spec path and README instructions based on hidden flag
+# Compute spec path based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
-  README_INSTRUCTIONS=""
-  README_UPDATE_SECTION=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
-  README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
-  README_UPDATE_SECTION="## Update specs/README.md
-
-After creating the epic, update the WIP table entry with the bead ID:
-\`\`\`markdown
-| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
-\`\`\`"
 fi
 
 # Check spec file exists
@@ -136,152 +127,20 @@ fi
 # Extract title from spec file (first heading)
 SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$SPEC_NAME")
 
-# Read spec content for profile detection
-SPEC_CONTENT_FOR_PROFILE=$(cat "$SPEC_PATH")
+# Get molecule ID from current.json (for update mode)
+MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE")
 
-# Detect default profile from spec content
-# This profile will be assigned to tasks via profile:X labels
-DEFAULT_PROFILE=$(detect_profile "$SPEC_CONTENT_FOR_PROFILE")
-debug "Detected profile: $DEFAULT_PROFILE"
-
-# Build mode-specific content for the template
-MODE="new"
-MOLECULE_CONTEXT=""
-WORKFLOW_INSTRUCTIONS=""
-OUTPUT_FORMAT=""
-
+# Count existing tasks (for status display in update mode)
+EXISTING_COUNT=0
 if [ "$UPDATE_MODE" = "true" ]; then
-  MODE="update"
-
-  # Get existing molecule ID from current.json (may be empty)
-  MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE")
-
-  # Query existing beads with this label (regardless of whether molecule exists)
   EXISTING_BEADS=$(bd list --label "spec-$LABEL" --format json 2>/dev/null || echo "[]")
   EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
-
-  if [ -n "$MOLECULE_ID" ]; then
-    # Molecule exists - bond new tasks to it
-    MOLECULE_CONTEXT="Molecule ID: $MOLECULE_ID
-
-## Existing Tasks
-
-This is an UPDATE to an existing molecule. The following tasks already exist:
-
-\`\`\`json
-$EXISTING_BEADS
-\`\`\`"
-
-    WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
-2. **Identify NEW requirements** not covered by existing tasks
-3. **Create new tasks as children of the molecule** using --parent flag
-4. **Add dependencies** where new tasks depend on existing or other new tasks
-{{README_INSTRUCTIONS}}
-
-**IMPORTANT**: Do NOT recreate the epic or any existing tasks. Only create NEW tasks for requirements that are not already covered. If no new tasks are needed, just output RALPH_COMPLETE."
-
-    OUTPUT_FORMAT="## Output Format
-
-For each NEW implementation task, create it as a child of the molecule:
-\`\`\`bash
-# Create the new task as a child of the molecule
-# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"$MOLECULE_ID\" --silent)
-\`\`\`
-
-Add dependencies between tasks:
-\`\`\`bash
-bd dep add <dependent-task> <depends-on-task>
-\`\`\`"
-  else
-    # Update mode but no molecule - create one while checking for existing tasks
-    MOLECULE_CONTEXT="## Existing Tasks
-
-This is an UPDATE to an existing spec but no molecule exists yet. The following tasks may already exist:
-
-\`\`\`json
-$EXISTING_BEADS
-\`\`\`"
-
-    WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
-2. **Create a parent epic bead** as the molecule root
-3. **Capture the epic ID** for use as the molecule root
-4. **Store the molecule ID** in current.json
-5. **Identify NEW requirements** not covered by existing tasks (if any)
-6. **Create new tasks** and bond them to the molecule
-7. **Add dependencies** where tasks depend on each other
-{{README_INSTRUCTIONS}}
-
-**IMPORTANT**: Do NOT recreate any existing tasks. Only create NEW tasks for requirements that are not already covered."
-
-    OUTPUT_FORMAT="## Output Format
-
-First, create the epic bead and capture its ID (this becomes the molecule root):
-\`\`\`bash
-MOLECULE_ID=\$(bd create --title=\"{{SPEC_TITLE}}\" --type=epic --priority={{PRIORITY}} --labels=\"spec-{{LABEL}}\" --silent)
-echo \"Created molecule root: \$MOLECULE_ID\"
-\`\`\`
-
-**CRITICAL**: Store the molecule ID in current.json:
-\`\`\`bash
-jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
-\`\`\`
-
-Then, for each NEW implementation task, create it as a child of the molecule:
-\`\`\`bash
-# Create the task as a child of the molecule (this enables molecule progress tracking)
-# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"\$MOLECULE_ID\" --silent)
-\`\`\`
-
-Add dependencies between tasks:
-\`\`\`bash
-bd dep add <dependent-task> <depends-on-task>
-\`\`\`"
-  fi
-else
-  # New spec mode - create molecule from scratch
-  MOLECULE_CONTEXT=""
-
-  WORKFLOW_INSTRUCTIONS="1. **Read the spec file** at {{SPEC_PATH}} thoroughly
-2. **Create a parent epic bead** as the molecule root
-3. **Capture the epic ID** for use as the molecule root
-4. **Store the molecule ID** in current.json
-5. **Create tasks as children of the epic** using --parent flag
-6. **Add dependencies** where tasks depend on each other
-{{README_INSTRUCTIONS}}"
-
-  OUTPUT_FORMAT="## Output Format
-
-First, create the epic bead and capture its ID (this becomes the molecule root):
-\`\`\`bash
-MOLECULE_ID=\$(bd create --title=\"{{SPEC_TITLE}}\" --type=epic --priority={{PRIORITY}} --labels=\"spec-{{LABEL}}\" --silent)
-echo \"Created molecule root: \$MOLECULE_ID\"
-\`\`\`
-
-**CRITICAL**: Store the molecule ID in current.json:
-\`\`\`bash
-jq --arg mol \"\$MOLECULE_ID\" '.molecule = \$mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
-\`\`\`
-
-Then, for each implementation task, create it as a child of the molecule:
-\`\`\`bash
-# Create the task as a child of the molecule (this enables molecule progress tracking)
-# Include profile:{{DEFAULT_PROFILE}} label for toolchain selection in ralph step
-TASK_ID=\$(bd create --title=\"Task title\" --description=\"Description with context\" --type=task --priority=N --labels=\"spec-{{LABEL}},profile:{{DEFAULT_PROFILE}}\" --parent=\"\$MOLECULE_ID\" --silent)
-\`\`\`
-
-Add dependencies between tasks:
-\`\`\`bash
-bd dep add <dependent-task> <depends-on-task>
-\`\`\`"
 fi
 
 echo "Ralph Ready: Converting spec to molecule..."
 echo "  Label: $LABEL"
 echo "  Spec: $SPEC_PATH"
 echo "  Title: $SPEC_TITLE"
-echo "  Profile: $DEFAULT_PROFILE"
 if [ "$UPDATE_MODE" = "true" ]; then
   if [ -n "$MOLECULE_ID" ]; then
     echo "  Mode: UPDATE (bonding new tasks to existing molecule)"
@@ -312,20 +171,15 @@ PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MODE\}\}/$MODE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{DEFAULT_PROFILE\}\}/$DEFAULT_PROFILE}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
 PROMPT_CONTENT="${PROMPT_CONTENT//\{\{NEW_REQUIREMENTS_PATH\}\}/$NEW_REQUIREMENTS_PATH}"
+PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MOLECULE_ID\}\}/$MOLECULE_ID}"
 
 # Multi-line substitutions using awk (handles newlines in replacement text)
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/{{README_INSTRUCTIONS}}/, replacement); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/{{README_UPDATE_SECTION}}/, replacement); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$MOLECULE_CONTEXT" '{gsub(/{{MOLECULE_CONTEXT}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$WORKFLOW_INSTRUCTIONS" '{gsub(/{{WORKFLOW_INSTRUCTIONS}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$OUTPUT_FORMAT" '{gsub(/{{OUTPUT_FORMAT}}/, ctx); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{EXISTING_SPEC}}/, ctx); print}')
+PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{SPEC_CONTENT}}/, ctx); print}')
 PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$NEW_REQUIREMENTS" '{gsub(/{{NEW_REQUIREMENTS}}/, ctx); print}')
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"

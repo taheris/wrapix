@@ -41,7 +41,6 @@ fetch_github_templates() {
     "plan.md"
     "plan-new.md"
     "plan-update.md"
-    "ready.md"
     "ready-new.md"
     "ready-update.md"
     "step.md"
