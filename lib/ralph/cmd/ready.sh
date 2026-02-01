@@ -133,7 +133,7 @@ MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE")
 # Count existing tasks (for status display in update mode)
 EXISTING_COUNT=0
 if [ "$UPDATE_MODE" = "true" ]; then
-  EXISTING_BEADS=$(bd list --label "spec-$LABEL" --format json 2>/dev/null || echo "[]")
+  EXISTING_BEADS=$(bd list -l "spec-$LABEL" --json 2>/dev/null || echo "[]")
   EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
 fi
 
@@ -265,7 +265,7 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
 
   echo ""
   echo "To list created issues:"
-  echo "  bd list --label spec-$LABEL"
+  echo "  bd list -l spec-$LABEL"
   echo ""
   echo "To work through issues:"
   echo "  ralph step      # Work one issue at a time"

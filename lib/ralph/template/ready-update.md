@@ -50,7 +50,7 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
    ```bash
    bd dep add <new-task> <existing-task>  # new-task waits for existing-task
    ```
-5. **Merge new requirements into spec** - Append content from `{{NEW_REQUIREMENTS_PATH}}` to `specs/{{LABEL}}.md`
+5. **Merge new requirements into spec** - Integrate content from `{{NEW_REQUIREMENTS_PATH}}` into `specs/{{LABEL}}.md`
 
 ### Key Concepts
 
@@ -70,17 +70,16 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
 
 ## Spec Merge
 
-After creating tasks, merge the new requirements into the main spec file:
+After creating tasks, **integrate** the new requirements into the main spec file:
 
-```bash
-# Append new requirements to the spec file
-cat >> specs/{{LABEL}}.md << 'EOF'
+1. Read the current spec structure
+2. Determine where new content belongs:
+   - If it updates an existing section → **edit that section in place**
+   - If it adds a new capability → **add a new section in the appropriate location**
+   - If it supersedes existing content → **replace the old content**
+3. Keep the spec **concise** - it should remain a single source of truth, not a changelog
 
-## Updates
-
-[Paste or summarize the new requirements here]
-EOF
-```
+Use the Edit tool to modify `specs/{{LABEL}}.md` directly. Do NOT append with `cat >>`.
 
 The `state/{{LABEL}}.md` file will be automatically deleted after successful completion.
 
