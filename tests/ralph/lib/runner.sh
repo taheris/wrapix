@@ -94,26 +94,58 @@ run_tests_parallel() {
   local results_dir
   results_dir=$(mktemp -d -t "ralph-test-results-XXXXXX")
 
-  local pids=()
-  local test_names=()
+  # Inside wrapix container, limit concurrency to avoid overwhelming Claude
+  # Too many background processes cause Claude to exit unexpectedly
+  local max_jobs="${RALPH_TEST_MAX_JOBS:-0}"  # 0 = unlimited
+  if [ "$max_jobs" -eq 0 ] && [ -f /etc/wrapix/claude-config.json ]; then
+    max_jobs=5
+  fi
 
-  echo "Running ${#tests_ref[@]} tests in parallel..."
+  if [ "$max_jobs" -gt 0 ]; then
+    echo "Running ${#tests_ref[@]} tests (max $max_jobs concurrent)..."
+  else
+    echo "Running ${#tests_ref[@]} tests in parallel..."
+  fi
   echo ""
 
-  # Launch all tests in background
+  local pids=()
+  local test_names=()
+  declare -A exit_codes
+
+  # Launch tests, respecting max_jobs limit
   for test_func in "${tests_ref[@]}"; do
     local result_file="$results_dir/${test_func}.result"
     local output_file="$results_dir/${test_func}.output"
 
-    # Run test in subshell with set +e to prevent early exit from killing the subshell
-    # This is defense in depth - run_test_isolated also disables set -e internally
+    # If we're at the job limit, wait for one to finish
+    if [ "$max_jobs" -gt 0 ] && [ "${#pids[@]}" -ge "$max_jobs" ]; then
+      # Wait for any job to finish
+      wait -n 2>/dev/null || true
+      # Clean up finished jobs from our tracking
+      local new_pids=()
+      local new_names=()
+      for i in "${!pids[@]}"; do
+        if kill -0 "${pids[$i]}" 2>/dev/null; then
+          new_pids+=("${pids[$i]}")
+          new_names+=("${test_names[$i]}")
+        else
+          # Job finished, collect its exit code and show output
+          wait "${pids[$i]}" 2>/dev/null && exit_codes[${test_names[$i]}]=0 || exit_codes[${test_names[$i]}]=$?
+          local out="$results_dir/${test_names[$i]}.output"
+          [ -f "$out" ] && cat "$out"
+        fi
+      done
+      pids=("${new_pids[@]}")
+      test_names=("${new_names[@]}")
+    fi
+
+    # Launch the test
     (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") &
     pids+=($!)
     test_names+=("$test_func")
   done
 
-  # Wait for all tests to complete
-  declare -A exit_codes
+  # Wait for remaining tests to complete
   for i in "${!pids[@]}"; do
     local pid="${pids[$i]}"
     local test_func="${test_names[$i]}"
