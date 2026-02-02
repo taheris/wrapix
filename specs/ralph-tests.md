@@ -72,7 +72,30 @@ The ralph workflow orchestrates AI-driven feature development but lacks automate
 | `specs/ralph-workflow.md` | Update to reflect merged command |
 | `flake.nix` | Add `.#test` that combines all test targets |
 
-### Test Directory Reorganization
+### Test Directory Structure
+
+```
+tests/ralph/
+├── default.nix              # Nix test derivation
+├── mock-claude              # Mock claude executable
+├── run-tests.sh             # Test harness (thin wrapper)
+├── templates.nix            # Template test fixtures
+├── lib/                     # Reusable test libraries
+│   ├── assertions.sh        # test_pass, test_fail, assert_*
+│   ├── fixtures.sh          # setup_*, teardown_*, temp directories
+│   ├── mock-claude.sh       # Mock infrastructure
+│   └── runner.sh            # Parallel/sequential test execution
+└── scenarios/               # Test scenario definitions
+    ├── happy-path.sh        # Full workflow test (shell format)
+    ├── happy-path.json      # Same test (JSON format)
+    ├── blocked.json         # RALPH_BLOCKED signal handling
+    ├── clarify.json         # RALPH_CLARIFY signal handling
+    ├── complete.json        # Basic completion
+    ├── no-signal.json       # Missing exit signal
+    └── ...
+```
+
+### Darwin Test Reorganization
 
 Move darwin tests into `tests/darwin/`:
 | From | To |
@@ -83,13 +106,43 @@ Move darwin tests into `tests/darwin/`:
 | `tests/darwin-network.nix` | `tests/darwin/network.nix` |
 | `tests/darwin.nix` | `tests/darwin/default.nix` |
 
-New ralph test files in `tests/ralph/`:
-| File | Purpose |
-|------|---------|
-| `tests/ralph/default.nix` | Nix test derivation |
-| `tests/ralph/mock-claude` | Mock claude executable |
-| `tests/ralph/scenarios/` | Test scenario definitions |
-| `tests/ralph/run-tests.sh` | Test harness script |
+## Test Library Modules
+
+The test infrastructure is split into reusable libraries under `tests/ralph/lib/`:
+
+### `assertions.sh`
+
+Provides assertion functions for test validation:
+- `test_pass <name>` — Record test success
+- `test_fail <name> <reason>` — Record test failure
+- `assert_file_exists <path>` — Verify file presence
+- `assert_file_contains <path> <pattern>` — Grep file for content
+- `assert_exit_code <expected> <actual>` — Compare exit codes
+- `assert_beads_count <n>` — Verify number of beads created
+
+### `fixtures.sh`
+
+Test setup and teardown helpers:
+- `setup_test_env` — Create isolated temp directory with clean beads DB
+- `teardown_test_env` — Clean up temp directory
+- `setup_ralph_config` — Initialize `.ralph/config.nix`
+- `create_test_spec <label> <content>` — Create spec file for testing
+
+### `mock-claude.sh`
+
+Mock Claude infrastructure:
+- `setup_mock_claude` — Install mock executable in PATH
+- `load_scenario <name>` — Load scenario file (shell or JSON)
+- `get_phase_response <phase>` — Return response for current phase
+- `execute_phase_effects <phase>` — Run side effects (bd commands, file creation)
+
+### `runner.sh`
+
+Test execution framework:
+- `run_test_isolated <func> <result> <output>` — Run test in subshell
+- `run_tests_parallel <tests...>` — Execute tests concurrently
+- `run_tests_sequential <tests...>` — Execute tests in order
+- `summarize_results` — Print pass/fail/skip counts
 
 ## Mock Claude Design
 
@@ -105,8 +158,11 @@ PROMPT="$*"
 # Read scenario, match phase, execute side effects, output response
 ```
 
-### Scenario File Format
+### Scenario File Formats
 
+Scenarios can be defined in shell (`.sh`) or JSON (`.json`) format.
+
+**Shell format** (imperative, full control):
 ```bash
 # scenarios/happy-path.sh
 
@@ -133,6 +189,35 @@ phase_run() {
   echo "RALPH_COMPLETE"
 }
 ```
+
+**JSON format** (declarative, simpler):
+```json
+{
+  "name": "happy-path",
+  "description": "Full workflow from plan to completion",
+  "phases": {
+    "plan": {
+      "output": "I'll create a spec for this feature...",
+      "signal": "RALPH_COMPLETE",
+      "creates_spec": true
+    },
+    "todo": {
+      "output": "Creating tasks from the spec...",
+      "signal": "RALPH_COMPLETE",
+      "tasks": [
+        {"title": "Task 1", "type": "task"},
+        {"title": "Task 2", "type": "task", "depends_on": ["Task 1"]}
+      ]
+    },
+    "run": {
+      "output": "Implemented the feature",
+      "signal": "RALPH_COMPLETE"
+    }
+  }
+}
+```
+
+JSON scenarios are converted to shell phases by the test runner.
 
 ### Phase Detection
 
@@ -176,18 +261,21 @@ Mock determines current phase from:
 
 ## Success Criteria
 
-- [ ] `nix run .#test` runs all tests (darwin, integration, ralph)
-- [ ] Darwin tests skip gracefully on Linux
-- [ ] Ralph tests pass with mock claude (no real API calls)
-- [ ] `ralph plan <label>` does setup AND interview (no separate `start` command)
-- [ ] `ralph todo` creates molecule from spec
-- [ ] `ralph run --once` processes single issue
-- [ ] `ralph run` processes all issues continuously
-- [ ] Tests verify dependency-ordered task execution
-- [ ] Tests verify in_progress exclusion for parallel agents
-- [ ] Tests verify error handling (missing signals, RALPH_BLOCKED, bad JSON)
-- [ ] Tests verify config options affect behavior (spec.hidden, beads.priority, run settings)
-- [ ] Tests are deterministic and fast
+- [x] `nix run .#test` runs all tests (darwin, integration, ralph)
+- [x] Darwin tests skip gracefully on Linux
+- [x] Ralph tests pass with mock claude (no real API calls)
+- [x] `ralph plan <label>` does setup AND interview (no separate `start` command)
+- [x] `ralph todo` creates molecule from spec
+- [x] `ralph run --once` processes single issue
+- [x] `ralph run` processes all issues continuously
+- [x] Tests verify dependency-ordered task execution
+- [x] Tests verify in_progress exclusion for parallel agents
+- [x] Tests verify error handling (missing signals, RALPH_BLOCKED, bad JSON)
+- [x] Tests verify config options affect behavior (spec.hidden, beads.priority, run settings)
+- [x] Tests are deterministic and fast
+- [x] Test infrastructure split into `lib/` modules (assertions, fixtures, mock-claude, runner)
+- [x] JSON format support for declarative test scenarios
+- [x] Shell format support for complex scenarios requiring custom logic
 
 ## Out of Scope
 
