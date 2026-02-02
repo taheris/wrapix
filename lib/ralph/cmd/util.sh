@@ -56,6 +56,30 @@ validate_json() {
   return 0
 }
 
+# Extract JSON from mixed output (removes warning lines, keeps JSON)
+# Usage: extract_json "$mixed_output"
+# Returns: the JSON portion of the output
+extract_json() {
+  local input="$1"
+
+  # If input is already valid JSON, return as-is
+  if echo "$input" | jq empty 2>/dev/null; then
+    echo "$input"
+    return 0
+  fi
+
+  # Find first line starting with [ or { and extract from there
+  local json_start
+  json_start=$(echo "$input" | grep -n -E '^[\[\{]' | head -1 | cut -d: -f1)
+  if [ -n "$json_start" ]; then
+    echo "$input" | tail -n +"$json_start"
+    return 0
+  fi
+
+  # No JSON found, return original input
+  echo "$input"
+}
+
 # Validate JSON is an array with at least one element
 # Usage: validate_json_array "$json_string" "description"
 validate_json_array() {
