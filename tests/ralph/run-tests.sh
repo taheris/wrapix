@@ -2503,6 +2503,241 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
+# Ralph Logs Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph logs finds errors and shows context
+test_logs_error_detection() {
+  CURRENT_TEST="logs_error_detection"
+  test_header "ralph logs - error detection"
+
+  setup_test_env "logs-error"
+
+  # Create a test log file with an error
+  cat > "$RALPH_DIR/logs/work-test-error.log" << 'EOF'
+{"type":"system","subtype":"hook_started"}
+{"type":"user","content":"run the build"}
+{"type":"assistant","content":"Running build..."}
+{"type":"assistant","content":"Build completed"}
+{"type":"system","subtype":"hook_response","exit_code":0,"output":"hooks passed"}
+{"type":"user","content":"run tests"}
+{"type":"assistant","content":"Running tests now"}
+{"type":"result","subtype":"success","result":"Tests passed: 50/50"}
+{"type":"assistant","content":"Now running lint..."}
+{"type":"result","subtype":"error","result":"Lint failed: 3 errors found"}
+{"type":"assistant","content":"I need to fix the lint errors"}
+EOF
+
+  # Run ralph logs directly (not via symlink - use source script)
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" "$RALPH_DIR/logs/work-test-error.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph logs should succeed"
+
+  # Should find the error
+  if echo "$output" | grep -q "Error found at line"; then
+    test_pass "Error was detected"
+  else
+    test_fail "Should detect error in log"
+    echo "  Output: $output"
+  fi
+
+  # Should show context before error
+  if echo "$output" | grep -q "Running tests now"; then
+    test_pass "Context before error is shown"
+  else
+    test_fail "Should show context before error"
+  fi
+
+  # Should show the error line
+  if echo "$output" | grep -qi "Lint failed"; then
+    test_pass "Error message is displayed"
+  else
+    test_fail "Error message should be displayed"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs --all shows full log
+test_logs_all_flag() {
+  CURRENT_TEST="logs_all_flag"
+  test_header "ralph logs --all - full log output"
+
+  setup_test_env "logs-all"
+
+  # Create a test log file
+  cat > "$RALPH_DIR/logs/work-test-all.log" << 'EOF'
+{"type":"system","subtype":"hook_started"}
+{"type":"user","content":"hello"}
+{"type":"assistant","content":"world"}
+{"type":"result","subtype":"success","result":"completed"}
+EOF
+
+  # Run ralph logs --all
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" --all "$RALPH_DIR/logs/work-test-all.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph logs --all should succeed"
+
+  # Should show all entries
+  if echo "$output" | grep -q "hello" && echo "$output" | grep -q "world"; then
+    test_pass "All log entries are shown"
+  else
+    test_fail "Should show all log entries"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs -n controls context lines
+test_logs_context_lines() {
+  CURRENT_TEST="logs_context_lines"
+  test_header "ralph logs -n - context line control"
+
+  setup_test_env "logs-context"
+
+  # Create a test log file with 10 lines before an error
+  # Use "entry N" instead of "line N" to avoid substring matching issues
+  # (e.g. "line 1" would match "line 10")
+  cat > "$RALPH_DIR/logs/work-test-context.log" << 'EOF'
+{"type":"assistant","content":"entry 1"}
+{"type":"assistant","content":"entry 2"}
+{"type":"assistant","content":"entry 3"}
+{"type":"assistant","content":"entry 4"}
+{"type":"assistant","content":"entry 5"}
+{"type":"assistant","content":"entry 6"}
+{"type":"assistant","content":"entry 7"}
+{"type":"assistant","content":"entry 8"}
+{"type":"assistant","content":"entry 9"}
+{"type":"result","subtype":"error","result":"Error occurred"}
+EOF
+
+  # Run ralph logs -n 3 (only 3 lines of context)
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" -n 3 "$RALPH_DIR/logs/work-test-context.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph logs -n 3 should succeed"
+
+  # Should show error info
+  if echo "$output" | grep -q "Error found at line 10"; then
+    test_pass "Error line correctly identified"
+  else
+    test_fail "Should identify error at line 10"
+    echo "  Output: $output"
+  fi
+
+  # Should NOT show entry 1-6 (only 3 lines of context before line 10)
+  if echo "$output" | grep -q "entry 1"; then
+    test_fail "Should not show entry 1 with -n 3"
+  else
+    test_pass "Early entries excluded with -n 3"
+  fi
+
+  # Should show entries 7-9 (within context window)
+  if echo "$output" | grep -q "entry 8" || echo "$output" | grep -q "entry 9"; then
+    test_pass "Recent context entries are shown"
+  else
+    test_fail "Should show entries within context window"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs with no errors shows last result
+test_logs_no_errors() {
+  CURRENT_TEST="logs_no_errors"
+  test_header "ralph logs - no errors case"
+
+  setup_test_env "logs-no-errors"
+
+  # Create a test log file with no errors
+  cat > "$RALPH_DIR/logs/work-test-clean.log" << 'EOF'
+{"type":"system","subtype":"hook_started"}
+{"type":"user","content":"run tests"}
+{"type":"assistant","content":"Running tests..."}
+{"type":"result","subtype":"success","result":"All tests passed. RALPH_COMPLETE"}
+EOF
+
+  # Run ralph logs
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" "$RALPH_DIR/logs/work-test-clean.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph logs should succeed"
+
+  # Should indicate no errors found
+  if echo "$output" | grep -q "No errors found"; then
+    test_pass "Reports no errors found"
+  else
+    test_fail "Should report no errors found"
+    echo "  Output: $output"
+  fi
+
+  # Should show last result
+  if echo "$output" | grep -q "RALPH_COMPLETE"; then
+    test_pass "Last result is shown"
+  else
+    test_fail "Should show last result when no errors"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs detects exit code errors
+test_logs_exit_code_error() {
+  CURRENT_TEST="logs_exit_code_error"
+  test_header "ralph logs - exit code error detection"
+
+  setup_test_env "logs-exit-code"
+
+  # Create a test log file with a non-zero exit code
+  cat > "$RALPH_DIR/logs/work-test-exitcode.log" << 'EOF'
+{"type":"system","subtype":"hook_started"}
+{"type":"user","content":"run the build"}
+{"type":"assistant","content":"Building..."}
+{"type":"system","subtype":"hook_response","exit_code":1,"output":"pre-commit failed"}
+{"type":"assistant","content":"Need to fix"}
+EOF
+
+  # Run ralph logs
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" "$RALPH_DIR/logs/work-test-exitcode.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should exit 0
+  assert_exit_code 0 $exit_code "ralph logs should succeed"
+
+  # Should find the error (exit code 1)
+  if echo "$output" | grep -q "Error found at line"; then
+    test_pass "Exit code error was detected"
+  else
+    test_fail "Should detect exit code error"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Ralph Diff Tests
 #-----------------------------------------------------------------------------
 
@@ -3787,6 +4022,11 @@ ALL_TESTS=(
   test_plan_template_with_partials
   test_discovered_work
   test_config_data_driven
+  test_logs_error_detection
+  test_logs_all_flag
+  test_logs_context_lines
+  test_logs_no_errors
+  test_logs_exit_code_error
   test_diff_no_changes
   test_diff_local_modifications
   test_diff_specific_template

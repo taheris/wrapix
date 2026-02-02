@@ -1,48 +1,209 @@
 #!/usr/bin/env bash
+# ralph logs - Error-focused log viewer
+#
+# Usage:
+#   ralph logs              # Find most recent error, show 20 lines before
+#   ralph logs -n 50        # Show 50 lines of context
+#   ralph logs --all        # Show full log without error filtering
+#   ralph logs <logfile>    # Analyze specific log file
+#
+# Error patterns scanned:
+#   - is_error: true in JSON entries
+#   - exit_code != 0 in hook responses
+#   - Text patterns: error:, Error:, ERROR, failed, Failed, FAILED, stack traces
 set -euo pipefail
 
 RALPH_DIR="${RALPH_DIR:-.ralph}"
-COUNT="${1:-5}"
+CONTEXT_LINES=20
+SHOW_ALL=false
+LOG_FILE=""
 
-LOGS_PATTERN="$RALPH_DIR/logs/work-*.log"
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -n)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: -n requires a count argument" >&2
+        exit 1
+      fi
+      CONTEXT_LINES="$2"
+      shift 2
+      ;;
+    --all|-a)
+      SHOW_ALL=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: ralph logs [OPTIONS] [LOGFILE]"
+      echo ""
+      echo "Error-focused log viewer. Finds errors and shows context."
+      echo ""
+      echo "Options:"
+      echo "  -n <count>    Show <count> lines of context before error (default: 20)"
+      echo "  --all, -a     Show full log without error filtering"
+      echo "  -h, --help    Show this help message"
+      echo ""
+      echo "Without LOGFILE, uses the most recent work-*.log"
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      LOG_FILE="$1"
+      shift
+      ;;
+  esac
+done
 
-# Find recent logs (use find for better handling of special filenames)
-# shellcheck disable=SC2086 # LOGS_PATTERN is intentionally unquoted for glob expansion
-RECENT_LOGS=$(
-  find "$(dirname "$LOGS_PATTERN")" -maxdepth 1 \
-    -name "$(basename "$LOGS_PATTERN")" -type f \
+# Find most recent log if not specified
+if [[ -z "$LOG_FILE" ]]; then
+  LOGS_DIR="$RALPH_DIR/logs"
+  if [[ ! -d "$LOGS_DIR" ]]; then
+    echo "No logs directory found: $LOGS_DIR" >&2
+    exit 1
+  fi
+
+  LOG_FILE=$(find "$LOGS_DIR" -maxdepth 1 -name "work-*.log" -type f \
     -printf '%T@\t%p\n' 2>/dev/null \
-  | sort -rn \
-  | head -"$COUNT" \
-  | cut -f2
-) || true
+    | sort -rn \
+    | head -1 \
+    | cut -f2) || true
 
-if [ -z "$RECENT_LOGS" ]; then
-  echo "No work logs found in $RALPH_DIR/logs/"
+  if [[ -z "$LOG_FILE" ]]; then
+    echo "No work logs found in $LOGS_DIR" >&2
+    exit 1
+  fi
+fi
+
+# Verify log file exists
+if [[ ! -f "$LOG_FILE" ]]; then
+  echo "Log file not found: $LOG_FILE" >&2
   exit 1
 fi
 
-echo "=== Recent work logs ==="
+echo "=== $(basename "$LOG_FILE") ==="
 echo ""
 
-# jq filter to extract signals from JSON log format
-JQ_FILTER='
-  select(.type == "result") |
-  "status: " + (.subtype // "unknown")
-  + (if (.result | test("RALPH_COMPLETE")) then " | RALPH_COMPLETE" else "" end)
-  + (if (.result | test("RALPH_BLOCKED")) then " | RALPH_BLOCKED" else "" end)
-  + (if (.result | test("RALPH_CLARIFY")) then " | RALPH_CLARIFY" else "" end)
-  + (if .is_error == true then " | ERROR" else "" end)
-'
+# Show all mode - just dump the log nicely formatted
+if [[ "$SHOW_ALL" == "true" ]]; then
+  jq -r '
+    if .type == "assistant" then
+      "─── assistant ───\n" + (.message.content // .content // "(no content)")
+    elif .type == "user" then
+      "─── user ───\n" + (.message.content // .content // "(no content)")
+    elif .type == "result" then
+      "─── result (" + (.subtype // "unknown") + ") ───\n" + (.result // "(no result)")
+    elif .type == "system" then
+      "─── system: " + (.subtype // "unknown") + " ───" +
+      (if .exit_code then " [exit: " + (.exit_code | tostring) + "]" else "" end) +
+      (if .output then "\n" + .output else "" end)
+    else
+      "─── " + (.type // "unknown") + " ───"
+    end
+  ' "$LOG_FILE" 2>/dev/null || cat "$LOG_FILE"
+  exit 0
+fi
 
-for log in $RECENT_LOGS; do
-  echo "--- $(basename "$log") ---"
-  result_info=$(jq -r "$JQ_FILTER" "$log" 2>/dev/null) || true
+# Error scanning mode - find first error and show context
 
-  if [ -n "$result_info" ]; then
-    echo "$result_info"
-  else
-    echo "(no result found - may be old format or incomplete)"
+# Find the first error line using grep for fast initial scan
+# IMPORTANT: Do NOT use jq -s (slurp) or per-line jq - both cause OOM in containers
+# Strategy: grep for potential errors (streaming), then validate with targeted jq
+find_error_line() {
+  local file="$1"
+
+  # Step 1: Use grep to find lines with JSON error indicators (streaming, memory-safe)
+  # Check for is_error:true, non-zero exit_code, or subtype:error
+  local json_error_line
+  json_error_line=$(grep -n -m1 -E '"is_error"\s*:\s*true|"exit_code"\s*:\s*[1-9]|"subtype"\s*:\s*"error"' "$file" 2>/dev/null | cut -d: -f1) || true
+
+  # Step 2: Use grep to find lines with error text patterns (streaming, memory-safe)
+  local text_error_line
+  text_error_line=$(grep -n -m1 -iE \
+    'error:|failed|exception|panic:|stack trace|traceback' \
+    "$file" 2>/dev/null | cut -d: -f1) || true
+
+  # Filter out false positives (0 errors, RALPH_COMPLETE, etc)
+  if [[ -n "$text_error_line" ]]; then
+    local line_content
+    line_content=$(sed -n "${text_error_line}p" "$file")
+    if echo "$line_content" | grep -qE '0 errors|no errors|errors: 0|RALPH_COMPLETE'; then
+      # False positive - continue searching from this line
+      local remaining
+      remaining=$(tail -n "+$((text_error_line + 1))" "$file" | grep -n -m1 -iE \
+        'error:|failed|exception|panic:|stack trace|traceback' 2>/dev/null | cut -d: -f1) || true
+      if [[ -n "$remaining" ]]; then
+        text_error_line=$((text_error_line + remaining))
+        # Re-check for false positives
+        line_content=$(sed -n "${text_error_line}p" "$file")
+        if echo "$line_content" | grep -qE '0 errors|no errors|errors: 0|RALPH_COMPLETE'; then
+          text_error_line=""
+        fi
+      else
+        text_error_line=""
+      fi
+    fi
   fi
+
+  # Return the earliest error found
+  if [[ -n "$json_error_line" && -n "$text_error_line" ]]; then
+    if [[ "$json_error_line" -lt "$text_error_line" ]]; then
+      echo "$json_error_line"
+    else
+      echo "$text_error_line"
+    fi
+  elif [[ -n "$json_error_line" ]]; then
+    echo "$json_error_line"
+  elif [[ -n "$text_error_line" ]]; then
+    echo "$text_error_line"
+  else
+    echo "0"
+  fi
+}
+
+# Find the error line
+ERROR_LINE=$(find_error_line "$LOG_FILE")
+
+if [[ "$ERROR_LINE" -eq 0 ]]; then
+  echo "No errors found in log."
   echo ""
-done
+  echo "Last result:"
+  jq -r 'select(.type == "result") |
+    "Status: " + (.subtype // "unknown") +
+    (if .result then "\n" + .result else "" end)
+  ' "$LOG_FILE" 2>/dev/null | tail -30
+  exit 0
+fi
+
+# Calculate context range
+START_LINE=$((ERROR_LINE - CONTEXT_LINES))
+if [[ $START_LINE -lt 1 ]]; then
+  START_LINE=1
+fi
+
+echo "Error found at line $ERROR_LINE (showing $CONTEXT_LINES lines of context)"
+echo ""
+
+# Show context leading up to and including the error
+sed -n "${START_LINE},${ERROR_LINE}p" "$LOG_FILE" | jq -r '
+  if .type == "assistant" then
+    "─── assistant ───\n" + (.message.content // .content // "(no content)")
+  elif .type == "user" then
+    "─── user ───\n" + (.message.content // .content // "(no content)")
+  elif .type == "result" then
+    "─── result (" + (.subtype // "unknown") + ") ───\n" + (.result // "(no result)")
+  elif .type == "system" then
+    "─── system: " + (.subtype // "unknown") + " ───" +
+    (if .exit_code then " [exit: " + (.exit_code | tostring) + "]" else "" end) +
+    (if .output then "\n" + .output else "" end)
+  else
+    "─── " + (.type // "unknown") + " ───"
+  end
+' 2>/dev/null || sed -n "${START_LINE},${ERROR_LINE}p" "$LOG_FILE"
+
+# Highlight what triggered the error detection
+echo ""
+echo "═══ Error detected at line $ERROR_LINE ═══"
+sed -n "${ERROR_LINE}p" "$LOG_FILE" | jq -C '.' 2>/dev/null || sed -n "${ERROR_LINE}p" "$LOG_FILE"
