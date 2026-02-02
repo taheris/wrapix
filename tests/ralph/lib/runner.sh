@@ -162,19 +162,60 @@ run_tests_parallel() {
 # Sequential Test Runner
 #-----------------------------------------------------------------------------
 
-# Run tests sequentially (original behavior)
+# Run tests sequentially with proper isolation
+# Each test runs in a subshell to prevent exit calls from killing the main shell
 # Usage: run_tests_sequential <test_array_name>
 run_tests_sequential() {
   local -n tests_ref=$1
+  local results_dir
+  results_dir=$(mktemp -d -t "ralph-test-results-XXXXXX")
+
+  local total_passed=0
+  local total_failed=0
+  local total_skipped=0
+  local all_failed_tests=()
 
   for test_func in "${tests_ref[@]}"; do
-    "$test_func"
+    local result_file="$results_dir/${test_func}.result"
+    local output_file="$results_dir/${test_func}.output"
+
+    # Run test in subshell to isolate exit calls
+    local exit_code=0
+    (run_test_isolated "$test_func" "$result_file" "$output_file") || exit_code=$?
+
+    # Show output immediately (sequential mode)
+    if [ -f "$output_file" ]; then
+      cat "$output_file"
+    fi
+
+    # Aggregate results
+    if [ -f "$result_file" ] && [ -s "$result_file" ]; then
+      local p f s
+      p=$(grep "^passed=" "$result_file" | cut -d= -f2)
+      f=$(grep "^failed=" "$result_file" | cut -d= -f2)
+      s=$(grep "^skipped=" "$result_file" | cut -d= -f2)
+      total_passed=$((total_passed + p))
+      total_failed=$((total_failed + f))
+      total_skipped=$((total_skipped + s))
+
+      while IFS= read -r line; do
+        all_failed_tests+=("${line#failed_test=}")
+      done < <(grep "^failed_test=" "$result_file" || true)
+    elif [ "$exit_code" -ne 0 ]; then
+      # Test subprocess crashed before writing results
+      total_failed=$((total_failed + 1))
+      all_failed_tests+=("$test_func: CRASHED (exit code $exit_code)")
+      echo -e "  ${RED:-}CRASH${NC:-}: $test_func (subprocess exited with code $exit_code)"
+    fi
   done
 
-  # Summary
-  print_test_summary "$PASSED" "$FAILED" "$SKIPPED" "${FAILED_TESTS[@]}"
+  # Clean up
+  rm -rf "$results_dir"
 
-  [ "$FAILED" -eq 0 ]
+  # Summary
+  print_test_summary "$total_passed" "$total_failed" "$total_skipped" "${all_failed_tests[@]}"
+
+  [ "$total_failed" -eq 0 ]
 }
 
 #-----------------------------------------------------------------------------
