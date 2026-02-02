@@ -4,6 +4,10 @@
 # - All referenced partials must exist
 # - All required variables must be provided during render
 # - Partial markers {{> partial-name}} are resolved at render time
+#
+# Variable metadata (single source of truth):
+# - Each variable has: source, required, default (optional), description
+# - Shell scripts can read this via: nix eval --json .#ralph.variableDefinitions
 { lib }:
 
 let
@@ -20,6 +24,7 @@ let
     replaceStrings
     split
     stringLength
+    toJSON
     ;
 
   inherit (lib)
@@ -30,6 +35,146 @@ let
     hasPrefix
     pipe
     ;
+
+  # ==========================================================================
+  # Variable Definitions (Single Source of Truth)
+  # ==========================================================================
+  #
+  # Each variable has:
+  #   source: Where the value comes from
+  #     - "args"     : CLI argument
+  #     - "state"    : From current.json state file
+  #     - "computed" : Derived from other values
+  #     - "file"     : Content read from a file path
+  #     - "beads"    : From beads issue data
+  #     - "config"   : From ralph config
+  #   required: Whether the variable must have a value for render
+  #   default: Optional default value if not provided
+  #   description: Human-readable description
+  #   derivedFrom: For computed variables, what they're derived from
+  #   filePath: For file variables, expression for the source path
+  #
+  variableDefinitions = {
+    # --- Arguments (from CLI) ---
+    LABEL = {
+      source = "args";
+      required = true;
+      description = "Feature label (e.g., 'my-feature')";
+    };
+
+    # --- State (from current.json) ---
+    MOLECULE_ID = {
+      source = "state";
+      required = false;
+      description = "Molecule/epic ID from current.json";
+    };
+
+    # --- Computed (derived from other values) ---
+    SPEC_PATH = {
+      source = "computed";
+      required = true;
+      derivedFrom = "LABEL";
+      description = "Path to spec file: specs/{LABEL}.md";
+    };
+
+    CURRENT_FILE = {
+      source = "computed";
+      required = false;
+      description = "Path to current.json state file";
+    };
+
+    NEW_REQUIREMENTS_PATH = {
+      source = "computed";
+      required = false;
+      derivedFrom = "LABEL";
+      description = "Path to new requirements file: .ralph/state/{LABEL}.md";
+    };
+
+    MOLECULE_PROGRESS = {
+      source = "computed";
+      required = false;
+      derivedFrom = "MOLECULE_ID";
+      description = "Progress string like '50% (5/10)' from beads status";
+    };
+
+    # --- File content (read from paths) ---
+    SPEC_CONTENT = {
+      source = "file";
+      required = false;
+      filePath = "SPEC_PATH";
+      description = "Full content of the spec file";
+    };
+
+    EXISTING_SPEC = {
+      source = "file";
+      required = false;
+      filePath = "SPEC_PATH";
+      description = "Existing spec content (alias for SPEC_CONTENT in update mode)";
+    };
+
+    NEW_REQUIREMENTS = {
+      source = "file";
+      required = false;
+      filePath = "NEW_REQUIREMENTS_PATH";
+      description = "Content of the new requirements file";
+    };
+
+    PINNED_CONTEXT = {
+      source = "file";
+      required = false;
+      filePath = "config.pinnedContext";
+      default = "";
+      description = "Content from pinned context file (usually specs/README.md)";
+    };
+
+    # --- Beads data (from issue) ---
+    ISSUE_ID = {
+      source = "beads";
+      required = false;
+      description = "Current beads issue ID";
+    };
+
+    TITLE = {
+      source = "beads";
+      required = false;
+      description = "Issue title from beads";
+    };
+
+    DESCRIPTION = {
+      source = "beads";
+      required = false;
+      description = "Issue description from beads";
+    };
+
+    # --- Config (from ralph config) ---
+    EXIT_SIGNALS = {
+      source = "config";
+      required = false;
+      default = "";
+      description = "Exit signal definitions for templates";
+    };
+
+    README_INSTRUCTIONS = {
+      source = "config";
+      required = false;
+      default = "";
+      description = "Conditional README update instructions";
+    };
+  };
+
+  # Get list of all variable names
+  allVariableNames = attrNames variableDefinitions;
+
+  # Filter variables by source type
+  variablesBySource =
+    source: attrNames (filterAttrs (name: def: def.source == source) variableDefinitions);
+
+  # Get required variables (those with required = true)
+  requiredVariables = attrNames (filterAttrs (name: def: def.required or false) variableDefinitions);
+
+  # ==========================================================================
+  # Template Functions
+  # ==========================================================================
 
   # Extract partial names from content ({{> partial-name}})
   # Returns list of partial names referenced in the template
@@ -325,5 +470,14 @@ in
     templates
     validateTemplates
     mkTemplatesCheck
+    # Variable definitions (single source of truth)
+    variableDefinitions
+    allVariableNames
+    variablesBySource
+    requiredVariables
     ;
+
+  # JSON export for shell scripts
+  # Usage: nix eval --json .#ralph.variablesJson
+  variablesJson = toJSON variableDefinitions;
 }
