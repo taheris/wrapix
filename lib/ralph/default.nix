@@ -8,16 +8,27 @@
 }:
 
 let
-  inherit (pkgs) runCommand;
+  inherit (builtins) toJSON;
+  inherit (pkgs) runCommand writeText;
+  inherit (pkgs.lib) mapAttrs;
 
   templateDir = ./template;
 
   # Import template module for validation
   templateModule = import ./template/default.nix { inherit (pkgs) lib; };
 
+  # Pre-compute metadata as JSON files for shell scripts
+  # This avoids needing to call nix eval at runtime (which may fail in containers)
+  variablesJson = writeText "ralph-variables.json" templateModule.variablesJson;
+
+  # Template variables as JSON (maps template name -> list of variable names)
+  templatesJson = writeText "ralph-templates.json" (
+    toJSON (mapAttrs (name: tmpl: tmpl.variables) templateModule.templates)
+  );
+
   # All ralph scripts bundled in a single derivation
   scripts = runCommand "ralph-scripts" { } ''
-    mkdir -p $out/bin
+    mkdir -p $out/bin $out/share/ralph
     for script in ${./cmd}/*.sh; do
       name=$(basename "$script" .sh)
       if [ "$name" = "util" ]; then
@@ -33,6 +44,10 @@ let
         chmod +x $out/bin/ralph-$name
       fi
     done
+
+    # Copy pre-computed metadata
+    cp ${variablesJson} $out/share/ralph/variables.json
+    cp ${templatesJson} $out/share/ralph/templates.json
   '';
 
 in
@@ -94,6 +109,7 @@ in
       shellHook = ''
         export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
         export RALPH_TEMPLATE_DIR="${templateDir}"
+        export RALPH_METADATA_DIR="${scripts}/share/ralph"
       '';
 
       # Nix app definition for `nix run .#ralph`

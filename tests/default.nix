@@ -94,9 +94,17 @@ let
     chmod +x $out/run-tests.sh $out/mock-claude $out/scenarios/*.sh
   '';
 
+  # Get ralph scripts for RALPH_METADATA_DIR (contains variables.json, templates.json)
+  ralphModule = import ../lib/ralph {
+    inherit pkgs;
+    mkSandbox = null;
+  };
+
   ralphIntegrationTests = writeShellScriptBin "test-ralph-integration" ''
     set -euo pipefail
     export REPO_ROOT="${src}"
+    export RALPH_METADATA_DIR="${ralphModule.scripts}/share/ralph"
+    export RALPH_TEMPLATE_DIR="${src}/lib/ralph/template"
     exec ${ralphTestDir}/run-tests.sh
   '';
 

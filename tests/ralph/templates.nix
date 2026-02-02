@@ -347,6 +347,7 @@ in
           LABEL = "test-feature";
           SPEC_PATH = "specs/test-feature.md";
           EXIT_SIGNALS = "- RALPH_COMPLETE\n- RALPH_BLOCKED\n- RALPH_CLARIFY";
+          README_INSTRUCTIONS = "Update the README if needed.";
         };
         # Check that partials were resolved
         checks = assertAll [
