@@ -105,13 +105,6 @@ debug "Syncing beads database..."
 bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
 
 RALPH_DIR="${RALPH_DIR:-.ralph}"
-
-# Template directory: use RALPH_TEMPLATE_DIR if set and exists
-if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
-  TEMPLATE="$RALPH_TEMPLATE_DIR"
-else
-  TEMPLATE=""
-fi
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
@@ -270,12 +263,6 @@ if [ -z "$ISSUE_TITLE" ]; then
 fi
 debug "Issue title: ${ISSUE_TITLE:0:50}..."
 
-PROMPT_TEMPLATE="$RALPH_DIR/template/step.md"
-require_file "$PROMPT_TEMPLATE" "Step prompt template (step.md)"
-
-# Validate template has placeholders, reset from source if corrupted
-validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/step.md" "step.md"
-
 # Pin context from specs/README.md
 PINNED_CONTEXT=""
 if [ -f "$SPECS_README" ]; then
@@ -299,23 +286,16 @@ if [ -z "$MOLECULE_ID" ]; then
 fi
 debug "Molecule ID: ${MOLECULE_ID:-<none>}"
 
-# Read template content (placeholders are substituted at runtime)
-WORK_PROMPT=$(cat "$PROMPT_TEMPLATE")
-
-# Resolve partials ({{> partial-name}})
-WORK_PROMPT=$(resolve_partials "$WORK_PROMPT" "$TEMPLATE/partial")
-
-# Substitute all placeholders at runtime
-WORK_PROMPT="${WORK_PROMPT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
-WORK_PROMPT="${WORK_PROMPT//\{\{ISSUE_ID\}\}/$NEXT_ISSUE}"
-WORK_PROMPT="${WORK_PROMPT//\{\{TITLE\}\}/$ISSUE_TITLE}"
-WORK_PROMPT="${WORK_PROMPT//\{\{LABEL\}\}/$LABEL}"
-WORK_PROMPT="${WORK_PROMPT//\{\{MOLECULE_ID\}\}/$MOLECULE_ID}"
-WORK_PROMPT="${WORK_PROMPT//\{\{EXIT_SIGNALS\}\}/}"
-
-# For description and pinned context, use awk for multi-line
-WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v desc="$ISSUE_DESC" '{gsub(/{{DESCRIPTION}}/, desc); print}')
-WORK_PROMPT=$(echo "$WORK_PROMPT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
+# Render template using centralized render_template function
+WORK_PROMPT=$(render_template step \
+  "SPEC_PATH=$SPEC_PATH" \
+  "ISSUE_ID=$NEXT_ISSUE" \
+  "TITLE=$ISSUE_TITLE" \
+  "LABEL=$LABEL" \
+  "MOLECULE_ID=$MOLECULE_ID" \
+  "DESCRIPTION=$ISSUE_DESC" \
+  "PINNED_CONTEXT=$PINNED_CONTEXT" \
+  "EXIT_SIGNALS=")
 
 mkdir -p "$RALPH_DIR/logs"
 LOG="$RALPH_DIR/logs/work-$NEXT_ISSUE.log"

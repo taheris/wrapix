@@ -25,12 +25,6 @@ source "$(dirname "$0")/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.ralph}"
 
-# Template directory: use RALPH_TEMPLATE_DIR if set and exists
-if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then
-  TEMPLATE="$RALPH_TEMPLATE_DIR"
-else
-  TEMPLATE=""
-fi
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
@@ -56,9 +50,8 @@ if [ -z "$LABEL" ]; then
   exit 1
 fi
 
-# Load config to get priority
+# Load config for stream filter
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
 
 # Compute spec path based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
@@ -93,28 +86,12 @@ if [ "$UPDATE_MODE" = "true" ]; then
   NEW_REQUIREMENTS=$(cat "$NEW_REQUIREMENTS_PATH")
 fi
 
-# Select template based on mode: ready-new.md for new specs, ready-update.md for updates
+# Select template based on mode: ready-new for new specs, ready-update for updates
 if [ "$UPDATE_MODE" = "true" ]; then
-  TEMPLATE_NAME="ready-update.md"
+  TEMPLATE_NAME="ready-update"
 else
-  TEMPLATE_NAME="ready-new.md"
+  TEMPLATE_NAME="ready-new"
 fi
-PROMPT_TEMPLATE="$RALPH_DIR/template/$TEMPLATE_NAME"
-if [ ! -f "$PROMPT_TEMPLATE" ]; then
-  echo "Error: Ready prompt template not found: $PROMPT_TEMPLATE"
-  echo ""
-  if [ -n "$TEMPLATE" ]; then
-    echo "Copying from $TEMPLATE..."
-    cp "$TEMPLATE/$TEMPLATE_NAME" "$PROMPT_TEMPLATE"
-    chmod u+rw "$PROMPT_TEMPLATE"
-  else
-    echo "Make sure $TEMPLATE_NAME exists in your ralph template directory."
-    exit 1
-  fi
-fi
-
-# Validate template has placeholders, reset from source if corrupted
-validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/$TEMPLATE_NAME" "$TEMPLATE_NAME"
 
 mkdir -p "$RALPH_DIR/logs"
 
@@ -154,33 +131,44 @@ else
 fi
 echo ""
 
-# Read template content (placeholders are substituted at runtime)
-PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
-
-# Resolve partials ({{> partial-name}})
-PROMPT_CONTENT=$(resolve_partials "$PROMPT_CONTENT" "$TEMPLATE/partial")
-
-# Read existing spec content for template (for update mode context)
-EXISTING_SPEC=""
+# Read spec content for template
+SPEC_CONTENT=""
 if [ -f "$SPEC_PATH" ]; then
-  EXISTING_SPEC=$(cat "$SPEC_PATH")
+  SPEC_CONTENT=$(cat "$SPEC_PATH")
 fi
 
-# Substitute simple placeholders at runtime
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_TITLE\}\}/$SPEC_TITLE}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{CURRENT_FILE\}\}/$CURRENT_FILE}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{NEW_REQUIREMENTS_PATH\}\}/$NEW_REQUIREMENTS_PATH}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{MOLECULE_ID\}\}/$MOLECULE_ID}"
+# Render template using centralized render_template function
+# Variables differ based on template type
+if [ "$UPDATE_MODE" = "true" ]; then
+  # Compute molecule progress (for ready-update template)
+  MOLECULE_PROGRESS=""
+  if [ -n "$MOLECULE_ID" ]; then
+    # Try to get progress from bd mol progress
+    PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE_ID" 2>/dev/null || true)
+    if [ -n "$PROGRESS_OUTPUT" ]; then
+      MOLECULE_PROGRESS="$PROGRESS_OUTPUT"
+    fi
+  fi
 
-# Multi-line substitutions using awk (handles newlines in replacement text)
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{EXISTING_SPEC}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{SPEC_CONTENT}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$NEW_REQUIREMENTS" '{gsub(/{{NEW_REQUIREMENTS}}/, ctx); print}')
+  PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
+    "LABEL=$LABEL" \
+    "SPEC_PATH=$SPEC_PATH" \
+    "EXISTING_SPEC=$SPEC_CONTENT" \
+    "MOLECULE_ID=$MOLECULE_ID" \
+    "MOLECULE_PROGRESS=$MOLECULE_PROGRESS" \
+    "NEW_REQUIREMENTS=$NEW_REQUIREMENTS" \
+    "NEW_REQUIREMENTS_PATH=$NEW_REQUIREMENTS_PATH" \
+    "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "EXIT_SIGNALS=")
+else
+  PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
+    "LABEL=$LABEL" \
+    "SPEC_PATH=$SPEC_PATH" \
+    "SPEC_CONTENT=$SPEC_CONTENT" \
+    "CURRENT_FILE=$CURRENT_FILE" \
+    "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "EXIT_SIGNALS=")
+fi
 
 LOG="$RALPH_DIR/logs/ready-$(date +%Y%m%d-%H%M%S).log"
 
