@@ -262,7 +262,7 @@ in
           (assertTrue "templates-has-plan-update" (templates ? "plan-update"))
           (assertTrue "templates-has-todo-new" (templates ? "todo-new"))
           (assertTrue "templates-has-todo-update" (templates ? "todo-update"))
-          (assertTrue "templates-has-step" (templates ? "step"))
+          (assertTrue "templates-has-run" (templates ? "run"))
         ];
       in
       if checks then "echo 'template-definitions-load: PASS'" else "false"
@@ -308,26 +308,26 @@ in
     mkdir $out
   '';
 
-  # Test: step template has expected variables
-  template-step-variables = runCommandLocal "template-step-variables" { } ''
+  # Test: run template has expected variables
+  template-run-variables = runCommandLocal "template-run-variables" { } ''
     set -e
 
-    echo "Test: step template variables..."
+    echo "Test: run template variables..."
 
     ${
       let
-        t = templates."step";
+        t = templates."run";
         checks = assertAll [
-          (assertTrue "step-has-PINNED_CONTEXT" (builtins.elem "PINNED_CONTEXT" t.variables))
-          (assertTrue "step-has-SPEC_PATH" (builtins.elem "SPEC_PATH" t.variables))
-          (assertTrue "step-has-LABEL" (builtins.elem "LABEL" t.variables))
-          (assertTrue "step-has-MOLECULE_ID" (builtins.elem "MOLECULE_ID" t.variables))
-          (assertTrue "step-has-ISSUE_ID" (builtins.elem "ISSUE_ID" t.variables))
-          (assertTrue "step-has-TITLE" (builtins.elem "TITLE" t.variables))
-          (assertTrue "step-has-DESCRIPTION" (builtins.elem "DESCRIPTION" t.variables))
+          (assertTrue "run-has-PINNED_CONTEXT" (builtins.elem "PINNED_CONTEXT" t.variables))
+          (assertTrue "run-has-SPEC_PATH" (builtins.elem "SPEC_PATH" t.variables))
+          (assertTrue "run-has-LABEL" (builtins.elem "LABEL" t.variables))
+          (assertTrue "run-has-MOLECULE_ID" (builtins.elem "MOLECULE_ID" t.variables))
+          (assertTrue "run-has-ISSUE_ID" (builtins.elem "ISSUE_ID" t.variables))
+          (assertTrue "run-has-TITLE" (builtins.elem "TITLE" t.variables))
+          (assertTrue "run-has-DESCRIPTION" (builtins.elem "DESCRIPTION" t.variables))
         ];
       in
-      if checks then "echo 'step-variables: PASS'" else "false"
+      if checks then "echo 'run-variables: PASS'" else "false"
     }
 
     mkdir $out

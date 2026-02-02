@@ -16,7 +16,7 @@
       },
       "signal": "RALPH_CLARIFY: Should we create separate issues for frontend and backend?"
     },
-    "step": {
+    "run": {
       "messages": {
         "work": "Implementing task...",
         "done": "Found an ambiguity in the spec."

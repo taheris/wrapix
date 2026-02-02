@@ -4,27 +4,27 @@
 #
 # Signal scenarios should source this file and set:
 #   SIGNAL_PLAN - signal to output at end of plan phase (empty = no signal)
-#   SIGNAL_READY - signal to output at end of ready phase (empty = no signal)
-#   SIGNAL_STEP - signal to output at end of step phase (empty = no signal)
+#   SIGNAL_TODO - signal to output at end of todo phase (empty = no signal)
+#   SIGNAL_RUN - signal to output at end of run phase (empty = no signal)
 #
 # Example:
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/signal-base.sh"
 #   SIGNAL_PLAN="RALPH_COMPLETE"
-#   SIGNAL_READY="RALPH_COMPLETE"
-#   SIGNAL_STEP="RALPH_COMPLETE"
+#   SIGNAL_TODO="RALPH_COMPLETE"
+#   SIGNAL_RUN="RALPH_COMPLETE"
 
 # Default signals (empty = no signal)
 SIGNAL_PLAN=""
-SIGNAL_READY=""
-SIGNAL_STEP=""
+SIGNAL_TODO=""
+SIGNAL_RUN=""
 
 # Default messages for each phase
 MSG_PLAN_WORK="Working on spec..."
 MSG_PLAN_DONE="Spec work done."
-MSG_READY_WORK="Breaking down work..."
-MSG_READY_DONE="Task breakdown done."
-MSG_STEP_WORK="Implementing task..."
-MSG_STEP_DONE="Implementation work done."
+MSG_TODO_WORK="Breaking down work..."
+MSG_TODO_DONE="Task breakdown done."
+MSG_RUN_WORK="Implementing task..."
+MSG_RUN_DONE="Implementation work done."
 
 # Helper to output phase content with optional signal
 _emit_phase() {
@@ -47,10 +47,10 @@ phase_plan() {
   _emit_phase "$MSG_PLAN_WORK" "$MSG_PLAN_DONE" "$SIGNAL_PLAN"
 }
 
-phase_ready() {
-  _emit_phase "$MSG_READY_WORK" "$MSG_READY_DONE" "$SIGNAL_READY"
+phase_todo() {
+  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$SIGNAL_TODO"
 }
 
-phase_step() {
-  _emit_phase "$MSG_STEP_WORK" "$MSG_STEP_DONE" "$SIGNAL_STEP"
+phase_run() {
+  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$SIGNAL_RUN"
 }

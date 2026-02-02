@@ -1,11 +1,11 @@
 # shellcheck shell=bash
 # Check-status scenario - verifies issue status and bd mol current integration
 # Used to test that:
-# 1. step.sh marks issues as in_progress before work starts
+# 1. run.sh marks issues as in_progress before work starts
 # 2. ralph status uses bd mol current to show position markers
 # 3. Position markers correctly show [current], [done], [blocked] states
 
-phase_step() {
+phase_run() {
   local issue_id="${CHECK_ISSUE_ID:-}"
 
   if [ -z "$issue_id" ]; then
@@ -32,7 +32,7 @@ phase_step() {
 
 # Test bd mol current output with position markers
 # This phase is used when CHECK_MOL_CURRENT=true
-phase_step_mol_current() {
+phase_run_mol_current() {
   local molecule_id="${CHECK_MOLECULE_ID:-}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
 
@@ -151,7 +151,7 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   local label="${LABEL:-check-status-test}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
 

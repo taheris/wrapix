@@ -16,7 +16,7 @@
       },
       "signal": "RALPH_COMPLETE"
     },
-    "step": {
+    "run": {
       "messages": {
         "work": "Implementing task...",
         "done": "Implementation complete.\nAll quality gates passed."

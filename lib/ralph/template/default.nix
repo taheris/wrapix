@@ -366,8 +366,8 @@ let
       ];
     };
 
-    step = mkTemplate {
-      body = ./step.md;
+    run = mkTemplate {
+      body = ./run.md;
       partials = partialFiles;
       variables = [
         "PINNED_CONTEXT"

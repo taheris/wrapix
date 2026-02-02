@@ -37,7 +37,7 @@ DIFF_TEMPLATES=(
   "todo"
   "todo-new"
   "todo-update"
-  "step"
+  "run"
 )
 
 # Partials in .ralph/template/partial/
@@ -58,12 +58,11 @@ fetch_github_templates() {
 
   local files=(
     "config.nix"
-    "plan.md"
     "plan-new.md"
     "plan-update.md"
     "todo-new.md"
     "todo-update.md"
-    "step.md"
+    "run.md"
   )
 
   local partials=(
@@ -166,7 +165,7 @@ while [[ $# -gt 0 ]]; do
       echo "  ralph sync                    # Sync all templates"
       echo "  ralph sync --dry-run          # Preview sync without changes"
       echo "  ralph sync --diff             # Show all template changes"
-      echo "  ralph sync --diff step        # Show step.md changes only"
+      echo "  ralph sync --diff run         # Show run.md changes only"
       echo "  ralph sync --diff | ralph tune  # Pipe to tune for integration"
       echo ""
       echo "Environment:"

@@ -8,12 +8,12 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   echo "Ready phase"
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
+phase_run() {
   # Output the failure pattern from environment (set by test)
   local failure_output="${MOCK_FAILURE_OUTPUT:-}"
 
@@ -21,7 +21,7 @@ phase_step() {
     echo "Processing task..."
     echo "$failure_output"
     # Note: Still output RALPH_COMPLETE because the failure pattern
-    # detection happens in the loop/step wrapper, not here
+    # detection happens in the run wrapper, not here
     echo "RALPH_COMPLETE"
   else
     echo "Task completed normally"

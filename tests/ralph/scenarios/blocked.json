@@ -16,7 +16,7 @@
       },
       "signal": "RALPH_BLOCKED: Spec is incomplete"
     },
-    "step": {
+    "run": {
       "messages": {
         "work": "Attempting to implement...",
         "done": "Cannot proceed with implementation."

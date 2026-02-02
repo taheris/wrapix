@@ -22,7 +22,7 @@ create a beads molecule (epic + child issues) that breaks down the work.
 
 ## Profile Assignment
 
-Each task needs a `profile:X` label to select the right container toolchain in `ralph step`:
+Each task needs a `profile:X` label to select the right container toolchain in `ralph run`:
 
 | Task Type | Profile | When to Use |
 |-----------|---------|-------------|
@@ -59,7 +59,7 @@ Different tasks in the same molecule can have different profiles. Assign based o
 |-----------|---------|--------|
 | `--parent` | Links task to molecule | Enables `ralph status` progress tracking |
 | `bd dep add` | Sets execution order | Controls what `bd ready` returns next |
-| `profile:X` | Selects container profile | Determines toolchain available in `ralph step` |
+| `profile:X` | Selects container profile | Determines toolchain available in `ralph run` |
 
 Both `--parent` and `bd dep add` are required: `--parent` for visibility, `bd dep add` for ordering.
 

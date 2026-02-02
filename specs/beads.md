@@ -76,7 +76,7 @@ bd sync                              # Push changes
 
 Ralph uses beads for issue tracking:
 - `ralph todo` creates issues from specs via `bd create`
-- `ralph step/loop` finds work via `bd ready`
+- `ralph run` finds work via `bd ready`
 - Issues link to specs via description field
 
 ## Configuration
