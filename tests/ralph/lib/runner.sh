@@ -48,16 +48,27 @@ run_test_isolated() {
   local result_file="$2"
   local output_file="$3"
 
+  # CRITICAL: Disable set -e for the entire function to ensure results are always written
+  # This runs in a subshell, so this doesn't affect the parent shell's settings
+  set +e
+
   # Reset counters for this test
   PASSED=0
   FAILED=0
   SKIPPED=0
   FAILED_TESTS=()
 
-  # Run the test, capturing output
+  # Run the test, capturing output and exit code
   "$test_func" > "$output_file" 2>&1
+  local test_exit_code=$?
 
-  # Write results
+  # If test exited with non-zero and no assertions were recorded, treat as crash
+  if [ "$test_exit_code" -ne 0 ] && [ "$PASSED" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
+    FAILED=1
+    FAILED_TESTS+=("$test_func: exited with code $test_exit_code")
+  fi
+
+  # Write results (this always executes now that set -e is disabled)
   echo "passed=$PASSED" > "$result_file"
   echo "failed=$FAILED" >> "$result_file"
   echo "skipped=$SKIPPED" >> "$result_file"
@@ -94,8 +105,9 @@ run_tests_parallel() {
     local result_file="$results_dir/${test_func}.result"
     local output_file="$results_dir/${test_func}.output"
 
-    # Run test in subshell
-    (run_test_isolated "$test_func" "$result_file" "$output_file") &
+    # Run test in subshell with set +e to prevent early exit from killing the subshell
+    # This is defense in depth - run_test_isolated also disables set -e internally
+    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") &
     pids+=($!)
     test_names+=("$test_func")
   done
@@ -179,9 +191,10 @@ run_tests_sequential() {
     local result_file="$results_dir/${test_func}.result"
     local output_file="$results_dir/${test_func}.output"
 
-    # Run test in subshell to isolate exit calls
+    # Run test in subshell with set +e to prevent early exit from killing the subshell
+    # The || exit_code=$? pattern captures the subshell's exit code without triggering set -e
     local exit_code=0
-    (run_test_isolated "$test_func" "$result_file" "$output_file") || exit_code=$?
+    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") || exit_code=$?
 
     # Show output immediately (sequential mode)
     if [ -f "$output_file" ]; then

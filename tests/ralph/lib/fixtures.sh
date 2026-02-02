@@ -185,13 +185,19 @@ EOF
     fi
   done
 
-  # Filter PATH to remove wrapix (prevents container re-launch during tests)
-  # ralph scripts check for wrapix and re-exec into container if found
+  # Filter PATH to remove wrapix-related paths (prevents using installed claude/ralph)
+  # Two cases:
+  # 1. Outside container: wrapix binary exists - filter to prevent container re-exec
+  # 2. Inside container: wrapix-profile-env has real claude/ralph - filter to use mocks
   FILTERED_PATH=""
   IFS=':' read -ra PATH_PARTS <<< "$PATH"
   for part in "${PATH_PARTS[@]}"; do
-    # Skip paths containing wrapix
+    # Skip paths containing wrapix binary (prevents container re-launch)
     if [ -x "$part/wrapix" ]; then
+      continue
+    fi
+    # Skip wrapix-profile-env paths (these have real claude/ralph, not mocks)
+    if [[ "$part" == *"wrapix-profile-env"* ]]; then
       continue
     fi
     if [ -n "$FILTERED_PATH" ]; then
