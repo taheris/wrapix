@@ -9,12 +9,14 @@ case "$COMMAND" in
   check)  exec ralph-check  "$@" ;;
   diff)   exec ralph-diff   "$@" ;;
   logs)   exec ralph-logs   "$@" ;;
-  loop)   exec ralph-loop   "$@" ;;
+  loop)   exec ralph-loop   "$@" ;;  # deprecated, use 'run'
   plan)   exec ralph-plan   "$@" ;;
-  ready)  exec ralph-ready  "$@" ;;
+  ready)  exec ralph-ready  "$@" ;;  # deprecated, use 'todo'
+  run)    exec ralph-run    "$@" ;;
   status) exec ralph-status "$@" ;;
-  step)   exec ralph-step   "$@" ;;
+  step)   exec ralph-step   "$@" ;;  # deprecated, use 'run --once'
   sync)   exec ralph-sync   "$@" ;;
+  todo)   exec ralph-todo   "$@" ;;
   tune)   exec ralph-tune   "$@" ;;
 
   edit)
@@ -53,9 +55,10 @@ case "$COMMAND" in
     echo "    -n <label>      New spec in specs/"
     echo "    -h <label>      New hidden spec in state/"
     echo "    -u <spec>       Update existing spec (-uh for hidden)"
-    echo "  ready           Convert spec to beads issues"
-    echo "  step [feature]  Work one issue (fresh context), then exit"
-    echo "  loop [feature]  Loop through all steps until done"
+    echo "  todo            Convert spec to beads issues"
+    echo "  run [feature]   Execute work items for a feature"
+    echo "    --once/-1       Execute single issue then exit"
+    echo "    --profile=X     Override container profile (rust, python, base)"
     echo "  status          Show current workflow state"
     echo ""
     echo "Template Commands:"
@@ -67,6 +70,10 @@ case "$COMMAND" in
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"
     echo "  edit            Edit current spec file"
+    echo ""
+    echo "Deprecated Commands:"
+    echo "  step            Use 'run --once' instead"
+    echo "  loop            Use 'run' instead"
     echo ""
     echo "Environment:"
     echo "  RALPH_DIR    Working directory (default: .ralph)"

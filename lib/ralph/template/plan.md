@@ -22,7 +22,7 @@ Mode: {{MODE}}
 When creating a new feature specification:
 - Conduct the interview to gather requirements
 - Write the complete spec file at `{{SPEC_PATH}}`
-- The spec becomes the source of truth for `ralph ready`
+- The spec becomes the source of truth for `ralph todo`
 
 ### Update Mode (`--update`)
 
@@ -30,7 +30,7 @@ When refining an existing, already-implemented spec:
 - The spec file already exists and has been implemented
 - **Do NOT modify the spec file** during the planning conversation
 - Discuss and capture NEW requirements in the conversation only
-- `ralph ready` will:
+- `ralph todo` will:
   1. Update the spec file with new requirements
   2. Create new tasks for the additional work
   3. Bond those tasks to the existing molecule
@@ -77,7 +77,7 @@ When you have gathered enough information, create:
 
 1. Summarize the new requirements gathered during the conversation
 2. Confirm with the user that the requirements are complete
-3. Output `RALPH_COMPLETE` — `ralph ready` will handle updating the spec and creating tasks
+3. Output `RALPH_COMPLETE` — `ralph todo` will handle updating the spec and creating tasks
 
 ## Implementation Notes Section (New Spec Mode Only)
 
@@ -85,7 +85,7 @@ When writing a new spec, you may include an optional `## Implementation Notes` s
 - Bugs or gotchas discovered during research
 - Implementation hints and suggestions
 - Technical details that inform task breakdown but aren't requirements
-- Context that helps during `ralph ready` but shouldn't persist in permanent docs
+- Context that helps during `ralph todo` but shouldn't persist in permanent docs
 
 This section is **automatically stripped** when the spec is finalized to `specs/`. Use it freely for transient context that aids implementation planning.
 

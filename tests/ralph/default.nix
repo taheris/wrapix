@@ -566,10 +566,10 @@ templateTests
           exit 1
         fi
 
-        if grep -q "ready-new" "$script" && grep -q "ready-update" "$script"; then
-          echo "PASS: Help lists ready variants"
+        if grep -q "todo-new" "$script" && grep -q "todo-update" "$script"; then
+          echo "PASS: Help lists todo variants"
         else
-          echo "FAIL: Help missing ready variants"
+          echo "FAIL: Help missing todo variants"
           exit 1
         fi
 
@@ -608,7 +608,7 @@ templateTests
         script="${../.. + "/lib/ralph/cmd/diff.sh"}"
 
         # Check all template variants are listed
-        for template in plan plan-new plan-update ready ready-new ready-update step; do
+        for template in plan plan-new plan-update todo todo-new todo-update step; do
           if grep -q "\"$template\"" "$script"; then
             echo "PASS: Template '$template' in list"
           else
@@ -938,7 +938,7 @@ templateTests
         script="${../.. + "/lib/ralph/cmd/check.sh"}"
 
         # Check that all body files are listed
-        for template in plan-new plan-update ready-new ready-update step; do
+        for template in plan-new plan-update todo-new todo-update step; do
           if grep -q "\"$template.md\"" "$script" || grep -q "'$template.md'" "$script"; then
             echo "PASS: Template '$template.md' in body files list"
           else
@@ -1066,10 +1066,10 @@ templateTests
         script="${../.. + "/lib/ralph/cmd/check.sh"}"
 
         # Check that dummy values are used for rendering
-        if grep -q 'dummyVars' "$script"; then
-          echo "PASS: Script uses dummyVars for dry-run"
+        if grep -q 'allDummyVars' "$script"; then
+          echo "PASS: Script uses allDummyVars for dry-run"
         else
-          echo "FAIL: Script doesn't use dummyVars"
+          echo "FAIL: Script doesn't use allDummyVars"
           exit 1
         fi
 
@@ -1081,15 +1081,22 @@ templateTests
           exit 1
         fi
 
-        # Check that all known variables have dummy values
-        for var in PINNED_CONTEXT LABEL SPEC_PATH SPEC_CONTENT EXISTING_SPEC MOLECULE_ID ISSUE_ID TITLE DESCRIPTION EXIT_SIGNALS; do
-          if grep -q "$var" "$script"; then
-            echo "PASS: Script provides dummy value for $var"
-          else
-            echo "FAIL: Script missing dummy value for $var"
-            exit 1
-          fi
-        done
+        # Check that script uses variableDefinitions for variable metadata
+        # (Variables are dynamically read from Nix definitions, not hardcoded)
+        if grep -q 'variableDefinitions' "$script"; then
+          echo "PASS: Script reads from variableDefinitions"
+        else
+          echo "FAIL: Script doesn't read from variableDefinitions"
+          exit 1
+        fi
+
+        # Check that script generates dummy values dynamically
+        if grep -q 'makeDummy' "$script"; then
+          echo "PASS: Script uses makeDummy to generate dummy values"
+        else
+          echo "FAIL: Script doesn't use makeDummy"
+          exit 1
+        fi
 
         echo "PASS: ralph-check dry-run rendering tests"
         mkdir $out

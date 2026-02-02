@@ -335,8 +335,8 @@ let
       ];
     };
 
-    ready-new = mkTemplate {
-      body = ./ready-new.md;
+    todo-new = mkTemplate {
+      body = ./todo-new.md;
       partials = partialFiles;
       variables = [
         "PINNED_CONTEXT"
@@ -348,8 +348,8 @@ let
       ];
     };
 
-    ready-update = mkTemplate {
-      body = ./ready-update.md;
+    todo-update = mkTemplate {
+      body = ./todo-update.md;
       partials = partialFiles;
       variables = [
         "PINNED_CONTEXT"

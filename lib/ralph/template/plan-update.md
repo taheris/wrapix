@@ -54,7 +54,7 @@ When the conversation is complete:
 
 3. Output `RALPH_COMPLETE` when confirmed.
 
-`ralph ready` will then:
+`ralph todo` will then:
 1. Read new requirements from `{{NEW_REQUIREMENTS_PATH}}`
 2. Create tasks ONLY for those new requirements
 3. Merge the new requirements into `specs/{{LABEL}}.md`
