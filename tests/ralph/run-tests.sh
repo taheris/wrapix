@@ -2738,13 +2738,13 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
-# Ralph Diff Tests
+# Ralph Sync --diff Tests (formerly ralph diff)
 #-----------------------------------------------------------------------------
 
-# Test: ralph diff with no local changes (templates match packaged)
+# Test: ralph sync --diff with no local changes (templates match packaged)
 test_diff_no_changes() {
   CURRENT_TEST="diff_no_changes"
-  test_header "ralph diff - no local changes"
+  test_header "ralph sync --diff - no local changes"
 
   setup_test_env "diff-no-changes"
 
@@ -2753,15 +2753,15 @@ test_diff_no_changes() {
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
-  # Run ralph diff
+  # Run ralph sync --diff
   set +e
   local output
-  output=$(ralph-diff 2>&1)
+  output=$(ralph-sync --diff 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit 0
-  assert_exit_code 0 $exit_code "ralph diff should succeed"
+  assert_exit_code 0 $exit_code "ralph sync --diff should succeed"
 
   # Output should indicate no changes
   if echo "$output" | grep -qi "no local template changes\|no changes"; then
@@ -2780,10 +2780,10 @@ test_diff_no_changes() {
   teardown_test_env
 }
 
-# Test: ralph diff detects local modifications
+# Test: ralph sync --diff detects local modifications
 test_diff_local_modifications() {
   CURRENT_TEST="diff_local_modifications"
-  test_header "ralph diff - local modifications detected"
+  test_header "ralph sync --diff - local modifications detected"
 
   setup_test_env "diff-modifications"
 
@@ -2800,15 +2800,15 @@ test_diff_local_modifications() {
     echo "This is a local customization."
   } >> "$RALPH_DIR/template/step.md"
 
-  # Run ralph diff
+  # Run ralph sync --diff
   set +e
   local output
-  output=$(ralph-diff 2>&1)
+  output=$(ralph-sync --diff 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit 0
-  assert_exit_code 0 $exit_code "ralph diff should succeed"
+  assert_exit_code 0 $exit_code "ralph sync --diff should succeed"
 
   # Output should indicate changes found
   if echo "$output" | grep -q "Local Template Changes"; then
@@ -2834,10 +2834,10 @@ test_diff_local_modifications() {
   teardown_test_env
 }
 
-# Test: ralph diff with specific template name
+# Test: ralph sync --diff with specific template name
 test_diff_specific_template() {
   CURRENT_TEST="diff_specific_template"
-  test_header "ralph diff - specific template (ralph diff step)"
+  test_header "ralph sync --diff - specific template (ralph sync --diff step)"
 
   setup_test_env "diff-specific"
 
@@ -2849,15 +2849,15 @@ test_diff_specific_template() {
   echo "# Step modification" >> "$RALPH_DIR/template/step.md"
   echo "# Plan modification" >> "$RALPH_DIR/template/plan.md"
 
-  # Run ralph diff for just step
+  # Run ralph sync --diff for just step
   set +e
   local output
-  output=$(ralph-diff step 2>&1)
+  output=$(ralph-sync --diff step 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit 0
-  assert_exit_code 0 $exit_code "ralph diff step should succeed"
+  assert_exit_code 0 $exit_code "ralph sync --diff step should succeed"
 
   # Should show step template changes
   if echo "$output" | grep -q "step\|Step"; then
@@ -2876,19 +2876,19 @@ test_diff_specific_template() {
   # Verify it works with .md suffix too
   set +e
   local output_with_suffix
-  output_with_suffix=$(ralph-diff step.md 2>&1)
+  output_with_suffix=$(ralph-sync --diff step.md 2>&1)
   local exit_code2=$?
   set -e
 
-  assert_exit_code 0 $exit_code2 "ralph diff step.md should succeed (normalized)"
+  assert_exit_code 0 $exit_code2 "ralph sync --diff step.md should succeed (normalized)"
 
   teardown_test_env
 }
 
-# Test: ralph diff handles missing local templates gracefully
+# Test: ralph sync --diff handles missing local templates gracefully
 test_diff_missing_local_templates() {
   CURRENT_TEST="diff_missing_local_templates"
-  test_header "ralph diff - missing local templates handled"
+  test_header "ralph sync --diff - missing local templates handled"
 
   setup_test_env "diff-missing"
 
@@ -2898,15 +2898,15 @@ test_diff_missing_local_templates() {
   # Remove markdown templates to simulate partial installation
   rm -f "$RALPH_DIR/template/step.md" "$RALPH_DIR/template/plan.md"
 
-  # Run ralph diff
+  # Run ralph sync --diff
   set +e
   local output
-  output=$(ralph-diff 2>&1)
+  output=$(ralph-sync --diff 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit 0 (not an error, just no local files to compare)
-  assert_exit_code 0 $exit_code "ralph diff should succeed even with missing templates"
+  assert_exit_code 0 $exit_code "ralph sync --diff should succeed even with missing templates"
 
   # Output should indicate no local changes (since nothing to compare)
   if echo "$output" | grep -qi "no local template changes\|no changes\|match"; then
@@ -2918,25 +2918,25 @@ test_diff_missing_local_templates() {
   teardown_test_env
 }
 
-# Test: ralph diff rejects invalid template name
+# Test: ralph sync --diff rejects invalid template name
 test_diff_invalid_template() {
   CURRENT_TEST="diff_invalid_template"
-  test_header "ralph diff - invalid template name rejected"
+  test_header "ralph sync --diff - invalid template name rejected"
 
   setup_test_env "diff-invalid"
 
-  # Run ralph diff with invalid template name
+  # Run ralph sync --diff with invalid template name
   set +e
   local output
-  output=$(ralph-diff nonexistent 2>&1)
+  output=$(ralph-sync --diff nonexistent 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit non-zero
   if [ $exit_code -ne 0 ]; then
-    test_pass "ralph diff exits with error for invalid template"
+    test_pass "ralph sync --diff exits with error for invalid template"
   else
-    test_fail "ralph diff should fail for invalid template name"
+    test_fail "ralph sync --diff should fail for invalid template name"
   fi
 
   # Should mention valid templates

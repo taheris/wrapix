@@ -164,8 +164,9 @@ EOF
 
   # Symlink ralph commands from SOURCE (not installed) to test latest code
   # This ensures tests verify the actual source, not a potentially stale build
+  # Note: ralph-diff was removed; use ralph-sync --diff instead
   RALPH_SRC_DIR="$REPO_ROOT/lib/ralph/cmd"
-  for cmd in ralph-run ralph-step ralph-loop ralph-ready ralph-todo ralph-plan ralph-status ralph-diff ralph-sync ralph-check; do
+  for cmd in ralph-run ralph-step ralph-loop ralph-ready ralph-todo ralph-plan ralph-status ralph-sync ralph-check; do
     local script_name="${cmd#ralph-}"  # Remove 'ralph-' prefix
     if [ -f "$RALPH_SRC_DIR/$script_name.sh" ]; then
       ln -sf "$RALPH_SRC_DIR/$script_name.sh" "$TEST_DIR/bin/$cmd"

@@ -536,9 +536,9 @@ templateTests
         mkdir $out
       '';
 
-  # Test: ralph-diff help flag content
+  # Test: ralph sync --diff help flag content (formerly ralph-diff)
   diff-help =
-    runCommandLocal "ralph-diff-help"
+    runCommandLocal "ralph-sync-diff-help"
       {
         nativeBuildInputs = [
           bash
@@ -548,11 +548,11 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff --help content..."
+        echo "Test: ralph sync --diff help content..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
-        if grep -q "Shows local template changes vs packaged templates" "$script"; then
+        if grep -q "Show local template changes vs packaged" "$script"; then
           echo "PASS: Help mentions showing local template changes"
         else
           echo "FAIL: Help missing description"
@@ -587,13 +587,13 @@ templateTests
           exit 1
         fi
 
-        echo "PASS: ralph-diff help tests"
+        echo "PASS: ralph sync --diff help tests"
         mkdir $out
       '';
 
-  # Test: ralph-diff template list includes all variants
+  # Test: ralph sync --diff template list includes all variants (formerly ralph-diff)
   diff-template-list =
-    runCommandLocal "ralph-diff-template-list"
+    runCommandLocal "ralph-sync-diff-template-list"
       {
         nativeBuildInputs = [
           bash
@@ -603,9 +603,9 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff template list..."
+        echo "Test: ralph sync --diff template list..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
         # Check all template variants are listed
         for template in plan plan-new plan-update todo todo-new todo-update step; do
@@ -627,13 +627,13 @@ templateTests
           fi
         done
 
-        echo "PASS: ralph-diff template list tests"
+        echo "PASS: ralph sync --diff template list tests"
         mkdir $out
       '';
 
-  # Test: ralph-diff partial handling
+  # Test: ralph sync --diff partial handling (formerly ralph-diff)
   diff-partial-handling =
-    runCommandLocal "ralph-diff-partial-handling"
+    runCommandLocal "ralph-sync-diff-partial-handling"
       {
         nativeBuildInputs = [
           bash
@@ -643,15 +643,15 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff partial handling..."
+        echo "Test: ralph sync --diff partial handling..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
-        # Check diff_partial function exists
-        if grep -q "diff_partial()" "$script"; then
-          echo "PASS: Script has diff_partial function"
+        # Check diff_partial_file function exists
+        if grep -q "diff_partial_file()" "$script"; then
+          echo "PASS: Script has diff_partial_file function"
         else
-          echo "FAIL: Script missing diff_partial function"
+          echo "FAIL: Script missing diff_partial_file function"
           exit 1
         fi
 
@@ -663,21 +663,21 @@ templateTests
           exit 1
         fi
 
-        # Check FILTER_PARTIAL handling for specific partial diff
-        if grep -q 'FILTER_PARTIAL' "$script"; then
+        # Check filter_partial handling for specific partial diff
+        if grep -q 'filter_partial' "$script"; then
           echo "PASS: Script handles filtered partial diffing"
         else
-          echo "FAIL: Script missing FILTER_PARTIAL handling"
+          echo "FAIL: Script missing filter_partial handling"
           exit 1
         fi
 
-        echo "PASS: ralph-diff partial handling tests"
+        echo "PASS: ralph sync --diff partial handling tests"
         mkdir $out
       '';
 
-  # Test: ralph-diff requires RALPH_TEMPLATE_DIR
+  # Test: ralph sync --diff requires RALPH_TEMPLATE_DIR (formerly ralph-diff)
   diff-env-validation =
-    runCommandLocal "ralph-diff-env-validation"
+    runCommandLocal "ralph-sync-diff-env-validation"
       {
         nativeBuildInputs = [
           bash
@@ -687,9 +687,9 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff environment validation..."
+        echo "Test: ralph sync --diff environment validation..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
         # Verify the script requires RALPH_TEMPLATE_DIR
         if grep -q 'RALPH_TEMPLATE_DIR' "$script"; then
@@ -715,13 +715,13 @@ templateTests
           exit 1
         fi
 
-        echo "PASS: ralph-diff env validation tests"
+        echo "PASS: ralph sync --diff env validation tests"
         mkdir $out
       '';
 
-  # Test: ralph-diff output format is pipe-friendly
+  # Test: ralph sync --diff output format is pipe-friendly (formerly ralph-diff)
   diff-output-format =
-    runCommandLocal "ralph-diff-output-format"
+    runCommandLocal "ralph-sync-diff-output-format"
       {
         nativeBuildInputs = [
           bash
@@ -731,9 +731,9 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff output format..."
+        echo "Test: ralph sync --diff output format..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
         # Check for markdown-friendly output headers
         if grep -q '# Local Template Changes' "$script"; then
@@ -743,8 +743,8 @@ templateTests
           exit 1
         fi
 
-        # Check for code fence around diffs
-        if grep -q '\`\`\`diff' "$script"; then
+        # Check for code fence around diffs (escaped backticks in shell)
+        if grep -qF '\`\`\`diff' "$script"; then
           echo "PASS: Script uses diff code fence"
         else
           echo "FAIL: Script missing diff code fence"
@@ -759,13 +759,13 @@ templateTests
           exit 1
         fi
 
-        echo "PASS: ralph-diff output format tests"
+        echo "PASS: ralph sync --diff output format tests"
         mkdir $out
       '';
 
-  # Test: ralph-diff validation logic for templates and partials
+  # Test: ralph sync --diff validation logic for templates and partials (formerly ralph-diff)
   diff-validation-logic =
-    runCommandLocal "ralph-diff-validation-logic"
+    runCommandLocal "ralph-sync-diff-validation-logic"
       {
         nativeBuildInputs = [
           bash
@@ -775,9 +775,9 @@ templateTests
       ''
         set -euo pipefail
 
-        echo "Test: ralph-diff validation logic..."
+        echo "Test: ralph sync --diff validation logic..."
 
-        script="${../.. + "/lib/ralph/cmd/diff.sh"}"
+        script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
         # Check that both templates and partials are validated
         if grep -q 'valid_template' "$script" && grep -q 'valid_partial' "$script"; then
@@ -796,7 +796,7 @@ templateTests
         fi
 
         # Check that specific template filters out partials
-        if grep -q 'PARTIALS=()' "$script"; then
+        if grep -q 'partials_to_diff=()' "$script"; then
           echo "PASS: Script clears partials when template is specified"
         else
           echo "FAIL: Script doesn't clear partials for template filter"
@@ -804,14 +804,14 @@ templateTests
         fi
 
         # Check that specific partial filters out templates
-        if grep -q 'TEMPLATES=()' "$script"; then
+        if grep -q 'templates_to_diff=()' "$script"; then
           echo "PASS: Script clears templates when partial is specified"
         else
           echo "FAIL: Script doesn't clear templates for partial filter"
           exit 1
         fi
 
-        echo "PASS: ralph-diff validation logic tests"
+        echo "PASS: ralph sync --diff validation logic tests"
         mkdir $out
       '';
 
