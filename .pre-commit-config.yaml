@@ -23,7 +23,7 @@ repos:
 
       - id: shellcheck
         name: shellcheck
-        entry: shellcheck --external-sources --source-path=lib/ralph/cmd
+        entry: shellcheck --external-sources --source-path=lib/ralph/cmd --source-path=tests/ralph/lib
         language: system
         types: [shell]
         pass_filenames: true
