@@ -28,17 +28,17 @@ The ralph workflow orchestrates AI-driven feature development but lacks automate
 
 4. **Full workflow coverage** — Tests verify:
    - `ralph plan <label>` creates spec file with `RALPH_COMPLETE` signal
-   - `ralph ready` creates beads issues with correct dependencies
-   - `ralph step` works issues in dependency order
-   - `ralph loop` processes all issues until complete
+   - `ralph todo` creates beads issues with correct dependencies
+   - `ralph run --once` works issues in dependency order
+   - `ralph run` processes all issues until complete
 
 5. **Parallel agent simulation** — Tests verify coordination:
-   - `step` marks issue `in_progress` before starting work
-   - Subsequent `step` (simulated) skips in_progress items
-   - Subsequent `step` skips items blocked by in_progress dependencies
+   - `run --once` marks issue `in_progress` before starting work
+   - Subsequent `run --once` (simulated) skips in_progress items
+   - Subsequent `run --once` skips items blocked by in_progress dependencies
 
 6. **Error handling** — Tests verify:
-   - Missing exit signal (no `RALPH_COMPLETE`) — step does not close issue
+   - Missing exit signal (no `RALPH_COMPLETE`) — run does not close issue
    - `RALPH_BLOCKED: reason` signal — workflow pauses appropriately
    - Invalid beads JSON output — graceful handling
    - Partial completion — epic remains open when tasks remain
@@ -50,7 +50,7 @@ The ralph workflow orchestrates AI-driven feature development but lacks automate
 
 8. **Implementation Notes section** — Support transient context in specs:
    - Specs may contain `## Implementation Notes` section
-   - This section is available during `ralph ready` for context when creating beads
+   - This section is available during `ralph todo` for context when creating beads
    - Section is stripped when spec is finalized to `specs/<feature>.md`
    - Useful for capturing bugs, gotchas, and implementation hints that don't belong in permanent docs
 
@@ -119,7 +119,7 @@ EOF
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   # Create beads issues
   bd create --title="Task 1" --type=task --labels="spec-$LABEL"
   bd create --title="Task 2" --type=task --labels="spec-$LABEL"
@@ -127,7 +127,7 @@ phase_ready() {
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
+phase_run() {
   # Implement and signal completion
   echo "Implemented the feature"
   echo "RALPH_COMPLETE"
@@ -146,13 +146,13 @@ Mock determines current phase from:
 ### Happy Path
 
 1. `ralph plan test-feature` — creates spec, signals complete
-2. `ralph ready` — creates epic + tasks with dependencies
-3. `ralph step` — completes first unblocked task
-4. `ralph loop` — completes remaining tasks, closes epic
+2. `ralph todo` — creates epic + tasks with dependencies
+3. `ralph run --once` — completes first unblocked task
+4. `ralph run` — completes remaining tasks, closes epic
 
 ### Parallel Simulation
 
-1. Run `ralph step` — marks task A as `in_progress`
+1. Run `ralph run --once` — marks task A as `in_progress`
 2. Simulate second agent state check — task B (no deps) available, task C (depends on A) blocked
 3. Verify task selection logic
 
@@ -161,15 +161,15 @@ Mock determines current phase from:
 1. **spec.hidden = true** — spec file created in `state/` instead of `specs/`, README not updated
 2. **spec.hidden = false** — spec file created in `specs/`, README updated with WIP entry
 3. **beads.priority** — issues created with configured priority (test with priority=1 vs priority=3)
-4. **loop.max-iterations** — loop stops after N iterations even if work remains
-5. **loop.pause-on-failure = true** — loop pauses when step fails
-6. **loop.pause-on-failure = false** — loop continues after step failure
-7. **loop.pre-hook / post-hook** — hooks execute before/after each iteration
+4. **run.max-iterations** — run stops after N iterations even if work remains
+5. **run.pause-on-failure = true** — run pauses when iteration fails
+6. **run.pause-on-failure = false** — run continues after iteration failure
+7. **run.pre-hook / post-hook** — hooks execute before/after each iteration
 8. **failure-patterns** — custom patterns trigger configured actions (log/pause)
 
 ### Error Scenarios
 
-1. **No completion signal** — `step` runs, mock omits `RALPH_COMPLETE`, verify issue stays open
+1. **No completion signal** — `run --once` runs, mock omits `RALPH_COMPLETE`, verify issue stays open
 2. **RALPH_BLOCKED signal** — mock returns `RALPH_BLOCKED: needs API key`, verify workflow pauses
 3. **Malformed bd output** — `bd list` returns warning + JSON, verify parsing succeeds
 4. **Partial epic** — close 2 of 3 tasks, verify epic stays open
@@ -179,11 +179,14 @@ Mock determines current phase from:
 - [ ] `nix run .#test` runs all tests (darwin, integration, ralph)
 - [ ] Darwin tests skip gracefully on Linux
 - [ ] Ralph tests pass with mock claude (no real API calls)
-- [ ] `ralph plan <label>` replaces `ralph start` + `ralph plan`
+- [ ] `ralph plan <label>` does setup AND interview (no separate `start` command)
+- [ ] `ralph todo` creates molecule from spec
+- [ ] `ralph run --once` processes single issue
+- [ ] `ralph run` processes all issues continuously
 - [ ] Tests verify dependency-ordered task execution
 - [ ] Tests verify in_progress exclusion for parallel agents
 - [ ] Tests verify error handling (missing signals, RALPH_BLOCKED, bad JSON)
-- [ ] Tests verify config options affect behavior (spec.hidden, beads.priority, loop settings)
+- [ ] Tests verify config options affect behavior (spec.hidden, beads.priority, run settings)
 - [ ] Tests are deterministic and fast
 
 ## Out of Scope
