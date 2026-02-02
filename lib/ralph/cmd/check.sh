@@ -181,36 +181,61 @@ echo "Checking template rendering..."
 # Build dummy variables for dry-run render
 # This catches typos in variable names
 # We test each template individually to get better error messages
+# Dummy values are generated dynamically from variable metadata in default.nix
+
 TEMPLATES_TO_CHECK=("plan-new" "plan-update" "ready-new" "ready-update" "step")
 
+# Find flake root for lib access
+FLAKE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+if [ -z "$FLAKE_ROOT" ] || [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
+  echo "  ⚠ Not in a git repo with flake.nix, skipping template rendering check"
+  FLAKE_ROOT=""
+fi
+
+# shellcheck disable=SC2016  # Single quotes are intentional for Nix expression building
 for template in "${TEMPLATES_TO_CHECK[@]}"; do
+  if [ -z "$FLAKE_ROOT" ]; then
+    echo "  - $template (skipped - no flake)"
+    continue
+  fi
+
   # Build template-specific render expression using nix eval with flake
+  # Reads variable definitions from Nix and generates dummy values based on metadata
+  # Uses the local flake's nixpkgs input to get lib (no GitHub API calls)
   render_expr='
 let
-  lib = (builtins.getFlake "nixpkgs").lib;
-  templates = (import '"$NIX_FILE"' { inherit lib; }).templates;
+  flake = builtins.getFlake (toString '"$FLAKE_ROOT"');
+  lib = flake.inputs.nixpkgs.lib;
+  templateModule = import '"$NIX_FILE"' { inherit lib; };
+  templates = templateModule.templates;
+  variableDefs = templateModule.variableDefinitions;
   template = templates."'"$template"'";
 
-  # Dummy values for all known variables
-  dummyVars = {
-    PINNED_CONTEXT = "dummy-pinned-context";
-    LABEL = "dummy-label";
-    SPEC_PATH = "specs/dummy.md";
-    SPEC_CONTENT = "# Dummy Spec Content";
-    EXISTING_SPEC = "# Existing Spec";
-    CURRENT_FILE = ".ralph/state/current.json";
-    NEW_REQUIREMENTS_PATH = ".ralph/state/test-feature.md";
-    MOLECULE_ID = "test-mol123";
-    MOLECULE_PROGRESS = "50% (5/10)";
-    NEW_REQUIREMENTS = "- New requirement 1";
-    ISSUE_ID = "test-issue123";
-    TITLE = "Dummy Task Title";
-    DESCRIPTION = "Dummy task description";
-    EXIT_SIGNALS = "- RALPH_COMPLETE";
-  };
+  # Generate a dummy value for a variable based on its metadata
+  # Uses source type, name, and other metadata to create appropriate dummy values
+  makeDummy = name: def:
+    let
+      source = def.source or "unknown";
+      lowerName = lib.toLower name;
+    in
+    if source == "args" then "dummy-${lowerName}"
+    else if source == "state" then "dummy-state-${lowerName}"
+    else if source == "computed" then
+      if name == "SPEC_PATH" then "specs/dummy.md"
+      else if name == "CURRENT_FILE" then ".ralph/state/current.json"
+      else if name == "NEW_REQUIREMENTS_PATH" then ".ralph/state/dummy-feature.md"
+      else if name == "MOLECULE_PROGRESS" then "50% (5/10)"
+      else "dummy-computed-${lowerName}"
+    else if source == "file" then "# Dummy content for ${name}"
+    else if source == "beads" then "dummy-beads-${lowerName}"
+    else if source == "config" then "dummy-config-${lowerName}"
+    else "dummy-${lowerName}";
 
-  # Filter dummyVars to only include variables this template needs
-  templateVars = lib.filterAttrs (k: v: builtins.elem k template.variables) dummyVars;
+  # Generate dummy values for all defined variables
+  allDummyVars = builtins.mapAttrs makeDummy variableDefs;
+
+  # Filter to only include variables this template needs
+  templateVars = lib.filterAttrs (k: v: builtins.elem k template.variables) allDummyVars;
 
   # Render the template - this will throw if there are issues
   rendered = template.render templateVars;
@@ -234,15 +259,21 @@ done
 echo ""
 echo "Checking variable declarations..."
 
+# Skip if no flake root available
+if [ -z "$FLAKE_ROOT" ]; then
+  echo "  ⚠ Variable check skipped (no flake root)"
+else
+
 # Create a temporary Nix file for the variable check expression
 # This avoids shell escaping issues with the regex pattern
 VAR_CHECK_NIX=$(mktemp)
 # shellcheck disable=SC2064
 trap "rm -f $VAR_CHECK_NIX" EXIT
 
-cat > "$VAR_CHECK_NIX" << 'NIXEOF'
+cat > "$VAR_CHECK_NIX" << NIXEOF
 let
-  lib = (builtins.getFlake "nixpkgs").lib;
+  flake = builtins.getFlake (toString $FLAKE_ROOT);
+  lib = flake.inputs.nixpkgs.lib;
   nixFile = builtins.getEnv "RALPH_CHECK_NIX_FILE";
   templates = (import nixFile { inherit lib; }).templates;
 
@@ -286,6 +317,8 @@ if var_check=$(RALPH_CHECK_NIX_FILE="$NIX_FILE" nix eval --impure --json --file 
 else
   echo "  ⚠ Variable check skipped (evaluation failed)"
 fi
+
+fi # End of FLAKE_ROOT check
 
 #-----------------------------------------------------------------------------
 # Summary
