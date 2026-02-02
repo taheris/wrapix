@@ -86,13 +86,16 @@ validate_json_array() {
 # Extract field from JSON array's first element with validation
 # Usage: json_array_field "$json" "field_name" "description"
 # Returns: field value or empty string, warns if missing
+# Note: For new code, use bd_json() to get clean JSON, then pipe to jq directly
 json_array_field() {
   local json="$1"
   local field="$2"
   local desc="${3:-field}"
 
-  # Extract clean JSON first (handles bd warnings in output)
-  json=$(extract_json "$json")
+  # Handle potentially mixed output from legacy callers
+  if ! echo "$json" | jq empty 2>/dev/null; then
+    json=$(extract_json "$json")
+  fi
 
   if ! validate_json_array "$json" "JSON for $desc"; then
     echo ""
@@ -134,6 +137,42 @@ bd_run() {
 
   debug "$desc succeeded"
   echo "$output"
+}
+
+# Run bd command and return clean JSON
+# bd outputs warnings/info to stdout mixed with JSON; this wrapper filters them
+# Usage: bd_json list --label foo --json
+# Returns: clean JSON on stdout, warnings suppressed (or logged with RALPH_DEBUG=1)
+bd_json() {
+  local stderr_output
+  local stdout_output
+  local exit_code
+
+  # Capture stderr separately so we can log it in debug mode without polluting JSON
+  # Use a temp file for stderr since bash can't capture both streams independently
+  local stderr_file
+  stderr_file=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$stderr_file'" RETURN
+
+  debug "Running: bd $*"
+
+  stdout_output=$(bd "$@" 2>"$stderr_file") && exit_code=0 || exit_code=$?
+  stderr_output=$(cat "$stderr_file")
+
+  # Log stderr in debug mode
+  if [ -n "$stderr_output" ]; then
+    debug "bd stderr: ${stderr_output:0:200}"
+  fi
+
+  if [ $exit_code -ne 0 ]; then
+    warn "bd $1 failed (exit $exit_code): ${stderr_output:0:200}"
+    echo "[]"
+    return $exit_code
+  fi
+
+  # Return clean stdout (should be pure JSON)
+  echo "$stdout_output"
 }
 
 # Check required variable is set
@@ -179,11 +218,14 @@ bd_list_ids() {
 
 # Get first issue ID from bd list JSON output
 # Usage: bd_list_first_id "$json_output"
+# Note: For new code, use bd_json() to get clean JSON, then pipe to jq directly
 bd_list_first_id() {
   local json="$1"
 
-  # Extract clean JSON from potentially mixed output
-  json=$(extract_json "$json")
+  # Handle potentially mixed output from legacy callers using 2>&1
+  if ! echo "$json" | jq empty 2>/dev/null; then
+    json=$(extract_json "$json")
+  fi
 
   if ! validate_json_array "$json" "bd list output"; then
     echo ""
@@ -194,26 +236,11 @@ bd_list_first_id() {
 }
 
 # Extract JSON array or object from mixed output
-# bd commands sometimes emit warnings before JSON; this extracts just the JSON
+# DEPRECATED: Use bd_json() instead for new code
+# This function is kept for backward compatibility with code that already captured bd output
 # Usage: extract_json "$mixed_output"
 extract_json() {
   local input="$1"
-
-  # Try to find JSON array starting with [
-  local array_json
-  array_json=$(echo "$input" | sed -n '/^\[/,/^\]/p')
-  if [ -n "$array_json" ] && echo "$array_json" | jq empty 2>/dev/null; then
-    echo "$array_json"
-    return 0
-  fi
-
-  # Try to find JSON object starting with {
-  local object_json
-  object_json=$(echo "$input" | sed -n '/^{/,/^}/p')
-  if [ -n "$object_json" ] && echo "$object_json" | jq empty 2>/dev/null; then
-    echo "$object_json"
-    return 0
-  fi
 
   # If the whole thing is valid JSON, return it
   if echo "$input" | jq empty 2>/dev/null; then
@@ -221,13 +248,13 @@ extract_json() {
     return 0
   fi
 
-  # Last resort: grep for lines that look like JSON and try to parse
-  local maybe_json
-  maybe_json=$(echo "$input" | grep -E '^\s*[\[\{]' | head -1)
-  if [ -n "$maybe_json" ]; then
-    # Try to extract from that point to end
+  # Find first line starting with [ or { and extract from there to end
+  local json_start
+  json_start=$(echo "$input" | grep -n -E '^[\[\{]' | head -1 | cut -d: -f1)
+
+  if [ -n "$json_start" ]; then
     local from_json
-    from_json=$(echo "$input" | sed -n "/^${maybe_json:0:1}/,\$p")
+    from_json=$(echo "$input" | tail -n +"$json_start")
     if echo "$from_json" | jq empty 2>/dev/null; then
       echo "$from_json"
       return 0
