@@ -448,6 +448,7 @@ run_hook "pre-loop" "$HOOK_PRE_LOOP"
 
 step_count=0
 current_issue_id=""
+FINAL_EXIT_CODE=0
 
 while true; do
   ((++step_count))
@@ -491,6 +492,10 @@ while true; do
       ;;
     100)
       # All work complete - exit loop
+      # In --once mode, propagate exit code 100 to indicate "no work to do"
+      if [ "$RUN_ONCE" = "true" ]; then
+        FINAL_EXIT_CODE=100
+      fi
       break
       ;;
     *)
@@ -514,3 +519,5 @@ run_hook "post-loop" "$HOOK_POST_LOOP"
 
 echo ""
 echo "All work complete after $step_count step(s)!"
+
+exit $FINAL_EXIT_CODE
