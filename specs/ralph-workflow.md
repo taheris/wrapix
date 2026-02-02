@@ -21,15 +21,13 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
    - `-n/--new`: New spec in `specs/`
    - `-h/--hidden`: New spec in `state/` (not committed)
    - `-u/--update`: Refine existing spec (combinable with `-h`)
-3. **Molecule Creation** — `ralph ready` converts specs to beads molecules
-4. **Single-Issue Work** — `ralph step` works on one issue in fresh context
-5. **Continuous Work** — `ralph loop` processes issues until complete
-6. **Progress Tracking** — `ralph status` shows molecule progress
-7. **Log Access** — `ralph logs` shows recent command output
-8. **Template Validation** — `ralph check` validates all templates and partials
-9. **Template Tuning** — `ralph tune` edits templates (interactive or integration mode)
-10. **Template Diff** — `ralph diff` shows local template changes vs packaged
-11. **Template Sync** — `ralph sync` updates local templates from packaged versions
+3. **Molecule Creation** — `ralph todo` converts specs to beads molecules
+4. **Issue Work** — `ralph run` processes issues (single with `--once`, continuous by default)
+5. **Progress Tracking** — `ralph status` shows molecule progress
+6. **Log Access** — `ralph logs` finds errors and shows context
+7. **Template Validation** — `ralph check` validates all templates and partials
+8. **Template Tuning** — `ralph tune` edits templates (interactive or integration mode)
+9. **Template Sync** — `ralph sync` updates local templates (use `--diff` to preview changes)
 
 ### Non-Functional
 
@@ -71,10 +69,10 @@ ralph plan -u -h <label>        # Update existing spec in state/
 - **Update mode**: Writes NEW requirements only to `state/<label>.md` (not the original spec)
 - Outputs `RALPH_COMPLETE` when done
 
-### `ralph ready`
+### `ralph todo`
 
 ```bash
-ralph ready
+ralph todo
 ```
 
 Launches wrapix container with base profile. Reads `state/current.json` to determine mode:
@@ -85,32 +83,30 @@ Launches wrapix container with base profile. Reads `state/current.json` to deter
 
 Stores molecule ID in `state/current.json`. In update mode, cleans up `state/<label>.md` after successful merge.
 
-### `ralph step`
+### `ralph run`
 
 ```bash
-ralph step                  # Use profile from bead label (or base)
-ralph step --profile=rust   # Override profile
+ralph run                   # Continuous mode: process all issues until complete
+ralph run --once            # Single-issue mode: process one issue then exit
+ralph run -1                # Alias for --once
+ralph run --profile=rust    # Override profile (applies to all iterations)
 ```
 
+**Default (continuous) mode** — Runs on host as orchestrator:
+- Queries for next ready issue from molecule
+- Spawns implementation in fresh wrapix container (profile from bead label or flag)
+- Waits for completion
+- Repeats until all issues complete
+- Handles discovered work via `bd mol bond`
+
+**Single-issue mode (`--once` / `-1`)** — For debugging or manual control:
 - Selects next ready issue from molecule
 - Reads `profile:X` label from bead to determine container profile (fallback: base)
 - Launches wrapix container with selected profile
 - Loads step template with issue context
 - Implements in fresh Claude session
 - Updates issue status on completion
-
-### `ralph loop`
-
-```bash
-ralph loop
-```
-
-Runs on host as orchestrator (not in container):
-- Queries for next ready issue from molecule
-- Spawns `ralph step` in fresh wrapix container (profile per-step)
-- Waits for step completion
-- Repeats until all issues complete
-- Handles discovered work via `bd mol bond`
+- Exits after one issue
 
 ### `ralph status`
 
@@ -139,9 +135,12 @@ Current Position:
 ### `ralph logs`
 
 ```bash
-ralph logs           # Recent output
-ralph logs -f        # Follow mode
+ralph logs              # Find most recent error, show 20 lines of context
+ralph logs -n 50        # Show 50 lines of context before error
+ralph logs --all        # Show full log without error filtering
 ```
+
+Error-focused output: Scans for error patterns (exit code != 0, "error:", "failed"), shows context leading up to first match.
 
 ### `ralph check`
 
@@ -177,7 +176,7 @@ ralph tune
 
 **Integration mode** (stdin with diff):
 ```bash
-ralph diff | ralph tune
+ralph sync --diff | ralph tune
 > Analyzing diff...
 >
 > Change 1/2: step.md lines 35-40
@@ -195,23 +194,12 @@ ralph diff | ralph tune
 
 AI-driven interview that asks questions until user accepts or abandons.
 
-### `ralph diff`
-
-```bash
-ralph diff           # Show local template changes vs packaged
-ralph diff step      # Show diff for specific template
-```
-
-Pipe to `ralph tune` for integration:
-```bash
-ralph diff | ralph tune
-```
-
 ### `ralph sync`
 
 ```bash
 ralph sync           # Update local templates from packaged
-ralph sync --dry-run # Preview changes without executing
+ralph sync --diff    # Show local template changes vs packaged (preview)
+ralph sync --dry-run # Preview sync without executing
 ```
 
 Synchronizes local templates with packaged versions:
@@ -219,6 +207,11 @@ Synchronizes local templates with packaged versions:
 1. Creates `.ralph/template/` with fresh packaged templates
 2. Moves existing customized templates to `.ralph/backup/`
 3. Copies all templates including variants and `partial/` directory
+
+**`--diff` mode**: Shows changes between local templates and packaged versions. Pipe to `ralph tune` for integration:
+```bash
+ralph sync --diff | ralph tune
+```
 
 **Directory structure after sync:**
 ```
@@ -232,27 +225,27 @@ Synchronizes local templates with packaged versions:
 │   ├── plan.md
 │   ├── plan-new.md
 │   ├── plan-update.md
-│   ├── ready-new.md
-│   ├── ready-update.md
+│   ├── todo-new.md
+│   ├── todo-update.md
 │   └── step.md
 └── backup/              # User customizations (if any)
     └── ...
 ```
 
-Use `ralph diff` to see what changed, then `ralph tune` to merge customizations from backup.
+Use `ralph sync --diff` to see what changed, then `ralph tune` to merge customizations from backup.
 
 ## Workflow Phases
 
 ```
-plan → ready → loop/step → (done)
-  │       │        │          │
-  │       │        │          └─ bd mol squash (archive)
-  │       │        └─ Implementation + bd mol bond (discovered work)
+plan → todo → run → (done)
+  │       │     │       │
+  │       │     │       └─ bd mol squash (archive)
+  │       │     └─ Implementation + bd mol bond (discovered work)
   │       └─ Molecule creation from specs/<label>.md
   └─ Spec interview → writes specs/<label>.md
 
 Update cycle (for existing specs):
-plan --update → ready → loop/step → (done)
+plan --update → todo → run → (done)
       │            │
       │            ├─ Read new reqs from state/<label>.md
       │            ├─ Create tasks ONLY for new requirements
@@ -268,20 +261,19 @@ Ralph runs Claude-calling commands inside wrapix containers for isolation and re
 | Command | Execution | Profile |
 |---------|-----------|---------|
 | `ralph plan` | wrapix container | base |
-| `ralph ready` | wrapix container | base |
-| `ralph step` | wrapix container | from bead label or `--profile` flag (fallback: base) |
-| `ralph loop` | host | N/A (orchestrates containerized steps) |
+| `ralph todo` | wrapix container | base |
+| `ralph run` | host (orchestrator) | N/A (spawns containerized work per-issue) |
+| `ralph run --once` | wrapix container | from bead label or `--profile` flag (fallback: base) |
 | `ralph status` | host | N/A (utility) |
 | `ralph logs` | host | N/A (utility) |
 | `ralph check` | host | N/A (utility) |
 | `ralph tune` | host | N/A (utility) |
-| `ralph diff` | host | N/A (utility) |
 | `ralph sync` | host | N/A (utility) |
 
 **Rationale:**
-- `plan` and `ready` involve AI decision-making that benefits from isolation
-- `step` performs implementation work requiring language toolchains
-- `loop` is a simple orchestrator that spawns containerized steps
+- `plan` and `todo` involve AI decision-making that benefits from isolation
+- `run --once` performs implementation work requiring language toolchains
+- `run` (continuous) is a simple orchestrator that spawns containerized steps
 - Utility commands don't invoke Claude and run directly on host
 
 ## Profile Selection
@@ -299,7 +291,7 @@ Profiles determine which language toolchains are available in the wrapix contain
 
 ### Profile Assignment Flow
 
-1. **`ralph ready`** — LLM analyzes each task and assigns `profile:X` label based on:
+1. **`ralph todo`** — LLM analyzes each task and assigns `profile:X` label based on:
    - Files the task will touch (`.rs` → rust, `.py` → python, `.nix` → base)
    - Tools required (cargo, pytest, etc.)
    - Task description context
@@ -310,7 +302,7 @@ Profiles determine which language toolchains are available in the wrapix contain
    bd create --title="Update docs" --labels "spec:my-feature,profile:base" ...
    ```
 
-3. **`ralph step`** reads profile from bead:
+3. **`ralph run`** reads profile from bead:
    ```bash
    # Get profile label from bead
    profile=$(bd show "$issue_id" --json | jq -r '.labels[] | select(startswith("profile:")) | split(":")[1]')
@@ -319,7 +311,7 @@ Profiles determine which language toolchains are available in the wrapix contain
 
 4. **Override** via `--profile` flag takes precedence:
    ```bash
-   ralph step --profile=rust  # Ignore bead label, use rust
+   ralph run --once --profile=rust  # Ignore bead label, use rust
    ```
 
 ### Per-Task Profiles
@@ -395,8 +387,8 @@ lib/ralph/template/
 │   └── spec-header.md       # Label, spec path block
 ├── plan-new.md              # New spec interview
 ├── plan-update.md           # Update existing spec
-├── ready-new.md             # Create molecule
-├── ready-update.md          # Bond new tasks
+├── todo-new.md              # Create molecule
+├── todo-update.md           # Bond new tasks
 └── step.md                  # Single-issue implementation
 ```
 
@@ -407,10 +399,10 @@ lib/ralph/template/
 | `PINNED_CONTEXT` | Read from `pinnedContext` file | all |
 | `LABEL` | From command args | all |
 | `SPEC_PATH` | Computed from label + mode | all |
-| `SPEC_CONTENT` | Read from spec file | ready-new, step |
-| `EXISTING_SPEC` | Read from `specs/<label>.md` | plan-update, ready-update |
-| `NEW_REQUIREMENTS` | Read from `state/<label>.md` | ready-update |
-| `MOLECULE_ID` | From `state/current.json` | ready-update, step |
+| `SPEC_CONTENT` | Read from spec file | todo-new, step |
+| `EXISTING_SPEC` | Read from `specs/<label>.md` | plan-update, todo-update |
+| `NEW_REQUIREMENTS` | Read from `state/<label>.md` | todo-update |
+| `MOLECULE_ID` | From `state/current.json` | todo-update, step |
 | `ISSUE_ID` | From `bd ready` | step |
 | `TITLE` | From issue | step |
 | `DESCRIPTION` | From issue | step |
@@ -528,17 +520,17 @@ Spec file: {{SPEC_PATH}}
 4. `{{> spec-header}}`
 5. Existing spec display — Show current spec from `specs/<label>.md` for reference
 6. Update guidelines — Discuss NEW requirements only
-7. Output — Write new requirements to `state/<label>.md` (ralph ready merges into spec)
+7. Output — Write new requirements to `state/<label>.md` (ralph todo merges into spec)
 8. `{{> exit-signals}}`
 
-**Output file:** `state/<label>.md` contains only the NEW requirements gathered during the interview. This file is consumed by `ralph ready` which:
+**Output file:** `state/<label>.md` contains only the NEW requirements gathered during the interview. This file is consumed by `ralph todo` which:
 1. Creates tasks for only these new requirements
 2. Merges the content into `specs/<label>.md`
 3. Deletes `state/<label>.md`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
 
-### ready-new.md
+### todo-new.md
 
 **Purpose:** Convert spec to molecule with tasks
 
@@ -558,7 +550,7 @@ Spec file: {{SPEC_PATH}}
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
 
-### ready-update.md
+### todo-update.md
 
 **Purpose:** Add new tasks to existing molecule
 
@@ -620,17 +612,17 @@ Spec file: {{SPEC_PATH}}
 | `update` | Whether this is an update to existing spec |
 | `hidden` | Whether spec is in `state/` (not committed) |
 | `spec_path` | Full path to spec file |
-| `molecule` | Beads molecule ID (set by `ralph ready`) |
+| `molecule` | Beads molecule ID (set by `ralph todo`) |
 
 **`state/<label>.md`** (update mode only):
 
 When `ralph plan --update` runs, it writes NEW requirements to `state/<label>.md`. This file:
 - Contains only the requirements gathered during the update interview
 - Is separate from the original spec in `specs/<label>.md`
-- Gets merged into `specs/<label>.md` by `ralph ready`
+- Gets merged into `specs/<label>.md` by `ralph todo`
 - Is deleted after successful merge
 
-This separation ensures `ralph ready` knows exactly what's new and only creates tasks for those requirements.
+This separation ensures `ralph todo` knows exactly what's new and only creates tasks for those requirements.
 
 ## Spec File Format
 
@@ -674,15 +666,13 @@ Why this feature is needed.
 |------|------|
 | `lib/ralph/cmd/ralph.sh` | Main dispatcher |
 | `lib/ralph/cmd/plan.sh` | Feature initialization + spec interview |
-| `lib/ralph/cmd/ready.sh` | Issue creation |
-| `lib/ralph/cmd/step.sh` | Single-issue work |
-| `lib/ralph/cmd/loop.sh` | Continuous work |
+| `lib/ralph/cmd/todo.sh` | Issue creation (renamed from ready.sh) |
+| `lib/ralph/cmd/run.sh` | Issue work (merged from step.sh + loop.sh) |
 | `lib/ralph/cmd/status.sh` | Progress display |
-| `lib/ralph/cmd/logs.sh` | Log viewer |
+| `lib/ralph/cmd/logs.sh` | Error-focused log viewer |
 | `lib/ralph/cmd/check.sh` | Template validation |
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
-| `lib/ralph/cmd/diff.sh` | Template diff |
-| `lib/ralph/cmd/sync.sh` | Template sync from packaged |
+| `lib/ralph/cmd/sync.sh` | Template sync from packaged (includes --diff) |
 | `lib/ralph/cmd/util.sh` | Shared helper functions |
 | `lib/ralph/template/` | Prompt templates |
 | `lib/ralph/template/default.nix` | Nix template definitions |
@@ -692,7 +682,7 @@ Why this feature is needed.
 Ralph uses `bd mol` for work tracking:
 
 - **Specs are NOT molecules** — Specs are persistent markdown; molecules are work batches
-- **Each `ralph ready` creates/updates a molecule** — Epic becomes molecule root
+- **Each `ralph todo` creates/updates a molecule** — Epic becomes molecule root
 - **Update mode bonds to existing molecules** — New tasks attach to prior work
 - **Molecule ID stored in current.json** — Enables `ralph status` convenience wrapper
 
@@ -700,10 +690,10 @@ Ralph uses `bd mol` for work tracking:
 
 | Command | Used by | Purpose |
 |---------|---------|---------|
-| `bd create --type=epic` | `ralph ready` | Create molecule root |
+| `bd create --type=epic` | `ralph todo` | Create molecule root |
 | `bd mol progress` | `ralph status` | Show completion % |
 | `bd mol current` | `ralph status` | Show position in DAG |
-| `bd mol bond` | `ralph step` | Attach discovered work |
+| `bd mol bond` | `ralph run` | Attach discovered work |
 | `bd mol stale` | `ralph status` | Warn about orphaned molecules |
 
 **Not used by Ralph** (user calls directly):
@@ -718,23 +708,23 @@ Ralph uses `bd mol` for work tracking:
 - [ ] `ralph plan -u <label>` writes NEW requirements to `state/<label>.md`
 - [ ] `ralph plan -u -h <label>` updates hidden spec
 - [ ] `ralph plan` runs Claude in wrapix container with base profile
-- [ ] `ralph ready` creates molecule and stores ID in current.json
-- [ ] `ralph ready` (new mode) creates tasks from `specs/<label>.md`
-- [ ] `ralph ready` (update mode) reads NEW requirements from `state/<label>.md`
-- [ ] `ralph ready` (update mode) creates tasks ONLY for new requirements
-- [ ] `ralph ready` (update mode) merges `state/<label>.md` into `specs/<label>.md`
-- [ ] `ralph ready` (update mode) deletes `state/<label>.md` after merge
-- [ ] `ralph ready` runs Claude in wrapix container with base profile
-- [ ] `ralph ready` LLM assigns `profile:X` labels per-task based on implementation needs
-- [ ] `ralph step` reads `profile:X` label from bead and uses that profile
-- [ ] `ralph step --profile=X` overrides bead profile label
-- [ ] `ralph step` falls back to base profile when no label present
-- [ ] `ralph step` completes single issues with blocked-vs-waiting guidance
-- [ ] `ralph loop` runs on host, spawning containerized `ralph step` per issue
+- [ ] `ralph todo` creates molecule and stores ID in current.json
+- [ ] `ralph todo` (new mode) creates tasks from `specs/<label>.md`
+- [ ] `ralph todo` (update mode) reads NEW requirements from `state/<label>.md`
+- [ ] `ralph todo` (update mode) creates tasks ONLY for new requirements
+- [ ] `ralph todo` (update mode) merges `state/<label>.md` into `specs/<label>.md`
+- [ ] `ralph todo` (update mode) deletes `state/<label>.md` after merge
+- [ ] `ralph todo` runs Claude in wrapix container with base profile
+- [ ] `ralph todo` LLM assigns `profile:X` labels per-task based on implementation needs
+- [ ] `ralph run` reads `profile:X` label from bead and uses that profile
+- [ ] `ralph run --profile=X` overrides bead profile label
+- [ ] `ralph run` falls back to base profile when no label present
+- [ ] `ralph run --once` completes single issues with blocked-vs-waiting guidance
+- [ ] `ralph run` (continuous) runs on host, spawning containerized work per issue
 - [ ] `ralph check` validates all templates and partials
 - [ ] `ralph tune` (interactive) identifies correct template and makes edits
 - [ ] `ralph tune` (integration) ingests diff and interviews about changes
-- [ ] `ralph diff` shows local template changes vs packaged
+- [ ] `ralph sync --diff` shows local template changes vs packaged
 - [ ] `ralph sync` updates templates and backs up customizations
 - [ ] `ralph sync --dry-run` previews without executing
 - [ ] `nix flake check` includes template validation
