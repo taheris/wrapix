@@ -267,7 +267,7 @@ extract_json() {
 }
 
 # Strip "## Implementation Notes" section from markdown content
-# This section provides transient context during ralph ready but shouldn't persist in permanent docs
+# This section provides transient context during ralph todo but shouldn't persist in permanent docs
 # Usage: strip_implementation_notes "$markdown_content"
 # Returns: markdown with Implementation Notes section removed
 strip_implementation_notes() {

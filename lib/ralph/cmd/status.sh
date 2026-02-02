@@ -222,12 +222,12 @@ else
   fi
 
   echo ""
-  echo "Run 'ralph ready' to create a molecule for this spec."
+  echo "Run 'ralph todo' to create a molecule for this spec."
 fi
 
 echo ""
 echo "Commands:"
 echo "  ralph plan   - Create/continue spec interview"
-echo "  ralph ready  - Convert spec to beads"
+echo "  ralph todo   - Convert spec to beads"
 echo "  ralph step   - Work next task"
 echo "  ralph loop   - Work all tasks"

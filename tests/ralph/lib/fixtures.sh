@@ -86,8 +86,8 @@ Output ONE of these when done:
 - `RALPH_CLARIFY: <question>` - Need clarification before proceeding
 EOF
 
-  # Create ready.md template
-  cat > "$TEST_DIR/.ralph/template/ready.md" << 'EOF'
+  # Create todo.md template
+  cat > "$TEST_DIR/.ralph/template/todo.md" << 'EOF'
 # Convert Spec to Tasks
 
 Read: {{SPEC_PATH}}
@@ -165,7 +165,7 @@ EOF
   # Symlink ralph commands from SOURCE (not installed) to test latest code
   # This ensures tests verify the actual source, not a potentially stale build
   RALPH_SRC_DIR="$REPO_ROOT/lib/ralph/cmd"
-  for cmd in ralph-step ralph-loop ralph-ready ralph-plan ralph-status ralph-diff ralph-sync ralph-check; do
+  for cmd in ralph-run ralph-step ralph-loop ralph-ready ralph-todo ralph-plan ralph-status ralph-diff ralph-sync ralph-check; do
     local script_name="${cmd#ralph-}"  # Remove 'ralph-' prefix
     if [ -f "$RALPH_SRC_DIR/$script_name.sh" ]; then
       ln -sf "$RALPH_SRC_DIR/$script_name.sh" "$TEST_DIR/bin/$cmd"
