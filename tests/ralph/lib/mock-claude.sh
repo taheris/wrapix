@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# Mock Claude infrastructure for ralph integration tests
+# Provides helpers for creating mock Claude responses in stream-json format
+
+#-----------------------------------------------------------------------------
+# Stream JSON Output Helpers
+#-----------------------------------------------------------------------------
+
+# Output text in stream-json format
+# Usage: stream_text "your message"
+stream_text() {
+  local text="$1"
+  # Escape for JSON (handle newlines, quotes, backslashes)
+  local escaped
+  escaped=$(echo "$text" | jq -Rs '.')
+  # Output as assistant message with text content
+  echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":$escaped}]}}"
+}
+
+# Output final result in stream-json format
+# Usage: stream_result "final output text"
+stream_result() {
+  local text="$1"
+  local escaped
+  escaped=$(echo "$text" | jq -Rs '.')
+  echo "{\"type\":\"result\",\"result\":$escaped,\"cost_usd\":0,\"usage\":{\"input_tokens\":100,\"output_tokens\":50},\"duration_ms\":1000}"
+}
+
+#-----------------------------------------------------------------------------
+# Phase Detection
+#-----------------------------------------------------------------------------
+
+# Detect phase from prompt content
+# Usage: detect_phase "$PROMPT"
+# Returns: plan, ready, or step
+detect_phase() {
+  local prompt="$1"
+
+  # Check for step phase markers FIRST (most specific)
+  # Matches: "# Implementation Step" (the heading), "## Issue Details", "step.md"
+  # Note: Use more specific patterns to avoid matching "each implementation step" in ready.md
+  if echo "$prompt" | grep -qE "^# Implementation Step|^## Issue Details|step\.md"; then
+    echo "step"
+    return
+  fi
+
+  # Check for ready phase markers
+  # Matches: "Convert Spec to Tasks", "task breakdown", "create task beads", "ready.md"
+  if echo "$prompt" | grep -qiE "convert.spec|task.breakdown|create.task.bead|ready\.md"; then
+    echo "ready"
+    return
+  fi
+
+  # Check for plan phase markers
+  # Matches: "Specification Interview", "spec interview", "plan.md"
+  # Note: Removed "create.*spec" as it false-positives on step template's "bd create --labels=spec-"
+  if echo "$prompt" | grep -qiE "specification.interview|spec.interview|plan\.md"; then
+    echo "plan"
+    return
+  fi
+
+  # Default to step (most common)
+  echo "step"
+}
+
+#-----------------------------------------------------------------------------
+# Mock Claude Execution
+#-----------------------------------------------------------------------------
+
+# Run mock Claude with a scenario file
+# Usage: run_mock_claude <scenario_file> <prompt>
+# Expects scenario file to define: phase_plan, phase_ready, phase_step functions
+run_mock_claude() {
+  local scenario_file="$1"
+  local prompt="$2"
+
+  # Debug output (only if RALPH_DEBUG is set)
+  if [ "${RALPH_DEBUG:-0}" = "1" ]; then
+    echo "[mock-claude] Scenario: ${scenario_file:-<none>}" >&2
+    echo "[mock-claude] Prompt length: ${#prompt}" >&2
+  fi
+
+  # If no scenario, just echo and exit
+  if [ -z "$scenario_file" ]; then
+    stream_text "[mock-claude] No scenario file specified"
+    stream_result "[mock-claude] Prompt received"
+    return 0
+  fi
+
+  # Check scenario file exists
+  if [ ! -f "$scenario_file" ]; then
+    echo "[mock-claude] ERROR: Scenario file not found: $scenario_file" >&2
+    return 1
+  fi
+
+  # Source the scenario file
+  # shellcheck source=/dev/null
+  source "$scenario_file"
+
+  # Detect and run phase
+  local phase
+  phase=$(detect_phase "$prompt")
+
+  if [ "${RALPH_DEBUG:-0}" = "1" ]; then
+    echo "[mock-claude] Detected phase: $phase" >&2
+  fi
+
+  # Capture the phase function output
+  local phase_output=""
+  case "$phase" in
+    plan)
+      if type phase_plan &>/dev/null; then
+        phase_output=$(phase_plan)
+      else
+        phase_output="[mock-claude] No phase_plan function defined"
+      fi
+      ;;
+    ready)
+      if type phase_ready &>/dev/null; then
+        phase_output=$(phase_ready)
+      else
+        phase_output="[mock-claude] No phase_ready function defined"
+      fi
+      ;;
+    step)
+      if type phase_step &>/dev/null; then
+        phase_output=$(phase_step)
+      else
+        phase_output="[mock-claude] No phase_step function defined"
+      fi
+      ;;
+    *)
+      phase_output="[mock-claude] Unknown phase: $phase"
+      ;;
+  esac
+
+  # Output the phase result in stream-json format
+  # First, output any intermediate text (everything except RALPH_* signals)
+  local non_signal_output
+  non_signal_output=$(echo "$phase_output" | grep -v "^RALPH_" || true)
+  if [ -n "$non_signal_output" ]; then
+    stream_text "$non_signal_output"
+  fi
+
+  # Then output the result (including any RALPH_* signals)
+  stream_result "$phase_output"
+}
+
+#-----------------------------------------------------------------------------
+# Signal Base Library
+#-----------------------------------------------------------------------------
+# Provides default phase implementations that can be customized
+# Signal scenarios should set:
+#   SIGNAL_PLAN - signal to output at end of plan phase (empty = no signal)
+#   SIGNAL_READY - signal to output at end of ready phase (empty = no signal)
+#   SIGNAL_STEP - signal to output at end of step phase (empty = no signal)
+
+# Default signals (empty = no signal)
+SIGNAL_PLAN="${SIGNAL_PLAN:-}"
+SIGNAL_READY="${SIGNAL_READY:-}"
+SIGNAL_STEP="${SIGNAL_STEP:-}"
+
+# Default messages for each phase
+MSG_PLAN_WORK="${MSG_PLAN_WORK:-Working on spec...}"
+MSG_PLAN_DONE="${MSG_PLAN_DONE:-Spec work done.}"
+MSG_READY_WORK="${MSG_READY_WORK:-Breaking down work...}"
+MSG_READY_DONE="${MSG_READY_DONE:-Task breakdown done.}"
+MSG_STEP_WORK="${MSG_STEP_WORK:-Implementing task...}"
+MSG_STEP_DONE="${MSG_STEP_DONE:-Implementation work done.}"
+
+# Helper to output phase content with optional signal
+_emit_phase() {
+  local work_msg="$1"
+  local done_msg="$2"
+  local signal="${3:-}"
+
+  if [ -n "$work_msg" ]; then
+    echo "$work_msg"
+  fi
+  if [ -n "$done_msg" ]; then
+    echo "$done_msg"
+  fi
+  if [ -n "$signal" ]; then
+    echo "$signal"
+  fi
+}
+
+# Default phase implementations (can be overridden by scenarios)
+_default_phase_plan() {
+  _emit_phase "$MSG_PLAN_WORK" "$MSG_PLAN_DONE" "$SIGNAL_PLAN"
+}
+
+_default_phase_ready() {
+  _emit_phase "$MSG_READY_WORK" "$MSG_READY_DONE" "$SIGNAL_READY"
+}
+
+_default_phase_step() {
+  _emit_phase "$MSG_STEP_WORK" "$MSG_STEP_DONE" "$SIGNAL_STEP"
+}
