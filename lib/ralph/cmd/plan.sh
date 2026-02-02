@@ -272,56 +272,24 @@ else
     '{label: $label, hidden: $hidden, update: $update}' > "$CURRENT_FILE"
 fi
 
-CONFIG_FILE="$RALPH_DIR/config.nix"
-
-# Load config to compute derived values
-CONFIG=$(nix eval --json --file "$CONFIG_FILE")
-DEFAULT_PRIORITY=$(echo "$CONFIG" | jq -r '.beads.priority // 2')
-
 # Compute spec path and README instructions based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
   README_INSTRUCTIONS=""
-  README_UPDATE_SECTION=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
   README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
-  README_UPDATE_SECTION="## Update specs/README.md
-
-After creating the epic, update the WIP table entry with the bead ID:
-\`\`\`markdown
-| [$LABEL.md](./$LABEL.md) | beads-XXXXXX | Brief purpose |
-\`\`\`"
 fi
 
 # Path for new requirements in update mode (separate from main spec)
 NEW_REQUIREMENTS_PATH="$RALPH_DIR/state/$LABEL.md"
 
-# Select template based on mode: plan-new.md for new specs, plan-update.md for updates
+# Select template based on mode: plan-new for new specs, plan-update for updates
 if [ "$UPDATE_MODE" = "true" ]; then
-  TEMPLATE_NAME="plan-update.md"
+  TEMPLATE_NAME="plan-update"
 else
-  TEMPLATE_NAME="plan-new.md"
+  TEMPLATE_NAME="plan-new"
 fi
-PROMPT_TEMPLATE="$RALPH_DIR/template/$TEMPLATE_NAME"
-if [ ! -f "$PROMPT_TEMPLATE" ]; then
-  echo "Error: Plan prompt template not found: $PROMPT_TEMPLATE"
-  echo ""
-  if [ -n "$TEMPLATE" ]; then
-    echo "Copying from $TEMPLATE..."
-    cp "$TEMPLATE/$TEMPLATE_NAME" "$PROMPT_TEMPLATE"
-    chmod u+rw "$PROMPT_TEMPLATE"
-  else
-    echo "RALPH_TEMPLATE_DIR not set or doesn't exist - cannot copy template."
-    [ -n "${RALPH_TEMPLATE_DIR:-}" ] && echo "  RALPH_TEMPLATE_DIR=$RALPH_TEMPLATE_DIR (not found)"
-    echo ""
-    echo "Run from 'nix develop' shell to restore templates."
-    exit 1
-  fi
-fi
-
-# Validate template has placeholders, reset from source if corrupted
-validate_template "$PROMPT_TEMPLATE" "$TEMPLATE/$TEMPLATE_NAME" "$TEMPLATE_NAME"
 
 # Pin context from specs/README.md
 PINNED_CONTEXT=""
@@ -365,27 +333,25 @@ else
 fi
 echo ""
 
-# Read template content
-PROMPT_CONTENT=$(cat "$PROMPT_TEMPLATE")
+# Render template using centralized render_template function
+# Variables differ based on template type
+if [ "$UPDATE_MODE" = "true" ]; then
+  PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
+    "LABEL=$LABEL" \
+    "SPEC_PATH=$SPEC_PATH" \
+    "EXISTING_SPEC=$EXISTING_SPEC" \
+    "NEW_REQUIREMENTS_PATH=$NEW_REQUIREMENTS_PATH" \
+    "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "EXIT_SIGNALS=")
+else
+  PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
+    "LABEL=$LABEL" \
+    "SPEC_PATH=$SPEC_PATH" \
+    "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
+    "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "EXIT_SIGNALS=")
 
-# Resolve partials ({{> partial-name}})
-PROMPT_CONTENT=$(resolve_partials "$PROMPT_CONTENT" "$TEMPLATE/partial")
-
-# Substitute all placeholders at runtime (this is the key fix - fresh substitution each time)
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{LABEL\}\}/$LABEL}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{SPEC_PATH\}\}/$SPEC_PATH}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{PRIORITY\}\}/$DEFAULT_PRIORITY}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{EXIT_SIGNALS\}\}/}"
-PROMPT_CONTENT="${PROMPT_CONTENT//\{\{NEW_REQUIREMENTS_PATH\}\}/$NEW_REQUIREMENTS_PATH}"
-
-# Multi-line substitutions using awk
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_INSTRUCTIONS" '{gsub(/{{README_INSTRUCTIONS}}/, replacement); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v replacement="$README_UPDATE_SECTION" '{gsub(/{{README_UPDATE_SECTION}}/, replacement); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$PINNED_CONTEXT" '{gsub(/{{PINNED_CONTEXT}}/, ctx); print}')
-PROMPT_CONTENT=$(echo "$PROMPT_CONTENT" | awk -v ctx="$EXISTING_SPEC" '{gsub(/{{EXISTING_SPEC}}/, ctx); print}')
-
-# Append continuation context if resuming an existing spec (only for non-update mode)
-if [ "$UPDATE_MODE" != "true" ]; then
+  # Append continuation context if resuming an existing spec
   PROMPT_CONTENT="${PROMPT_CONTENT}${CONTINUATION_CONTEXT}"
 fi
 
