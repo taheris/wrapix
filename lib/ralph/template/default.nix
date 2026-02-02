@@ -173,6 +173,7 @@ let
         "LABEL"
         "SPEC_PATH"
         "EXIT_SIGNALS"
+        "README_INSTRUCTIONS"
       ];
     };
 

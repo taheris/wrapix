@@ -50,10 +50,7 @@ You may include an optional `## Implementation Notes` section at the end for:
 
 This section is **automatically stripped** when the spec is finalized. Use it freely for transient context that aids implementation planning.
 
-## README Update
-
-After creating the spec, add an entry to `specs/README.md` table:
-- Add row with spec file, code path (use — for new code), beads ID (use — until `ralph ready`), and purpose
+{{README_INSTRUCTIONS}}
 
 {{> exit-signals}}
 
