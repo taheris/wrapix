@@ -71,11 +71,7 @@ After creating all tasks:
 2. Show the dependency graph
 3. Confirm the molecule was created
 
-## README Update
-
-After creating the molecule, update `specs/README.md`:
-- Find the row for this spec
-- Update the Beads column with the molecule ID (epic ID)
+{{README_INSTRUCTIONS}}
 
 {{> exit-signals}}
 
