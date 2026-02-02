@@ -469,6 +469,200 @@ run_claude_interactive() {
   claude --dangerously-skip-permissions "${!prompt_var}"
 }
 
+# Get variable definitions from pre-computed metadata
+# Usage: get_variable_definitions
+# Returns: JSON object with all variable definitions
+# Cached in RALPH_VAR_DEFS for performance
+get_variable_definitions() {
+  # Return cached value if available
+  if [ -n "${RALPH_VAR_DEFS:-}" ]; then
+    echo "$RALPH_VAR_DEFS"
+    return 0
+  fi
+
+  # Find metadata file
+  local metadata_file=""
+  if [ -n "${RALPH_METADATA_DIR:-}" ] && [ -f "${RALPH_METADATA_DIR}/variables.json" ]; then
+    metadata_file="${RALPH_METADATA_DIR}/variables.json"
+  else
+    # Try to find via script location (fallback for development)
+    local script_dir
+    script_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "$script_dir/../share/ralph/variables.json" ]; then
+      metadata_file="$script_dir/../share/ralph/variables.json"
+    fi
+  fi
+
+  if [ -z "$metadata_file" ]; then
+    warn "Variable definitions not found (RALPH_METADATA_DIR not set)"
+    echo "{}"
+    return 1
+  fi
+
+  local var_defs
+  var_defs=$(cat "$metadata_file") || {
+    warn "Failed to read variable definitions from $metadata_file"
+    echo "{}"
+    return 1
+  }
+
+  # Cache for subsequent calls
+  export RALPH_VAR_DEFS="$var_defs"
+  echo "$var_defs"
+}
+
+# Get template variables (list of required variables for a template)
+# Usage: get_template_variables <template-name>
+# Returns: JSON array of variable names, or empty array on error
+get_template_variables() {
+  local template_name="$1"
+
+  # Find metadata file
+  local metadata_file=""
+  if [ -n "${RALPH_METADATA_DIR:-}" ] && [ -f "${RALPH_METADATA_DIR}/templates.json" ]; then
+    metadata_file="${RALPH_METADATA_DIR}/templates.json"
+  else
+    # Try to find via script location (fallback for development)
+    local script_dir
+    script_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "$script_dir/../share/ralph/templates.json" ]; then
+      metadata_file="$script_dir/../share/ralph/templates.json"
+    fi
+  fi
+
+  if [ -z "$metadata_file" ]; then
+    warn "Template metadata not found (RALPH_METADATA_DIR not set)"
+    echo "[]"
+    return 1
+  fi
+
+  local vars
+  vars=$(jq -r --arg name "$template_name" '.[$name] // []' "$metadata_file" 2>/dev/null) || {
+    warn "Failed to get variables for template: $template_name"
+    echo "[]"
+    return 1
+  }
+
+  echo "$vars"
+}
+
+# Render a template with variable substitution
+# Usage: render_template <template-name> [VAR=value ...]
+#
+# Reads the template from RALPH_TEMPLATE_DIR (or local .ralph/template),
+# resolves partials, validates required variables, and substitutes placeholders.
+#
+# Variables can be passed as arguments (VAR=value) or read from environment.
+# Required variables that are missing will cause an error.
+#
+# Example:
+#   render_template step LABEL=my-feature ISSUE_ID=beads-123
+#   LABEL=my-feature render_template step
+render_template() {
+  local template_name="$1"
+  shift
+
+  # Determine template directory
+  local template_dir="${RALPH_TEMPLATE_DIR:-}"
+  local local_template_dir="${RALPH_DIR:-.ralph}/template"
+
+  # Prefer local template if it exists, otherwise use RALPH_TEMPLATE_DIR
+  local template_path
+  if [ -f "$local_template_dir/${template_name}.md" ]; then
+    template_path="$local_template_dir/${template_name}.md"
+    template_dir="$local_template_dir"
+  elif [ -n "$template_dir" ] && [ -f "$template_dir/${template_name}.md" ]; then
+    template_path="$template_dir/${template_name}.md"
+  else
+    warn "Template not found: ${template_name}.md (checked $local_template_dir and ${template_dir:-<unset>})"
+    return 1
+  fi
+
+  debug "Rendering template: $template_path"
+
+  # Parse VAR=value arguments into an associative array
+  declare -A vars
+  for arg in "$@"; do
+    # Skip empty arguments
+    [ -z "$arg" ] && continue
+    if [[ "$arg" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+      vars["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+      debug "  ${BASH_REMATCH[1]}=${BASH_REMATCH[2]:0:50}..."
+    else
+      warn "Invalid variable argument (expected VAR=value): $arg"
+    fi
+  done
+
+  # Get required variables for this template from metadata
+  local required_vars
+  required_vars=$(get_template_variables "$template_name")
+
+  if [ "$required_vars" = "[]" ]; then
+    debug "No variable requirements found for template: $template_name"
+  fi
+
+  # Check that all required variables are provided (via args or environment)
+  local missing_vars=()
+  while IFS= read -r var_name; do
+    [ -z "$var_name" ] && continue
+
+    # Check if variable is in args
+    if [ -n "${vars[$var_name]+set}" ]; then
+      continue
+    fi
+
+    # Check if variable is in environment
+    if [ -n "${!var_name+set}" ]; then
+      vars["$var_name"]="${!var_name}"
+      continue
+    fi
+
+    # Variable is missing - check if it's required in the definitions
+    local var_defs
+    var_defs=$(get_variable_definitions)
+    local is_required
+    is_required=$(echo "$var_defs" | jq -r --arg name "$var_name" '.[$name].required // false')
+
+    if [ "$is_required" = "true" ]; then
+      missing_vars+=("$var_name")
+    else
+      # Use default value if available
+      local default_val
+      default_val=$(echo "$var_defs" | jq -r --arg name "$var_name" '.[$name].default // empty')
+      vars["$var_name"]="${default_val:-}"
+      debug "Using default for $var_name: ${default_val:-<empty>}"
+    fi
+  done < <(echo "$required_vars" | jq -r '.[]')
+
+  if [ ${#missing_vars[@]} -gt 0 ]; then
+    warn "Missing required variables for template '$template_name': ${missing_vars[*]}"
+    return 1
+  fi
+
+  # Read template content
+  local content
+  content=$(cat "$template_path")
+
+  # Resolve partials ({{> partial-name}})
+  local partial_dir="$template_dir/partial"
+  if [ -d "$partial_dir" ]; then
+    content=$(resolve_partials "$content" "$partial_dir")
+  fi
+
+  # Substitute variables
+  # Process each variable, handling multiline values with bash string replacement
+  for var_name in "${!vars[@]}"; do
+    local var_value="${vars[$var_name]}"
+    local marker="{{${var_name}}}"
+
+    # Use bash string replacement for simple substitutions
+    # This handles multiline values correctly and preserves blank lines
+    content="${content//"$marker"/$var_value}"
+  done
+
+  echo "$content"
+}
+
 # Resolve partial markers {{> partial-name}} in template content
 # Usage: resolve_partials "$content" "$partial_dir"
 # Returns: content with partials resolved

@@ -213,6 +213,12 @@ EOF
   # Set template directory for diff/sync/check commands
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
 
+  # Preserve RALPH_METADATA_DIR if set (needed for get_template_variables and get_variable_definitions)
+  # This is set by the nix test runner to point to pre-computed metadata files
+  if [ -n "${RALPH_METADATA_DIR:-}" ]; then
+    export RALPH_METADATA_DIR
+  fi
+
   echo "  Test environment: $TEST_DIR"
 }
 
