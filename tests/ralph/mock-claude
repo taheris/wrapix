@@ -46,9 +46,35 @@ if [ ! -f "$SCENARIO_FILE" ]; then
   exit 1
 fi
 
-# Source the scenario file
-# shellcheck source=/dev/null
-source "$SCENARIO_FILE"
+# Check if scenario is JSON or shell
+IS_JSON_SCENARIO=0
+if [[ "$SCENARIO_FILE" == *.json ]]; then
+  IS_JSON_SCENARIO=1
+else
+  # Source the shell scenario file
+  # shellcheck source=/dev/null
+  source "$SCENARIO_FILE"
+fi
+
+# Execute JSON scenario phase
+# Usage: exec_json_phase <phase>
+exec_json_phase() {
+  local phase="$1"
+  local work_msg done_msg signal
+
+  # Extract phase data using jq
+  work_msg=$(jq -r ".phases.${phase}.messages.work // \"\"" "$SCENARIO_FILE")
+  done_msg=$(jq -r ".phases.${phase}.messages.done // \"\"" "$SCENARIO_FILE")
+  signal=$(jq -r ".phases.${phase}.signal // \"\"" "$SCENARIO_FILE")
+
+  # Output messages (|| true prevents set -e failure on empty)
+  [ -n "$work_msg" ] && echo "$work_msg" || true
+  [ -n "$done_msg" ] && echo "$done_msg" || true
+  # Output signal (null becomes "null" string via jq -r, skip if empty or "null")
+  if [ -n "$signal" ] && [ "$signal" != "null" ]; then
+    echo "$signal"
+  fi
+}
 
 # Detect phase from prompt content
 detect_phase() {
@@ -89,32 +115,38 @@ fi
 
 # Capture the phase function output
 PHASE_OUTPUT=""
-case "$PHASE" in
-  plan)
-    if type phase_plan &>/dev/null; then
-      PHASE_OUTPUT=$(phase_plan)
-    else
-      PHASE_OUTPUT="[mock-claude] No phase_plan function defined"
-    fi
-    ;;
-  ready)
-    if type phase_ready &>/dev/null; then
-      PHASE_OUTPUT=$(phase_ready)
-    else
-      PHASE_OUTPUT="[mock-claude] No phase_ready function defined"
-    fi
-    ;;
-  step)
-    if type phase_step &>/dev/null; then
-      PHASE_OUTPUT=$(phase_step)
-    else
-      PHASE_OUTPUT="[mock-claude] No phase_step function defined"
-    fi
-    ;;
-  *)
-    PHASE_OUTPUT="[mock-claude] Unknown phase: $PHASE"
-    ;;
-esac
+if [ "$IS_JSON_SCENARIO" = "1" ]; then
+  # JSON scenario: use exec_json_phase
+  PHASE_OUTPUT=$(exec_json_phase "$PHASE")
+else
+  # Shell scenario: use phase_* functions
+  case "$PHASE" in
+    plan)
+      if type phase_plan &>/dev/null; then
+        PHASE_OUTPUT=$(phase_plan)
+      else
+        PHASE_OUTPUT="[mock-claude] No phase_plan function defined"
+      fi
+      ;;
+    ready)
+      if type phase_ready &>/dev/null; then
+        PHASE_OUTPUT=$(phase_ready)
+      else
+        PHASE_OUTPUT="[mock-claude] No phase_ready function defined"
+      fi
+      ;;
+    step)
+      if type phase_step &>/dev/null; then
+        PHASE_OUTPUT=$(phase_step)
+      else
+        PHASE_OUTPUT="[mock-claude] No phase_step function defined"
+      fi
+      ;;
+    *)
+      PHASE_OUTPUT="[mock-claude] Unknown phase: $PHASE"
+      ;;
+  esac
+fi
 
 # Output the phase result in stream-json format
 # First, output any intermediate text (everything except RALPH_* signals)
