@@ -14,9 +14,14 @@
 #   SIGNAL_RUN="RALPH_COMPLETE"
 
 # Default signals (empty = no signal)
+# Note: Scenarios may use either naming convention:
+#   SIGNAL_PLAN / SIGNAL_TODO / SIGNAL_RUN (original)
+#   SIGNAL_PLAN / SIGNAL_READY / SIGNAL_STEP (alternative)
 SIGNAL_PLAN=""
 SIGNAL_TODO=""
 SIGNAL_RUN=""
+SIGNAL_READY=""
+SIGNAL_STEP=""
 
 # Default messages for each phase
 MSG_PLAN_WORK="Working on spec..."
@@ -48,9 +53,13 @@ phase_plan() {
 }
 
 phase_todo() {
-  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$SIGNAL_TODO"
+  # Support both SIGNAL_TODO and SIGNAL_READY (alias)
+  local signal="${SIGNAL_TODO:-$SIGNAL_READY}"
+  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$signal"
 }
 
 phase_run() {
-  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$SIGNAL_RUN"
+  # Support both SIGNAL_RUN and SIGNAL_STEP (alias)
+  local signal="${SIGNAL_RUN:-$SIGNAL_STEP}"
+  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$signal"
 }

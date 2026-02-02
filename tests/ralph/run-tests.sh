@@ -1648,13 +1648,14 @@ EOF
   CONFIG_POST_LOOP_MARKER="$TEST_DIR/post-loop-marker"
 
   # Use new hooks schema with template variables
+  # Note: run.sh uses pre-step/post-step (not pre-run/post-run)
   cat > "$RALPH_DIR/config.nix" << EOF
 {
   beads.priority = 2;
   hooks = {
     pre-loop = "echo 'pre-loop:{{LABEL}}' >> $CONFIG_PRE_LOOP_MARKER";
-    pre-run = "echo 'pre-run:{{LABEL}}:{{STEP_COUNT}}' >> $CONFIG_PRE_STEP_MARKER";
-    post-run = "echo 'post-run:{{LABEL}}:{{STEP_COUNT}}:{{STEP_EXIT_CODE}}' >> $CONFIG_POST_STEP_MARKER";
+    pre-step = "echo 'pre-step:{{LABEL}}:{{STEP_COUNT}}' >> $CONFIG_PRE_STEP_MARKER";
+    post-step = "echo 'post-step:{{LABEL}}:{{STEP_COUNT}}:{{STEP_EXIT_CODE}}' >> $CONFIG_POST_STEP_MARKER";
     post-loop = "echo 'post-loop:{{LABEL}}' >> $CONFIG_POST_LOOP_MARKER";
   };
 }
@@ -1686,31 +1687,31 @@ config_assert_run_hooks() {
     test_fail "pre-loop hook not executed (marker file missing)"
   fi
 
-  # Test pre-run hook
+  # Test pre-step hook
   if [ -f "$CONFIG_PRE_STEP_MARKER" ]; then
     local content
     content=$(cat "$CONFIG_PRE_STEP_MARKER")
-    if [[ "$content" == *"pre-run:hooks-test:1"* ]]; then
-      test_pass "pre-run hook executed with {{LABEL}} and {{STEP_COUNT}} substitution"
+    if [[ "$content" == *"pre-step:hooks-test:1"* ]]; then
+      test_pass "pre-step hook executed with {{LABEL}} and {{STEP_COUNT}} substitution"
     else
-      test_fail "pre-run hook variables not substituted: $content"
+      test_fail "pre-step hook variables not substituted: $content"
     fi
   else
-    test_fail "pre-run hook not executed (marker file missing)"
+    test_fail "pre-step hook not executed (marker file missing)"
   fi
 
-  # Test post-run hook
+  # Test post-step hook
   if [ -f "$CONFIG_POST_STEP_MARKER" ]; then
     local content
     content=$(cat "$CONFIG_POST_STEP_MARKER")
     # Exit code 100 means all work complete (this is first and last run)
-    if [[ "$content" == *"post-run:hooks-test:1:"* ]]; then
-      test_pass "post-run hook executed with all template variables"
+    if [[ "$content" == *"post-step:hooks-test:1:"* ]]; then
+      test_pass "post-step hook executed with all template variables"
     else
-      test_fail "post-run hook variables not substituted: $content"
+      test_fail "post-step hook variables not substituted: $content"
     fi
   else
-    test_fail "post-run hook not executed (marker file missing)"
+    test_fail "post-step hook not executed (marker file missing)"
   fi
 
   # Test post-loop hook
@@ -1804,8 +1805,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-run = "exit 1";
-    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "warn";
 }
@@ -1861,8 +1862,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-run = "exit 1";
-    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "block";
 }
@@ -1925,8 +1926,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-run = "exit 1";
-    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-step = "exit 1";
+    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "skip";
 }
@@ -1990,7 +1991,7 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-run = "echo 'issue:{{ISSUE_ID}}' >> $CONFIG_ISSUE_ID_MARKER";
+    pre-step = "echo 'issue:{{ISSUE_ID}}' >> $CONFIG_ISSUE_ID_MARKER";
   };
 }
 EOF
@@ -2983,7 +2984,7 @@ test_sync_fresh() {
 
   # Should copy main templates
   assert_file_exists "$RALPH_DIR/template/run.md" "run.md should be copied"
-  assert_file_exists "$RALPH_DIR/template/plan.md" "plan.md should be copied"
+  # Note: plan.md does not exist - planning uses plan-new.md and plan-update.md variants
 
   # Should copy variant templates
   assert_file_exists "$RALPH_DIR/template/plan-new.md" "plan-new.md should be copied"
@@ -3481,22 +3482,22 @@ test_default_config_has_hooks() {
     test_fail "hooks.pre-loop should run prek to validate before loop starts"
   fi
 
-  # Check hooks.pre-run is defined (bd sync)
-  local pre_run
-  pre_run=$(echo "$config" | jq -r '.hooks."pre-run" // empty' 2>/dev/null || true)
-  if [ -n "$pre_run" ]; then
-    test_pass "hooks.pre-run is defined"
+  # Check hooks.pre-step is defined (bd sync)
+  local pre_step
+  pre_step=$(echo "$config" | jq -r '.hooks."pre-step" // empty' 2>/dev/null || true)
+  if [ -n "$pre_step" ]; then
+    test_pass "hooks.pre-step is defined (bd sync)"
   else
-    test_fail "hooks.pre-run should be defined"
+    test_fail "hooks.pre-step should be defined"
   fi
 
-  # Check hooks.post-run is defined and runs prek
-  local post_run
-  post_run=$(echo "$config" | jq -r '.hooks."post-run" // empty' 2>/dev/null || true)
-  if [ -n "$post_run" ] && echo "$post_run" | grep -q "prek"; then
-    test_pass "hooks.post-run runs prek (validates after each run)"
+  # Check hooks.post-step is defined and runs prek
+  local post_step
+  post_step=$(echo "$config" | jq -r '.hooks."post-step" // empty' 2>/dev/null || true)
+  if [ -n "$post_step" ] && echo "$post_step" | grep -q "prek"; then
+    test_pass "hooks.post-step runs prek (validates after each step)"
   else
-    test_fail "hooks.post-run should run prek to validate after each run"
+    test_fail "hooks.post-step should run prek to validate after each step"
   fi
 
   # Check hooks.post-loop is defined (commit and push)
