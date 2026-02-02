@@ -7,7 +7,11 @@ shift || true
 
 case "$COMMAND" in
   check)  exec ralph-check  "$@" ;;
-  diff)   exec ralph-diff   "$@" ;;
+  diff)
+    # deprecated: use 'ralph sync --diff'
+    echo "WARNING: 'ralph diff' is deprecated. Use 'ralph sync --diff' instead." >&2
+    exec ralph-sync --diff "$@"
+    ;;
   logs)   exec ralph-logs   "$@" ;;
   loop)   exec ralph-loop   "$@" ;;  # deprecated, use 'run'
   plan)   exec ralph-plan   "$@" ;;
@@ -63,8 +67,8 @@ case "$COMMAND" in
     echo ""
     echo "Template Commands:"
     echo "  check           Validate all templates (syntax, partials, rendering)"
-    echo "  diff [name]     Show local template changes vs packaged"
     echo "  sync            Update local templates from packaged (backs up customizations)"
+    echo "    --diff [name]   Show local template changes vs packaged"
     echo "  tune            AI-assisted template editing (interactive or via diff)"
     echo ""
     echo "Utility Commands:"
@@ -72,6 +76,7 @@ case "$COMMAND" in
     echo "  edit            Edit current spec file"
     echo ""
     echo "Deprecated Commands:"
+    echo "  diff            Use 'sync --diff' instead"
     echo "  step            Use 'run --once' instead"
     echo "  loop            Use 'run' instead"
     echo ""

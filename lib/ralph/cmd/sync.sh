@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph sync [--dry-run]
+# ralph sync [--dry-run] [--diff]
 # Synchronizes local templates with packaged versions
 # - Creates .ralph/template/ with fresh packaged templates
 # - Backs up existing customized templates to .ralph/backup/
 # - Copies all templates including partial/ directory
 # - Verbose by default (prints actions taken)
+# - Use --diff to show changes without syncing
 
 # Load shared helpers
 # shellcheck source=util.sh
@@ -26,6 +27,25 @@ else
   PACKAGED_DIR=""
   FETCH_FROM_GITHUB=true
 fi
+
+# Templates to compare (base names without .md)
+# Main templates in .ralph/template/
+DIFF_TEMPLATES=(
+  "plan"
+  "plan-new"
+  "plan-update"
+  "todo"
+  "todo-new"
+  "todo-update"
+  "step"
+)
+
+# Partials in .ralph/template/partial/
+DIFF_PARTIALS=(
+  "context-pinning"
+  "exit-signals"
+  "spec-header"
+)
 
 # Fetch templates from GitHub to a temp directory
 # Returns: path to temp directory containing templates
@@ -100,28 +120,54 @@ fetch_github_templates() {
 
 # Parse arguments
 DRY_RUN=false
+DIFF_MODE=false
+DIFF_TEMPLATE_NAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run|-d)
       DRY_RUN=true
       shift
       ;;
+    --diff)
+      DIFF_MODE=true
+      shift
+      # Optional template name after --diff
+      if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+        DIFF_TEMPLATE_NAME="$1"
+        shift
+      fi
+      ;;
     -h|--help)
-      echo "Usage: ralph sync [--dry-run]"
+      echo "Usage: ralph sync [--dry-run] [--diff [template-name]]"
       echo ""
       echo "Synchronizes local templates with packaged versions."
       echo ""
       echo "Options:"
       echo "  --dry-run, -d  Preview changes without executing"
+      echo "  --diff [name]  Show local template changes vs packaged (no sync)"
+      echo "                 If template-name given, diff only that template/partial"
       echo "  --help, -h     Show this help message"
       echo ""
-      echo "Actions:"
+      echo "Sync Actions:"
       echo "  1. Creates .ralph/template/ with fresh packaged templates"
       echo "  2. Backs up existing customized templates to .ralph/backup/"
       echo "  3. Copies all templates including partial/ directory"
       echo ""
-      echo "After sync, use 'ralph diff' to see what changed,"
+      echo "Templates (for --diff):"
+      echo "  plan, plan-new, plan-update, todo, todo-new, todo-update, step"
+      echo ""
+      echo "Partials (for --diff):"
+      echo "  context-pinning, exit-signals, spec-header"
+      echo ""
+      echo "After sync, use 'ralph sync --diff' to see what changed,"
       echo "then 'ralph tune' to merge customizations from backup."
+      echo ""
+      echo "Examples:"
+      echo "  ralph sync                    # Sync all templates"
+      echo "  ralph sync --dry-run          # Preview sync without changes"
+      echo "  ralph sync --diff             # Show all template changes"
+      echo "  ralph sync --diff step        # Show step.md changes only"
+      echo "  ralph sync --diff | ralph tune  # Pipe to tune for integration"
       echo ""
       echo "Environment:"
       echo "  RALPH_DIR           Local ralph directory (default: .ralph)"
@@ -305,7 +351,7 @@ backup_existing() {
   if [ "$has_backups" = "true" ]; then
     echo ""
     echo "Customizations backed up to: $backup_dir"
-    echo "Use 'ralph tune' to merge them after reviewing with 'ralph diff'."
+    echo "Use 'ralph tune' to merge them after reviewing with 'ralph sync --diff'."
   fi
 }
 
@@ -356,7 +402,202 @@ copy_fresh_templates() {
   echo "Copied $file_count template files to: $templates_dir"
 }
 
+# === Diff Mode Functions ===
+
+# Show template differences between local and packaged versions
+# Usage: show_template_diff [template-name]
+show_template_diff() {
+  local template_name="${1:-}"
+  local templates_to_diff=("${DIFF_TEMPLATES[@]}")
+  local partials_to_diff=("${DIFF_PARTIALS[@]}")
+  local filter_partial=""
+
+  # If specific template requested, validate it
+  if [ -n "$template_name" ]; then
+    # Normalize: remove .md suffix if provided
+    template_name="${template_name%.md}"
+
+    # Check if it's a template
+    local valid_template=false
+    for t in "${templates_to_diff[@]}"; do
+      if [ "$t" = "$template_name" ]; then
+        valid_template=true
+        break
+      fi
+    done
+
+    # Check if it's a partial
+    local valid_partial=false
+    for p in "${partials_to_diff[@]}"; do
+      if [ "$p" = "$template_name" ]; then
+        valid_partial=true
+        break
+      fi
+    done
+
+    if [ "$valid_template" = "false" ] && [ "$valid_partial" = "false" ]; then
+      error "Unknown template or partial: $template_name
+
+Valid templates: ${templates_to_diff[*]}
+Valid partials: ${partials_to_diff[*]}"
+    fi
+
+    if [ "$valid_template" = "true" ]; then
+      # Only diff the requested template
+      templates_to_diff=("$template_name")
+      partials_to_diff=()
+    else
+      # Only diff the requested partial
+      templates_to_diff=()
+      filter_partial="$template_name"
+    fi
+  fi
+
+  # Validate local ralph directory exists
+  if [ ! -d "$RALPH_DIR" ]; then
+    echo "No local templates found at $RALPH_DIR"
+    echo "Run 'ralph plan <label>' first to initialize local templates."
+    return 0
+  fi
+
+  # Track changes and collect output
+  local has_changes=false
+  local diff_output=""
+
+  # Diff templates
+  for template in "${templates_to_diff[@]}"; do
+    local local_file="$RALPH_DIR/template/${template}.md"
+    local packaged_file="$PACKAGED_DIR/${template}.md"
+
+    # Skip if local file doesn't exist (not customized)
+    if [ ! -f "$local_file" ]; then
+      debug "Skipping $template: no local file"
+      continue
+    fi
+
+    # Skip if packaged file doesn't exist (shouldn't happen)
+    if [ ! -f "$packaged_file" ]; then
+      warn "Packaged template not found: $packaged_file"
+      continue
+    fi
+
+    # Compare files
+    if ! diff -q "$packaged_file" "$local_file" >/dev/null 2>&1; then
+      has_changes=true
+
+      # Generate unified diff with header
+      local diff_result
+      diff_result=$(diff -u \
+        --label "packaged/${template}.md" \
+        --label "local/${template}.md" \
+        "$packaged_file" "$local_file" 2>/dev/null || true)
+
+      if [ -n "$diff_result" ]; then
+        diff_output+="
+### Template: ${template}.md
+\`\`\`diff
+$diff_result
+\`\`\`
+"
+      fi
+    else
+      debug "$template: no changes"
+    fi
+  done
+
+  # Diff partials
+  diff_partial_file() {
+    local partial="$1"
+    local local_file="$RALPH_DIR/template/partial/${partial}.md"
+    local packaged_file="$PACKAGED_DIR/partial/${partial}.md"
+
+    # Skip if local file doesn't exist (not customized)
+    if [ ! -f "$local_file" ]; then
+      debug "Skipping partial/$partial: no local file"
+      return
+    fi
+
+    # Skip if packaged file doesn't exist (shouldn't happen)
+    if [ ! -f "$packaged_file" ]; then
+      warn "Packaged partial not found: $packaged_file"
+      return
+    fi
+
+    # Compare files
+    if ! diff -q "$packaged_file" "$local_file" >/dev/null 2>&1; then
+      has_changes=true
+
+      # Generate unified diff with header
+      local diff_result
+      diff_result=$(diff -u \
+        --label "packaged/partial/${partial}.md" \
+        --label "local/partial/${partial}.md" \
+        "$packaged_file" "$local_file" 2>/dev/null || true)
+
+      if [ -n "$diff_result" ]; then
+        diff_output+="
+### Partial: partial/${partial}.md
+\`\`\`diff
+$diff_result
+\`\`\`
+"
+      fi
+    else
+      debug "partial/$partial: no changes"
+    fi
+  }
+
+  # Diff partials (either all or filtered)
+  if [ -n "$filter_partial" ]; then
+    diff_partial_file "$filter_partial"
+  else
+    for partial in "${partials_to_diff[@]}"; do
+      diff_partial_file "$partial"
+    done
+  fi
+
+  # Output results
+  if [ "$has_changes" = "true" ]; then
+    echo "# Local Template Changes"
+    echo ""
+    echo "Comparing local templates (\`$RALPH_DIR\`) against packaged templates (\`$PACKAGED_DIR\`)."
+    echo "$diff_output"
+
+    # Hint for integration mode (only if stdout is a tty)
+    if [ -t 1 ]; then
+      echo ""
+      echo "---"
+      echo "Pipe to 'ralph tune' for interactive integration:"
+      echo "  ralph sync --diff | ralph tune"
+    fi
+  else
+    if [ -n "$template_name" ]; then
+      echo "No changes in ${template_name}.md"
+    else
+      echo "No local template changes found."
+      echo ""
+      echo "Local templates match packaged templates."
+    fi
+  fi
+}
+
 # Main
+
+# Handle diff mode separately - no sync, just show changes
+if [ "$DIFF_MODE" = "true" ]; then
+  # For diff mode, we still need RALPH_TEMPLATE_DIR (can't fetch from GitHub for diff)
+  if [ -z "$PACKAGED_DIR" ]; then
+    error "RALPH_TEMPLATE_DIR not set or directory doesn't exist.
+
+Run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR.
+Current value: ${RALPH_TEMPLATE_DIR:-<not set>}"
+  fi
+
+  show_template_diff "$DIFF_TEMPLATE_NAME"
+  exit 0
+fi
+
+# Sync mode
 echo "Ralph Template Sync"
 echo "==================="
 echo ""
@@ -404,6 +645,6 @@ else
   echo "Sync complete."
   echo ""
   echo "Next steps:"
-  echo "  ralph diff   - Review changes vs packaged templates"
-  echo "  ralph check  - Validate template syntax"
+  echo "  ralph sync --diff  - Review changes vs packaged templates"
+  echo "  ralph check        - Validate template syntax"
 fi
