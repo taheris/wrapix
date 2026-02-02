@@ -53,11 +53,17 @@ fi
 # Load config for stream filter
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
 
-# Compute spec path based on hidden flag
+# Compute spec path and README instructions based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then
   SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+  README_INSTRUCTIONS=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
+  README_INSTRUCTIONS="## README Update
+
+After creating the molecule, update \`specs/README.md\`:
+- Find the row for this spec
+- Update the Beads column with the molecule ID (epic ID)"
 fi
 
 # Check spec file exists
@@ -159,6 +165,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "NEW_REQUIREMENTS=$NEW_REQUIREMENTS" \
     "NEW_REQUIREMENTS_PATH=$NEW_REQUIREMENTS_PATH" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
     "EXIT_SIGNALS=")
 else
   PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
@@ -167,6 +174,7 @@ else
     "SPEC_CONTENT=$SPEC_CONTENT" \
     "CURRENT_FILE=$CURRENT_FILE" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
+    "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
     "EXIT_SIGNALS=")
 fi
 

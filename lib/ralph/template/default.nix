@@ -345,6 +345,7 @@ let
         "SPEC_CONTENT"
         "CURRENT_FILE"
         "EXIT_SIGNALS"
+        "README_INSTRUCTIONS"
       ];
     };
 
@@ -361,6 +362,7 @@ let
         "NEW_REQUIREMENTS"
         "NEW_REQUIREMENTS_PATH"
         "EXIT_SIGNALS"
+        "README_INSTRUCTIONS"
       ];
     };
 
