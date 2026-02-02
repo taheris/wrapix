@@ -3457,6 +3457,304 @@ SCRIPT_EOF
 }
 
 #-----------------------------------------------------------------------------
+# render_template Function Tests
+#-----------------------------------------------------------------------------
+
+# Test: render_template basic substitution
+test_render_template_basic() {
+  CURRENT_TEST="render_template_basic"
+  test_header "render_template Basic Substitution"
+
+  setup_test_env "render-template-basic"
+
+  # Source util.sh to get render_template function
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Set template directory
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Test rendering with all required variables
+  local output
+  output=$(render_template step \
+    PINNED_CONTEXT="# Test Context" \
+    SPEC_PATH="specs/test.md" \
+    LABEL="test-feature" \
+    MOLECULE_ID="mol-123" \
+    ISSUE_ID="beads-456" \
+    TITLE="Test Issue" \
+    DESCRIPTION="Test description" \
+    EXIT_SIGNALS="" 2>&1)
+
+  # Check LABEL was substituted
+  if echo "$output" | grep -q "test-feature"; then
+    test_pass "LABEL placeholder substituted"
+  else
+    test_fail "LABEL placeholder not substituted"
+  fi
+
+  # Check ISSUE_ID was substituted
+  if echo "$output" | grep -q "beads-456"; then
+    test_pass "ISSUE_ID placeholder substituted"
+  else
+    test_fail "ISSUE_ID placeholder not substituted"
+  fi
+
+  # Check MOLECULE_ID was substituted
+  if echo "$output" | grep -q "mol-123"; then
+    test_pass "MOLECULE_ID placeholder substituted"
+  else
+    test_fail "MOLECULE_ID placeholder not substituted"
+  fi
+
+  # Check pinned context was substituted
+  if echo "$output" | grep -q "# Test Context"; then
+    test_pass "PINNED_CONTEXT placeholder substituted"
+  else
+    test_fail "PINNED_CONTEXT placeholder not substituted"
+  fi
+
+  teardown_test_env
+}
+
+# Test: render_template validates required variables
+# Requires RALPH_METADATA_DIR to be set (needed to know which variables are required)
+test_render_template_missing_required() {
+  CURRENT_TEST="render_template_missing_required"
+  test_header "render_template Missing Required Variable"
+
+  setup_test_env "render-template-missing"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Skip if metadata not available (can't validate required variables without it)
+  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
+    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
+    teardown_test_env
+    return
+  fi
+
+  # Test with missing LABEL (required variable)
+  set +e
+  local output
+  output=$(render_template step \
+    PINNED_CONTEXT="# Test" \
+    SPEC_PATH="specs/test.md" \
+    MOLECULE_ID="mol-123" \
+    ISSUE_ID="beads-456" \
+    TITLE="Test" \
+    DESCRIPTION="Test" \
+    EXIT_SIGNALS="" 2>&1)
+  local exit_code=$?
+  set -e
+
+  if [ $exit_code -ne 0 ]; then
+    test_pass "render_template errors on missing required variable"
+  else
+    test_fail "render_template should error when required variable is missing"
+  fi
+
+  if echo "$output" | grep -qi "missing.*required.*LABEL"; then
+    test_pass "Error message mentions missing LABEL variable"
+  else
+    test_fail "Error message should mention missing LABEL variable"
+  fi
+
+  teardown_test_env
+}
+
+# Test: render_template handles multiline values
+test_render_template_multiline() {
+  CURRENT_TEST="render_template_multiline"
+  test_header "render_template Multiline Values"
+
+  setup_test_env "render-template-multiline"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Test with multiline description
+  local multiline_desc="Line 1
+Line 2
+Line 3"
+
+  local output
+  output=$(render_template step \
+    PINNED_CONTEXT="# Context" \
+    SPEC_PATH="specs/test.md" \
+    LABEL="test" \
+    MOLECULE_ID="mol-123" \
+    ISSUE_ID="beads-456" \
+    TITLE="Test" \
+    "DESCRIPTION=$multiline_desc" \
+    EXIT_SIGNALS="" 2>&1)
+
+  # Check multiline content is preserved
+  if echo "$output" | grep -q "Line 1" && \
+     echo "$output" | grep -q "Line 2" && \
+     echo "$output" | grep -q "Line 3"; then
+    test_pass "Multiline values preserved"
+  else
+    test_fail "Multiline values not preserved correctly"
+  fi
+
+  teardown_test_env
+}
+
+# Test: render_template reads from environment variables
+# Requires RALPH_METADATA_DIR to be set (needed to know which env vars to check)
+test_render_template_env_vars() {
+  CURRENT_TEST="render_template_env_vars"
+  test_header "render_template Environment Variables"
+
+  setup_test_env "render-template-env"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Skip if metadata not available (can't detect env vars without variable list)
+  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
+    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
+    teardown_test_env
+    return
+  fi
+
+  # Set variables via environment
+  export PINNED_CONTEXT="# Env Context"
+  export SPEC_PATH="specs/env-test.md"
+  export LABEL="env-feature"
+  export MOLECULE_ID="env-mol"
+  export ISSUE_ID="env-beads"
+  export TITLE="Env Title"
+  export DESCRIPTION="Env description"
+  export EXIT_SIGNALS=""
+
+  local output
+  output=$(render_template step 2>&1)
+
+  if echo "$output" | grep -q "env-feature"; then
+    test_pass "Environment variable LABEL used"
+  else
+    test_fail "Environment variable LABEL not used"
+  fi
+
+  if echo "$output" | grep -q "# Env Context"; then
+    test_pass "Environment variable PINNED_CONTEXT used"
+  else
+    test_fail "Environment variable PINNED_CONTEXT not used"
+  fi
+
+  # Clean up env vars
+  unset PINNED_CONTEXT SPEC_PATH LABEL MOLECULE_ID ISSUE_ID TITLE DESCRIPTION EXIT_SIGNALS
+
+  teardown_test_env
+}
+
+# Test: get_template_variables returns correct list
+# Requires RALPH_METADATA_DIR to be set (available in Nix environment)
+test_get_template_variables() {
+  CURRENT_TEST="get_template_variables"
+  test_header "get_template_variables Function"
+
+  setup_test_env "get-template-vars"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Skip if metadata not available (only available in Nix build)
+  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
+    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
+    teardown_test_env
+    return
+  fi
+
+  local vars
+  vars=$(get_template_variables step 2>&1)
+
+  # Check it returns a JSON array
+  if echo "$vars" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    test_pass "get_template_variables returns JSON array"
+  else
+    test_fail "get_template_variables should return JSON array"
+  fi
+
+  # Check expected variables are present
+  if echo "$vars" | jq -e 'index("LABEL")' >/dev/null 2>&1; then
+    test_pass "LABEL in template variables"
+  else
+    test_fail "LABEL should be in template variables"
+  fi
+
+  if echo "$vars" | jq -e 'index("ISSUE_ID")' >/dev/null 2>&1; then
+    test_pass "ISSUE_ID in template variables"
+  else
+    test_fail "ISSUE_ID should be in template variables"
+  fi
+
+  teardown_test_env
+}
+
+# Test: get_variable_definitions returns definitions
+# Requires RALPH_METADATA_DIR to be set (available in Nix environment)
+test_get_variable_definitions() {
+  CURRENT_TEST="get_variable_definitions"
+  test_header "get_variable_definitions Function"
+
+  setup_test_env "get-var-defs"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Skip if metadata not available (only available in Nix build)
+  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
+    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
+    teardown_test_env
+    return
+  fi
+
+  local defs
+  defs=$(get_variable_definitions 2>&1)
+
+  # Check it returns a JSON object
+  if echo "$defs" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    test_pass "get_variable_definitions returns JSON object"
+  else
+    test_fail "get_variable_definitions should return JSON object"
+  fi
+
+  # Check LABEL is defined as required
+  local label_required
+  label_required=$(echo "$defs" | jq -r '.LABEL.required // false')
+  if [ "$label_required" = "true" ]; then
+    test_pass "LABEL marked as required"
+  else
+    test_fail "LABEL should be marked as required"
+  fi
+
+  # Check EXIT_SIGNALS has default value
+  local exit_default
+  exit_default=$(echo "$defs" | jq -r 'has("EXIT_SIGNALS") and .EXIT_SIGNALS.default != null')
+  if [ "$exit_default" = "true" ]; then
+    test_pass "EXIT_SIGNALS has default value"
+  else
+    test_fail "EXIT_SIGNALS should have default value"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -3464,6 +3762,12 @@ SCRIPT_EOF
 ALL_TESTS=(
   test_mock_claude_exists
   test_isolated_beads_db
+  test_render_template_basic
+  test_render_template_missing_required
+  test_render_template_multiline
+  test_render_template_env_vars
+  test_get_template_variables
+  test_get_variable_definitions
   test_step_marks_in_progress
   test_status_mol_current_position
   test_status_wrapper
