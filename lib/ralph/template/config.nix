@@ -32,9 +32,11 @@
   };
 
   prompts = {
-    plan = "plan.md";
-    ready = "ready.md";
-    step = "step.md";
+    plan-new = "plan-new.md";
+    plan-update = "plan-update.md";
+    todo-new = "todo-new.md";
+    todo-update = "todo-update.md";
+    run = "run.md";
   };
 
   loop = {
@@ -42,7 +44,7 @@
     pause-on-failure = true;
   };
 
-  # Hook points for ralph loop (FR2)
+  # Hook points for ralph run (FR2)
   # Template variables: {{LABEL}}, {{ISSUE_ID}}, {{STEP_COUNT}}, {{STEP_EXIT_CODE}}
   hooks = {
     pre-loop = "prek run";

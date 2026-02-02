@@ -200,12 +200,12 @@ assert_molecule_progress() {
   fi
 }
 
-# Assert molecule has expected step count
-# Usage: assert_molecule_step_count <molecule_id> <expected_total> [message]
-assert_molecule_step_count() {
+# Assert molecule has expected task count
+# Usage: assert_molecule_task_count <molecule_id> <expected_total> [message]
+assert_molecule_task_count() {
   local molecule="$1"
   local expected="$2"
-  local msg="${3:-Molecule $molecule should have $expected steps}"
+  local msg="${3:-Molecule $molecule should have $expected tasks}"
 
   # Get progress output and extract total count
   local progress_output
@@ -219,7 +219,7 @@ assert_molecule_step_count() {
   actual=$(echo "$progress_output" | grep -oE '\([0-9]+/[0-9]+\)' | head -1 | sed 's/.*\///' | tr -d ')' || echo "")
 
   if [ -z "$actual" ]; then
-    test_fail "$msg (could not parse step count from output)"
+    test_fail "$msg (could not parse task count from output)"
     return
   fi
 

@@ -32,35 +32,33 @@ stream_result() {
 
 # Detect phase from prompt content
 # Usage: detect_phase "$PROMPT"
-# Returns: plan, ready, or step
+# Returns: plan, todo, or run
 detect_phase() {
   local prompt="$1"
 
-  # Check for step phase markers FIRST (most specific)
-  # Matches: "# Implementation Step" (the heading), "## Issue Details", "step.md"
-  # Note: Use more specific patterns to avoid matching "each implementation step" in ready.md
-  if echo "$prompt" | grep -qE "^# Implementation Step|^## Issue Details|step\.md"; then
-    echo "step"
+  # Check for run phase markers FIRST (most specific)
+  # Matches: "# Implementation Step" (the heading), "## Issue Details", "run.md"
+  if echo "$prompt" | grep -qE "^# Implementation Step|^## Issue Details|run\.md"; then
+    echo "run"
     return
   fi
 
-  # Check for ready phase markers
-  # Matches: "Convert Spec to Tasks", "task breakdown", "create task beads", "ready.md"
-  if echo "$prompt" | grep -qiE "convert.spec|task.breakdown|create.task.bead|ready\.md"; then
-    echo "ready"
+  # Check for todo phase markers
+  # Matches: "Convert Spec to Tasks", "task breakdown", "create task beads", "todo-new.md", "todo-update.md"
+  if echo "$prompt" | grep -qiE "convert.spec|task.breakdown|create.task.bead|todo-new\.md|todo-update\.md"; then
+    echo "todo"
     return
   fi
 
   # Check for plan phase markers
-  # Matches: "Specification Interview", "spec interview", "plan.md"
-  # Note: Removed "create.*spec" as it false-positives on step template's "bd create --labels=spec-"
-  if echo "$prompt" | grep -qiE "specification.interview|spec.interview|plan\.md"; then
+  # Matches: "Specification Interview", "spec interview", "plan-new.md", "plan-update.md"
+  if echo "$prompt" | grep -qiE "specification.interview|spec.interview|plan-new\.md|plan-update\.md"; then
     echo "plan"
     return
   fi
 
-  # Default to step (most common)
-  echo "step"
+  # Default to run (most common)
+  echo "run"
 }
 
 #-----------------------------------------------------------------------------
@@ -69,7 +67,7 @@ detect_phase() {
 
 # Run mock Claude with a scenario file
 # Usage: run_mock_claude <scenario_file> <prompt>
-# Expects scenario file to define: phase_plan, phase_ready, phase_step functions
+# Expects scenario file to define: phase_plan, phase_todo, phase_run functions
 run_mock_claude() {
   local scenario_file="$1"
   local prompt="$2"
@@ -115,18 +113,18 @@ run_mock_claude() {
         phase_output="[mock-claude] No phase_plan function defined"
       fi
       ;;
-    ready)
-      if type phase_ready &>/dev/null; then
-        phase_output=$(phase_ready)
+    todo)
+      if type phase_todo &>/dev/null; then
+        phase_output=$(phase_todo)
       else
-        phase_output="[mock-claude] No phase_ready function defined"
+        phase_output="[mock-claude] No phase_todo function defined"
       fi
       ;;
-    step)
-      if type phase_step &>/dev/null; then
-        phase_output=$(phase_step)
+    run)
+      if type phase_run &>/dev/null; then
+        phase_output=$(phase_run)
       else
-        phase_output="[mock-claude] No phase_step function defined"
+        phase_output="[mock-claude] No phase_run function defined"
       fi
       ;;
     *)
@@ -152,21 +150,21 @@ run_mock_claude() {
 # Provides default phase implementations that can be customized
 # Signal scenarios should set:
 #   SIGNAL_PLAN - signal to output at end of plan phase (empty = no signal)
-#   SIGNAL_READY - signal to output at end of ready phase (empty = no signal)
-#   SIGNAL_STEP - signal to output at end of step phase (empty = no signal)
+#   SIGNAL_TODO - signal to output at end of todo phase (empty = no signal)
+#   SIGNAL_RUN - signal to output at end of run phase (empty = no signal)
 
 # Default signals (empty = no signal)
 SIGNAL_PLAN="${SIGNAL_PLAN:-}"
-SIGNAL_READY="${SIGNAL_READY:-}"
-SIGNAL_STEP="${SIGNAL_STEP:-}"
+SIGNAL_TODO="${SIGNAL_TODO:-}"
+SIGNAL_RUN="${SIGNAL_RUN:-}"
 
 # Default messages for each phase
 MSG_PLAN_WORK="${MSG_PLAN_WORK:-Working on spec...}"
 MSG_PLAN_DONE="${MSG_PLAN_DONE:-Spec work done.}"
-MSG_READY_WORK="${MSG_READY_WORK:-Breaking down work...}"
-MSG_READY_DONE="${MSG_READY_DONE:-Task breakdown done.}"
-MSG_STEP_WORK="${MSG_STEP_WORK:-Implementing task...}"
-MSG_STEP_DONE="${MSG_STEP_DONE:-Implementation work done.}"
+MSG_TODO_WORK="${MSG_TODO_WORK:-Breaking down work...}"
+MSG_TODO_DONE="${MSG_TODO_DONE:-Task breakdown done.}"
+MSG_RUN_WORK="${MSG_RUN_WORK:-Implementing task...}"
+MSG_RUN_DONE="${MSG_RUN_DONE:-Implementation work done.}"
 
 # Helper to output phase content with optional signal
 _emit_phase() {
@@ -190,10 +188,10 @@ _default_phase_plan() {
   _emit_phase "$MSG_PLAN_WORK" "$MSG_PLAN_DONE" "$SIGNAL_PLAN"
 }
 
-_default_phase_ready() {
-  _emit_phase "$MSG_READY_WORK" "$MSG_READY_DONE" "$SIGNAL_READY"
+_default_phase_todo() {
+  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$SIGNAL_TODO"
 }
 
-_default_phase_step() {
-  _emit_phase "$MSG_STEP_WORK" "$MSG_STEP_DONE" "$SIGNAL_STEP"
+_default_phase_run() {
+  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$SIGNAL_RUN"
 }

@@ -20,7 +20,7 @@ SPEC_EOF
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   local label="${LABEL:-test}"
   # Read priority from environment (set by test), default to 2
   local priority="${MOCK_PRIORITY:-2}"
@@ -35,7 +35,7 @@ phase_ready() {
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
+phase_run() {
   echo "Implementing task..."
   echo "RALPH_COMPLETE"
 }

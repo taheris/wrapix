@@ -66,12 +66,12 @@ test_mock_claude_exists() {
   teardown_test_env
 }
 
-# Test: step closes issue when RALPH_COMPLETE is output
-test_step_closes_issue_on_complete() {
-  CURRENT_TEST="step_closes_issue_on_complete"
+# Test: run closes issue when RALPH_COMPLETE is output
+test_run_closes_issue_on_complete() {
+  CURRENT_TEST="run_closes_issue_on_complete"
   test_header "Step Closes Issue on RALPH_COMPLETE"
 
-  setup_test_env "step-complete"
+  setup_test_env "run-complete"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -98,9 +98,9 @@ EOF
   # Use scenario that outputs RALPH_COMPLETE
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run ralph step
+  # Run ralph run --once
   set +e
-  ralph-step 2>&1
+  ralph-run --once 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -110,12 +110,12 @@ EOF
   teardown_test_env
 }
 
-# Test: step does NOT close issue when RALPH_COMPLETE is missing
-test_step_no_close_without_signal() {
-  CURRENT_TEST="step_no_close_without_signal"
+# Test: run does NOT close issue when RALPH_COMPLETE is missing
+test_run_no_close_without_signal() {
+  CURRENT_TEST="run_no_close_without_signal"
   test_header "Step Does Not Close Issue Without RALPH_COMPLETE"
 
-  setup_test_env "step-no-signal"
+  setup_test_env "run-no-signal"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -136,9 +136,9 @@ EOF
   # Use scenario that does NOT output RALPH_COMPLETE
   export MOCK_SCENARIO="$SCENARIOS_DIR/no-signal.sh"
 
-  # Run ralph step (should fail/not complete)
+  # Run ralph run --once (should fail/not complete)
   set +e
-  ralph-step 2>&1
+  ralph-run --once 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -148,12 +148,12 @@ EOF
   teardown_test_env
 }
 
-# Test: step marks issue as in_progress before work
-test_step_marks_in_progress() {
-  CURRENT_TEST="step_marks_in_progress"
+# Test: run marks issue as in_progress before work
+test_run_marks_in_progress() {
+  CURRENT_TEST="run_marks_in_progress"
   test_header "Step Marks Issue In-Progress"
 
-  setup_test_env "step-in-progress"
+  setup_test_env "run-in-progress"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -175,9 +175,9 @@ EOF
   export MOCK_SCENARIO="$SCENARIOS_DIR/check-status.sh"
   export CHECK_ISSUE_ID="$TASK_ID"
 
-  # Run ralph step
+  # Run ralph run --once
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
@@ -363,7 +363,7 @@ SPEC_EOF
         cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
 {
   "completed": 8,
-  "current_step_id": "test-step-3",
+  "current_run_id": "test-run-3",
   "in_progress": 1,
   "molecule_id": "test-mol-abc123",
   "molecule_title": "Test Feature",
@@ -376,7 +376,7 @@ MOCK_EOF
         cat > "$mock_responses/mol-progress.txt" << 'MOCK_EOF'
 Molecule: test-mol-abc123 (Test Feature)
 Progress: 8 / 10 (80%)
-Current step: test-step-3
+Current run: test-run-3
 MOCK_EOF
 
         # Set up mock current output (per spec format)
@@ -523,12 +523,12 @@ MOCK_EOF
   done
 }
 
-# Test: step exits 100 when no issues remain
-test_step_exits_100_when_complete() {
-  CURRENT_TEST="step_exits_100_when_complete"
+# Test: run exits 100 when no issues remain
+test_run_exits_100_when_complete() {
+  CURRENT_TEST="run_exits_100_when_complete"
   test_header "Step Exits 100 When All Work Complete"
 
-  setup_test_env "step-all-complete"
+  setup_test_env "run-all-complete"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -543,7 +543,7 @@ EOF
 
   # No issues to work - should exit 100
   set +e
-  ralph-step 2>&1
+  ralph-run --once 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -553,11 +553,11 @@ EOF
 }
 
 # Test: RALPH_BLOCKED signal handling
-test_step_handles_blocked_signal() {
-  CURRENT_TEST="step_handles_blocked_signal"
+test_run_handles_blocked_signal() {
+  CURRENT_TEST="run_handles_blocked_signal"
   test_header "Step Handles RALPH_BLOCKED Signal"
 
-  setup_test_env "step-blocked"
+  setup_test_env "run-blocked"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -578,9 +578,9 @@ EOF
   # Use scenario that outputs RALPH_BLOCKED
   export MOCK_SCENARIO="$SCENARIOS_DIR/blocked.sh"
 
-  # Run ralph step (should fail)
+  # Run ralph run --once (should fail)
   set +e
-  ralph-step 2>&1
+  ralph-run --once 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -597,11 +597,11 @@ EOF
 }
 
 # Test: RALPH_CLARIFY signal handling
-test_step_handles_clarify_signal() {
-  CURRENT_TEST="step_handles_clarify_signal"
+test_run_handles_clarify_signal() {
+  CURRENT_TEST="run_handles_clarify_signal"
   test_header "Step Handles RALPH_CLARIFY Signal"
 
-  setup_test_env "step-clarify"
+  setup_test_env "run-clarify"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -622,9 +622,9 @@ EOF
   # Use scenario that outputs RALPH_CLARIFY
   export MOCK_SCENARIO="$SCENARIOS_DIR/clarify.sh"
 
-  # Run ralph step (should fail - clarify is not completion)
+  # Run ralph run --once (should fail - clarify is not completion)
   set +e
-  ralph-step 2>&1
+  ralph-run --once 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -653,15 +653,15 @@ EOF
   teardown_test_env
 }
 
-# Test: dependency ordering in step
+# Test: dependency ordering in run
 # NOTE: bd list --ready currently doesn't filter blocked issues correctly.
-# This test verifies that dependencies are SET UP correctly and that step
+# This test verifies that dependencies are SET UP correctly and that run
 # eventually processes all tasks, even if not in strict dependency order.
-test_step_respects_dependencies() {
-  CURRENT_TEST="step_respects_dependencies"
+test_run_respects_dependencies() {
+  CURRENT_TEST="run_respects_dependencies"
   test_header "Step Respects Dependencies"
 
-  setup_test_env "step-deps"
+  setup_test_env "run-deps"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -695,10 +695,10 @@ EOF
   # Use scenario that outputs RALPH_COMPLETE
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run step twice to close both tasks (order may vary due to bd --ready behavior)
+  # Run run twice to close both tasks (order may vary due to bd --ready behavior)
   # First, close task 1 (unblocked)
   set +e
-  ralph-step >/dev/null 2>&1
+  ralph-run --once >/dev/null 2>&1
   set -e
 
   # Close task 1 explicitly if still open (since bd --ready may pick wrong task)
@@ -711,7 +711,7 @@ EOF
 
   # Task 2 should now be unblocked and processable
   set +e
-  ralph-step >/dev/null 2>&1
+  ralph-run --once >/dev/null 2>&1
   set -e
 
   # Close task 2 explicitly if still open
@@ -725,11 +725,11 @@ EOF
 }
 
 # Test: loop processes all issues
-test_loop_processes_all() {
-  CURRENT_TEST="loop_processes_all"
+test_run_loop_processes_all() {
+  CURRENT_TEST="run_loop_processes_all"
   test_header "Loop Processes All Issues"
 
-  setup_test_env "loop-all"
+  setup_test_env "run-loop-all"
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -752,9 +752,9 @@ EOF
   # Use scenario that outputs RALPH_COMPLETE
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run ralph loop
+  # Run ralph run
   set +e
-  ralph-loop 2>&1
+  ralph-run 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -862,18 +862,18 @@ EOF
     test_pass "Task C (blocked by in_progress A) correctly excluded from ready list"
   fi
 
-  # Now run ralph step - it should pick Task B since:
+  # Now run ralph run --once - it should pick Task B since:
   # - A is in_progress (filtered by --ready)
   # - B is open with no deps (available)
   # - C depends on A which is not closed (ideally filtered, but may not be)
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
-  # Check that the step completed
+  # Check that the run completed
   if echo "$OUTPUT" | grep -q "Working on:"; then
     # Some task was selected - verify which one
     if echo "$OUTPUT" | grep -q "Working on: $TASK_B_ID"; then
@@ -896,10 +896,10 @@ EOF
   teardown_test_env
 }
 
-# Test: step skips in_progress items from bd ready
+# Test: run skips in_progress items from bd ready
 # Verifies that bd list --ready excludes items already in_progress
-test_step_skips_in_progress() {
-  CURRENT_TEST="step_skips_in_progress"
+test_run_skips_in_progress() {
+  CURRENT_TEST="run_skips_in_progress"
   test_header "Step Skips In-Progress Items"
 
   setup_test_env "skip-in-progress"
@@ -932,9 +932,9 @@ EOF
   # Use complete scenario
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run ralph step - should pick Task 2, not Task 1
+  # Run ralph run --once - should pick Task 2, not Task 1
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
@@ -950,15 +950,15 @@ EOF
   # Task 1 should still be in_progress
   assert_bead_status "$TASK1_ID" "in_progress" "Task 1 should remain in_progress"
 
-  # Task 2 should now be closed (completed by step)
-  assert_bead_closed "$TASK2_ID" "Task 2 should be closed after step"
+  # Task 2 should now be closed (completed by run)
+  assert_bead_closed "$TASK2_ID" "Task 2 should be closed after run"
 
   teardown_test_env
 }
 
-# Test: step skips items blocked by in_progress dependencies
-test_step_skips_blocked_by_in_progress() {
-  CURRENT_TEST="step_skips_blocked_by_in_progress"
+# Test: run skips items blocked by in_progress dependencies
+test_run_skips_blocked_by_in_progress() {
+  CURRENT_TEST="run_skips_blocked_by_in_progress"
   test_header "Step Skips Items Blocked by In-Progress Dependencies"
 
   setup_test_env "skip-blocked"
@@ -999,9 +999,9 @@ EOF
   # Use complete scenario
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run ralph step - should pick Independent, not Parent or Child
+  # Run ralph run --once - should pick Independent, not Parent or Child
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
@@ -1023,7 +1023,7 @@ EOF
   assert_bead_status "$CHILD_ID" "open" "Child should remain open (blocked)"
 
   # Independent should be closed
-  assert_bead_closed "$INDEPENDENT_ID" "Independent should be closed after step"
+  assert_bead_closed "$INDEPENDENT_ID" "Independent should be closed after run"
 
   teardown_test_env
 }
@@ -1151,13 +1151,13 @@ EOF
   # Verify epic is open
   assert_bead_status "$EPIC_ID" "open" "Epic should start as open"
 
-  # Use complete scenario for steps
+  # Use complete scenario for runs
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
 
-  # Run 2 steps to close 2 tasks
+  # Run 2 runs to close 2 tasks
   set +e
-  ralph-step >/dev/null 2>&1  # Close task 1
-  ralph-step >/dev/null 2>&1  # Close task 2
+  ralph-run --once >/dev/null 2>&1  # Close task 1
+  ralph-run --once >/dev/null 2>&1  # Close task 2
   set -e
 
   # Count how many tasks are closed
@@ -1188,9 +1188,9 @@ EOF
 
   # Now close the remaining task(s)
   set +e
-  ralph-step >/dev/null 2>&1  # Close task 3 (or any remaining)
+  ralph-run --once >/dev/null 2>&1  # Close task 3 (or any remaining)
   # Run one more time to trigger completion check
-  ralph-step >/dev/null 2>&1
+  ralph-run --once >/dev/null 2>&1
   set -e
 
   # Now all tasks should be closed
@@ -1284,9 +1284,9 @@ test_isolated_beads_db() {
 # Consolidates configuration tests into 1 parameterized test:
 # (Note: spec_hidden tests removed - they require interactive plan mode which mock-claude doesn't support)
 # - test_config_beads_priority
-# - test_config_loop_max_iterations
-# - test_config_loop_pause_on_failure_true/false
-# - test_config_loop_hooks
+# - test_config_run_max_iterations
+# - test_config_run_pause_on_failure_true/false
+# - test_config_run_hooks
 # - test_config_failure_patterns
 test_config_data_driven() {
   CURRENT_TEST="config_data_driven"
@@ -1307,47 +1307,47 @@ test_config_data_driven() {
   #---------------------------------------------------------------------------
   # Test case: loop.max-iterations limits iterations
   #---------------------------------------------------------------------------
-  run_config_test "loop_max_iterations" \
+  run_config_test "run_max_iterations" \
     "Config: loop.max-iterations" \
-    config_setup_loop_max_iterations \
-    config_run_loop_max_iterations \
-    config_assert_loop_max_iterations
+    config_setup_run_max_iterations \
+    config_run_run_max_iterations \
+    config_assert_run_max_iterations
 
   #---------------------------------------------------------------------------
   # Test case: loop.pause-on-failure=true stops on failure
   #---------------------------------------------------------------------------
-  run_config_test "loop_pause_on_failure_true" \
+  run_config_test "run_pause_on_failure_true" \
     "Config: loop.pause-on-failure=true" \
-    config_setup_loop_pause_on_failure_true \
-    config_run_loop_pause_on_failure_true \
-    config_assert_loop_pause_on_failure_true
+    config_setup_run_pause_on_failure_true \
+    config_run_run_pause_on_failure_true \
+    config_assert_run_pause_on_failure_true
 
   #---------------------------------------------------------------------------
   # Test case: loop.pause-on-failure=false continues on failure
   #---------------------------------------------------------------------------
-  run_config_test "loop_pause_on_failure_false" \
+  run_config_test "run_pause_on_failure_false" \
     "Config: loop.pause-on-failure=false" \
-    config_setup_loop_pause_on_failure_false \
-    config_run_loop_pause_on_failure_false \
-    config_assert_loop_pause_on_failure_false
+    config_setup_run_pause_on_failure_false \
+    config_run_run_pause_on_failure_false \
+    config_assert_run_pause_on_failure_false
 
   #---------------------------------------------------------------------------
-  # Test case: hooks (pre-loop, pre-step, post-step, post-loop with variables)
+  # Test case: hooks (pre-loop, pre-run, post-run, post-loop with variables)
   #---------------------------------------------------------------------------
-  run_config_test "loop_hooks" \
+  run_config_test "run_hooks" \
     "Config: hooks with template variables" \
-    config_setup_loop_hooks \
-    config_run_loop_hooks \
-    config_assert_loop_hooks
+    config_setup_run_hooks \
+    config_run_run_hooks \
+    config_assert_run_hooks
 
   #---------------------------------------------------------------------------
   # Test case: hooks backward compatibility (loop.pre-hook, loop.post-hook)
   #---------------------------------------------------------------------------
-  run_config_test "loop_hooks_compat" \
+  run_config_test "run_hooks_compat" \
     "Config: hooks backward compatibility" \
-    config_setup_loop_hooks_compat \
-    config_run_loop_hooks_compat \
-    config_assert_loop_hooks_compat
+    config_setup_run_hooks_compat \
+    config_run_run_hooks_compat \
+    config_assert_run_hooks_compat
 
   #---------------------------------------------------------------------------
   # Test case: hooks-on-failure warn mode
@@ -1456,9 +1456,9 @@ config_assert_beads_priority() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_max_iterations
+# Config test case: run_max_iterations
 #-----------------------------------------------------------------------------
-config_setup_loop_max_iterations() {
+config_setup_run_max_iterations() {
   CONFIG_LABEL="iter-test"
 
   cat > "$TEST_DIR/specs/iter-test.md" << 'EOF'
@@ -1490,15 +1490,15 @@ EOF
   test_pass "Initial open tasks: $CONFIG_INITIAL_COUNT"
 }
 
-config_run_loop_max_iterations() {
+config_run_run_max_iterations() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
   set +e
-  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(timeout 30 ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
-config_assert_loop_max_iterations() {
+config_assert_run_max_iterations() {
   local final_count
   final_count=$(bd list --label "spec-$CONFIG_LABEL" --status=open --json 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
 
@@ -1514,9 +1514,9 @@ config_assert_loop_max_iterations() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_pause_on_failure_true
+# Config test case: run_pause_on_failure_true
 #-----------------------------------------------------------------------------
-config_setup_loop_pause_on_failure_true() {
+config_setup_run_pause_on_failure_true() {
   CONFIG_LABEL="pause-test"
 
   cat > "$TEST_DIR/specs/pause-test.md" << 'EOF'
@@ -1543,19 +1543,19 @@ EOF
   test_pass "Created 3 tasks"
 }
 
-config_run_loop_pause_on_failure_true() {
+config_run_run_pause_on_failure_true() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/blocked.sh"
   set +e
-  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(timeout 30 ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
-config_assert_loop_pause_on_failure_true() {
+config_assert_run_pause_on_failure_true() {
   if [ "$CONFIG_EXIT_CODE" -ne 0 ]; then
     test_pass "Loop exited with non-zero on failure (exit code: $CONFIG_EXIT_CODE)"
   else
-    test_fail "Loop should exit non-zero when pause-on-failure=true and step fails"
+    test_fail "Loop should exit non-zero when pause-on-failure=true and run fails"
   fi
 
   local in_progress_count
@@ -1578,9 +1578,9 @@ config_assert_loop_pause_on_failure_true() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_pause_on_failure_false
+# Config test case: run_pause_on_failure_false
 #-----------------------------------------------------------------------------
-config_setup_loop_pause_on_failure_false() {
+config_setup_run_pause_on_failure_false() {
   CONFIG_LABEL="continue-test"
 
   cat > "$TEST_DIR/specs/continue-test.md" << 'EOF'
@@ -1607,15 +1607,15 @@ EOF
   test_pass "Created 3 tasks"
 }
 
-config_run_loop_pause_on_failure_false() {
+config_run_run_pause_on_failure_false() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/blocked.sh"
   set +e
-  CONFIG_OUTPUT=$(timeout 30 ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(timeout 30 ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
-config_assert_loop_pause_on_failure_false() {
+config_assert_run_pause_on_failure_false() {
   if [ "$CONFIG_EXIT_CODE" -ne 0 ]; then
     echo "  NOTE: pause-on-failure=false not yet implemented in loop.sh"
     echo "        Loop currently always pauses on failure"
@@ -1626,16 +1626,16 @@ config_assert_loop_pause_on_failure_false() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_hooks - tests all four hook points with template vars
+# Config test case: run_hooks - tests all four hook points with template vars
 #-----------------------------------------------------------------------------
-config_setup_loop_hooks() {
+config_setup_run_hooks() {
   CONFIG_LABEL="hooks-test"
 
   cat > "$TEST_DIR/specs/hooks-test.md" << 'EOF'
 # Hooks Test
 
 ## Requirements
-- Test all four hook points (pre-loop, pre-step, post-step, post-loop)
+- Test all four hook points (pre-loop, pre-run, post-run, post-loop)
 - Test template variable substitution
 EOF
 
@@ -1643,8 +1643,8 @@ EOF
 
   # Marker files for each hook type
   CONFIG_PRE_LOOP_MARKER="$TEST_DIR/pre-loop-marker"
-  CONFIG_PRE_STEP_MARKER="$TEST_DIR/pre-step-marker"
-  CONFIG_POST_STEP_MARKER="$TEST_DIR/post-step-marker"
+  CONFIG_PRE_STEP_MARKER="$TEST_DIR/pre-run-marker"
+  CONFIG_POST_STEP_MARKER="$TEST_DIR/post-run-marker"
   CONFIG_POST_LOOP_MARKER="$TEST_DIR/post-loop-marker"
 
   # Use new hooks schema with template variables
@@ -1653,8 +1653,8 @@ EOF
   beads.priority = 2;
   hooks = {
     pre-loop = "echo 'pre-loop:{{LABEL}}' >> $CONFIG_PRE_LOOP_MARKER";
-    pre-step = "echo 'pre-step:{{LABEL}}:{{STEP_COUNT}}' >> $CONFIG_PRE_STEP_MARKER";
-    post-step = "echo 'post-step:{{LABEL}}:{{STEP_COUNT}}:{{STEP_EXIT_CODE}}' >> $CONFIG_POST_STEP_MARKER";
+    pre-run = "echo 'pre-run:{{LABEL}}:{{STEP_COUNT}}' >> $CONFIG_PRE_STEP_MARKER";
+    post-run = "echo 'post-run:{{LABEL}}:{{STEP_COUNT}}:{{STEP_EXIT_CODE}}' >> $CONFIG_POST_STEP_MARKER";
     post-loop = "echo 'post-loop:{{LABEL}}' >> $CONFIG_POST_LOOP_MARKER";
   };
 }
@@ -1664,15 +1664,15 @@ EOF
   test_pass "Created 1 task"
 }
 
-config_run_loop_hooks() {
+config_run_run_hooks() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
   set +e
-  ralph-loop >/dev/null 2>&1
+  ralph-run >/dev/null 2>&1
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
-config_assert_loop_hooks() {
+config_assert_run_hooks() {
   # Test pre-loop hook
   if [ -f "$CONFIG_PRE_LOOP_MARKER" ]; then
     local content
@@ -1686,31 +1686,31 @@ config_assert_loop_hooks() {
     test_fail "pre-loop hook not executed (marker file missing)"
   fi
 
-  # Test pre-step hook
+  # Test pre-run hook
   if [ -f "$CONFIG_PRE_STEP_MARKER" ]; then
     local content
     content=$(cat "$CONFIG_PRE_STEP_MARKER")
-    if [[ "$content" == *"pre-step:hooks-test:1"* ]]; then
-      test_pass "pre-step hook executed with {{LABEL}} and {{STEP_COUNT}} substitution"
+    if [[ "$content" == *"pre-run:hooks-test:1"* ]]; then
+      test_pass "pre-run hook executed with {{LABEL}} and {{STEP_COUNT}} substitution"
     else
-      test_fail "pre-step hook variables not substituted: $content"
+      test_fail "pre-run hook variables not substituted: $content"
     fi
   else
-    test_fail "pre-step hook not executed (marker file missing)"
+    test_fail "pre-run hook not executed (marker file missing)"
   fi
 
-  # Test post-step hook
+  # Test post-run hook
   if [ -f "$CONFIG_POST_STEP_MARKER" ]; then
     local content
     content=$(cat "$CONFIG_POST_STEP_MARKER")
-    # Exit code 100 means all work complete (this is first and last step)
-    if [[ "$content" == *"post-step:hooks-test:1:"* ]]; then
-      test_pass "post-step hook executed with all template variables"
+    # Exit code 100 means all work complete (this is first and last run)
+    if [[ "$content" == *"post-run:hooks-test:1:"* ]]; then
+      test_pass "post-run hook executed with all template variables"
     else
-      test_fail "post-step hook variables not substituted: $content"
+      test_fail "post-run hook variables not substituted: $content"
     fi
   else
-    test_fail "post-step hook not executed (marker file missing)"
+    test_fail "post-run hook not executed (marker file missing)"
   fi
 
   # Test post-loop hook
@@ -1728,9 +1728,9 @@ config_assert_loop_hooks() {
 }
 
 #-----------------------------------------------------------------------------
-# Config test case: loop_hooks_compat - backward compat with loop.pre-hook
+# Config test case: run_hooks_compat - backward compat with loop.pre-hook
 #-----------------------------------------------------------------------------
-config_setup_loop_hooks_compat() {
+config_setup_run_hooks_compat() {
   CONFIG_LABEL="hooks-compat"
 
   cat > "$TEST_DIR/specs/hooks-compat.md" << 'EOF'
@@ -1760,23 +1760,23 @@ EOF
   test_pass "Created 1 task"
 }
 
-config_run_loop_hooks_compat() {
+config_run_run_hooks_compat() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
   set +e
-  ralph-loop >/dev/null 2>&1
+  ralph-run >/dev/null 2>&1
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
-config_assert_loop_hooks_compat() {
+config_assert_run_hooks_compat() {
   if [ -f "$CONFIG_PRE_HOOK_MARKER" ]; then
-    test_pass "loop.pre-hook backward compat (executed as pre-step)"
+    test_pass "loop.pre-hook backward compat (executed as pre-run)"
   else
     test_fail "loop.pre-hook backward compat failed (marker missing)"
   fi
 
   if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
-    test_pass "loop.post-hook backward compat (executed as post-step)"
+    test_pass "loop.post-hook backward compat (executed as post-run)"
   else
     test_fail "loop.post-hook backward compat failed (marker missing)"
   fi
@@ -1804,8 +1804,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-step = "exit 1";
-    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-run = "exit 1";
+    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "warn";
 }
@@ -1818,24 +1818,24 @@ EOF
 config_run_hooks_on_failure() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
   set +e
-  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
 config_assert_hooks_on_failure() {
-  # With warn mode, the loop should continue despite pre-step hook failure
+  # With warn mode, the loop should continue despite pre-run hook failure
   if [ $CONFIG_EXIT_CODE -eq 0 ]; then
     test_pass "Loop completed despite hook failure (warn mode working)"
   else
     test_fail "Loop should continue in warn mode, but exited with $CONFIG_EXIT_CODE"
   fi
 
-  # post-step should still run after the failed pre-step
+  # post-run should still run after the failed pre-run
   if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
-    test_pass "post-step hook still executed after pre-step failure"
+    test_pass "post-run hook still executed after pre-run failure"
   else
-    test_fail "post-step hook should run even when pre-step fails in warn mode"
+    test_fail "post-run hook should run even when pre-run fails in warn mode"
   fi
 }
 
@@ -1861,8 +1861,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-step = "exit 1";
-    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-run = "exit 1";
+    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "block";
 }
@@ -1875,24 +1875,24 @@ EOF
 config_run_hooks_on_failure_block() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
   set +e
-  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
 config_assert_hooks_on_failure_block() {
-  # With block mode, the loop should stop on pre-step hook failure
+  # With block mode, the loop should stop on pre-run hook failure
   if [ $CONFIG_EXIT_CODE -ne 0 ]; then
     test_pass "Loop stopped on hook failure (block mode exit code: $CONFIG_EXIT_CODE)"
   else
     test_fail "Loop should stop in block mode, but exited with 0"
   fi
 
-  # post-step should NOT run because loop was stopped by failed pre-step
+  # post-run should NOT run because loop was stopped by failed pre-run
   if [ ! -f "$CONFIG_POST_HOOK_MARKER" ]; then
-    test_pass "post-step hook did not run after pre-step failure (block mode)"
+    test_pass "post-run hook did not run after pre-run failure (block mode)"
   else
-    test_fail "post-step hook should not run when pre-step fails in block mode"
+    test_fail "post-run hook should not run when pre-run fails in block mode"
   fi
 
   # Error message should mention the hook failure
@@ -1925,8 +1925,8 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-step = "exit 1";
-    post-step = "echo success >> $CONFIG_POST_HOOK_MARKER";
+    pre-run = "exit 1";
+    post-run = "echo success >> $CONFIG_POST_HOOK_MARKER";
   };
   hooks-on-failure = "skip";
 }
@@ -1939,24 +1939,24 @@ EOF
 config_run_hooks_on_failure_skip() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
   set +e
-  CONFIG_OUTPUT=$(ralph-loop 2>&1)
+  CONFIG_OUTPUT=$(ralph-run 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
 
 config_assert_hooks_on_failure_skip() {
-  # With skip mode, the loop should continue silently despite pre-step hook failure
+  # With skip mode, the loop should continue silently despite pre-run hook failure
   if [ $CONFIG_EXIT_CODE -eq 0 ]; then
     test_pass "Loop completed despite hook failure (skip mode working)"
   else
     test_fail "Loop should continue in skip mode, but exited with $CONFIG_EXIT_CODE"
   fi
 
-  # post-step should still run after the failed pre-step
+  # post-run should still run after the failed pre-run
   if [ -f "$CONFIG_POST_HOOK_MARKER" ]; then
-    test_pass "post-step hook still executed after pre-step failure (skip mode)"
+    test_pass "post-run hook still executed after pre-run failure (skip mode)"
   else
-    test_fail "post-step hook should run even when pre-step fails in skip mode"
+    test_fail "post-run hook should run even when pre-run fails in skip mode"
   fi
 
   # Skip mode should NOT show warning messages (unlike warn mode)
@@ -1990,7 +1990,7 @@ EOF
 {
   beads.priority = 2;
   hooks = {
-    pre-step = "echo 'issue:{{ISSUE_ID}}' >> $CONFIG_ISSUE_ID_MARKER";
+    pre-run = "echo 'issue:{{ISSUE_ID}}' >> $CONFIG_ISSUE_ID_MARKER";
   };
 }
 EOF
@@ -2003,7 +2003,7 @@ EOF
 config_run_hooks_issue_id() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/hook-test.sh"
   set +e
-  ralph-loop >/dev/null 2>&1
+  ralph-run >/dev/null 2>&1
   CONFIG_EXIT_CODE=$?
   set -e
 }
@@ -2014,7 +2014,7 @@ config_assert_hooks_issue_id() {
     content=$(cat "$CONFIG_ISSUE_ID_MARKER")
     # Check that the issue ID was substituted (should contain "beads-" or similar ID format)
     if [[ "$content" == *"issue:beads-"* ]] || [[ "$content" == *"issue:$CONFIG_TASK_ID"* ]]; then
-      test_pass "{{ISSUE_ID}} substituted correctly in pre-step hook"
+      test_pass "{{ISSUE_ID}} substituted correctly in pre-run hook"
     elif [[ "$content" == "issue:{{ISSUE_ID}}" ]]; then
       test_fail "{{ISSUE_ID}} was not substituted (literal text found)"
     elif [[ "$content" == "issue:" ]]; then
@@ -2024,7 +2024,7 @@ config_assert_hooks_issue_id() {
       test_pass "{{ISSUE_ID}} substituted with value: $content"
     fi
   else
-    test_fail "pre-step hook not executed (marker file missing)"
+    test_fail "pre-run hook not executed (marker file missing)"
   fi
 }
 
@@ -2061,7 +2061,7 @@ config_run_failure_patterns() {
   export MOCK_SCENARIO="$SCENARIOS_DIR/failure-pattern.sh"
   export MOCK_FAILURE_OUTPUT="CUSTOM_ERROR: Something went wrong"
   set +e
-  CONFIG_OUTPUT=$(ralph-step 2>&1)
+  CONFIG_OUTPUT=$(ralph-run --once 2>&1)
   CONFIG_EXIT_CODE=$?
   set -e
 }
@@ -2265,10 +2265,10 @@ EOF
   teardown_test_env
 }
 
-# Test: discovered work - bd mol bond during step execution
+# Test: discovered work - bd mol bond during run execution
 # Verifies:
-# 1. bd mol bond --type sequential during step works
-# 2. bd mol bond --type parallel during step works
+# 1. bd mol bond --type sequential during run works
+# 2. bd mol bond --type parallel during run works
 # 3. Sequential bonds block current task completion
 # 4. Parallel bonds are independent
 test_discovered_work() {
@@ -2323,22 +2323,22 @@ EOF
   export MOLECULE_ID="$epic_id"
 
   #---------------------------------------------------------------------------
-  # Phase 2: Test sequential bond during step
+  # Phase 2: Test sequential bond during run
   #---------------------------------------------------------------------------
   echo ""
-  echo "  Phase 2: Testing sequential bond during step..."
+  echo "  Phase 2: Testing sequential bond during run..."
 
   # Use discovered-work scenario with sequential type
   export MOCK_SCENARIO="$SCENARIOS_DIR/discovered-work.sh"
   export DISCOVER_TYPE="sequential"
 
-  # Run ralph step
+  # Run ralph run --once
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
-  # Check the log file for scenario output (ralph-step filters stdout but logs all)
+  # Check the log file for scenario output (ralph-run --once filters stdout but logs all)
   local log_file="$RALPH_DIR/logs/work-$main_task_id.log"
   local log_content=""
   if [ -f "$log_file" ]; then
@@ -2382,12 +2382,12 @@ EOF
   fi
 
   #---------------------------------------------------------------------------
-  # Phase 3: Test parallel bond during step
+  # Phase 3: Test parallel bond during run
   #---------------------------------------------------------------------------
   echo ""
-  echo "  Phase 3: Testing parallel bond during step..."
+  echo "  Phase 3: Testing parallel bond during run..."
 
-  # Reset for next step - create a new task to work on
+  # Reset for next run - create a new task to work on
   local task2_json
   task2_json=$(bd create --title="Second Task - discovers parallel work" --type=task --labels="spec-$label" --json 2>/dev/null)
   local task2_id
@@ -2398,9 +2398,9 @@ EOF
   # Use discovered-work scenario with parallel type
   export DISCOVER_TYPE="parallel"
 
-  # Run ralph step
+  # Run ralph run --once
   set +e
-  OUTPUT=$(ralph-step 2>&1)
+  OUTPUT=$(ralph-run --once 2>&1)
   EXIT_CODE=$?
   set -e
 
@@ -2749,7 +2749,7 @@ test_diff_no_changes() {
   setup_test_env "diff-no-changes"
 
   # Copy packaged templates to local directory (simulates fresh install)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
@@ -2789,16 +2789,16 @@ test_diff_local_modifications() {
 
   # Copy ALL packaged templates to match setup templates
   # (setup_test_env creates templates with different content)
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
-  # Modify ONLY step.md to create a detectable change
+  # Modify ONLY run.md to create a detectable change
   {
     echo "# My Custom Header"
     echo ""
     echo "This is a local customization."
-  } >> "$RALPH_DIR/template/step.md"
+  } >> "$RALPH_DIR/template/run.md"
 
   # Run ralph sync --diff
   set +e
@@ -2817,11 +2817,11 @@ test_diff_local_modifications() {
     test_fail "Output should indicate local template changes"
   fi
 
-  # Should show the step.md template name
-  if echo "$output" | grep -q "step\.md\|step"; then
-    test_pass "Output shows step template"
+  # Should show the run.md template name
+  if echo "$output" | grep -q "run\.md\|run"; then
+    test_pass "Output shows run template"
   else
-    test_fail "Output should mention step template"
+    test_fail "Output should mention run template"
   fi
 
   # Should contain our custom text in the diff
@@ -2837,38 +2837,38 @@ test_diff_local_modifications() {
 # Test: ralph sync --diff with specific template name
 test_diff_specific_template() {
   CURRENT_TEST="diff_specific_template"
-  test_header "ralph sync --diff - specific template (ralph sync --diff step)"
+  test_header "ralph sync --diff - specific template (ralph sync --diff run)"
 
   setup_test_env "diff-specific"
 
   # Copy all templates
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
 
   # Modify both templates
-  echo "# Step modification" >> "$RALPH_DIR/template/step.md"
+  echo "# Step modification" >> "$RALPH_DIR/template/run.md"
   echo "# Plan modification" >> "$RALPH_DIR/template/plan.md"
 
-  # Run ralph sync --diff for just step
+  # Run ralph sync --diff for just run
   set +e
   local output
-  output=$(ralph-sync --diff step 2>&1)
+  output=$(ralph-sync --diff run 2>&1)
   local exit_code=$?
   set -e
 
   # Should exit 0
-  assert_exit_code 0 $exit_code "ralph sync --diff step should succeed"
+  assert_exit_code 0 $exit_code "ralph sync --diff run should succeed"
 
-  # Should show step template changes
-  if echo "$output" | grep -q "step\|Step"; then
-    test_pass "Output mentions step template"
+  # Should show run template changes
+  if echo "$output" | grep -q "run\|Step"; then
+    test_pass "Output mentions run template"
   else
-    test_fail "Output should mention step template"
+    test_fail "Output should mention run template"
   fi
 
-  # Should NOT show plan template changes (we only asked for step)
+  # Should NOT show plan template changes (we only asked for run)
   if echo "$output" | grep -qi "plan.*modification"; then
-    test_fail "Output should NOT show plan modifications when diffing just step"
+    test_fail "Output should NOT show plan modifications when diffing just run"
   else
     test_pass "Output correctly excludes other templates"
   fi
@@ -2876,11 +2876,11 @@ test_diff_specific_template() {
   # Verify it works with .md suffix too
   set +e
   local output_with_suffix
-  output_with_suffix=$(ralph-sync --diff step.md 2>&1)
+  output_with_suffix=$(ralph-sync --diff run.md 2>&1)
   local exit_code2=$?
   set -e
 
-  assert_exit_code 0 $exit_code2 "ralph sync --diff step.md should succeed (normalized)"
+  assert_exit_code 0 $exit_code2 "ralph sync --diff run.md should succeed (normalized)"
 
   teardown_test_env
 }
@@ -2896,7 +2896,7 @@ test_diff_missing_local_templates() {
   cp "$RALPH_TEMPLATE_DIR/config.nix" "$RALPH_DIR/config.nix"
 
   # Remove markdown templates to simulate partial installation
-  rm -f "$RALPH_DIR/template/step.md" "$RALPH_DIR/template/plan.md"
+  rm -f "$RALPH_DIR/template/run.md" "$RALPH_DIR/template/plan.md"
 
   # Run ralph sync --diff
   set +e
@@ -2940,7 +2940,7 @@ test_diff_invalid_template() {
   fi
 
   # Should mention valid templates
-  if echo "$output" | grep -qi "unknown\|valid\|plan\|ready\|step\|config"; then
+  if echo "$output" | grep -qi "unknown\|valid\|plan\|ready\|run\|config"; then
     test_pass "Error message mentions valid template options"
   else
     test_fail "Error should mention valid templates"
@@ -2982,7 +2982,7 @@ test_sync_fresh() {
   fi
 
   # Should copy main templates
-  assert_file_exists "$RALPH_DIR/template/step.md" "step.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/run.md" "run.md should be copied"
   assert_file_exists "$RALPH_DIR/template/plan.md" "plan.md should be copied"
 
   # Should copy variant templates
@@ -3017,15 +3017,15 @@ test_sync_backup() {
 
   # Create templates directory with customized content
   mkdir -p "$RALPH_DIR/template"
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md"
   cp "$RALPH_TEMPLATE_DIR/plan.md" "$RALPH_DIR/template/plan.md"
 
-  # Add local customizations to step.md
+  # Add local customizations to run.md
   {
     echo ""
     echo "# My Custom Instructions"
     echo "This is a local customization that should be backed up."
-  } >> "$RALPH_DIR/template/step.md"
+  } >> "$RALPH_DIR/template/run.md"
 
   # Run ralph sync
   set +e
@@ -3044,18 +3044,18 @@ test_sync_backup() {
     test_fail "Backup directory should be created for customized templates"
   fi
 
-  # Should backup the customized step.md
-  assert_file_exists "$RALPH_DIR/backup/step.md" "Customized step.md should be backed up"
+  # Should backup the customized run.md
+  assert_file_exists "$RALPH_DIR/backup/run.md" "Customized run.md should be backed up"
 
   # Backup should contain our customization
-  if grep -q "My Custom Instructions" "$RALPH_DIR/backup/step.md" 2>/dev/null; then
+  if grep -q "My Custom Instructions" "$RALPH_DIR/backup/run.md" 2>/dev/null; then
     test_pass "Backup contains local customizations"
   else
     test_fail "Backup should contain local customizations"
   fi
 
   # Templates should now match packaged (fresh copy)
-  if diff -q "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md" >/dev/null 2>&1; then
+  if diff -q "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md" >/dev/null 2>&1; then
     test_pass "Templates updated to match packaged"
   else
     test_fail "Templates should match packaged after sync"
@@ -3087,12 +3087,12 @@ test_sync_dry_run() {
 
   # Create templates directory with customized content
   mkdir -p "$RALPH_DIR/template"
-  cp "$RALPH_TEMPLATE_DIR/step.md" "$RALPH_DIR/template/step.md"
-  echo "# My Customization" >> "$RALPH_DIR/template/step.md"
+  cp "$RALPH_TEMPLATE_DIR/run.md" "$RALPH_DIR/template/run.md"
+  echo "# My Customization" >> "$RALPH_DIR/template/run.md"
 
   # Record state before dry-run
   local original_content
-  original_content=$(cat "$RALPH_DIR/template/step.md")
+  original_content=$(cat "$RALPH_DIR/template/run.md")
 
   # Run ralph sync --dry-run
   set +e
@@ -3113,7 +3113,7 @@ test_sync_dry_run() {
 
   # Templates should NOT have changed
   local current_content
-  current_content=$(cat "$RALPH_DIR/template/step.md")
+  current_content=$(cat "$RALPH_DIR/template/run.md")
   if [ "$original_content" = "$current_content" ]; then
     test_pass "Templates unchanged in dry-run mode"
   else
@@ -3128,7 +3128,7 @@ test_sync_dry_run() {
   fi
 
   # Output should show what would be done
-  if echo "$output" | grep -qi "backup\|copying\|step"; then
+  if echo "$output" | grep -qi "backup\|copying\|run"; then
     test_pass "Dry-run shows planned actions"
   else
     test_fail "Dry-run should show what would be done"
@@ -3240,7 +3240,7 @@ test_check_valid_templates() {
 
   # Check 2: Body files exist
   if echo "$output" | grep -q "✓ plan-new.md" && \
-     echo "$output" | grep -q "✓ step.md"; then
+     echo "$output" | grep -q "✓ run.md"; then
     test_pass "All required body files exist"
   else
     test_fail "Missing required body files"
@@ -3254,7 +3254,7 @@ test_check_valid_templates() {
   fi
 
   # Check 4: Partial references valid
-  if echo "$output" | grep -q "✓ step.md → {{> context-pinning}}"; then
+  if echo "$output" | grep -q "✓ run.md → {{> context-pinning}}"; then
     test_pass "Partial references are valid"
   else
     test_fail "Partial reference check failed"
@@ -3456,8 +3456,8 @@ test_default_config_has_hooks() {
   setup_test_env "default-config-hooks"
 
   # This test verifies that the packaged config.nix template includes
-  # the hooks section with pre-loop and post-step hooks that run prek.
-  # This ensures ralph loop will block on test/lint failures by default.
+  # the hooks section with pre-loop and post-run hooks that run prek.
+  # This ensures ralph run will block on test/lint failures by default.
 
   # Read the packaged config.nix template
   local config_file="$RALPH_TEMPLATE_DIR/config.nix"
@@ -3481,22 +3481,22 @@ test_default_config_has_hooks() {
     test_fail "hooks.pre-loop should run prek to validate before loop starts"
   fi
 
-  # Check hooks.pre-step is defined (bd sync)
-  local pre_step
-  pre_step=$(echo "$config" | jq -r '.hooks."pre-step" // empty' 2>/dev/null || true)
-  if [ -n "$pre_step" ]; then
-    test_pass "hooks.pre-step is defined"
+  # Check hooks.pre-run is defined (bd sync)
+  local pre_run
+  pre_run=$(echo "$config" | jq -r '.hooks."pre-run" // empty' 2>/dev/null || true)
+  if [ -n "$pre_run" ]; then
+    test_pass "hooks.pre-run is defined"
   else
-    test_fail "hooks.pre-step should be defined"
+    test_fail "hooks.pre-run should be defined"
   fi
 
-  # Check hooks.post-step is defined and runs prek
-  local post_step
-  post_step=$(echo "$config" | jq -r '.hooks."post-step" // empty' 2>/dev/null || true)
-  if [ -n "$post_step" ] && echo "$post_step" | grep -q "prek"; then
-    test_pass "hooks.post-step runs prek (validates after each step)"
+  # Check hooks.post-run is defined and runs prek
+  local post_run
+  post_run=$(echo "$config" | jq -r '.hooks."post-run" // empty' 2>/dev/null || true)
+  if [ -n "$post_run" ] && echo "$post_run" | grep -q "prek"; then
+    test_pass "hooks.post-run runs prek (validates after each run)"
   else
-    test_fail "hooks.post-step should run prek to validate after each step"
+    test_fail "hooks.post-run should run prek to validate after each run"
   fi
 
   # Check hooks.post-loop is defined (commit and push)
@@ -3520,16 +3520,16 @@ test_default_config_has_hooks() {
   teardown_test_env
 }
 
-# Test: ralph step profile-based container selection
-# Tests the profile detection logic in ralph step:
+# Test: ralph run --once profile-based container selection
+# Tests the profile detection logic in ralph run:
 # 1. Profile from bead's profile:X label
 # 2. --profile=X flag override
 # 3. Fallback to base
-test_step_profile_selection() {
-  CURRENT_TEST="step_profile_selection"
-  test_header "Profile-Based Container Selection in ralph step"
+test_run_profile_selection() {
+  CURRENT_TEST="run_profile_selection"
+  test_header "Profile-Based Container Selection in ralph run"
 
-  setup_test_env "step-profile"
+  setup_test_env "run-profile"
 
   local label="profile-test-feature"
 
@@ -3569,7 +3569,7 @@ SPEC_EOF
   fi
 
   # Test 2: Verify jq profile extraction works on bd list output
-  # This is the same jq query used in step.sh
+  # This is the same jq query used in run.sh
   local next_issue_json
   next_issue_json=$(bd list --label "spec-$label" --ready --sort priority --json 2>/dev/null || echo "[]")
 
@@ -3627,9 +3627,9 @@ SPEC_EOF
     test_fail "Expected empty profile from jq for untagged task, got '$profile_from_jq'"
   fi
 
-  # Test 5: Verify --profile flag parsing in step.sh
-  # This tests the arg parsing logic directly by sourcing step.sh components
-  # We can't run the full step.sh (needs wrapix), but we can test the parsing
+  # Test 5: Verify --profile flag parsing in run.sh
+  # This tests the arg parsing logic directly by sourcing run.sh components
+  # We can't run the full run.sh (needs wrapix), but we can test the parsing
 
   # Create a mock test for arg parsing
   local test_args_script="$TEST_DIR/test-args.sh"
@@ -3637,7 +3637,7 @@ SPEC_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Parse --profile flag (extracted from step.sh)
+# Parse --profile flag (extracted from run.sh)
 PROFILE_OVERRIDE=""
 STEP_ARGS=()
 for arg in "$@"; do
@@ -3711,7 +3711,7 @@ test_render_template_basic() {
 
   # Test rendering with all required variables
   local output
-  output=$(render_template step \
+  output=$(render_template run \
     PINNED_CONTEXT="# Test Context" \
     SPEC_PATH="specs/test.md" \
     LABEL="test-feature" \
@@ -3775,7 +3775,7 @@ test_render_template_missing_required() {
   # Test with missing LABEL (required variable)
   set +e
   local output
-  output=$(render_template step \
+  output=$(render_template run \
     PINNED_CONTEXT="# Test" \
     SPEC_PATH="specs/test.md" \
     MOLECULE_ID="mol-123" \
@@ -3819,7 +3819,7 @@ Line 2
 Line 3"
 
   local output
-  output=$(render_template step \
+  output=$(render_template run \
     PINNED_CONTEXT="# Context" \
     SPEC_PATH="specs/test.md" \
     LABEL="test" \
@@ -3872,7 +3872,7 @@ test_render_template_env_vars() {
   export EXIT_SIGNALS=""
 
   local output
-  output=$(render_template step 2>&1)
+  output=$(render_template run 2>&1)
 
   if echo "$output" | grep -q "env-feature"; then
     test_pass "Environment variable LABEL used"
@@ -3913,7 +3913,7 @@ test_get_template_variables() {
   fi
 
   local vars
-  vars=$(get_template_variables step 2>&1)
+  vars=$(get_template_variables run 2>&1)
 
   # Check it returns a JSON array
   if echo "$vars" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -4003,19 +4003,19 @@ ALL_TESTS=(
   test_render_template_env_vars
   test_get_template_variables
   test_get_variable_definitions
-  test_step_marks_in_progress
+  test_run_marks_in_progress
   test_status_mol_current_position
   test_status_wrapper
-  test_step_closes_issue_on_complete
-  test_step_no_close_without_signal
-  test_step_exits_100_when_complete
-  test_step_handles_blocked_signal
-  test_step_handles_clarify_signal
-  test_step_respects_dependencies
-  test_loop_processes_all
+  test_run_closes_issue_on_complete
+  test_run_no_close_without_signal
+  test_run_exits_100_when_complete
+  test_run_handles_blocked_signal
+  test_run_handles_clarify_signal
+  test_run_respects_dependencies
+  test_run_loop_processes_all
   test_parallel_agent_simulation
-  test_step_skips_in_progress
-  test_step_skips_blocked_by_in_progress
+  test_run_skips_in_progress
+  test_run_skips_blocked_by_in_progress
   test_malformed_bd_output_parsing
   test_partial_epic_completion
   test_plan_flag_validation
@@ -4041,7 +4041,7 @@ ALL_TESTS=(
   test_check_invalid_nix_syntax
   test_check_exit_codes
   test_default_config_has_hooks
-  test_step_profile_selection
+  test_run_profile_selection
 )
 
 #-----------------------------------------------------------------------------

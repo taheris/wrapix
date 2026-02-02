@@ -1,12 +1,12 @@
 # shellcheck shell=bash
 # Happy path scenario - full workflow test
-# Tests: ralph plan -> ralph todo -> ralph step -> ralph loop
+# Tests: ralph plan -> ralph todo -> ralph run
 #
 # This scenario simulates a complete feature workflow:
 # 1. plan: Creates a spec file
-# 2. ready: Creates molecule (epic + child tasks), stores molecule ID in current.json
-# 3. step: Completes the first unblocked task
-# 4. loop: Completes remaining tasks and closes epic
+# 2. todo: Creates molecule (epic + child tasks), stores molecule ID in current.json
+# 3. run --once: Completes the first unblocked task
+# 4. run: Completes remaining tasks and closes epic
 
 # State tracking (set by test harness)
 # LABEL - feature label (e.g., "test-feature")
@@ -26,7 +26,7 @@ A test feature for verifying the full ralph workflow.
 
 ## Problem Statement
 
-Need to verify that ralph plan, ready, step, and loop work correctly together.
+Need to verify that ralph plan, todo, and run work correctly together.
 
 ## Requirements
 
@@ -57,7 +57,7 @@ SPEC_EOF
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   # Get label from state or environment
   local label="${LABEL:-happy-path-test}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
@@ -82,9 +82,9 @@ phase_ready() {
   fi
 
   # Create tasks and bond them to the molecule using bd mol bond
-  # Note: Dependency tests are covered by test_step_respects_dependencies.
+  # Note: Dependency tests are covered by test_run_respects_dependencies.
   # The happy path test focuses on verifying the full workflow from
-  # plan -> ready -> step -> loop without dependency complications.
+  # plan -> todo -> run without dependency complications.
   # Tasks are bonded to the molecule for proper tracking.
 
   local task_a_id
@@ -112,7 +112,7 @@ phase_ready() {
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
+phase_run() {
   # Simulate implementing the current task
   echo "Implementing the assigned task..."
   echo "Reading spec and understanding requirements..."

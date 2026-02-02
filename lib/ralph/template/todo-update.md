@@ -58,7 +58,7 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
 |-----------|---------|--------|
 | `--parent` | Links task to molecule | Enables `ralph status` progress tracking |
 | `bd dep add` | Sets execution order | Controls what `bd ready` returns next |
-| `profile:X` | Selects container profile | Determines toolchain available in `ralph step` |
+| `profile:X` | Selects container profile | Determines toolchain available in `ralph run` |
 
 ## Task Breakdown Guidelines
 

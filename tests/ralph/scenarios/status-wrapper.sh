@@ -257,13 +257,13 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   echo "status-wrapper scenario: ready phase (not applicable)"
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
-  echo "status-wrapper scenario: step phase (not applicable)"
+phase_run() {
+  echo "status-wrapper scenario: run phase (not applicable)"
   echo "RALPH_COMPLETE"
 }
 

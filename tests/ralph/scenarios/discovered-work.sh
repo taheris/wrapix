@@ -1,16 +1,16 @@
 # shellcheck shell=bash
-# Discovered work scenario - tests bd mol bond during step execution
+# Discovered work scenario - tests bd mol bond during run execution
 # Verifies:
-# 1. bd mol bond --type sequential during step works
-# 2. bd mol bond --type parallel during step works
+# 1. bd mol bond --type sequential during run works
+# 2. bd mol bond --type parallel during run works
 # 3. Sequential bonds block current task completion
 # 4. Parallel bonds are independent
 #
 # Test flow:
 # 1. Setup molecule with tasks
-# 2. Run step that discovers sequential work
+# 2. Run that discovers sequential work
 # 3. Verify bond created with sequential type
-# 4. Run step that discovers parallel work
+# 4. Run that discovers parallel work
 # 5. Verify bond created with parallel type
 
 # State tracking (set by test harness)
@@ -33,7 +33,7 @@ A test feature for verifying discovered work bonding.
 
 ## Problem Statement
 
-Need to verify that bd mol bond works correctly during step execution
+Need to verify that bd mol bond works correctly during run execution
 for both sequential and parallel bond types.
 
 ## Requirements
@@ -65,7 +65,7 @@ SPEC_EOF
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   # Get label from state or environment
   local label="${LABEL:-discovered-work-test}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
@@ -101,7 +101,7 @@ phase_ready() {
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
+phase_run() {
   # Simulate implementing a task that discovers additional work
   local label="${LABEL:-discovered-work-test}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
@@ -181,7 +181,7 @@ phase_step() {
     echo "BOND_TYPE=parallel"
 
   elif [ "$discover_type" = "both" ]; then
-    # Discover both types in one step
+    # Discover both types in one run
     echo ""
     echo "=== Discovering both sequential and parallel work ==="
 

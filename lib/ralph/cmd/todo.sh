@@ -264,8 +264,8 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
   echo "  bd list -l spec-$LABEL"
   echo ""
   echo "To work through issues:"
-  echo "  ralph step      # Work one issue at a time"
-  echo "  ralph loop      # Work all issues automatically"
+  echo "  ralph run         # Work all issues automatically"
+  echo "  ralph run --once  # Work one issue at a time"
 else
   echo ""
   echo "Molecule creation did not complete. Review log: $LOG"

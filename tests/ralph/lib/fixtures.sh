@@ -44,8 +44,8 @@ EOF
 }
 EOF
 
-  # Create step.md template
-  cat > "$TEST_DIR/.ralph/template/step.md" << 'EOF'
+  # Create run.md template
+  cat > "$TEST_DIR/.ralph/template/run.md" << 'EOF'
 # Implementation Step
 
 ## Context Pinning
@@ -100,7 +100,7 @@ Spec Title: {{SPEC_TITLE}}
 
 1. Read the spec thoroughly
 2. Create an epic bead for the overall feature
-3. Create task beads for each implementation step
+3. Create task beads for each implementation task
 4. Add dependencies between tasks
 
 {{README_INSTRUCTIONS}}
@@ -164,9 +164,8 @@ EOF
 
   # Symlink ralph commands from SOURCE (not installed) to test latest code
   # This ensures tests verify the actual source, not a potentially stale build
-  # Note: ralph-diff was removed; use ralph-sync --diff instead
   RALPH_SRC_DIR="$REPO_ROOT/lib/ralph/cmd"
-  for cmd in ralph-run ralph-step ralph-loop ralph-ready ralph-todo ralph-plan ralph-status ralph-sync ralph-check; do
+  for cmd in ralph-run ralph-todo ralph-plan ralph-status ralph-sync ralph-check; do
     local script_name="${cmd#ralph-}"  # Remove 'ralph-' prefix
     if [ -f "$RALPH_SRC_DIR/$script_name.sh" ]; then
       ln -sf "$RALPH_SRC_DIR/$script_name.sh" "$TEST_DIR/bin/$cmd"

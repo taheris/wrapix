@@ -7,12 +7,12 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   echo "Echo scenario: ready phase"
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
-  echo "Echo scenario: step phase"
+phase_run() {
+  echo "Echo scenario: run phase"
   echo "RALPH_COMPLETE"
 }

@@ -7,18 +7,10 @@ shift || true
 
 case "$COMMAND" in
   check)  exec ralph-check  "$@" ;;
-  diff)
-    # deprecated: use 'ralph sync --diff'
-    echo "WARNING: 'ralph diff' is deprecated. Use 'ralph sync --diff' instead." >&2
-    exec ralph-sync --diff "$@"
-    ;;
   logs)   exec ralph-logs   "$@" ;;
-  loop)   exec ralph-loop   "$@" ;;  # deprecated, use 'run'
   plan)   exec ralph-plan   "$@" ;;
-  ready)  exec ralph-ready  "$@" ;;  # deprecated, use 'todo'
   run)    exec ralph-run    "$@" ;;
   status) exec ralph-status "$@" ;;
-  step)   exec ralph-step   "$@" ;;  # deprecated, use 'run --once'
   sync)   exec ralph-sync   "$@" ;;
   todo)   exec ralph-todo   "$@" ;;
   tune)   exec ralph-tune   "$@" ;;
@@ -74,11 +66,6 @@ case "$COMMAND" in
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"
     echo "  edit            Edit current spec file"
-    echo ""
-    echo "Deprecated Commands:"
-    echo "  diff            Use 'sync --diff' instead"
-    echo "  step            Use 'run --once' instead"
-    echo "  loop            Use 'run' instead"
     echo ""
     echo "Environment:"
     echo "  RALPH_DIR    Working directory (default: .ralph)"

@@ -9,7 +9,7 @@ An ordered list of specs and project terminology.
 | [image-builder.md](./image-builder.md) | [`lib/sandbox/image.nix`](../lib/sandbox/image.nix) | — | Nix-based OCI image creation |
 | [linux-builder.md](./linux-builder.md) | [`lib/builder/default.nix`](../lib/builder/default.nix) | wx-ope | Remote Nix builds for macOS |
 | [notifications.md](./notifications.md) | [`lib/notify/`](../lib/notify/) | wx-q6x | Desktop notifications with focus suppression |
-| [pre-commit.md](./pre-commit.md) | [`.pre-commit-config.yaml`](../.pre-commit-config.yaml), [`lib/ralph/cmd/loop.sh`](../lib/ralph/cmd/loop.sh) | wx-t6rh | Git hooks and ralph loop integration |
+| [pre-commit.md](./pre-commit.md) | [`.pre-commit-config.yaml`](../.pre-commit-config.yaml), [`lib/ralph/cmd/run.sh`](../lib/ralph/cmd/run.sh) | wx-t6rh | Git hooks and ralph run integration |
 | [profiles.md](./profiles.md) | [`lib/sandbox/profiles.nix`](../lib/sandbox/profiles.nix) | — | Pre-configured development environments |
 | [ralph-tests.md](./ralph-tests.md) | [`tests/ralph/`](../tests/ralph/) | wx-hfp | Integration tests for ralph workflow |
 | [ralph-workflow.md](./ralph-workflow.md) | [`lib/ralph/`](../lib/ralph/) | wx-zay1 | Spec-driven AI orchestration |

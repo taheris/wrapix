@@ -103,10 +103,11 @@ Packaged templates: \`$PACKAGED_DIR\`
 
 | Template | Purpose |
 |----------|---------|
-| plan.md | Feature initialization and spec interview |
-| ready-new.md | Issue creation from new spec |
-| ready-update.md | Add tasks to existing spec |
-| step.md | Single-issue implementation |
+| plan-new.md | New feature spec interview |
+| plan-update.md | Update existing spec |
+| todo-new.md | Issue creation from new spec |
+| todo-update.md | Add tasks to existing spec |
+| run.md | Single-issue implementation |
 | config.nix | Project configuration |
 
 ### Partials (in partial/)

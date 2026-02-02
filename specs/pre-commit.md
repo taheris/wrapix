@@ -1,6 +1,6 @@
-# Pre-commit Hooks and Ralph Loop Integration
+# Pre-commit Hooks and Ralph Run Integration
 
-Unified hook system for git workflow validation and ralph loop automation.
+Unified hook system for git workflow validation and ralph run automation.
 
 ## Problem Statement
 
@@ -29,18 +29,18 @@ Builtin hooks to add:
 - `end-of-file-fixer`
 - `check-merge-conflict`
 
-#### FR2: Ralph Loop Hook Points
+#### FR2: Ralph Run Hook Points
 
-Implement four hook points in the ralph loop:
+Implement four hook points in ralph run:
 
 ```
-ralph loop [feature]
+ralph run [feature]
 ├── [pre-loop]     → Before any work starts
 │
 ├── while has_work:
-│   ├── [pre-step]  → Before each ralph-step
-│   ├── ralph-step  → Claude works on one bead
-│   └── [post-step] → After each ralph-step
+│   ├── [pre-step]  → Before each step
+│   ├── step        → Claude works on one bead
+│   └── [post-step] → After each step
 │
 └── [post-loop]     → After all work complete
 ```
@@ -127,7 +127,7 @@ Consumer repos should configure their test runners with quiet mode for LLM envir
 | File | Changes |
 |------|---------|
 | `.pre-commit-config.yaml` | Add stages, builtin hooks |
-| `lib/ralph/cmd/loop.sh` | Implement hook execution |
+| `lib/ralph/cmd/run.sh` | Implement hook execution |
 | `lib/ralph/template/config.nix` | New hooks schema |
 | `lib/ralph/template/step.md` | Update quality gates section |
 | `tests/ralph/run-tests.sh` | Update hook tests (remove skip) |
