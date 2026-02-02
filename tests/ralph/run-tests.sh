@@ -501,11 +501,11 @@ MOCK_EOF
           test_fail "[$test_case] Expected fallback mode indication"
         fi
 
-        # Verify prompts user to run ralph ready
-        if echo "$status_output" | grep -qi "ralph ready"; then
-          test_pass "[$test_case] Prompts user to run ralph ready"
+        # Verify prompts user to run ralph todo
+        if echo "$status_output" | grep -qi "ralph todo"; then
+          test_pass "[$test_case] Prompts user to run ralph todo"
         else
-          test_fail "[$test_case] Should prompt user to run ralph ready"
+          test_fail "[$test_case] Should prompt user to run ralph todo"
         fi
         ;;
 
@@ -2753,8 +2753,8 @@ test_sync_fresh() {
   # Should copy variant templates
   assert_file_exists "$RALPH_DIR/template/plan-new.md" "plan-new.md should be copied"
   assert_file_exists "$RALPH_DIR/template/plan-update.md" "plan-update.md should be copied"
-  assert_file_exists "$RALPH_DIR/template/ready-new.md" "ready-new.md should be copied"
-  assert_file_exists "$RALPH_DIR/template/ready-update.md" "ready-update.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/todo-new.md" "todo-new.md should be copied"
+  assert_file_exists "$RALPH_DIR/template/todo-update.md" "todo-update.md should be copied"
 
   # Should NOT create backup directory (nothing to backup)
   if [ -d "$RALPH_DIR/backup" ]; then

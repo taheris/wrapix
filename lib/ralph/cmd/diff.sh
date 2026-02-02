@@ -4,7 +4,7 @@ set -euo pipefail
 # ralph diff [template-name]
 # Shows local template changes vs packaged templates
 # - No args: diff all templates
-# - With name: diff specific template (e.g., "step", "plan", "ready")
+# - With name: diff specific template (e.g., "step", "plan", "todo")
 # Output is pipeable to 'ralph tune' for integration mode
 
 # Load shared helpers
@@ -26,9 +26,9 @@ TEMPLATES=(
   "plan"
   "plan-new"
   "plan-update"
-  "ready"
-  "ready-new"
-  "ready-update"
+  "todo"
+  "todo-new"
+  "todo-update"
   "step"
 )
 
@@ -52,7 +52,7 @@ show_usage() {
   echo "                 If omitted, diffs all templates and partials"
   echo ""
   echo "Templates:"
-  echo "  plan, plan-new, plan-update, ready, ready-new, ready-update, step"
+  echo "  plan, plan-new, plan-update, todo, todo-new, todo-update, step"
   echo ""
   echo "Partials:"
   echo "  context-pinning, exit-signals, spec-header"

@@ -260,8 +260,8 @@ in
         checks = assertAll [
           (assertTrue "templates-has-plan-new" (templates ? "plan-new"))
           (assertTrue "templates-has-plan-update" (templates ? "plan-update"))
-          (assertTrue "templates-has-ready-new" (templates ? "ready-new"))
-          (assertTrue "templates-has-ready-update" (templates ? "ready-update"))
+          (assertTrue "templates-has-todo-new" (templates ? "todo-new"))
+          (assertTrue "templates-has-todo-update" (templates ? "todo-update"))
           (assertTrue "templates-has-step" (templates ? "step"))
         ];
       in

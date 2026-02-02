@@ -1,15 +1,15 @@
 # shellcheck shell=bash
-# Update mode scenario - tests ralph plan --update and ralph ready in update mode
+# Update mode scenario - tests ralph plan --update and ralph todo in update mode
 # Verifies:
 # 1. ralph plan --update for existing spec works
-# 2. ralph ready in update mode bonds new tasks to existing molecule
+# 2. ralph todo in update mode bonds new tasks to existing molecule
 # 3. Existing tasks are NOT recreated
 # 4. New tasks are properly bonded with bd mol bond
 #
 # Test flow:
 # 1. Setup with existing spec + molecule
 # 2. Run ralph plan --update
-# 3. Run ralph ready (update mode)
+# 3. Run ralph todo (update mode)
 # 4. Verify new tasks bonded to existing molecule
 # 5. Verify original tasks unchanged
 

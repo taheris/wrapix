@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Happy path scenario - full workflow test
-# Tests: ralph plan -> ralph ready -> ralph step -> ralph loop
+# Tests: ralph plan -> ralph todo -> ralph step -> ralph loop
 #
 # This scenario simulates a complete feature workflow:
 # 1. plan: Creates a spec file

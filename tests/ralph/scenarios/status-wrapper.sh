@@ -337,8 +337,8 @@ run_status_wrapper_test() {
         echo "FAIL: Expected fallback mode message"
       fi
 
-      if echo "$status_output" | grep -q "ralph ready"; then
-        echo "PASS: Prompts user to run ralph ready"
+      if echo "$status_output" | grep -q "ralph todo"; then
+        echo "PASS: Prompts user to run ralph todo"
       fi
 
       echo ""

@@ -283,9 +283,9 @@ check_prerequisites() {
     failed=1
   fi
 
-  # Check ralph-step command
-  if ! command -v ralph-step &>/dev/null; then
-    echo -e "${RED}ERROR: ralph-step command not found${NC}"
+  # Check ralph-run command
+  if ! command -v ralph-run &>/dev/null; then
+    echo -e "${RED}ERROR: ralph-run command not found${NC}"
     echo "Build and install ralph first"
     failed=1
   fi
