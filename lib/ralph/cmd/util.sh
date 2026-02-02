@@ -422,8 +422,22 @@ validate_template() {
     return 1
   fi
 
-  # Check for required placeholder - if {{LABEL}} is missing, template is corrupted
-  if ! grep -q '{{LABEL}}' "$local_path" 2>/dev/null; then
+  # Resolve partials before checking for required placeholders
+  # This handles templates that include {{LABEL}} via {{> partial-name}}
+  local template_dir
+  template_dir=$(dirname "$local_path")
+  local partial_dir="$template_dir/partial"
+
+  local content
+  content=$(cat "$local_path")
+
+  # Resolve partials if the directory exists
+  if [ -d "$partial_dir" ]; then
+    content=$(resolve_partials "$content" "$partial_dir")
+  fi
+
+  # Check for required placeholder in resolved content
+  if ! echo "$content" | grep -q '{{LABEL}}'; then
     warn "$template_name is missing {{LABEL}} placeholder - resetting from source"
 
     if [ ! -f "$source_path" ]; then
@@ -504,4 +518,3 @@ resolve_partials() {
 
   echo "$result"
 }
-

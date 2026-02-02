@@ -2658,6 +2658,76 @@ test_plan_flag_validation() {
   teardown_test_env
 }
 
+# Test: plan template validation accepts Mustache partials
+# Bug: validate_template checked for {{LABEL}} directly, but plan-new.md uses
+# {{> spec-header}} partial which contains {{LABEL}}. This caused false errors
+# when RALPH_TEMPLATE_DIR is not set (can't repair from source).
+test_plan_template_with_partials() {
+  CURRENT_TEST="plan_template_with_partials"
+  test_header "Plan Template With Mustache Partials"
+
+  setup_test_env "plan-partials"
+
+  # Save and unset RALPH_TEMPLATE_DIR to simulate user not in nix develop
+  local original_template_dir="$RALPH_TEMPLATE_DIR"
+  unset RALPH_TEMPLATE_DIR
+
+  # Set up a local .ralph/template with a template using partials (like plan-new.md)
+  mkdir -p "$RALPH_DIR/template/partial"
+
+  # Create plan-new.md that uses {{> spec-header}} partial instead of {{LABEL}} directly
+  cat > "$RALPH_DIR/template/plan-new.md" << 'EOF'
+# Specification Interview
+
+{{> context-pinning}}
+
+{{> spec-header}}
+
+## Interview Guidelines
+
+Test template using partials for {{LABEL}}.
+EOF
+
+  # Create the spec-header partial that contains {{LABEL}}
+  cat > "$RALPH_DIR/template/partial/spec-header.md" << 'EOF'
+## Current Feature
+
+Label: {{LABEL}}
+Spec file: {{SPEC_PATH}}
+EOF
+
+  # Create context-pinning partial
+  cat > "$RALPH_DIR/template/partial/context-pinning.md" << 'EOF'
+## Context
+EOF
+
+  # Create exit-signals partial
+  cat > "$RALPH_DIR/template/partial/exit-signals.md" << 'EOF'
+## Exit Signals
+EOF
+
+  # Test: ralph plan should NOT complain about missing {{LABEL}}
+  # because it's provided via the spec-header partial
+  set +e
+  local output
+  output=$(ralph-plan -h test-feature 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should NOT show "missing {{LABEL}} placeholder" error
+  if echo "$output" | grep -qi "missing.*LABEL.*placeholder"; then
+    test_fail "Should not complain about missing LABEL when using spec-header partial"
+    echo "  Output: $output"
+  else
+    test_pass "Template with {{> spec-header}} partial accepted (no LABEL error)"
+  fi
+
+  # Restore RALPH_TEMPLATE_DIR
+  export RALPH_TEMPLATE_DIR="$original_template_dir"
+
+  teardown_test_env
+}
+
 # Test: discovered work - bd mol bond during step execution
 # Verifies:
 # 1. bd mol bond --type sequential during step works
@@ -3873,6 +3943,7 @@ ALL_TESTS=(
   test_malformed_bd_output_parsing
   test_partial_epic_completion
   test_plan_flag_validation
+  test_plan_template_with_partials
   test_discovered_work
   test_config_data_driven
   test_diff_no_changes
