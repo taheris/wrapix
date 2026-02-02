@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Parallel-check scenario - verifies parallel agent task selection
-# Used to test that step correctly excludes in_progress and blocked items
+# Used to test that run correctly excludes in_progress and blocked items
 #
 # This scenario simulates what a second agent would see when checking for work:
 # - Items already in_progress should not be selected
 # - Items blocked by in_progress dependencies should not be selected
 # - Only unblocked, non-in_progress items should be available
 
-phase_step() {
+phase_run() {
   # First, output what work items are available to a "second agent"
   # This simulates checking bd ready from a parallel agent's perspective
 
@@ -64,6 +64,6 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   echo "RALPH_COMPLETE"
 }

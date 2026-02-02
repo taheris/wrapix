@@ -252,14 +252,12 @@ close_epic_if_exists() {
   local label="$1"
 
   debug "Checking for open epic with label: $label"
-  local epic_output
-  epic_output=$(bd list --label "$label" --json 2>&1) || {
-    warn "Failed to check for epic: ${epic_output:0:100}"
+  local epic_json
+  epic_json=$(bd_json list --label "$label" --json) || {
+    warn "Failed to check for epic"
     return 0
   }
 
-  local epic_json
-  epic_json=$(extract_json "$epic_output")
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '[.[] | select(.issue_type == "epic" and (.status == "closed" | not))][0].id // empty' 2>/dev/null)
 
@@ -277,15 +275,13 @@ check_all_complete() {
 
   # Check if any ready beads remain (excluding epics)
   local remaining=0
-  local output
-  output=$(bd list --label "$label" --ready --json 2>&1) || {
-    warn "Failed to check remaining issues: ${output:0:100}"
+  local json
+  json=$(bd_json list --label "$label" --ready --json) || {
+    warn "Failed to check remaining issues"
     remaining=0
   }
 
-  # Extract JSON and count non-epic work items
-  local json
-  json=$(extract_json "$output")
+  # Count non-epic work items
   if [ -n "$json" ] && echo "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
     remaining=$(echo "$json" | jq '[.[] | select(.issue_type == "epic" | not)] | length')
   fi
@@ -315,15 +311,13 @@ run_step() {
   debug "Looking for issues with label: $bead_label"
 
   # Find next ready issue with this label (excluding epics - they're containers, not work items)
-  local bd_list_output
-  bd_list_output=$(bd list --label "$bead_label" --ready --sort priority --json 2>&1) || {
-    warn "bd list command failed: ${bd_list_output:0:200}"
-    bd_list_output="[]"
+  local bd_list_json
+  bd_list_json=$(bd_json list --label "$bead_label" --ready --sort priority --json) || {
+    warn "bd list command failed"
+    bd_list_json="[]"
   }
 
   # Filter out epics and get first work item
-  local bd_list_json
-  bd_list_json=$(extract_json "$bd_list_output")
   local bd_work_items
   bd_work_items=$(echo "$bd_list_json" | jq '[.[] | select(.issue_type == "epic" | not)]' 2>/dev/null || echo "[]")
 
@@ -350,15 +344,11 @@ run_step() {
 
   # Get issue details as JSON for prompt substitution
   debug "Fetching issue details for $next_issue"
-  local issue_json_raw
-  issue_json_raw=$(bd show "$next_issue" --json 2>&1) || {
-    warn "bd show failed for $next_issue: ${issue_json_raw:0:200}"
-    issue_json_raw="[]"
-  }
-
-  # Extract clean JSON (bd may emit warnings before JSON)
   local issue_json
-  issue_json=$(extract_json "$issue_json_raw")
+  issue_json=$(bd_json show "$next_issue" --json) || {
+    warn "bd show failed for $next_issue"
+    issue_json="[]"
+  }
 
   # Parse issue fields
   local issue_title=""
@@ -393,7 +383,7 @@ run_step() {
 
   # Render template using centralized render_template function
   local work_prompt
-  work_prompt=$(render_template step \
+  work_prompt=$(render_template run \
     "SPEC_PATH=$spec_path" \
     "ISSUE_ID=$next_issue" \
     "TITLE=$issue_title" \
@@ -440,10 +430,8 @@ run_step() {
 #-----------------------------------------------------------------------------
 
 if [ "$RUN_ONCE" = "true" ]; then
-  # Single step mode (replaces ralph step)
   echo "Ralph Wiggum executing single step..."
 else
-  # Loop mode (replaces ralph loop)
   echo "Ralph Wiggum work loop starting..."
 fi
 

@@ -92,9 +92,14 @@ json_array_field() {
   local field="$2"
   local desc="${3:-field}"
 
-  # Handle potentially mixed output from legacy callers
+  # Handle potentially mixed output - extract JSON if needed
   if ! echo "$json" | jq empty 2>/dev/null; then
-    json=$(extract_json "$json")
+    # Find first line starting with [ or { and extract from there
+    local json_start
+    json_start=$(echo "$json" | grep -n -E '^[\[\{]' | head -1 | cut -d: -f1)
+    if [ -n "$json_start" ]; then
+      json=$(echo "$json" | tail -n +"$json_start")
+    fi
   fi
 
   if ! validate_json_array "$json" "JSON for $desc"; then
@@ -222,9 +227,13 @@ bd_list_ids() {
 bd_list_first_id() {
   local json="$1"
 
-  # Handle potentially mixed output from legacy callers using 2>&1
+  # Handle potentially mixed output - extract JSON if needed
   if ! echo "$json" | jq empty 2>/dev/null; then
-    json=$(extract_json "$json")
+    local json_start
+    json_start=$(echo "$json" | grep -n -E '^[\[\{]' | head -1 | cut -d: -f1)
+    if [ -n "$json_start" ]; then
+      json=$(echo "$json" | tail -n +"$json_start")
+    fi
   fi
 
   if ! validate_json_array "$json" "bd list output"; then
@@ -233,37 +242,6 @@ bd_list_first_id() {
   fi
 
   echo "$json" | jq -r '.[0].id // empty'
-}
-
-# Extract JSON array or object from mixed output
-# DEPRECATED: Use bd_json() instead for new code
-# This function is kept for backward compatibility with code that already captured bd output
-# Usage: extract_json "$mixed_output"
-extract_json() {
-  local input="$1"
-
-  # If the whole thing is valid JSON, return it
-  if echo "$input" | jq empty 2>/dev/null; then
-    echo "$input"
-    return 0
-  fi
-
-  # Find first line starting with [ or { and extract from there to end
-  local json_start
-  json_start=$(echo "$input" | grep -n -E '^[\[\{]' | head -1 | cut -d: -f1)
-
-  if [ -n "$json_start" ]; then
-    local from_json
-    from_json=$(echo "$input" | tail -n +"$json_start")
-    if echo "$from_json" | jq empty 2>/dev/null; then
-      echo "$from_json"
-      return 0
-    fi
-  fi
-
-  warn "Could not extract JSON from output: ${input:0:100}..."
-  echo "$input"
-  return 1
 }
 
 # Strip "## Implementation Notes" section from markdown content
@@ -583,8 +561,8 @@ get_template_variables() {
 # Required variables that are missing will cause an error.
 #
 # Example:
-#   render_template step LABEL=my-feature ISSUE_ID=beads-123
-#   LABEL=my-feature render_template step
+#   render_template run LABEL=my-feature ISSUE_ID=beads-123
+#   LABEL=my-feature render_template run
 render_template() {
   local template_name="$1"
   shift

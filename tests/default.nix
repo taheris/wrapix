@@ -139,10 +139,10 @@ let
     set -euo pipefail
     echo "=== Ralph Integration Tests ==="
     echo ""
-    if command -v bd &>/dev/null && command -v ralph-step &>/dev/null; then
+    if command -v bd &>/dev/null && command -v ralph-run &>/dev/null; then
       ${ralphIntegrationTests}/bin/test-ralph-integration
     else
-      echo "SKIP: Ralph integration tests (bd or ralph-step not in PATH)"
+      echo "SKIP: Ralph integration tests (bd or ralph-run not in PATH)"
       echo "Run from devShell: nix develop"
       exit 1
     fi
@@ -175,7 +175,7 @@ let
     echo "----------------------------------------"
     echo "Running: Ralph Integration Tests"
     echo "----------------------------------------"
-    if command -v bd &>/dev/null && command -v ralph-step &>/dev/null; then
+    if command -v bd &>/dev/null && command -v ralph-run &>/dev/null; then
       if ${ralphIntegrationTests}/bin/test-ralph-integration; then
         echo "PASS: Ralph integration tests"
       else
@@ -183,7 +183,7 @@ let
         FAILED=1
       fi
     else
-      echo "SKIP: Ralph integration tests (bd or ralph-step not in PATH)"
+      echo "SKIP: Ralph integration tests (bd or ralph-run not in PATH)"
       SKIPPED_TESTS="$SKIPPED_TESTS ralph"
     fi
     echo ""

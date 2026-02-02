@@ -11,16 +11,16 @@ phase_plan() {
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   echo "Ready phase (hooks test)"
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
-  # Create a marker file in the expected location (TEST_DIR/step-marker)
-  # so the test can verify the step ran between pre-step and post-step hooks
+phase_run() {
+  # Create a marker file in the expected location (TEST_DIR/run-marker)
+  # so the test can verify the run executed between pre-step and post-step hooks
   if [ -n "${TEST_DIR:-}" ]; then
-    echo "step-executed:${MOCK_STEP_COUNT:-1}" >> "$TEST_DIR/step-marker"
+    echo "run-executed:${MOCK_STEP_COUNT:-1}" >> "$TEST_DIR/run-marker"
   fi
   echo "Step executed"
   echo "RALPH_COMPLETE"

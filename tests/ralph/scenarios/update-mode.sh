@@ -57,7 +57,7 @@ REQEOF
   echo "RALPH_COMPLETE"
 }
 
-phase_ready() {
+phase_todo() {
   # Get label from state or environment
   local label="${LABEL:-update-mode-test}"
   local ralph_dir="${RALPH_DIR:-.ralph}"
@@ -116,8 +116,8 @@ phase_ready() {
   echo "RALPH_COMPLETE"
 }
 
-phase_step() {
-  # Standard step implementation
+phase_run() {
+  # Standard run implementation
   echo "Implementing the assigned task..."
   echo "Reading spec and understanding requirements..."
   echo "Writing code..."

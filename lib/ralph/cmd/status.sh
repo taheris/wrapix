@@ -128,8 +128,7 @@ show_label_progress() {
 if [ -n "$MOLECULE" ]; then
   # Progress section - use JSON for reliable parsing
   echo "Progress:"
-  PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE" --json 2>&1) || true
-  PROGRESS_JSON=$(extract_json "$PROGRESS_OUTPUT")
+  PROGRESS_JSON=$(bd_json mol progress "$MOLECULE" --json 2>/dev/null) || true
   if [ -n "$PROGRESS_JSON" ] && echo "$PROGRESS_JSON" | jq empty 2>/dev/null; then
     # Extract stats from JSON
     COMPLETED=$(echo "$PROGRESS_JSON" | jq -r '.completed // 0')
@@ -229,5 +228,4 @@ echo ""
 echo "Commands:"
 echo "  ralph plan   - Create/continue spec interview"
 echo "  ralph todo   - Convert spec to beads"
-echo "  ralph step   - Work next task"
-echo "  ralph loop   - Work all tasks"
+echo "  ralph run    - Work all tasks (or --once for single task)"
