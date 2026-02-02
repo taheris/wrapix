@@ -31,10 +31,8 @@ fi
 # Templates to compare (base names without .md)
 # Main templates in .ralph/template/
 DIFF_TEMPLATES=(
-  "plan"
   "plan-new"
   "plan-update"
-  "todo"
   "todo-new"
   "todo-update"
   "run"

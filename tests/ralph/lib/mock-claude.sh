@@ -154,9 +154,14 @@ run_mock_claude() {
 #   SIGNAL_RUN - signal to output at end of run phase (empty = no signal)
 
 # Default signals (empty = no signal)
+# Note: Scenarios may use either naming convention:
+#   SIGNAL_PLAN / SIGNAL_TODO / SIGNAL_RUN (original)
+#   SIGNAL_PLAN / SIGNAL_READY / SIGNAL_STEP (alternative)
 SIGNAL_PLAN="${SIGNAL_PLAN:-}"
 SIGNAL_TODO="${SIGNAL_TODO:-}"
 SIGNAL_RUN="${SIGNAL_RUN:-}"
+SIGNAL_READY="${SIGNAL_READY:-}"
+SIGNAL_STEP="${SIGNAL_STEP:-}"
 
 # Default messages for each phase
 MSG_PLAN_WORK="${MSG_PLAN_WORK:-Working on spec...}"
@@ -189,9 +194,13 @@ _default_phase_plan() {
 }
 
 _default_phase_todo() {
-  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$SIGNAL_TODO"
+  # Support both SIGNAL_TODO and SIGNAL_READY (alias)
+  local signal="${SIGNAL_TODO:-$SIGNAL_READY}"
+  _emit_phase "$MSG_TODO_WORK" "$MSG_TODO_DONE" "$signal"
 }
 
 _default_phase_run() {
-  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$SIGNAL_RUN"
+  # Support both SIGNAL_RUN and SIGNAL_STEP (alias)
+  local signal="${SIGNAL_RUN:-$SIGNAL_STEP}"
+  _emit_phase "$MSG_RUN_WORK" "$MSG_RUN_DONE" "$signal"
 }
