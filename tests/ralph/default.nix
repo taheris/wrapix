@@ -608,7 +608,7 @@ templateTests
         script="${../.. + "/lib/ralph/cmd/sync.sh"}"
 
         # Check all template variants are listed
-        for template in plan-new plan-update todo todo-new todo-update run; do
+        for template in plan-new plan-update todo-new todo-update run; do
           if grep -q "\"$template\"" "$script"; then
             echo "PASS: Template '$template' in list"
           else

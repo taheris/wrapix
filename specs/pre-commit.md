@@ -5,11 +5,22 @@ Unified hook system for git workflow validation and ralph run automation.
 ## Problem Statement
 
 Current state:
-- Basic prek setup exists but lacks stage separation (fast vs slow checks)
+- ~~Basic prek setup exists but lacks stage separation (fast vs slow checks)~~ Done
 - Ralph loop hooks (`pre-hook`, `post-hook`) defined in config but not implemented
 - LLMs may skip quality gates defined in templates
 - No enforcement mechanism for tests/linting between steps
 - "Land the plane" protocol is manual and error-prone
+
+### Hook Ownership
+
+prek owns all `.git/hooks/` shims. Beads (bd) hooks run as prek-managed local hooks
+in `.pre-commit-config.yaml` via `bd hooks run <stage>`. The `.git/hooks/` directory
+is `chmod 555` to prevent `bd hooks install` from overwriting prek's shims.
+
+To update hooks:
+```bash
+chmod 755 .git/hooks/ && prek install -f && chmod 555 .git/hooks/
+```
 
 ## Requirements
 
@@ -21,8 +32,11 @@ Configure `.pre-commit-config.yaml` with staged hooks:
 
 | Stage | Hooks | Purpose |
 |-------|-------|---------|
-| pre-commit | nixfmt, shellcheck, builtin hooks | Fast validation on every commit |
-| pre-push | nix flake check, tests | Slow validation before sharing |
+| pre-commit | bd sync, nixfmt, shellcheck, builtin hooks | Fast validation on every commit |
+| prepare-commit-msg | bd agent trailers | Add agent identity to commits |
+| post-checkout | bd import | Import JSONL after branch switch |
+| post-merge | bd import | Import JSONL after pull/merge |
+| pre-push | bd stale check, nix flake check, tests | Slow validation before sharing |
 
 Builtin hooks to add:
 - `trailing-whitespace`
