@@ -61,10 +61,10 @@ fi
 
 log_info "Building wrapix image with MCP opt-in including audit configuration..."
 
-# Build the audited debug profile image using MCP opt-in
+# Build the debug-audit profile image using MCP opt-in
 # The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = { audit = "/workspace/.debug-audit.log"; }; }; }
-IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug-audited" --print-out-paths 2>/dev/null) || {
-    log_error "Failed to build wrapix-debug-audited image"
+IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug-audit" --print-out-paths 2>/dev/null) || {
+    log_error "Failed to build wrapix-debug-audit image"
     log_warn "Check that the mcp parameter with audit option is properly configured"
     exit 1
 }

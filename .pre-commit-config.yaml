@@ -12,7 +12,7 @@ repos:
   # Local hooks
   - repo: local
     hooks:
-      # Fast hooks (pre-commit stage)
+      # === Fast hooks (pre-commit stage) ===
       - id: nixfmt
         name: nixfmt
         entry: nix fmt -- --fail-on-change
@@ -29,7 +29,7 @@ repos:
         pass_filenames: true
         stages: [pre-commit]
 
-      # Slow hooks (pre-push stage)
+      # === Slow hooks (pre-push stage) ===
       - id: nix-flake-check
         name: nix flake check
         entry: nix flake check
@@ -41,6 +41,51 @@ repos:
       - id: test
         name: test
         entry: nix run .#test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # === Beads sync (bd) — prek-managed ===
+      # bd hooks run through prek so prek owns .git/hooks/ exclusively.
+      # The hooks directory is chmod 555 to prevent bd hooks install from
+      # overwriting prek's shims. To update hooks:
+      #   chmod 755 .git/hooks/ && prek install -f && chmod 555 .git/hooks/
+      - id: bd-pre-commit
+        name: bd pre-commit
+        entry: bd hooks run pre-commit
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: bd-prepare-commit-msg
+        name: bd prepare-commit-msg
+        entry: bd hooks run prepare-commit-msg
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [prepare-commit-msg]
+
+      - id: bd-post-checkout
+        name: bd post-checkout
+        entry: bd hooks run post-checkout
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-checkout]
+
+      - id: bd-post-merge
+        name: bd post-merge
+        entry: bd hooks run post-merge
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-merge]
+
+      - id: bd-pre-push
+        name: bd pre-push
+        entry: bd hooks run pre-push
         language: system
         pass_filenames: false
         always_run: true
