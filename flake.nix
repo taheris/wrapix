@@ -32,22 +32,18 @@
           ...
         }:
         let
-          # Overlay for host system packages (devShell, etc.)
           hostOverlay = final: prev: {
             beads = inputs'.beads.packages.default;
           };
 
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
-
+          linuxOverlay = final: prev: {
+            beads = inputs.beads.packages.${linuxSystem}.default;
+          };
           linuxPkgs = import nixpkgs {
             system = linuxSystem;
             overlays = [ linuxOverlay ];
             config.allowUnfree = true;
-          };
-
-          # Overlay for Linux container packages (must use Linux binaries)
-          linuxOverlay = final: prev: {
-            beads = inputs.beads.packages.${linuxSystem}.default;
           };
 
           test = import ./tests {
@@ -84,7 +80,6 @@
               inherit (builtins) mapAttrs;
               inherit (wrapix) profiles;
 
-              # Sandbox configurations: profile + optional MCP servers
               sandboxes = {
                 wrapix = {
                   profile = profiles.base;
@@ -95,6 +90,7 @@
                 wrapix-python = {
                   profile = profiles.python;
                 };
+
                 wrapix-debug = {
                   profile = profiles.base;
                   mcp.tmux-debug = { };
@@ -103,7 +99,7 @@
                   profile = profiles.rust;
                   mcp.tmux-debug = { };
                 };
-                wrapix-debug-audited = {
+                wrapix-debug-audit = {
                   profile = profiles.base;
                   mcp.tmux-debug.audit = "/workspace/.debug-audit.log";
                 };
