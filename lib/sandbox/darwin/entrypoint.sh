@@ -136,18 +136,12 @@ chmod 700 "$HOME/.ssh"
 
 cd /workspace
 
-# Initialize Claude config if not already present (from workspace mount)
-if [ ! -f "$HOME/.claude.json" ]; then
-  cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
-  chmod 644 "$HOME/.claude.json"
-  chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json"
-fi
-if [ ! -f "$HOME/.claude/settings.json" ]; then
-  mkdir -p "$HOME/.claude"
-  cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
-  chmod 644 "$HOME/.claude/settings.json"
-  chown "$HOST_UID:$HOST_UID" "$HOME/.claude/settings.json"
-fi
+# Initialize Claude config (always update to match container image)
+mkdir -p "$HOME/.claude"
+cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
+cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
+chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
+chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json" "$HOME/.claude" "$HOME/.claude/settings.json"
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
