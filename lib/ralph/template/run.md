@@ -8,6 +8,8 @@
 
 Read: {{SPEC_PATH}}
 
+{{SPEC_GUARD}}
+
 ## Issue Details
 
 Issue: {{ISSUE_ID}}
