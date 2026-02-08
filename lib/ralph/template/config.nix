@@ -51,13 +51,8 @@
     pre-step = "bd sync";
     post-step = "prek run && git add -A && bd sync";
     post-loop = ''
-      git add -A
       bd sync
-      git commit -m "feat({{LABEL}}): implementation complete"
-      git push
-      git -C .git/beads-worktrees/beads add -A
-      git -C .git/beads-worktrees/beads commit -m "bd sync"
-      git push origin beads
+      git diff --quiet || { echo "Error: worktree is dirty; commit or stash before pushing" >&2; exit 1; }
     '';
   };
 
