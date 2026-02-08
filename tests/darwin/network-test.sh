@@ -8,7 +8,7 @@ set -euo pipefail
 # the nix-level gate; this check handles direct script execution.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "SKIP: network-test.sh is darwin-only (current platform: $(uname -s))"
-  exit 0
+  exit 77
 fi
 
 echo "=== Container Network Verification ==="
