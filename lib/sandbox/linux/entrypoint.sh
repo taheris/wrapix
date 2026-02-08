@@ -68,6 +68,8 @@ if [ -f /workspace/.beads/config.yaml ]; then
       mkdir -p /workspace/.beads/dolt
       cp -r "$DOLT_REMOTE/." /workspace/.beads/dolt/beads/
       bd init --prefix "$PREFIX" --backend dolt --quiet 2>/dev/null || true
+      # bd init overwrites .gitignore with its template (missing dolt/ rule)
+      git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
       # SQLite/fallback mode: init from JSONL
       bd init --prefix "$PREFIX" --from-jsonl --quiet
