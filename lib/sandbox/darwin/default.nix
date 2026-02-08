@@ -46,6 +46,12 @@ in
             WRAPIX_DATA="$XDG_DATA_HOME/wrapix"
             WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
             PROJECT_DIR="''${1:-$(pwd)}"
+            shift || true
+            # Remaining args override the container command (default: /entrypoint.sh)
+            CONTAINER_CMD=(/entrypoint.sh)
+            if [ $# -gt 0 ]; then
+              CONTAINER_CMD=("$@")
+            fi
 
             # Check macOS version
             if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 26 ]; then
@@ -320,6 +326,6 @@ in
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \
               "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
-              /entrypoint.sh
+              "''${CONTAINER_CMD[@]}"
     '';
 }

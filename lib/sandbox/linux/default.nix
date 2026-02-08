@@ -45,6 +45,12 @@ in
         XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
         WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
         PROJECT_DIR="''${1:-$(pwd)}"
+        shift || true
+        # Remaining args override the container command (default: /entrypoint.sh)
+        CONTAINER_CMD=(/entrypoint.sh)
+        if [ $# -gt 0 ]; then
+          CONTAINER_CMD=("$@")
+        fi
 
         ${cleanStaleStagingDirs}
 
@@ -257,7 +263,7 @@ in
           ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \
           -w /workspace \
           "$IMAGE_ID" \
-          /entrypoint.sh
+          "''${CONTAINER_CMD[@]}"
       '';
     };
 }

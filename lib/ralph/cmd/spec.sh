@@ -142,14 +142,18 @@ run_verify_wrapix_test() {
   fi
 
   # Run the test inside the container
+  # Pass project dir as $1 so sandbox mounts the workspace correctly,
+  # then pass the test command as remaining args to override /entrypoint.sh
   local exit_code test_output
   local abs_file_path
   abs_file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+  local project_dir
+  project_dir="$(pwd)"
 
   if [ -n "$function_name" ]; then
-    test_output=$(nix run .#wrapix-debug -- bash -c "source \"$abs_file_path\" && \"$function_name\"" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(nix run .#wrapix-debug -- "$project_dir" bash -c "source \"$abs_file_path\" && \"$function_name\"" 2>&1) && exit_code=0 || exit_code=$?
   else
-    test_output=$(nix run .#wrapix-debug -- bash -c "\"$abs_file_path\"" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(nix run .#wrapix-debug -- "$project_dir" bash -c "\"$abs_file_path\"" 2>&1) && exit_code=0 || exit_code=$?
   fi
 
   if [ "$exit_code" -eq 0 ]; then
