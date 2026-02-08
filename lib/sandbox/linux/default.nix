@@ -231,6 +231,7 @@ in
           $NETWORK_CAP_ARGS \
           --cpus="$CPUS" \
           --memory=${toString memoryMb}m \
+          --pids-limit=4096 \
           --network=pasta \
           --userns=keep-id \
           --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
