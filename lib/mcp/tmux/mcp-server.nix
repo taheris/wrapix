@@ -19,6 +19,10 @@ pkgs.rustPlatform.buildRustPackage {
     lockFile = ./tmux-debug-mcp/Cargo.lock;
   };
 
+  # Prevent cargo from creating /homeless-shelter/.cargo/ when building
+  # without Nix sandbox (e.g., inside containers where sandbox = false)
+  env.HOME = "/tmp";
+
   # tmux is required at runtime for pane management
   buildInputs = [ pkgs.tmux ];
 

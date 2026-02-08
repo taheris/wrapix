@@ -151,10 +151,10 @@ The `CLAUDE_CODE_OAUTH_TOKEN` is passed to containers via environment variable f
 
 The `WRAPIX_NETWORK` environment variable controls outbound network access:
 
-- `WRAPIX_NETWORK=full` — unrestricted outbound (current behavior, default)
-- `WRAPIX_NETWORK=allow` — outbound limited to profile allowlist + base allowlist
+- `WRAPIX_NETWORK=open` — unrestricted outbound (current behavior, default)
+- `WRAPIX_NETWORK=limit` — outbound limited to profile allowlist + base allowlist
 
-**Base allowlist** (always included in `allow` mode):
+**Base allowlist** (always included in `limit` mode):
 - `api.anthropic.com` — Claude API
 - `github.com` / `ssh.github.com` — git operations
 - `cache.nixos.org` — Nix binary cache

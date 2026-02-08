@@ -190,10 +190,10 @@ if [ -f /workspace/specs/README.md ]; then
 $(cat /workspace/specs/README.md)"
 fi
 
-# Apply network filtering when WRAPIX_NETWORK=allow
+# Apply network filtering when WRAPIX_NETWORK=limit
 # Runs as root (before unshare), so iptables works without extra capabilities
-if [ "${WRAPIX_NETWORK:-full}" = "allow" ]; then
-  echo "Network mode: allow (restricting outbound to allowlist)" >&2
+if [ "${WRAPIX_NETWORK:-open}" = "limit" ]; then
+  echo "Network mode: limit (restricting outbound to allowlist)" >&2
 
   if iptables -P OUTPUT DROP 2>/dev/null; then
     # Allow loopback traffic

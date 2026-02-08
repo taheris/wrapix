@@ -89,10 +89,10 @@ if [ -f /workspace/specs/README.md ]; then
 $(cat /workspace/specs/README.md)"
 fi
 
-# Apply network filtering when WRAPIX_NETWORK=allow
+# Apply network filtering when WRAPIX_NETWORK=limit
 # Resolves allowlisted domains to IPs and configures iptables OUTPUT chain
-if [ "${WRAPIX_NETWORK:-full}" = "allow" ]; then
-  echo "Network mode: allow (restricting outbound to allowlist)" >&2
+if [ "${WRAPIX_NETWORK:-open}" = "limit" ]; then
+  echo "Network mode: limit (restricting outbound to allowlist)" >&2
 
   if iptables -P OUTPUT DROP 2>/dev/null; then
     # Allow loopback traffic
@@ -135,7 +135,7 @@ if [ "${WRAPIX_NETWORK:-full}" = "allow" ]; then
     echo "Network filtering active: ${WRAPIX_NETWORK_ALLOWLIST:-}" >&2
   else
     echo "Warning: iptables not available, network filtering disabled" >&2
-    echo "  WRAPIX_NETWORK=allow requires NET_ADMIN capability (microVM recommended)" >&2
+    echo "  WRAPIX_NETWORK=limit requires NET_ADMIN capability (microVM recommended)" >&2
   fi
 fi
 

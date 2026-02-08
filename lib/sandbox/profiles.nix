@@ -51,7 +51,7 @@ let
   # Environment variables in all profiles
   baseEnv = { };
 
-  # Base network allowlist for WRAPIX_NETWORK=allow mode
+  # Base network allowlist for WRAPIX_NETWORK=limit mode
   # These domains are always permitted regardless of profile
   baseNetworkAllowlist = [
     "api.anthropic.com" # Claude API

@@ -325,7 +325,7 @@ in
       '';
 
   # Verify WRAPIX_NETWORK environment variable support in launcher and entrypoints
-  # Security property: network filtering restricts outbound access in allow mode
+  # Security property: network filtering restricts outbound access in limit mode
   # See specs/security-review.md "Network Modes" section
   network-mode-configuration =
     let
@@ -349,8 +349,8 @@ in
         grep -q 'WRAPIX_NETWORK' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK env var handling"; exit 1; }
         echo "PASS: WRAPIX_NETWORK env var handled in launcher"
 
-        # Test 2: Launcher validates mode values (full/allow)
-        grep -q "full|allow" "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK mode validation"; exit 1; }
+        # Test 2: Launcher validates mode values (open/limit)
+        grep -q "open|limit" "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK mode validation"; exit 1; }
         echo "PASS: WRAPIX_NETWORK mode validation present"
 
         # Test 3: Launcher passes WRAPIX_NETWORK_ALLOWLIST to container
@@ -376,9 +376,9 @@ in
         grep -q 'files.pythonhosted.org' "$PYTHON_SCRIPT" || { echo "FAIL: Missing files.pythonhosted.org in python allowlist"; exit 1; }
         echo "PASS: Python profile allowlist includes pypi domains"
 
-        # Test 7: Launcher adds NET_ADMIN capability for allow mode
-        grep -q 'NET_ADMIN' "$SCRIPT" || { echo "FAIL: Missing NET_ADMIN capability for allow mode"; exit 1; }
-        echo "PASS: NET_ADMIN capability added for allow mode"
+        # Test 7: Launcher adds NET_ADMIN capability for limit mode
+        grep -q 'NET_ADMIN' "$SCRIPT" || { echo "FAIL: Missing NET_ADMIN capability for limit mode"; exit 1; }
+        echo "PASS: NET_ADMIN capability added for limit mode"
 
         # Test 8: Linux entrypoint has iptables filtering logic
         LINUX_EP="${../lib/sandbox/linux/entrypoint.sh}"
