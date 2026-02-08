@@ -106,6 +106,76 @@ Move darwin tests into `tests/darwin/`:
 | `tests/darwin-network.nix` | `tests/darwin/network.nix` |
 | `tests/darwin.nix` | `tests/darwin/default.nix` |
 
+## Test Exit Code Convention
+
+Standalone shell test scripts use special exit codes to distinguish pass, fail, skip, and not-yet-implemented results. The test runner treats skip and not-implemented as non-failures.
+
+### Exit Codes
+
+| Exit Code | Meaning | When to Use |
+|-----------|---------|-------------|
+| 0 | Pass | Test ran and succeeded |
+| 1 | Fail | Test ran and failed |
+| 77 | Skip | Test cannot run on this platform/environment (legitimate) |
+| 78 | Not Yet Implemented | Test exists for a feature that hasn't been built yet |
+
+Exit code 77 follows the convention used by Automake, TAP, and GNU test frameworks. Exit code 78 is project-specific (unused by convention and available for custom meaning).
+
+### When to Use Exit 77 (Skip)
+
+Use exit 77 when a test cannot run due to platform or environment constraints that are outside the test's control:
+
+- **Platform checks** — Darwin-only test running on Linux, or vice versa
+- **Hardware requirements** — KVM availability, GPU, specific CPU features
+- **Runtime conditions** — Container system not running, notification daemon not available
+- **Upstream limitations** — `bd` features with known behavioral constraints (e.g., blocked-by-in_progress filtering)
+
+Use `test_skip` from `assertions.sh` to exit with code 77 and print a message:
+
+```bash
+[[ "$(uname)" == "Darwin" ]] || test_skip "Requires macOS"
+```
+
+### When to Use Exit 78 (Not Yet Implemented)
+
+Use exit 78 when a test exists for a feature that genuinely hasn't been built yet:
+
+- **Config option doesn't exist** — e.g., `loop.max-iterations` is spec'd but not implemented
+- **Feature not built** — the test is a placeholder for planned functionality
+- **API not available** — the function or command the test exercises doesn't exist yet
+
+Use `test_not_implemented` from `assertions.sh` to exit with code 78 and print a message:
+
+```bash
+test_not_implemented "loop.max-iterations config option not yet implemented"
+```
+
+### How the Test Runner Handles These Codes
+
+The test runner (`runner.sh`) executes each test in an isolated subshell via `run_test_isolated`. An EXIT trap captures the exit code and categorizes it:
+
+- Exit 77 increments the **skipped** counter
+- Exit 78 increments the **not_implemented** counter
+- Neither counts as a failure — the overall test suite passes as long as the **failed** counter is zero
+
+### Summary Format
+
+The test runner prints results in this format:
+
+```
+Results: 45 passed, 0 failed, 3 skipped (exit 77), 4 not implemented (exit 78)
+```
+
+CI systems can monitor skip and not-implemented counts to detect unexpected changes (e.g., a skip count increasing may indicate a regression in test infrastructure).
+
+### Nix Derivation Tests
+
+Nix derivation tests (`*.nix`) must still exit 0 for build success, since Nix treats any non-zero exit code as a build failure. The exit 77/78 convention applies only to standalone shell test scripts (`.sh` files) executed by the test runner.
+
+### Skip Messages (NFR1)
+
+Every skip must print a message explaining why the test was skipped. The message should state what prerequisite is missing and, where possible, how to provide it. Both `test_skip` and `test_not_implemented` print to stderr automatically.
+
 ## Test Library Modules
 
 The test infrastructure is split into reusable libraries under `tests/ralph/lib/`:
