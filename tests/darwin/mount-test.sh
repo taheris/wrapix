@@ -1,9 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Container mount verification test script
 # This runs INSIDE the container to verify mounts are working
 #
 # Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
 set -euo pipefail
+
+# Skip on non-Darwin platforms — this test uses darwin-specific mounts
+# (VirtioFS, WRAPIX_DIR_MOUNTS staging). See tests/darwin/default.nix for
+# the nix-level gate; this check handles direct script execution.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "SKIP: mount-test.sh is darwin-only (current platform: $(uname -s))"
+  exit 0
+fi
 
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"

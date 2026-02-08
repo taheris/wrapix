@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Container network verification test script
 # This runs INSIDE the container to verify networking is working
 set -euo pipefail
