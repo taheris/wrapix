@@ -133,7 +133,7 @@ nix-daemon                         sshd (:22)
   [verify](tests/builder-test.sh)
 - [ ] SSH connection is secure (key-based auth)
   [judge](tests/judges/linux-builder.sh::test_ssh_key_auth)
-- [ ] nix-darwin config enables permanent setup
+- [ ] `wrapix-builder config` prints nix-darwin configuration snippet (full nix-darwin module not yet implemented)
   [judge](tests/judges/linux-builder.sh::test_nix_darwin_config)
 - [ ] Builder can be stopped and restarted cleanly
   [verify](tests/builder-test.sh)
