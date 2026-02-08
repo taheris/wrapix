@@ -20,13 +20,6 @@ init_test_state
 setup_colors
 
 #-----------------------------------------------------------------------------
-# Helper: check if ralph-spec command is available
-#-----------------------------------------------------------------------------
-has_ralph_spec() {
-  command -v ralph-spec &>/dev/null
-}
-
-#-----------------------------------------------------------------------------
 # Helper: create a sample spec with mixed annotations for testing
 #-----------------------------------------------------------------------------
 create_annotated_spec() {
@@ -75,12 +68,6 @@ test_spec_annotation_counts() {
   test_header "Ralph Spec Annotation Counts"
 
   setup_test_env "spec-counts"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   # Create spec files with known annotations
   create_annotated_spec "$TEST_DIR/specs/test-feature.md"
@@ -154,12 +141,6 @@ test_spec_verbose() {
   test_header "Ralph Spec --verbose"
 
   setup_test_env "spec-verbose"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   create_annotated_spec "$TEST_DIR/specs/test-feature.md"
 
@@ -243,12 +224,6 @@ test_spec_verify() {
   test_header "Ralph Spec --verify"
 
   setup_test_env "spec-verify"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   # Create a spec with verify and judge annotations
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
@@ -348,12 +323,6 @@ test_spec_judge() {
 
   setup_test_env "spec-judge"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
-
   # Create a spec with judge annotations
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
@@ -408,12 +377,6 @@ test_spec_all() {
   test_header "Ralph Spec --all"
 
   setup_test_env "spec-all"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   # Create spec with both verify and judge
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
@@ -482,12 +445,6 @@ test_spec_no_execution_default() {
   test_header "Ralph Spec Default (No Execution)"
 
   setup_test_env "spec-no-exec"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   # Create a spec with verify annotations pointing to slow tests
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
@@ -890,12 +847,6 @@ test_spec_verify_molecule_header() {
 
   setup_test_env "spec-verify-mol"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
-
   # Create spec with a verify annotation
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
@@ -942,12 +893,6 @@ test_spec_verify_no_molecule_header() {
 
   setup_test_env "spec-verify-no-mol"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
-
   # Create spec with a verify annotation
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
@@ -993,12 +938,6 @@ test_spec_verify_verbose_output() {
   test_header "Ralph Spec --verify --verbose Shows Output"
 
   setup_test_env "spec-verify-verbose"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
-    teardown_test_env
-    return
-  fi
 
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
@@ -1063,12 +1002,6 @@ test_spec_short_flag_v() {
 
   setup_test_env "spec-short-v"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
 
@@ -1117,12 +1050,6 @@ test_spec_short_flag_j() {
 
   setup_test_env "spec-short-j"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
 
@@ -1165,12 +1092,6 @@ test_spec_short_flag_a() {
 
   setup_test_env "spec-short-a"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
 
@@ -1212,12 +1133,6 @@ test_spec_short_flag_s() {
   test_header "Ralph Spec -s maps to --spec"
 
   setup_test_env "spec-short-s"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
 
   # Create two specs
   cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
@@ -1291,12 +1206,6 @@ test_spec_verbose_no_short_v() {
 
   setup_test_env "spec-verbose-no-v"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
 
@@ -1340,12 +1249,6 @@ test_spec_short_compose() {
 
   setup_test_env "spec-short-compose"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
 # Test Feature
 
@@ -1387,12 +1290,6 @@ test_spec_multi_grouped_output() {
   test_header "Multi-spec Grouped Output"
 
   setup_test_env "spec-multi-grouped"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
 
   # Create two specs with verify annotations
   cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
@@ -1458,12 +1355,6 @@ test_spec_multi_summary_line() {
 
   setup_test_env "spec-multi-summary"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
 # Alpha
 
@@ -1521,12 +1412,6 @@ test_spec_nonzero_exit() {
 
   setup_test_env "spec-nonzero-exit"
 
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
-
   # Create one passing spec and one failing spec
   cat > "$TEST_DIR/specs/pass-spec.md" << 'SPEC'
 # Passing Spec
@@ -1583,12 +1468,6 @@ test_spec_skip_empty() {
   test_header "Multi-spec Skips Specs Without Success Criteria"
 
   setup_test_env "spec-skip-empty"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
 
   # Create a spec with criteria
   cat > "$TEST_DIR/specs/has-criteria.md" << 'SPEC'
@@ -1654,12 +1533,6 @@ test_spec_multi_molecule_lookup() {
   test_header "Multi-spec Molecule ID Lookup from README.md"
 
   setup_test_env "spec-multi-mol"
-
-  if ! has_ralph_spec; then
-    test_skip "ralph-spec command not available"
-    teardown_test_env
-    return
-  fi
 
   # Create specs
   cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
