@@ -247,11 +247,11 @@ main() {
     log_info "Tests to run: ${tests_to_run[*]}"
     echo ""
 
-    # Check prerequisites
+    # Check prerequisites — skip gracefully if not available
     log_info "Checking prerequisites..."
     if ! check_prerequisites; then
-        log_error "Prerequisites not met"
-        exit 2
+        echo "SKIP: run-integration.sh prerequisites not met (tmux, jq, or tmux-debug-mcp not available)"
+        exit 0
     fi
     log_info "Prerequisites OK"
     echo ""
