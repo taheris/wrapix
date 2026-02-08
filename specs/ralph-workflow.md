@@ -703,33 +703,61 @@ Ralph uses `bd mol` for work tracking:
 ## Success Criteria
 
 - [ ] `ralph plan -n <label>` creates new spec in `specs/`
+  [verify](tests/ralph/run-tests.sh::test_plan_flag_validation)
 - [ ] `ralph plan -h <label>` creates new spec in `state/`
+  [verify](tests/ralph/run-tests.sh::test_plan_flag_validation)
 - [ ] `ralph plan -u <label>` validates spec exists before updating
+  [verify](tests/ralph/run-tests.sh::test_plan_flag_validation)
 - [ ] `ralph plan -u <label>` writes NEW requirements to `state/<label>.md`
+  [judge](tests/judges/ralph-workflow.sh::test_plan_update_writes_new_requirements)
 - [ ] `ralph plan -u -h <label>` updates hidden spec
+  [judge](tests/judges/ralph-workflow.sh::test_plan_update_hidden)
 - [ ] `ralph plan` runs Claude in wrapix container with base profile
+  [judge](tests/judges/ralph-workflow.sh::test_plan_runs_in_container)
 - [ ] `ralph todo` creates molecule and stores ID in current.json
+  [verify](tests/ralph/run-tests.sh::test_run_closes_issue_on_complete)
 - [ ] `ralph todo` (new mode) creates tasks from `specs/<label>.md`
+  [verify](tests/ralph/run-tests.sh::test_run_closes_issue_on_complete)
 - [ ] `ralph todo` (update mode) reads NEW requirements from `state/<label>.md`
+  [judge](tests/judges/ralph-workflow.sh::test_todo_update_reads_new_requirements)
 - [ ] `ralph todo` (update mode) creates tasks ONLY for new requirements
+  [judge](tests/judges/ralph-workflow.sh::test_todo_update_creates_only_new)
 - [ ] `ralph todo` (update mode) merges `state/<label>.md` into `specs/<label>.md`
+  [judge](tests/judges/ralph-workflow.sh::test_todo_update_merges_state)
 - [ ] `ralph todo` (update mode) deletes `state/<label>.md` after merge
+  [judge](tests/judges/ralph-workflow.sh::test_todo_update_deletes_state)
 - [ ] `ralph todo` runs Claude in wrapix container with base profile
+  [judge](tests/judges/ralph-workflow.sh::test_todo_runs_in_container)
 - [ ] `ralph todo` LLM assigns `profile:X` labels per-task based on implementation needs
+  [verify](tests/ralph/run-tests.sh::test_run_profile_selection)
 - [ ] `ralph run` reads `profile:X` label from bead and uses that profile
+  [verify](tests/ralph/run-tests.sh::test_run_profile_selection)
 - [ ] `ralph run --profile=X` overrides bead profile label
+  [verify](tests/ralph/run-tests.sh::test_run_profile_selection)
 - [ ] `ralph run` falls back to base profile when no label present
+  [verify](tests/ralph/run-tests.sh::test_run_profile_selection)
 - [ ] `ralph run --once` completes single issues with blocked-vs-waiting guidance
+  [verify](tests/ralph/run-tests.sh::test_run_closes_issue_on_complete)
 - [ ] `ralph run` (continuous) runs on host, spawning containerized work per issue
+  [verify](tests/ralph/run-tests.sh::test_run_loop_processes_all)
 - [ ] `ralph check` validates all templates and partials
+  [verify](tests/ralph/run-tests.sh::test_check_valid_templates)
 - [ ] `ralph tune` (interactive) identifies correct template and makes edits
+  [judge](tests/judges/ralph-workflow.sh::test_tune_interactive)
 - [ ] `ralph tune` (integration) ingests diff and interviews about changes
+  [judge](tests/judges/ralph-workflow.sh::test_tune_integration)
 - [ ] `ralph sync --diff` shows local template changes vs packaged
+  [verify](tests/ralph/run-tests.sh::test_diff_local_modifications)
 - [ ] `ralph sync` updates templates and backs up customizations
+  [verify](tests/ralph/run-tests.sh::test_sync_backup)
 - [ ] `ralph sync --dry-run` previews without executing
+  [verify](tests/ralph/run-tests.sh::test_sync_dry_run)
 - [ ] `nix flake check` includes template validation
+  [verify](tests/ralph/run-tests.sh::test_check_exit_codes)
 - [ ] Templates use Nix-native definitions with static validation
+  [verify](tests/ralph/run-tests.sh::test_render_template_basic)
 - [ ] Partials work via `{{> partial-name}}` markers
+  [verify](tests/ralph/run-tests.sh::test_plan_template_with_partials)
 
 ## Out of Scope
 

@@ -128,10 +128,15 @@ nix-daemon                         sshd (:22)
 ## Success Criteria
 
 - [ ] `nix build --system aarch64-linux` works on macOS
+  [verify](tests/builder-test.sh)
 - [ ] Nix store persists across container restarts
+  [verify](tests/builder-test.sh)
 - [ ] SSH connection is secure (key-based auth)
+  [judge](tests/judges/linux-builder.sh::test_ssh_key_auth)
 - [ ] nix-darwin config enables permanent setup
+  [judge](tests/judges/linux-builder.sh::test_nix_darwin_config)
 - [ ] Builder can be stopped and restarted cleanly
+  [verify](tests/builder-test.sh)
 
 ## Out of Scope
 

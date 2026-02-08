@@ -91,10 +91,15 @@ mkSandbox {
 ## Success Criteria
 
 - [ ] Base profile provides functional development environment
+  [judge](tests/judges/profiles.sh::test_base_profile_functional)
 - [ ] Rust profile can compile and run Rust projects
+  [judge](tests/judges/profiles.sh::test_rust_profile)
 - [ ] Python profile can run Python scripts with dependencies
+  [judge](tests/judges/profiles.sh::test_python_profile)
 - [ ] deriveProfile correctly merges packages and environment
+  [judge](tests/judges/profiles.sh::test_derive_profile_merge)
 - [ ] Profiles are composable (can extend extended profiles)
+  [verify](tests/tmux-mcp/e2e/test_profile_composition.sh)
 
 ## Out of Scope
 
