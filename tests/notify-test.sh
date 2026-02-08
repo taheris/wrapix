@@ -52,7 +52,7 @@ else
     echo "  PASS: Socket exists at $SOCKET"
   else
     echo "  SKIP: Socket not mounted (daemon may not be running on host)"
-    exit 0
+    exit 77
   fi
 
   # Test 2: Check socket permissions
