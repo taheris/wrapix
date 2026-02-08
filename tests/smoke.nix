@@ -294,33 +294,40 @@ in
   # Verify wrapix script contains krun microVM boundary detection
   # Security property: Linux defaults to microVM boundary via krun runtime
   # See specs/security-review.md "MicroVM Boundary" section
+  # Linux-only: krun detection only exists in the Linux launcher
   linux-microvm-krun-detection =
-    runCommandLocal "smoke-linux-microvm-krun"
-      {
-        nativeBuildInputs = [ bash ];
-      }
-      ''
-        echo "Checking krun microVM detection in wrapix script..."
-        SCRIPT="${wrapix}/bin/wrapix"
+    if isLinux then
+      runCommandLocal "smoke-linux-microvm-krun"
+        {
+          nativeBuildInputs = [ bash ];
+        }
+        ''
+          echo "Checking krun microVM detection in wrapix script..."
+          SCRIPT="${wrapix}/bin/wrapix"
 
-        # Verify krun detection logic exists
-        grep -q 'WRAPIX_NO_MICROVM' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NO_MICROVM env var check"; exit 1; }
-        echo "PASS: WRAPIX_NO_MICROVM opt-out supported"
+          # Verify krun detection logic exists
+          grep -q 'WRAPIX_NO_MICROVM' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NO_MICROVM env var check"; exit 1; }
+          echo "PASS: WRAPIX_NO_MICROVM opt-out supported"
 
-        # Verify /dev/kvm detection
-        grep -q '/dev/kvm' "$SCRIPT" || { echo "FAIL: Missing /dev/kvm detection"; exit 1; }
-        echo "PASS: /dev/kvm availability check present"
+          # Verify /dev/kvm detection
+          grep -q '/dev/kvm' "$SCRIPT" || { echo "FAIL: Missing /dev/kvm detection"; exit 1; }
+          echo "PASS: /dev/kvm availability check present"
 
-        # Verify krun runtime flag is used
-        grep -q '\-\-runtime krun' "$SCRIPT" || { echo "FAIL: Missing --runtime krun flag"; exit 1; }
-        echo "PASS: --runtime krun flag present"
+          # Verify krun runtime flag is used
+          grep -q '\-\-runtime krun' "$SCRIPT" || { echo "FAIL: Missing --runtime krun flag"; exit 1; }
+          echo "PASS: --runtime krun flag present"
 
-        # Verify error message mentions crun-krun installation
-        grep -q 'crun-krun' "$SCRIPT" || { echo "FAIL: Missing crun-krun install instructions"; exit 1; }
-        echo "PASS: crun-krun installation instructions present"
+          # Verify error message mentions crun-krun installation
+          grep -q 'crun-krun' "$SCRIPT" || { echo "FAIL: Missing crun-krun install instructions"; exit 1; }
+          echo "PASS: crun-krun installation instructions present"
 
-        echo ""
-        echo "Linux microVM krun detection validation passed"
+          echo ""
+          echo "Linux microVM krun detection validation passed"
+          mkdir $out
+        ''
+    else
+      runCommandLocal "smoke-linux-microvm-krun" { } ''
+        echo "SKIP: krun microVM detection (Linux-only test)"
         mkdir $out
       '';
 
@@ -376,9 +383,19 @@ in
         grep -q 'files.pythonhosted.org' "$PYTHON_SCRIPT" || { echo "FAIL: Missing files.pythonhosted.org in python allowlist"; exit 1; }
         echo "PASS: Python profile allowlist includes pypi domains"
 
-        # Test 7: Launcher adds NET_ADMIN capability for limit mode
-        grep -q 'NET_ADMIN' "$SCRIPT" || { echo "FAIL: Missing NET_ADMIN capability for limit mode"; exit 1; }
-        echo "PASS: NET_ADMIN capability added for limit mode"
+        # Test 7: Linux launcher adds NET_ADMIN capability for limit mode
+        # Darwin doesn't need NET_ADMIN (entrypoint runs as root before unshare)
+        ${
+          if isLinux then
+            ''
+              grep -q 'NET_ADMIN' "$SCRIPT" || { echo "FAIL: Missing NET_ADMIN capability for limit mode"; exit 1; }
+              echo "PASS: NET_ADMIN capability added for limit mode"
+            ''
+          else
+            ''
+              echo "SKIP: NET_ADMIN check (Linux-only, Darwin entrypoint runs as root)"
+            ''
+        }
 
         # Test 8: Linux entrypoint has iptables filtering logic
         LINUX_EP="${../lib/sandbox/linux/entrypoint.sh}"
