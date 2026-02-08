@@ -35,11 +35,11 @@ run_verify_test() {
     return
   fi
 
-  local exit_code
+  local exit_code test_output
   if [ -n "$function_name" ]; then
-    "$file_path" "$function_name" >/dev/null 2>&1 && exit_code=0 || exit_code=$?
+    test_output=$("$file_path" "$function_name" 2>&1) && exit_code=0 || exit_code=$?
   else
-    "$file_path" >/dev/null 2>&1 && exit_code=0 || exit_code=$?
+    test_output=$("$file_path" 2>&1) && exit_code=0 || exit_code=$?
   fi
 
   if [ "$exit_code" -eq 0 ]; then
@@ -51,6 +51,13 @@ run_verify_test() {
     echo "         $file_path${function_name:+::$function_name} (exit $exit_code)"
     ((failed++)) || true
     has_failure=true
+  fi
+
+  # Show captured output in verbose mode
+  if [ "$VERBOSE" = "true" ] && [ -n "$test_output" ]; then
+    echo "$test_output" | while IFS= read -r line; do
+      echo "         | $line"
+    done
   fi
 }
 
@@ -179,9 +186,10 @@ run_spec_tests() {
     error "No active feature. Run 'ralph plan <label>' first."
   fi
 
-  local label spec_hidden spec_file
+  local label spec_hidden spec_file molecule_id
   label=$(jq -r '.label // empty' "$current_file")
   spec_hidden=$(jq -r '.hidden // false' "$current_file")
+  molecule_id=$(jq -r '.molecule // empty' "$current_file")
 
   if [ -z "$label" ]; then
     error "No label in current.json. Run 'ralph plan <label>' first."
@@ -219,8 +227,12 @@ run_spec_tests() {
     mode_label="Judge"
   fi
 
-  echo "Ralph $mode_label: $label"
-  printf '=%.0s' $(seq 1 $((${#mode_label} + ${#label} + 9)))
+  local header_text="Ralph $mode_label: $label"
+  if [ -n "$molecule_id" ]; then
+    header_text="$header_text ($molecule_id)"
+  fi
+  echo "$header_text"
+  printf '=%.0s' $(seq 1 ${#header_text})
   echo ""
 
   passed=0
