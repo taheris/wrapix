@@ -741,3 +741,139 @@ resolve_partials() {
 
   echo "$result"
 }
+
+# Parse annotation link in 'path::function' format
+# Usage: parse_annotation_link "tests/notify-test.sh::test_notification_timing"
+# Output: two lines: file_path and function_name (function_name empty if no ::)
+# Returns: 0 on valid input, 1 on empty input
+parse_annotation_link() {
+  local link="$1"
+
+  if [ -z "$link" ]; then
+    warn "Empty annotation link"
+    return 1
+  fi
+
+  local file_path function_name
+  if [[ "$link" == *"::"* ]]; then
+    file_path="${link%%::*}"
+    function_name="${link#*::}"
+  else
+    file_path="$link"
+    function_name=""
+  fi
+
+  echo "$file_path"
+  echo "$function_name"
+  return 0
+}
+
+# Parse spec annotations from a spec file's Success Criteria section
+# Scans for '- [ ]' or '- [x]' lines, then checks the next line for
+# [verify](...) or [judge](...) links.
+#
+# Usage: parse_spec_annotations "specs/notifications.md"
+# Output: TAB-separated records, one per criterion:
+#   criterion_text<TAB>annotation_type<TAB>file_path<TAB>function_name<TAB>checked
+#
+# annotation_type: "verify", "judge", or "none"
+# file_path/function_name: empty when annotation_type is "none"
+# checked: "x" if [x], "" if [ ]
+#
+# Returns: 0 on success, 1 if file not found or no Success Criteria section
+parse_spec_annotations() {
+  local spec_file="$1"
+
+  if [ ! -f "$spec_file" ]; then
+    warn "Spec file not found: $spec_file"
+    return 1
+  fi
+
+  local in_criteria=0
+  local prev_criterion=""
+  local prev_checked=""
+  local has_criteria=0
+
+  while IFS= read -r line; do
+    # Detect start of Success Criteria section
+    if [[ "$line" =~ ^##[[:space:]]+Success[[:space:]]+Criteria ]]; then
+      in_criteria=1
+      continue
+    fi
+
+    # Detect end of Success Criteria section (next ## heading)
+    if [ "$in_criteria" -eq 1 ] && [[ "$line" =~ ^##[[:space:]] ]] && [[ ! "$line" =~ ^##[[:space:]]+Success ]]; then
+      # Flush any pending criterion without annotation
+      if [ -n "$prev_criterion" ]; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$prev_criterion" "none" "" "" "$prev_checked"
+        prev_criterion=""
+        prev_checked=""
+      fi
+      break
+    fi
+
+    if [ "$in_criteria" -eq 0 ]; then
+      continue
+    fi
+
+    # Match criterion lines: - [ ] or - [x]
+    local criterion_re='^[[:space:]]*-[[:space:]]\[([[:space:]x])\][[:space:]]+(.*)'
+    if [[ "$line" =~ $criterion_re ]]; then
+      # Flush previous criterion if it had no annotation
+      if [ -n "$prev_criterion" ]; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$prev_criterion" "none" "" "" "$prev_checked"
+      fi
+      local check_mark="${BASH_REMATCH[1]}"
+      prev_criterion="${BASH_REMATCH[2]}"
+      prev_checked=""
+      if [ "$check_mark" = "x" ]; then
+        prev_checked="x"
+      fi
+      has_criteria=1
+      continue
+    fi
+
+    # Match annotation lines: [verify](...) or [judge](...)
+    if [ -n "$prev_criterion" ]; then
+      local ann_type="" ann_target=""
+      # Use variables for regexes containing brackets (bash workaround)
+      local verify_re='^[[:space:]]*\[verify\]\(([^)]+)\)'
+      local judge_re='^[[:space:]]*\[judge\]\(([^)]+)\)'
+      if [[ "$line" =~ $verify_re ]]; then
+        ann_type="verify"
+        ann_target="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ $judge_re ]]; then
+        ann_type="judge"
+        ann_target="${BASH_REMATCH[1]}"
+      fi
+
+      if [ -n "$ann_type" ]; then
+        # Parse the annotation link
+        local file_path="" function_name=""
+        if [[ "$ann_target" == *"::"* ]]; then
+          file_path="${ann_target%%::*}"
+          function_name="${ann_target#*::}"
+        else
+          file_path="$ann_target"
+          function_name=""
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$prev_criterion" "$ann_type" "$file_path" "$function_name" "$prev_checked"
+        prev_criterion=""
+        prev_checked=""
+        continue
+      fi
+    fi
+  done < "$spec_file"
+
+  # Flush final criterion if file ends inside Success Criteria
+  if [ -n "$prev_criterion" ]; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$prev_criterion" "none" "" "" "$prev_checked"
+  fi
+
+  if [ "$has_criteria" -eq 0 ]; then
+    debug "No success criteria found in $spec_file"
+    return 1
+  fi
+
+  return 0
+}

@@ -3991,6 +3991,269 @@ test_get_variable_definitions() {
 }
 
 #-----------------------------------------------------------------------------
+# Annotation Parsing Tests
+#-----------------------------------------------------------------------------
+
+# Test: parse_annotation_link splits path::function correctly
+test_parse_annotation_link() {
+  CURRENT_TEST="parse_annotation_link"
+  test_header "Parse Annotation Link"
+
+  setup_test_env "parse-annotation-link"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Test path::function format
+  local output
+  output=$(parse_annotation_link "tests/notify-test.sh::test_notification_timing")
+  local file_path function_name
+  file_path=$(echo "$output" | sed -n '1p')
+  function_name=$(echo "$output" | sed -n '2p')
+
+  if [ "$file_path" = "tests/notify-test.sh" ]; then
+    test_pass "Extracts file path from path::function"
+  else
+    test_fail "Expected file path 'tests/notify-test.sh', got '$file_path'"
+  fi
+
+  if [ "$function_name" = "test_notification_timing" ]; then
+    test_pass "Extracts function name from path::function"
+  else
+    test_fail "Expected function name 'test_notification_timing', got '$function_name'"
+  fi
+
+  # Test path-only format (no ::)
+  output=$(parse_annotation_link "tests/basic.sh")
+  file_path=$(echo "$output" | sed -n '1p')
+  function_name=$(echo "$output" | sed -n '2p')
+
+  if [ "$file_path" = "tests/basic.sh" ]; then
+    test_pass "Extracts file path from path-only link"
+  else
+    test_fail "Expected file path 'tests/basic.sh', got '$file_path'"
+  fi
+
+  if [ -z "$function_name" ]; then
+    test_pass "Function name empty for path-only link"
+  else
+    test_fail "Expected empty function name, got '$function_name'"
+  fi
+
+  # Test empty input
+  if ! parse_annotation_link "" 2>/dev/null; then
+    test_pass "Returns error for empty input"
+  else
+    test_fail "Should return error for empty input"
+  fi
+
+  teardown_test_env
+}
+
+# Test: parse_spec_annotations extracts criteria with annotations
+test_parse_spec_annotations() {
+  CURRENT_TEST="parse_spec_annotations"
+  test_header "Parse Spec Annotations"
+
+  setup_test_env "parse-spec-annotations"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create test spec with mixed annotations
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Requirements
+
+Some requirements here.
+
+## Success Criteria
+
+- [ ] Notification appears within 2s
+  [verify](tests/notify-test.sh::test_notification_timing)
+- [ ] Clear visibility into current state
+  [judge](tests/judges/notify.sh::test_clear_visibility)
+- [ ] Works on both Linux and macOS
+- [x] Basic functionality works
+  [verify](tests/basic.sh)
+- [ ] No regressions in existing tests
+
+## Out of Scope
+
+Nothing.
+SPEC
+
+  local output
+  output=$(parse_spec_annotations "$TEST_DIR/specs/test-feature.md")
+  local line_count
+  line_count=$(echo "$output" | wc -l)
+
+  if [ "$line_count" -eq 5 ]; then
+    test_pass "Parses all 5 criteria"
+  else
+    test_fail "Expected 5 criteria, got $line_count"
+  fi
+
+  # Check first criterion (verify with path::function)
+  local line1
+  line1=$(echo "$output" | sed -n '1p')
+  if echo "$line1" | grep -qP '^Notification appears within 2s\tverify\ttests/notify-test\.sh\ttest_notification_timing\t$'; then
+    test_pass "First criterion: verify with path::function"
+  else
+    test_fail "First criterion mismatch: $line1"
+  fi
+
+  # Check second criterion (judge with path::function)
+  local line2
+  line2=$(echo "$output" | sed -n '2p')
+  if echo "$line2" | grep -qP '^Clear visibility into current state\tjudge\ttests/judges/notify\.sh\ttest_clear_visibility\t$'; then
+    test_pass "Second criterion: judge with path::function"
+  else
+    test_fail "Second criterion mismatch: $line2"
+  fi
+
+  # Check third criterion (unannotated)
+  local line3
+  line3=$(echo "$output" | sed -n '3p')
+  if echo "$line3" | grep -qP '^Works on both Linux and macOS\tnone\t\t\t$'; then
+    test_pass "Third criterion: unannotated"
+  else
+    test_fail "Third criterion mismatch: $line3"
+  fi
+
+  # Check fourth criterion (verify with path-only, checked)
+  local line4
+  line4=$(echo "$output" | sed -n '4p')
+  if echo "$line4" | grep -qP '^Basic functionality works\tverify\ttests/basic\.sh\t\tx$'; then
+    test_pass "Fourth criterion: verify path-only, checked"
+  else
+    test_fail "Fourth criterion mismatch: $line4"
+  fi
+
+  # Check fifth criterion (unannotated)
+  local line5
+  line5=$(echo "$output" | sed -n '5p')
+  if echo "$line5" | grep -qP '^No regressions in existing tests\tnone'; then
+    test_pass "Fifth criterion: unannotated"
+  else
+    test_fail "Fifth criterion mismatch: $line5"
+  fi
+
+  teardown_test_env
+}
+
+# Test: parse_spec_annotations edge cases
+test_parse_spec_annotations_edge_cases() {
+  CURRENT_TEST="parse_spec_annotations_edge_cases"
+  test_header "Parse Spec Annotations Edge Cases"
+
+  setup_test_env "parse-spec-edge"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Test: no Success Criteria section
+  cat > "$TEST_DIR/specs/no-criteria.md" << 'SPEC'
+# Test Feature
+
+## Requirements
+
+Some requirements.
+
+## Out of Scope
+
+Nothing.
+SPEC
+
+  if ! parse_spec_annotations "$TEST_DIR/specs/no-criteria.md" >/dev/null 2>&1; then
+    test_pass "Returns error when no Success Criteria section"
+  else
+    test_fail "Should return error when no Success Criteria section"
+  fi
+
+  # Test: nonexistent file
+  if ! parse_spec_annotations "$TEST_DIR/specs/nonexistent.md" >/dev/null 2>&1; then
+    test_pass "Returns error for nonexistent file"
+  else
+    test_fail "Should return error for nonexistent file"
+  fi
+
+  # Test: empty Success Criteria section
+  cat > "$TEST_DIR/specs/empty-criteria.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+## Out of Scope
+SPEC
+
+  if ! parse_spec_annotations "$TEST_DIR/specs/empty-criteria.md" >/dev/null 2>&1; then
+    test_pass "Returns error for empty Success Criteria"
+  else
+    test_fail "Should return error for empty Success Criteria"
+  fi
+
+  # Test: file ends inside Success Criteria (no closing heading)
+  cat > "$TEST_DIR/specs/eof-criteria.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] First criterion
+  [verify](tests/first.sh::test_first)
+- [ ] Last criterion without closing heading
+SPEC
+
+  local output
+  output=$(parse_spec_annotations "$TEST_DIR/specs/eof-criteria.md")
+  local line_count
+  line_count=$(echo "$output" | wc -l)
+
+  if [ "$line_count" -eq 2 ]; then
+    test_pass "Handles file ending inside Success Criteria (2 criteria)"
+  else
+    test_fail "Expected 2 criteria when file ends in section, got $line_count"
+  fi
+
+  # Test: malformed annotation link is treated as non-annotation
+  cat > "$TEST_DIR/specs/malformed.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Has valid verify
+  [verify](tests/foo.sh::bar)
+- [ ] Has invalid annotation syntax
+  [notaverb](something)
+- [ ] Normal criterion
+SPEC
+
+  output=$(parse_spec_annotations "$TEST_DIR/specs/malformed.md")
+  line_count=$(echo "$output" | wc -l)
+
+  if [ "$line_count" -eq 3 ]; then
+    test_pass "Malformed annotations: correct criterion count (3)"
+  else
+    test_fail "Expected 3 criteria with malformed annotations, got $line_count"
+  fi
+
+  # The second criterion should be 'none' since [notaverb] is not recognized
+  local line2
+  line2=$(echo "$output" | sed -n '2p')
+  if echo "$line2" | grep -qP '\tnone\t'; then
+    test_pass "Malformed annotation treated as unannotated"
+  else
+    test_fail "Malformed annotation should be unannotated: $line2"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -4043,6 +4306,9 @@ ALL_TESTS=(
   test_check_exit_codes
   test_default_config_has_hooks
   test_run_profile_selection
+  test_parse_annotation_link
+  test_parse_spec_annotations
+  test_parse_spec_annotations_edge_cases
 )
 
 #-----------------------------------------------------------------------------
