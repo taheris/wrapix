@@ -113,6 +113,7 @@ let
     export REPO_ROOT="${src}"
     export RALPH_METADATA_DIR="${ralphModule.scripts}/share/ralph"
     export RALPH_TEMPLATE_DIR="${src}/lib/ralph/template"
+    export PATH="${ralphModule.scripts}/bin:$PATH"
     exec ${ralphTestDir}/run-tests.sh
   '';
 
