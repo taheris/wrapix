@@ -103,6 +103,77 @@ run_verify_test() {
 }
 
 #-----------------------------------------------------------------------------
+# Helper: run a [verify:wrapix] test inside a wrapix container
+#-----------------------------------------------------------------------------
+run_verify_wrapix_test() {
+  local criterion="$1"
+  local file_path="$2"
+  local function_name="$3"
+
+  if [ ! -f "$file_path" ]; then
+    echo "  [FAIL] $criterion"
+    echo "         $file_path not found"
+    ((failed++)) || true
+    has_failure=true
+    return
+  fi
+
+  # Build the wrapix-debug sandbox
+  local build_output build_exit
+  build_output=$(nix build .#wrapix-debug --no-link 2>&1) && build_exit=0 || build_exit=$?
+
+  if [ "$build_exit" -ne 0 ]; then
+    echo "  [FAIL] $criterion"
+    echo "         Failed to build wrapix-debug container"
+    if [ -n "$build_output" ]; then
+      echo "$build_output" | tail -3 | while IFS= read -r line; do
+        echo "         | $line"
+      done
+    fi
+    ((failed++)) || true
+    has_failure=true
+    return
+  fi
+
+  # Run the test inside the container
+  local exit_code test_output
+  local abs_file_path
+  abs_file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+
+  if [ -n "$function_name" ]; then
+    test_output=$(nix run .#wrapix-debug -- bash -c "source \"$abs_file_path\" && \"$function_name\"" 2>&1) && exit_code=0 || exit_code=$?
+  else
+    test_output=$(nix run .#wrapix-debug -- bash -c "\"$abs_file_path\"" 2>&1) && exit_code=0 || exit_code=$?
+  fi
+
+  if [ "$exit_code" -eq 0 ]; then
+    echo "  [PASS] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit 0, container)"
+    ((passed++)) || true
+  elif [ "$exit_code" -eq 77 ]; then
+    echo "  [SKIP] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit 77 — skipped, container)"
+    ((skipped++)) || true
+  elif [ "$exit_code" -eq 78 ]; then
+    echo "  [SKIP] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit 78 — not implemented, container)"
+    ((skipped++)) || true
+  else
+    echo "  [FAIL] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit $exit_code, container)"
+    ((failed++)) || true
+    has_failure=true
+  fi
+
+  # Show captured output in verbose mode
+  if [ "$VERBOSE" = "true" ] && [ -n "$test_output" ]; then
+    echo "$test_output" | while IFS= read -r line; do
+      echo "         | $line"
+    done
+  fi
+}
+
+#-----------------------------------------------------------------------------
 # Helper: run a [judge] test
 #-----------------------------------------------------------------------------
 run_judge_test() {
@@ -188,9 +259,9 @@ show_annotation_index() {
       continue
     fi
 
-    # Count by annotation type
+    # Count by annotation type (verify-wrapix counts as verify)
     local verify_count judge_count none_count
-    verify_count=$(echo "$annotations" | awk -F'\t' '$2 == "verify"' | wc -l)
+    verify_count=$(echo "$annotations" | awk -F'\t' '$2 == "verify" || $2 == "verify-wrapix"' | wc -l)
     judge_count=$(echo "$annotations" | awk -F'\t' '$2 == "judge"' | wc -l)
     none_count=$(echo "$annotations" | awk -F'\t' '$2 == "none"' | wc -l)
 
@@ -273,12 +344,16 @@ run_single_spec_tests() {
         ((skipped++)) || true
       elif [ "$ann_type" = "verify" ]; then
         run_verify_test "$criterion" "$file_path" "$function_name"
+      elif [ "$ann_type" = "verify-wrapix" ]; then
+        run_verify_wrapix_test "$criterion" "$file_path" "$function_name"
       elif [ "$ann_type" = "judge" ]; then
         run_judge_test "$criterion" "$file_path" "$function_name"
       fi
     elif [ "$VERIFY" = "true" ]; then
       if [ "$ann_type" = "verify" ]; then
         run_verify_test "$criterion" "$file_path" "$function_name"
+      elif [ "$ann_type" = "verify-wrapix" ]; then
+        run_verify_wrapix_test "$criterion" "$file_path" "$function_name"
       elif [ "$ann_type" = "none" ]; then
         echo "  [SKIP] $criterion (no annotation)"
         ((skipped++)) || true
@@ -291,7 +366,7 @@ run_single_spec_tests() {
         echo "  [SKIP] $criterion (no annotation)"
         ((skipped++)) || true
       fi
-      # verify-only criteria are silently omitted in judge mode
+      # verify-only and verify-wrapix criteria are silently omitted in judge mode
     fi
   done 3<<< "$annotations"
 
