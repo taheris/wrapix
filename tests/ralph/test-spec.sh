@@ -315,6 +315,126 @@ TESTFILE
 }
 
 #-----------------------------------------------------------------------------
+# Test: ralph spec --verify reports exit 77 as SKIP and exit 78 as SKIP
+#-----------------------------------------------------------------------------
+test_spec_verify_skip_exits() {
+  CURRENT_TEST="spec_verify_skip_exits"
+  test_header "Ralph Spec --verify handles exit 77/78 as SKIP"
+
+  setup_test_env "spec-verify-skip"
+
+  # Create a spec with verify annotations for skip, not-implemented, pass, and fail
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test passes
+  [verify](tests/pass-test.sh::test_passes)
+- [ ] Test is skipped
+  [verify](tests/skip-test.sh::test_skipped)
+- [ ] Test is not implemented
+  [verify](tests/notimpl-test.sh::test_not_implemented)
+- [ ] Test fails
+  [verify](tests/fail-test.sh::test_fails)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_passes() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  cat > "$TEST_DIR/tests/skip-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_skipped() { exit 77; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/skip-test.sh"
+
+  cat > "$TEST_DIR/tests/notimpl-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_not_implemented() { exit 78; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/notimpl-test.sh"
+
+  cat > "$TEST_DIR/tests/fail-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_fails() { return 1; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/fail-test.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
+  local exit_code=$?
+  set -e
+
+  # Should show PASS for passing test
+  if echo "$output" | grep "Test passes" | grep -q "\[PASS\]"; then
+    test_pass "Shows [PASS] for passing test"
+  else
+    test_fail "Should show [PASS] for passing test"
+  fi
+
+  # Should show SKIP for exit 77
+  if echo "$output" | grep "Test is skipped" | grep -q "\[SKIP\]"; then
+    test_pass "Shows [SKIP] for exit 77 (skipped)"
+  else
+    test_fail "Should show [SKIP] for exit 77"
+  fi
+
+  # Exit 77 should include skip reason
+  if echo "$output" | grep -q "exit 77"; then
+    test_pass "Shows exit 77 in output"
+  else
+    test_fail "Should show exit 77 in output"
+  fi
+
+  # Should show SKIP for exit 78
+  if echo "$output" | grep "Test is not implemented" | grep -q "\[SKIP\]"; then
+    test_pass "Shows [SKIP] for exit 78 (not implemented)"
+  else
+    test_fail "Should show [SKIP] for exit 78"
+  fi
+
+  # Exit 78 should include not-implemented reason
+  if echo "$output" | grep -q "exit 78"; then
+    test_pass "Shows exit 78 in output"
+  else
+    test_fail "Should show exit 78 in output"
+  fi
+
+  # Should show FAIL for failing test (exit 1, not 77/78)
+  if echo "$output" | grep "Test fails" | grep -q "\[FAIL\]"; then
+    test_pass "Shows [FAIL] for exit 1 (real failure)"
+  else
+    test_fail "Should show [FAIL] for exit 1"
+  fi
+
+  # Summary should count skipped tests
+  if echo "$output" | grep -q "1 passed.*1 failed.*2 skipped"; then
+    test_pass "Summary shows correct counts (1 pass, 1 fail, 2 skip)"
+  else
+    test_fail "Summary should show 1 passed, 1 failed, 2 skipped. Got: $(echo "$output" | tail -1)"
+  fi
+
+  # Exit code should be non-zero (there's still a real failure)
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exit code is non-zero due to real failure"
+  else
+    test_fail "Exit code should be non-zero when there is a real failure"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Test: ralph spec --judge invokes LLM evaluation (mocked)
 #-----------------------------------------------------------------------------
 test_spec_judge() {
@@ -1601,6 +1721,7 @@ ALL_TESTS=(
   test_spec_annotation_counts
   test_spec_verbose
   test_spec_verify
+  test_spec_verify_skip_exits
   test_spec_judge
   test_spec_all
   test_spec_no_execution_default
