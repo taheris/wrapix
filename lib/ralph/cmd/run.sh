@@ -384,10 +384,17 @@ run_step() {
     spec_path="$SPECS_DIR/$label.md"
   fi
 
+  # Guard: prevent hidden specs from being committed to specs/
+  local spec_guard=""
+  if [ "$hidden" = "true" ]; then
+    spec_guard="**IMPORTANT: This is a hidden spec. Do NOT copy, move, or commit the spec file to \`specs/\`. It lives at \`$spec_path\` and must stay there. Only commit your implementation code.**"
+  fi
+
   # Render template using centralized render_template function
   local work_prompt
   work_prompt=$(render_template run \
     "SPEC_PATH=$spec_path" \
+    "SPEC_GUARD=$spec_guard" \
     "ISSUE_ID=$next_issue" \
     "TITLE=$issue_title" \
     "LABEL=$label" \
