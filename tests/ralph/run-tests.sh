@@ -4778,6 +4778,33 @@ ALL_TESTS=(
 # are defined in lib/runner.sh
 
 main() {
+  local filter="${1:-}"
+
+  # If a specific test function name is given, run just that test
+  if [ -n "$filter" ] && [ "$filter" != "--sequential" ] && declare -f "$filter" >/dev/null 2>&1; then
+    # Check prerequisites
+    check_prerequisites "$MOCK_CLAUDE" "$SCENARIOS_DIR" || exit 1
+
+    # Run single test in isolation
+    local results_dir
+    results_dir=$(mktemp -d -t "ralph-test-results-XXXXXX")
+    local result_file="$results_dir/${filter}.result"
+    local output_file="$results_dir/${filter}.output"
+
+    run_test_isolated "$filter" "$result_file" "$output_file"
+    cat "$output_file"
+
+    # Read results
+    local p f s
+    p=$(grep "^passed=" "$result_file" | cut -d= -f2)
+    f=$(grep "^failed=" "$result_file" | cut -d= -f2)
+    s=$(grep "^skipped=" "$result_file" | cut -d= -f2)
+    rm -rf "$results_dir"
+
+    [ "$f" -eq 0 ]
+    return
+  fi
+
   echo "=========================================="
   echo "  Ralph Integration Tests"
   echo "=========================================="
@@ -4790,7 +4817,7 @@ main() {
   check_prerequisites "$MOCK_CLAUDE" "$SCENARIOS_DIR" || exit 1
 
   # Run tests (uses library functions)
-  run_tests ALL_TESTS "${1:-}"
+  run_tests ALL_TESTS "$filter"
 }
 
 # Run main (pass through args)
