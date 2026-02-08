@@ -147,14 +147,18 @@ show_annotation_index() {
     printf '  %-24s %d verify, %d judge, %d unannotated\n' \
       "$spec_name" "$verify_count" "$judge_count" "$none_count"
 
-    # Verbose: show per-criterion detail
+    # Verbose: show per-criterion detail with annotation type and test path
     if [ "$VERBOSE" = "true" ]; then
-      while IFS=$'\t' read -r criterion ann_type _file_path _function_name checked; do
-        local marker=" "
-        if [ "$checked" = "x" ]; then
-          marker="x"
+      while IFS=$'\t' read -r criterion ann_type ann_file_path ann_function_name _checked; do
+        if [ "$ann_type" != "none" ] && [ -n "$ann_file_path" ]; then
+          local test_ref="$ann_file_path"
+          if [ -n "$ann_function_name" ]; then
+            test_ref="${test_ref}::${ann_function_name}"
+          fi
+          printf '    [%-6s] %s → %s\n' "$ann_type" "$criterion" "$test_ref"
+        else
+          printf '    [%-6s] %s\n' "$ann_type" "$criterion"
         fi
-        printf '    [%s] %s (%s)\n' "$marker" "$criterion" "$ann_type"
       done <<< "$annotations"
     fi
   done
