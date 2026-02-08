@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Container UID mapping verification test script
 # This runs INSIDE the container to verify unshare-based UID mapping works
 #
@@ -6,6 +6,14 @@
 # unshare(1) to create a user namespace that maps inner HOST_UID to outer UID 0,
 # so all files (including VirtioFS mounts) appear with correct ownership.
 set -euo pipefail
+
+# Skip on non-Darwin platforms — this test uses darwin-specific UID mapping
+# (VirtioFS, unshare with HOST_UID). See tests/darwin/default.nix for
+# the nix-level gate; this check handles direct script execution.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "SKIP: uid-test.sh is darwin-only (current platform: $(uname -s))"
+  exit 0
+fi
 
 echo "=== Container UID Mapping Verification ==="
 echo "Running as: $(id)"
