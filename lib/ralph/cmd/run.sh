@@ -317,9 +317,9 @@ run_step() {
     bd_list_json="[]"
   }
 
-  # Filter out epics and get first work item
+  # Filter out epics and beads with awaiting:input label (not truly ready)
   local bd_work_items
-  bd_work_items=$(echo "$bd_list_json" | jq '[.[] | select(.issue_type == "epic" | not)]' 2>/dev/null || echo "[]")
+  bd_work_items=$(echo "$bd_list_json" | jq '[.[] | select((.issue_type == "epic" | not) and ((.labels // []) | map(select(. == "awaiting:input")) | length == 0))]' 2>/dev/null || echo "[]")
 
   # Note: || true prevents set -e from exiting on empty array (return code 1)
   local next_issue
@@ -417,6 +417,31 @@ run_step() {
     # Check if all beads with this label are complete
     check_all_complete "$bead_label" "$label" "$hidden"
     return 0
+  elif jq -e 'select(.type == "result") | .result | contains("RALPH_CLARIFY")' "$log" >/dev/null 2>&1; then
+    # Agent needs clarification — add awaiting:input label and store question
+    local clarify_text
+    clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
+      | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
+
+    echo ""
+    echo "Agent needs clarification on issue: $next_issue"
+    if [ -n "$clarify_text" ]; then
+      echo "  Question: $clarify_text"
+    fi
+
+    # Add awaiting:input label so ralph run skips this bead
+    bd update "$next_issue" --add-label "awaiting:input" || warn "Failed to add awaiting:input label"
+
+    # Store question in bead notes
+    if [ -n "$clarify_text" ]; then
+      bd update "$next_issue" --append-notes "Question: $clarify_text" || warn "Failed to store question in notes"
+    fi
+
+    echo ""
+    echo "To answer and unblock:"
+    echo "  bd update $next_issue --append-notes 'Answer: <your answer>'"
+    echo "  bd update $next_issue --remove-label awaiting:input"
+    return 1
   else
     echo ""
     echo "Work did not complete. Issue remains in-progress: $next_issue"
