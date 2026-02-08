@@ -252,7 +252,7 @@ run_spec_tests() {
   skipped=0
   has_failure=false
 
-  while IFS=$'\t' read -r criterion ann_type file_path function_name _checked; do
+  while IFS=$'\t' read -r criterion ann_type file_path function_name _checked <&3; do
     if [ "$VERIFY" = "true" ] && [ "$JUDGE" = "true" ]; then
       # --all mode: run both verify and judge, skip only unannotated
       if [ "$ann_type" = "none" ]; then
@@ -266,27 +266,21 @@ run_spec_tests() {
     elif [ "$VERIFY" = "true" ]; then
       if [ "$ann_type" = "verify" ]; then
         run_verify_test "$criterion" "$file_path" "$function_name"
-      else
-        local skip_reason="no annotation"
-        if [ "$ann_type" = "judge" ]; then
-          skip_reason="judge only"
-        fi
-        echo "  [SKIP] $criterion ($skip_reason)"
+      elif [ "$ann_type" = "none" ]; then
+        echo "  [SKIP] $criterion (no annotation)"
         ((skipped++)) || true
       fi
+      # judge-only criteria are silently omitted in verify mode
     elif [ "$JUDGE" = "true" ]; then
       if [ "$ann_type" = "judge" ]; then
         run_judge_test "$criterion" "$file_path" "$function_name"
-      else
-        local skip_reason="no annotation"
-        if [ "$ann_type" = "verify" ]; then
-          skip_reason="verify only"
-        fi
-        echo "  [SKIP] $criterion ($skip_reason)"
+      elif [ "$ann_type" = "none" ]; then
+        echo "  [SKIP] $criterion (no annotation)"
         ((skipped++)) || true
       fi
+      # verify-only criteria are silently omitted in judge mode
     fi
-  done <<< "$annotations"
+  done 3<<< "$annotations"
 
   echo ""
   echo "$passed passed, $failed failed, $skipped skipped"
