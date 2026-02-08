@@ -81,20 +81,25 @@ main() {
     response=$(mcp_send_keys "$pane_id" "Enter")
     assert_success "$response"
 
-    # Wait for process to exit
-    sleep 1
+    # Poll for pane status to become "exited" (tmux needs time to detect process exit)
+    local attempts=0
+    local max_attempts=10
+    status="running"
+    while [[ "$status" == "running" ]] && [[ "$attempts" -lt "$max_attempts" ]]; do
+        sleep 0.5
+        response=$(mcp_list_panes)
+        assert_success "$response" "List panes should succeed"
+        content=$(get_content_text "$response")
 
-    # Verify pane still exists with "exited" status
-    response=$(mcp_list_panes)
-    assert_success "$response" "List panes should succeed"
-    content=$(get_content_text "$response")
+        pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id\")" 2>/dev/null) || {
+            log_fail "Pane should still exist after process exits (remain-on-exit)"
+            exit 1
+        }
 
-    pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id\")" 2>/dev/null) || {
-        log_fail "Pane should still exist after process exits (remain-on-exit)"
-        exit 1
-    }
+        status=$(echo "$pane_data" | jq -r '.status')
+        ((attempts++)) || true
+    done
 
-    status=$(echo "$pane_data" | jq -r '.status')
     assert_eq "exited" "$status" "Pane status should be 'exited' after process terminates"
     log_pass "Pane status is 'exited'"
 
@@ -127,18 +132,22 @@ main() {
     assert_ne "" "$pane_id2" "Pane ID should be extracted"
     log_pass "Created quick-exit pane: $pane_id2"
 
-    # Wait for process to exit
-    sleep 1
+    # Poll for pane status to become "exited"
+    attempts=0
+    status="running"
+    while [[ "$status" == "running" ]] && [[ "$attempts" -lt "$max_attempts" ]]; do
+        sleep 0.5
+        response=$(mcp_list_panes)
+        content=$(get_content_text "$response")
+        pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id2\")" 2>/dev/null) || {
+            log_fail "Quick-exit pane should still exist after process exits"
+            exit 1
+        }
 
-    # Verify pane exists with exited status
-    response=$(mcp_list_panes)
-    content=$(get_content_text "$response")
-    pane_data=$(echo "$content" | jq ".[] | select(.id == \"$pane_id2\")" 2>/dev/null) || {
-        log_fail "Quick-exit pane should still exist after process exits"
-        exit 1
-    }
+        status=$(echo "$pane_data" | jq -r '.status')
+        ((attempts++)) || true
+    done
 
-    status=$(echo "$pane_data" | jq -r '.status')
     assert_eq "exited" "$status" "Quick-exit pane status should be 'exited'"
 
     # Verify output from quick-exit pane

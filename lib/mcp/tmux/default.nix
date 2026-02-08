@@ -5,7 +5,7 @@
 #
 # Exports:
 #   - name: Server identifier ("tmux-debug")
-#   - package: The tmux-debug-mcp binary
+#   - packages: Runtime packages (MCP server binary + tmux)
 #   - mkServerConfig: Function to generate server config from user options
 #
 # Config options:
@@ -18,7 +18,11 @@
 {
   name = "tmux-debug";
 
-  package = import ./mcp-server.nix { inherit pkgs; };
+  # tmux must be listed explicitly: buildEnv doesn't follow propagatedBuildInputs
+  packages = [
+    (import ./mcp-server.nix { inherit pkgs; })
+    pkgs.tmux
+  ];
 
   mkServerConfig =
     {
