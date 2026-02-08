@@ -32,6 +32,9 @@ let
   # Darwin network tests run on all platforms (test logic, not VM)
   darwinNetworkTests = import ./darwin/network.nix { inherit pkgs system; };
 
+  # Darwin UID mapping tests (verify unshare-based VirtioFS ownership fix)
+  darwinUidTests = import ./darwin/uid.nix { inherit pkgs system; };
+
   # Integration tests require NixOS VM (Linux with KVM only)
   # Skip when KVM unavailable (e.g., inside containers)
   integrationTests =
@@ -72,6 +75,7 @@ let
     smokeTests
     // darwinMountTests
     // darwinNetworkTests
+    // darwinUidTests
     // integrationTests
     // ralphTests
     // ralphTemplatesCheck
@@ -287,6 +291,7 @@ in
     smokeTests
     darwinMountTests
     darwinNetworkTests
+    darwinUidTests
     integrationTests
     ralphTests
     ralphTemplatesCheck

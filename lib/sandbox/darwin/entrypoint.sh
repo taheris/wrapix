@@ -1,16 +1,24 @@
 #!/bin/bash
 set -euo pipefail
 
-# Update wrapix user to use host UID (passwd is writable at runtime)
-# The wrapix user is pre-created in the image with UID 1000; we update it to match host
+# UID mapping strategy for Darwin VirtioFS:
+#
+# VirtioFS maps all files to UID 0 inside the container. To get correct UID
+# matching, we use unshare(1) to create a user namespace at exec time that
+# maps inner HOST_UID to outer UID 0. This means:
+#   - Setup runs as root (can modify /etc/passwd, create files, set permissions)
+#   - All root-owned files automatically appear as HOST_UID inside the namespace
+#   - VirtioFS mounts (/workspace) appear as HOST_UID — no ownership mismatch
+#   - No chown to HOST_UID needed (counterproductive: outer HOST_UID maps to nobody)
+#
+# Compare Linux entrypoint which uses Podman's --userns=keep-id for the same effect.
+
+# Update wrapix user to use host UID so id(1) resolves the correct username
 sed -i "s/^wrapix:x:1000:1000:/wrapix:x:$HOST_UID:$HOST_UID:/" /etc/passwd
 sed -i "s/^wrapix:x:1000:/wrapix:x:$HOST_UID:/" /etc/group
 
 export USER="wrapix"
 export HOME="/home/wrapix"
-
-# Fix home directory ownership (image has 1000:1000, we need HOST_UID)
-chown "$HOST_UID:$HOST_UID" "$HOME"
 
 # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
 expand_path() {
@@ -27,8 +35,8 @@ validate_mount_mapping() {
     [[ "$mapping" =~ ^[^:]+:[^:]+$ ]]
 }
 
-# Copy directories from staging to destination with correct ownership
-# VirtioFS maps files as root, so we copy and fix ownership
+# Copy directories from staging to destination
+# VirtioFS maps files as root; unshare namespace remaps root to HOST_UID
 # This must run BEFORE SSH setup so deploy keys are in place
 if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
     IFS=',' read -ra DIR_MOUNTS <<< "$WRAPIX_DIR_MOUNTS"
@@ -43,12 +51,11 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
         if [ -d "$src" ]; then
             mkdir -p "$(dirname "$dst")"
             cp -r "$src" "$dst"
-            chown -R "$HOST_UID:$HOST_UID" "$dst"
         fi
     done
 fi
 
-# Copy files from staging to destination with correct ownership
+# Copy files from staging to destination
 # This includes deploy keys which are needed for SSH config
 if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
     IFS=',' read -ra MOUNTS <<< "$WRAPIX_FILE_MOUNTS"
@@ -63,7 +70,6 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
         if [ -f "$src" ]; then
             mkdir -p "$(dirname "$dst")"
             cp "$src" "$dst"
-            chown "$HOST_UID:$HOST_UID" "$dst"
         fi
     done
 fi
@@ -114,9 +120,7 @@ if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
     echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$PUBKEY_TMP")" > "$HOME/.config/git/allowed_signers"
     rm "$PUBKEY_TMP"
     git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
-    chown "$HOST_UID:$HOST_UID" "$HOME/.config/git/allowed_signers"
   fi
-  chown -R "$HOST_UID:$HOST_UID" "$HOME/.config"
 
   # Enable auto-signing by default when signing key is configured
   # Set WRAPIX_GIT_SIGN=0 to disable
@@ -125,10 +129,8 @@ if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   fi
 fi
 
-# Fix ownership and permissions
-chown "$HOST_UID:$HOST_UID" "$HOME/.ssh"
+# Fix permissions
 chmod 700 "$HOME/.ssh"
-[ -f "$HOME/.ssh/config" ] && chown "$HOST_UID:$HOST_UID" "$HOME/.ssh/config"
 
 cd /workspace
 
@@ -137,8 +139,6 @@ mkdir -p "$HOME/.claude"
 cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
-# Note: $HOME/.claude is a VirtioFS mount, so we can't chown the directory itself
-chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json" "$HOME/.claude/settings.json"
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
@@ -184,13 +184,14 @@ if [ -f /workspace/specs/README.md ]; then
 $(cat /workspace/specs/README.md)"
 fi
 
-# Check for ralph mode
+# Drop to HOST_UID via user namespace (maps inner HOST_UID to outer root,
+# so VirtioFS root-owned files appear as HOST_UID — proper UID mapping)
 if [ "${RALPH_MODE:-}" = "1" ]; then
   # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
   # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
-  exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+  exec unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
     ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-}
 else
-  exec setpriv --reuid="$HOST_UID" --regid="$HOST_UID" --init-groups \
+  exec unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
     claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT"
 fi
