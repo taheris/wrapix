@@ -10,14 +10,14 @@ echo ""
 
 # Ensure we're on Darwin with macOS 26+
 if [ "$(uname)" != "Darwin" ]; then
-  echo "ERROR: This test only runs on Darwin"
-  exit 1
+  echo "SKIP: This test only runs on Darwin"
+  exit 77
 fi
 
 MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1)
 if [ "$MACOS_VERSION" -lt 26 ]; then
-  echo "ERROR: Requires macOS 26+ (current: $(sw_vers -productVersion))"
-  exit 1
+  echo "SKIP: Requires macOS 26+ (current: $(sw_vers -productVersion))"
+  exit 77
 fi
 
 FAILED=0
