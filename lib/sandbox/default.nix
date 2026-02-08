@@ -151,7 +151,7 @@ let
         inherit (mcpConfig) mcpServers;
       };
 
-      # Compute comma-separated network allowlist for WRAPIX_NETWORK=allow mode
+      # Compute comma-separated network allowlist for WRAPIX_NETWORK=limit mode
       networkAllowlist = concatStringsSep "," (finalProfile.networkAllowlist or [ ]);
 
       package =

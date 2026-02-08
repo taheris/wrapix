@@ -243,12 +243,12 @@ in
             }
             trap cleanup_session EXIT
 
-            # Validate WRAPIX_NETWORK mode (default: full)
-            WRAPIX_NETWORK="''${WRAPIX_NETWORK:-full}"
+            # Validate WRAPIX_NETWORK mode (default: open)
+            WRAPIX_NETWORK="''${WRAPIX_NETWORK:-open}"
             case "$WRAPIX_NETWORK" in
-              full|allow) ;;
+              open|limit) ;;
               *)
-                echo "Error: WRAPIX_NETWORK must be 'full' or 'allow' (got: $WRAPIX_NETWORK)" >&2
+                echo "Error: WRAPIX_NETWORK must be 'open' or 'limit' (got: $WRAPIX_NETWORK)" >&2
                 exit 1
                 ;;
             esac
@@ -275,7 +275,7 @@ in
             ENV_ARGS+=(-e "WRAPIX_NOTIFY_TCP=1")
             # Pass session ID for focus-aware notifications (empty if not in tmux)
             ENV_ARGS+=(-e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID")
-            # Pass network mode and allowlist for WRAPIX_NETWORK=allow filtering
+            # Pass network mode and allowlist for WRAPIX_NETWORK=limit filtering
             ENV_ARGS+=(-e "WRAPIX_NETWORK=$WRAPIX_NETWORK")
             ENV_ARGS+=(-e "WRAPIX_NETWORK_ALLOWLIST=${networkAllowlist}")
 

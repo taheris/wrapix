@@ -53,7 +53,7 @@ let
     pkgs.coreutils
     pkgs.bash
     pkgs.util-linux
-    pkgs.iptables # Network filtering for WRAPIX_NETWORK=allow mode
+    pkgs.iptables # Network filtering for WRAPIX_NETWORK=limit mode
     entrypointPkg
     notifyClient
   ]

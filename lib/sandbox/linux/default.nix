@@ -169,19 +169,19 @@ in
         }
         trap cleanup_session EXIT
 
-        # Validate WRAPIX_NETWORK mode (default: full)
-        WRAPIX_NETWORK="''${WRAPIX_NETWORK:-full}"
+        # Validate WRAPIX_NETWORK mode (default: open)
+        WRAPIX_NETWORK="''${WRAPIX_NETWORK:-open}"
         case "$WRAPIX_NETWORK" in
-          full|allow) ;;
+          open|limit) ;;
           *)
-            echo "Error: WRAPIX_NETWORK must be 'full' or 'allow' (got: $WRAPIX_NETWORK)" >&2
+            echo "Error: WRAPIX_NETWORK must be 'open' or 'limit' (got: $WRAPIX_NETWORK)" >&2
             exit 1
             ;;
         esac
 
         # Network filtering requires NET_ADMIN capability for iptables
         NETWORK_CAP_ARGS=""
-        if [ "$WRAPIX_NETWORK" = "allow" ]; then
+        if [ "$WRAPIX_NETWORK" = "limit" ]; then
           NETWORK_CAP_ARGS="--cap-add=NET_ADMIN"
         fi
 
