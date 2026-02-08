@@ -169,8 +169,8 @@ in
         # Build mount environment variables in same format as production:
         # DIR_MOUNTS:  /staging/path:/destination/path
         # FILE_MOUNTS: /staging/path/filename:/destination/path
-        DIR_MOUNTS="/mnt/wrapix/dir0:/home/$REAL_USER/.claude"
-        FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$REAL_USER/.claude.json"
+        DIR_MOUNTS="/mnt/wrapix/dir0:/home/wrapix/.claude"
+        FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/wrapix/.claude.json"
 
         echo "Test setup: symlink in $CLAUDE_DIR -> $SYMLINK_TARGET"
         echo ""
@@ -191,9 +191,9 @@ in
           -e BD_DB=/tmp/beads.db \
           -e BD_NO_DAEMON=1 \
           -e HOST_UID=$(id -u "$REAL_USER") \
-          -e HOST_USER=$REAL_USER \
           -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
           -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
+          -e WRAPIX_NOTIFY_TCP=1 \
           -e WRAPIX_PROMPT="test" \
           --network default \
           --entrypoint /bin/bash \

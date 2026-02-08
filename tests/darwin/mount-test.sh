@@ -8,13 +8,12 @@ set -euo pipefail
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"
 echo "HOME: $HOME"
-echo "HOST_USER: ${HOST_USER:-not set}"
 echo "PWD: $(pwd)"
 echo ""
 
-# Derive the test home directory from HOST_USER
+# Fixed home directory for wrapix user
 # (we bypass entrypoint with --entrypoint /bin/bash, so HOME is not set up)
-TEST_HOME="/home/${HOST_USER:-testuser}"
+TEST_HOME="/home/wrapix"
 
 FAILED=0
 
@@ -106,8 +105,6 @@ if [ -n "${WRAPIX_DIR_MOUNTS:-}" ]; then
   for mapping in "${MOUNTS[@]}"; do
     src="${mapping%%:*}"
     dst="${mapping#*:}"
-    # Expand $USER in dst path
-    dst="${dst//\$USER/$HOST_USER}"
     if [ -d "$src" ]; then
       mkdir -p "$(dirname "$dst")"
       cp -r "$src" "$dst"  # Symlinks already dereferenced on host
@@ -180,8 +177,6 @@ if [ -n "${WRAPIX_FILE_MOUNTS:-}" ]; then
   for mapping in "${MOUNTS[@]}"; do
     src="${mapping%%:*}"
     dst="${mapping#*:}"
-    # Expand $USER in dst path
-    dst="${dst//\$USER/$HOST_USER}"
     if [ -f "$src" ]; then
       mkdir -p "$(dirname "$dst")"
       cp "$src" "$dst"
