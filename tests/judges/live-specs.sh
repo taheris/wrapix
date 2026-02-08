@@ -65,3 +65,33 @@ test_clickable_links() {
   judge_files "specs/notifications.md" "specs/ralph-workflow.md"
   judge_criterion "Annotations use standard markdown link syntax [verify](path) and [judge](path) that renders as clickable links in GitHub and VS Code"
 }
+
+test_spec_verify_all_specs() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "ralph spec --verify runs across all spec files"
+}
+
+test_spec_judge_all_specs() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "ralph spec --judge runs across all spec files"
+}
+
+test_spec_all_all_specs() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "ralph spec --all runs both across all spec files"
+}
+
+test_spec_filter_single() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "ralph spec --verify --spec notifications filters to single spec"
+}
+
+test_spec_grouped_output() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "Multi-spec output groups results by spec with per-spec headers"
+}
+
+test_spec_summary_line() {
+  judge_files "lib/ralph/cmd/spec.sh"
+  judge_criterion "Multi-spec output ends with summary line"
+}
