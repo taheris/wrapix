@@ -59,6 +59,13 @@ git push origin beads
 
 Work is NOT complete until both pushes succeed.
 
+## Hidden Specs
+
+Files in `.wrapix/ralph/state/` are **hidden specs** managed by Ralph. **NEVER** copy or
+commit them to `specs/`. The `no-hidden-specs` pre-commit hook blocks this, but
+`--no-verify` bypasses it. If you need to reference a hidden spec, read it in place —
+do not create a corresponding file under `specs/`.
+
 ## Code Style
 
 Hooks enforce formatting (nixfmt, shellcheck). Follow these conventions:
