@@ -1714,6 +1714,73 @@ TESTFILE
 }
 
 #-----------------------------------------------------------------------------
+# Test: ralph spec --verify shows failure output without --verbose (FR5)
+#-----------------------------------------------------------------------------
+test_spec_verify_fail_shows_output() {
+  CURRENT_TEST="spec_verify_fail_shows_output"
+  test_header "Ralph Spec --verify Shows Failure Output Without --verbose"
+
+  setup_test_env "spec-verify-fail-output"
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test with failure output
+  [verify](tests/fail-test.sh::test_fails_with_output)
+- [ ] Test that passes with output
+  [verify](tests/pass-test.sh::test_passes_with_output)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+
+  cat > "$TEST_DIR/tests/fail-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_fails_with_output() {
+  echo "setting up environment"
+  echo "loading config"
+  echo "ERROR: foo-binary: command not found"
+  return 1
+}
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/fail-test.sh"
+
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_passes_with_output() {
+  echo "diagnostic output from passing test"
+  return 0
+}
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  # Run --verify WITHOUT --verbose
+  local output
+  set +e
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
+  set -e
+
+  # On FAIL: should show tail of output even without --verbose
+  if echo "$output" | grep -q "| .*foo-binary: command not found"; then
+    test_pass "Failure output shown without --verbose"
+  else
+    test_fail "Should show failure output without --verbose. Got: $output"
+  fi
+
+  # On PASS: should NOT show output without --verbose
+  if echo "$output" | grep -q "diagnostic output from passing test"; then
+    test_fail "Pass output should not be shown without --verbose"
+  else
+    test_pass "Pass output correctly suppressed without --verbose"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -1745,6 +1812,7 @@ ALL_TESTS=(
   test_spec_nonzero_exit
   test_spec_skip_empty
   test_spec_multi_molecule_lookup
+  test_spec_verify_fail_shows_output
 )
 
 main() {

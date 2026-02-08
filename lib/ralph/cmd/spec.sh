@@ -92,6 +92,12 @@ run_verify_test() {
     echo "         $file_path${function_name:+::$function_name} (exit $exit_code)"
     ((failed++)) || true
     has_failure=true
+    # Always show tail of output on failure (helps diagnose missing binaries etc.)
+    if [ "$VERBOSE" != "true" ] && [ -n "$test_output" ]; then
+      echo "$test_output" | tail -5 | while IFS= read -r line; do
+        echo "         | $line"
+      done
+    fi
   fi
 
   # Show captured output in verbose mode
@@ -163,6 +169,12 @@ run_verify_wrapix_test() {
     echo "         $file_path${function_name:+::$function_name} (exit $exit_code, container)"
     ((failed++)) || true
     has_failure=true
+    # Always show tail of output on failure (helps diagnose missing binaries etc.)
+    if [ "$VERBOSE" != "true" ] && [ -n "$test_output" ]; then
+      echo "$test_output" | tail -5 | while IFS= read -r line; do
+        echo "         | $line"
+      done
+    fi
   fi
 
   # Show captured output in verbose mode
