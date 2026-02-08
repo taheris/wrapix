@@ -4254,6 +4254,233 @@ SPEC
 }
 
 #-----------------------------------------------------------------------------
+# Sync --deps Tests
+#-----------------------------------------------------------------------------
+
+# Test: sync --deps detects tool dependencies from annotated test files
+test_sync_deps_basic() {
+  CURRENT_TEST="sync_deps_basic"
+  test_header "Sync --deps Basic"
+
+  setup_test_env "sync-deps"
+
+  # Create a spec with verify/judge annotations
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] API responds correctly
+  [verify](tests/api-test.sh::test_api_response)
+- [ ] Output is valid JSON
+  [judge](tests/judges/output.sh::test_json_output)
+- [ ] Works on both platforms
+SPEC
+
+  # Set up current.json to point to this spec
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  # Create the test files that the annotations reference
+  mkdir -p "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/api-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_api_response() {
+  local result
+  result=$(curl -s http://localhost:8080/api)
+  echo "$result" | jq '.status'
+}
+TESTFILE
+
+  cat > "$TEST_DIR/tests/judges/output.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_json_output() {
+  judge_files "lib/output.sh"
+  judge_criterion "Output is valid JSON"
+}
+TESTFILE
+
+  # Run ralph sync --deps
+  local output
+  output=$(ralph-sync --deps 2>/dev/null) || true
+
+  # Should detect curl and jq from api-test.sh
+  if echo "$output" | grep -q "^curl$"; then
+    test_pass "Detects curl dependency"
+  else
+    test_fail "Should detect curl dependency (output: $output)"
+  fi
+
+  if echo "$output" | grep -q "^jq$"; then
+    test_pass "Detects jq dependency"
+  else
+    test_fail "Should detect jq dependency (output: $output)"
+  fi
+
+  # Should not contain packages from tools not referenced
+  if echo "$output" | grep -q "^tmux$"; then
+    test_fail "Should not detect tmux (not in test files)"
+  else
+    test_pass "Does not falsely detect tmux"
+  fi
+
+  teardown_test_env
+}
+
+# Test: sync --deps with no annotations produces no output
+test_sync_deps_no_annotations() {
+  CURRENT_TEST="sync_deps_no_annotations"
+  test_header "Sync --deps No Annotations"
+
+  setup_test_env "sync-deps-none"
+
+  # Create a spec with no annotations
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Works correctly
+- [ ] No regressions
+SPEC
+
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  local output
+  output=$(ralph-sync --deps 2>/dev/null) || true
+
+  if [ -z "$output" ]; then
+    test_pass "No output when no annotations"
+  else
+    test_fail "Expected empty output, got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: sync --deps with missing test files does not error
+test_sync_deps_missing_files() {
+  CURRENT_TEST="sync_deps_missing_files"
+  test_header "Sync --deps Missing Test Files"
+
+  setup_test_env "sync-deps-missing"
+
+  # Create a spec with annotations pointing to nonexistent files
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Check something
+  [verify](tests/nonexistent.sh::test_something)
+SPEC
+
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  local exit_code=0
+  ralph-sync --deps >/dev/null 2>&1 || exit_code=$?
+
+  if [ "$exit_code" -eq 0 ]; then
+    test_pass "Does not error on missing test files"
+  else
+    test_fail "Should not error on missing test files (exit $exit_code)"
+  fi
+
+  teardown_test_env
+}
+
+# Test: sync --deps deduplicates packages across files
+test_sync_deps_dedup() {
+  CURRENT_TEST="sync_deps_dedup"
+  test_header "Sync --deps Deduplication"
+
+  setup_test_env "sync-deps-dedup"
+
+  # Create a spec with two annotations pointing to files that both use jq
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] First check
+  [verify](tests/check1.sh::test_first)
+- [ ] Second check
+  [verify](tests/check2.sh::test_second)
+SPEC
+
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/check1.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_first() {
+  curl http://example.com | jq .
+}
+TESTFILE
+
+  cat > "$TEST_DIR/tests/check2.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_second() {
+  curl http://other.com | jq .status
+}
+TESTFILE
+
+  local output
+  output=$(ralph-sync --deps 2>/dev/null) || true
+
+  # Count how many times jq appears
+  local jq_count
+  jq_count=$(echo "$output" | grep -c "^jq$" || true)
+
+  if [ "$jq_count" -eq 1 ]; then
+    test_pass "jq appears exactly once (deduplicated)"
+  else
+    test_fail "jq should appear once, appeared $jq_count times"
+  fi
+
+  local curl_count
+  curl_count=$(echo "$output" | grep -c "^curl$" || true)
+
+  if [ "$curl_count" -eq 1 ]; then
+    test_pass "curl appears exactly once (deduplicated)"
+  else
+    test_fail "curl should appear once, appeared $curl_count times"
+  fi
+
+  teardown_test_env
+}
+
+# Test: sync --deps errors when no active feature
+test_sync_deps_no_feature() {
+  CURRENT_TEST="sync_deps_no_feature"
+  test_header "Sync --deps No Active Feature"
+
+  setup_test_env "sync-deps-no-feature"
+
+  # Remove current.json
+  rm -f "$TEST_DIR/.wrapix/ralph/state/current.json"
+
+  local exit_code=0
+  ralph-sync --deps >/dev/null 2>&1 || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Errors when no active feature"
+  else
+    test_fail "Should error when no current.json (exit $exit_code)"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -4309,6 +4536,11 @@ ALL_TESTS=(
   test_parse_annotation_link
   test_parse_spec_annotations
   test_parse_spec_annotations_edge_cases
+  test_sync_deps_basic
+  test_sync_deps_no_annotations
+  test_sync_deps_missing_files
+  test_sync_deps_dedup
+  test_sync_deps_no_feature
 )
 
 #-----------------------------------------------------------------------------
