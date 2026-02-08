@@ -12,8 +12,8 @@ test_profile_packages() {
 }
 
 test_claude_code_starts() {
-  judge_files "lib/sandbox/image.nix"
-  judge_criterion "Claude Code binary is present and starts correctly inside the container"
+  judge_files "lib/sandbox/image.nix" "lib/sandbox/default.nix"
+  judge_criterion "Claude Code binary is present and starts correctly inside the container (note: entrypointPkg is set to linuxPkgs.claude-code in default.nix and included in allPackages in image.nix)"
 }
 
 test_nix_in_container() {
