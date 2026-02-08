@@ -41,15 +41,15 @@ pkgs.writeShellScriptBin "test-darwin" ''
 
   # Ensure we're on Darwin
   if [ "$(uname)" != "Darwin" ]; then
-    echo "ERROR: Integration tests only run on Darwin"
-    exit 1
+    echo "SKIP: Darwin-only integration tests" >&2
+    exit 77
   fi
 
   # Check macOS version
   MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1)
   if [ "$MACOS_VERSION" -lt 26 ]; then
-    echo "ERROR: Requires macOS 26+ (current: $(sw_vers -productVersion))"
-    exit 1
+    echo "SKIP: Requires macOS 26+ (current: $(sw_vers -productVersion))" >&2
+    exit 77
   fi
 
   echo "=== Darwin Integration Tests ==="

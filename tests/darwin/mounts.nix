@@ -53,21 +53,22 @@ in
         nativeBuildInputs = [ pkgs.skopeo ];
       }
       ''
+        # Nix-safe exit 77 handler: treat skip (77) as build success
+        trap '_ec=$?; if [ "$_ec" -eq 77 ]; then mkdir -p $out; exit 0; fi' EXIT
+
         set -euo pipefail
 
         # Ensure we're on Darwin
         if [ "$(uname)" != "Darwin" ]; then
-          echo "SKIP: Darwin-only test"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: Darwin-only test" >&2
+          exit 77
         fi
 
         # Check macOS version
         MACOS_VERSION=$(/usr/bin/sw_vers -productVersion | cut -d. -f1)
         if [ "$MACOS_VERSION" -lt 26 ]; then
-          echo "SKIP: Requires macOS 26+ (current: $(/usr/bin/sw_vers -productVersion))"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: Requires macOS 26+ (current: $(/usr/bin/sw_vers -productVersion))" >&2
+          exit 77
         fi
 
         echo "=== Darwin Mount Integration Test ==="
@@ -76,39 +77,29 @@ in
         # Get the real console user
         REAL_USER=$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || echo "")
         if [ -z "$REAL_USER" ]; then
-          echo "SKIP: Could not determine console user"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: Could not determine console user" >&2
+          exit 77
         fi
 
         REAL_HOME="/Users/$REAL_USER"
 
         # Check if container CLI is available
         if ! command -v container >/dev/null 2>&1; then
-          echo "SKIP: container CLI not found"
-          echo "Install with: nix profile install nixpkgs#container"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: container CLI not found" >&2
+          exit 77
         fi
 
         # Check if container system is running
         if ! container system status >/dev/null 2>&1; then
-          echo "SKIP: container system not running"
-          echo "Start with: container system start"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: container system not running (start with: container system start)" >&2
+          exit 77
         fi
 
         # Check if we can access the container storage
         CONTAINER_STORAGE="$REAL_HOME/Library/Application Support/com.apple.container"
         if [ ! -d "$CONTAINER_STORAGE" ] || [ ! -w "$CONTAINER_STORAGE" ]; then
-          echo ""
-          echo "SKIP: Cannot access container storage (running in nix build sandbox)"
-          echo ""
-          echo "To run this test manually:"
-          echo "  nix run .#test-darwin"
-          mkdir -p $out
-          exit 0
+          echo "SKIP: Cannot access container storage (running in nix build sandbox; run manually with: nix run .#test-darwin)" >&2
+          exit 77
         fi
 
         # Set HOME so container uses the right storage directory
