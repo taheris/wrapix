@@ -325,6 +325,7 @@ in
               $MOUNT_ARGS \
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \
+              -- \
               "''${WRAPIX_IMAGE:-$PROFILE_IMAGE}" \
               "''${CONTAINER_CMD[@]}"
     '';

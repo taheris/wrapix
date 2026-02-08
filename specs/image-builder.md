@@ -79,7 +79,7 @@ mkImage {
 - [ ] Nix commands work inside container
   [judge](tests/judges/image-builder.sh::test_nix_in_container)
 - [ ] HTTPS connections succeed (CA certs present)
-  [verify](tests/darwin/network-test.sh)
+  [verify:wrapix](tests/darwin/network-test.sh)
 
 ## Out of Scope
 
