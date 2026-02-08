@@ -175,7 +175,7 @@ in
             # Add SSH known_hosts and system prompt (directories from Nix store)
             # Note: prompt mounted to /etc/wrapix-prompts (not /etc/wrapix) to preserve
             # claude-config.json and claude-settings.json baked into /etc/wrapix by image.nix
-            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/\$USER/.ssh/known_hosts_dir"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/wrapix/.ssh/known_hosts_dir"
             MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix-prompts"
 
             # Notifications use TCP to gateway (port 5959) instead of mounted Unix socket
@@ -196,13 +196,13 @@ in
               [ -f "$SIGNING_KEY" ] && cp "$SIGNING_KEY" "$DEPLOY_STAGING/$DEPLOY_KEY_NAME-signing"
               MOUNT_ARGS="$MOUNT_ARGS -v $DEPLOY_STAGING:/mnt/wrapix/deploy_keys"
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
-              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
-              DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+              DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
             fi
             if [ -f "$SIGNING_KEY" ]; then
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
-              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME-signing:/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
-              DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/\$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME-signing:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+              DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
             fi
 
             # Stage .beads config files for container-local database isolation
@@ -252,7 +252,6 @@ in
             ENV_ARGS+=(-e "RALPH_DIR=''${RALPH_DIR:-}")
             ENV_ARGS+=(-e "RALPH_DEBUG=''${RALPH_DEBUG:-}")
             ENV_ARGS+=(-e "HOST_UID=$(id -u)")
-            ENV_ARGS+=(-e "HOST_USER=$USER")
             ENV_ARGS+=(-e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME")
             ENV_ARGS+=(-e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL")
             ENV_ARGS+=(-e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME")
@@ -302,7 +301,7 @@ in
               --dns 100.100.100.100 \
               --dns 1.1.1.1 \
               -v "$PROJECT_DIR:/workspace" \
-              -v "$PROJECT_DIR/.claude:/home/$USER/.claude" \
+              -v "$PROJECT_DIR/.claude:/home/wrapix/.claude" \
               $MOUNT_ARGS \
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \

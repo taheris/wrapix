@@ -102,10 +102,9 @@ pkgs.writeShellScriptBin "test-darwin" ''
   container run --rm \
     -w / \
     -v "$WORKSPACE:/workspace" \
-    -e HOST_USER=$USER \
+    -e BD_NO_DB=1 \
     -e HOST_UID=$(id -u) \
     -e WRAPIX_PROMPT="test" \
-    -e BD_NO_DB=1 \
     --network default \
     --dns 100.100.100.100 \
     --dns 1.1.1.1 \
@@ -160,8 +159,8 @@ pkgs.writeShellScriptBin "test-darwin" ''
   # Build mount environment variables in same format as production:
   # DIR_MOUNTS:  /staging/path:/destination/path
   # FILE_MOUNTS: /staging/path/filename:/destination/path
-  DIR_MOUNTS="/mnt/wrapix/dir0:/home/$USER/.claude"
-  FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/$USER/.claude.json"
+  DIR_MOUNTS="/mnt/wrapix/dir0:/home/wrapix/.claude"
+  FILE_MOUNTS="/mnt/wrapix/file0/claude.json:/home/wrapix/.claude.json"
 
   # Dereference symlinks on host (security: avoids mounting /nix/store)
   CLAUDE_DIR_DEREF="$TEST_DIR/claude-config-deref"
@@ -174,12 +173,12 @@ pkgs.writeShellScriptBin "test-darwin" ''
     -v "$WORKSPACE:/workspace" \
     -v "$CLAUDE_DIR_DEREF:/mnt/wrapix/dir0" \
     -v "$CLAUDE_JSON_DIR:/mnt/wrapix/file0" \
-    -e HOST_USER=$USER \
-    -e HOST_UID=$(id -u) \
-    -e WRAPIX_PROMPT="test" \
     -e BD_NO_DB=1 \
+    -e HOST_UID=$(id -u) \
     -e WRAPIX_DIR_MOUNTS="$DIR_MOUNTS" \
     -e WRAPIX_FILE_MOUNTS="$FILE_MOUNTS" \
+    -e WRAPIX_NOTIFY_TCP=1 \
+    -e WRAPIX_PROMPT="test" \
     --network default \
     --dns 100.100.100.100 \
     --dns 1.1.1.1 \
