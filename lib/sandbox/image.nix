@@ -35,15 +35,17 @@ let
   claudeConfigJson = pkgs.writeText "claude-config.json" (builtins.toJSON claudeConfig);
   claudeSettingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON claudeSettings);
 
-  # Base passwd/group (user added at runtime with host UID)
+  # Base passwd/group with fixed wrapix user (UID remapped at runtime via --userns=keep-id or setpriv)
   passwdFile = pkgs.writeTextDir "etc/passwd" ''
     root:x:0:0:root:/root:/bin/bash
     nobody:x:65534:65534:Unprivileged account:/var/empty:/bin/false
+    wrapix:x:1000:1000:Wrapix Sandbox:/home/wrapix:/bin/bash
   '';
 
   groupFile = pkgs.writeTextDir "etc/group" ''
     root:x:0:
     nogroup:x:65534:
+    wrapix:x:1000:
   '';
 
   # Create a merged environment with all packages for proper PATH
@@ -85,7 +87,7 @@ pkgs.dockerTools.buildLayeredImage {
   ];
 
   extraCommands = ''
-    mkdir -p tmp home root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
+    mkdir -p tmp home/wrapix root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
     chmod 1777 tmp var/cache
 
     mkdir -p etc/wrapix

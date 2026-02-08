@@ -99,8 +99,9 @@ in
         grep -q 'WRAPIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_DIR_MOUNTS handling"; exit 1; }
         grep -q 'WRAPIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_FILE_MOUNTS handling"; exit 1; }
 
-        # Verify /etc/passwd uses correct home directory
-        grep -q '/home/\$HOST_USER:/bin/bash' "$SCRIPT" || { echo "/etc/passwd should set home to /home/\$HOST_USER"; exit 1; }
+        # Verify entrypoint uses fixed wrapix user
+        grep -q 'USER="wrapix"' "$SCRIPT" || { echo "entrypoint should set USER=wrapix"; exit 1; }
+        grep -q 'HOME="/home/wrapix"' "$SCRIPT" || { echo "entrypoint should set HOME=/home/wrapix"; exit 1; }
 
         echo "Darwin entrypoint validation passed"
         mkdir $out

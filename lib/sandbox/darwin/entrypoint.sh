@@ -1,17 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Add user entry with host UID (passwd is writable at runtime)
-# Note: home directory must be /home/$HOST_USER to match where we copy .claude/settings.json
-echo "$HOST_USER:x:$HOST_UID:$HOST_UID::/home/$HOST_USER:/bin/bash" >> /etc/passwd
-echo "$HOST_USER:x:$HOST_UID:" >> /etc/group
+# Update wrapix user to use host UID (passwd is writable at runtime)
+# The wrapix user is pre-created in the image with UID 1000; we update it to match host
+sed -i "s/^wrapix:x:1000:1000:/wrapix:x:$HOST_UID:$HOST_UID:/" /etc/passwd
+sed -i "s/^wrapix:x:1000:/wrapix:x:$HOST_UID:/" /etc/group
 
-export USER="$HOST_USER"
+export USER="wrapix"
+export HOME="/home/wrapix"
 
-# Use container-local HOME for Darwin VMs (VirtioFS maps files as root)
-mkdir -p "/home/$HOST_USER"
-chown "$HOST_UID:$HOST_UID" "/home/$HOST_USER"
-export HOME="/home/$HOST_USER"
+# Fix home directory ownership (image has 1000:1000, we need HOST_UID)
+chown "$HOST_UID:$HOST_UID" "$HOME"
 
 # Safe path expansion: only expand ~ and $HOME/$USER, not arbitrary commands
 expand_path() {
@@ -83,15 +82,12 @@ fi
 
 # Set up SSH configuration
 # Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
-# The mount uses literal $USER path due to VirtioFS constraints
 mkdir -p "$HOME/.ssh"
-# shellcheck disable=SC2016 # $USER is intentionally literal - VirtioFS mount path
-KNOWN_HOSTS_SRC='/home/$USER/.ssh/known_hosts_dir/known_hosts'
+KNOWN_HOSTS_SRC="$HOME/.ssh/known_hosts_dir/known_hosts"
 [ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
 
 # Configure SSH to use deploy key if available (copied by WRAPIX_FILE_MOUNTS above)
-# Expand $USER in the path since FILE_MOUNTS copies to the expanded destination
-WRAPIX_DEPLOY_KEY=$(expand_path "${WRAPIX_DEPLOY_KEY:-}")
+WRAPIX_DEPLOY_KEY="${WRAPIX_DEPLOY_KEY:-}"
 if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
   cat > "$HOME/.ssh/config" <<EOF
 Host github.com
@@ -105,7 +101,7 @@ fi
 
 # Configure git SSH signing using separate signing key
 # (GitHub doesn't allow same key for deploy and signing)
-WRAPIX_SIGNING_KEY=$(expand_path "${WRAPIX_SIGNING_KEY:-}")
+WRAPIX_SIGNING_KEY="${WRAPIX_SIGNING_KEY:-}"
 if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   git config --global gpg.format ssh
   git config --global user.signingkey "$WRAPIX_SIGNING_KEY"
@@ -141,7 +137,8 @@ mkdir -p "$HOME/.claude"
 cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
-chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json" "$HOME/.claude" "$HOME/.claude/settings.json"
+# Note: $HOME/.claude is a VirtioFS mount, so we can't chown the directory itself
+chown "$HOST_UID:$HOST_UID" "$HOME/.claude.json" "$HOME/.claude/settings.json"
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter

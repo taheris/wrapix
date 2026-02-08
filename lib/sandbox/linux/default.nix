@@ -63,7 +63,7 @@ in
         # Mount project's .claude as container's ~/.claude for session persistence
         # This isolates container from host config while enabling /rename and /resume
         mkdir -p "$PROJECT_DIR/.claude"
-        VOLUME_ARGS="$VOLUME_ARGS -v $PROJECT_DIR/.claude:/home/$USER/.claude:rw"
+        VOLUME_ARGS="$VOLUME_ARGS -v $PROJECT_DIR/.claude:/home/wrapix/.claude:rw"
 
         dir_idx=0
 
@@ -98,7 +98,7 @@ in
         MOUNTS
 
         # Mount SSH known_hosts file directly and system prompt
-        VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/$USER/.ssh/known_hosts:ro"
+        VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/wrapix/.ssh/known_hosts:ro"
         VOLUME_ARGS="$VOLUME_ARGS -v ${prompt}:/etc/wrapix-prompt:ro"
 
         # Mount notification socket directory if daemon is running
@@ -118,13 +118,13 @@ in
         SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         DEPLOY_KEY_ARGS=""
         if [ -f "$DEPLOY_KEY" ]; then
-          VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
+          VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
           # Pass deploy key path to entrypoint for SSH config setup
-          DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+          DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
         fi
         if [ -f "$SIGNING_KEY" ]; then
-          VOLUME_ARGS="$VOLUME_ARGS -v $SIGNING_KEY:/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing:ro"
-          DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/$USER/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+          VOLUME_ARGS="$VOLUME_ARGS -v $SIGNING_KEY:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing:ro"
+          DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         fi
 
         # Stage .beads config files for container-local database isolation
@@ -190,8 +190,8 @@ in
           --memory=${toString memoryMb}m \
           --network=pasta \
           --userns=keep-id \
-          --passwd-entry "$USER:*:$(id -u):$(id -g)::/home/$USER:/bin/bash" \
-          --mount type=tmpfs,destination=/home/$USER \
+          --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
+          --mount type=tmpfs,destination=/home/wrapix \
           $VOLUME_ARGS \
           $BEADS_ARGS \
           $DEPLOY_KEY_ARGS \
@@ -202,7 +202,7 @@ in
           -e "RALPH_ARGS=''${RALPH_ARGS:-}" \
           -e "RALPH_DIR=''${RALPH_DIR:-}" \
           -e "RALPH_DEBUG=''${RALPH_DEBUG:-}" \
-          -e "HOME=/home/$USER" \
+          -e "HOME=/home/wrapix" \
           -e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME" \
           -e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL" \
           -e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME" \
