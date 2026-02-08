@@ -3,4 +3,5 @@
 .direnv/
 .wrapix/
 result
+result-*
 target/

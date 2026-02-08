@@ -1,0 +1,6 @@
+# Dolt storage syncs via beads branch, not main
+dolt/
+
+# Local state
+.local_version
+last-touched
