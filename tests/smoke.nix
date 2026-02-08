@@ -53,8 +53,9 @@ in
   image-builds =
     if skipImageTest then
       runCommandLocal "smoke-image-builds-skipped" { } ''
-        echo "SKIP: Image build test (SKIP_IMAGE_TEST=1)"
-        mkdir $out
+        trap '_ec=$?; if [ "$_ec" -eq 77 ]; then mkdir -p $out; exit 0; fi' EXIT
+        echo "SKIP: Image build test (SKIP_IMAGE_TEST=1)" >&2
+        exit 77
       ''
     else
       runCommandLocal "smoke-image-builds" { } ''
@@ -327,8 +328,9 @@ in
         ''
     else
       runCommandLocal "smoke-linux-microvm-krun" { } ''
-        echo "SKIP: krun microVM detection (Linux-only test)"
-        mkdir $out
+        trap '_ec=$?; if [ "$_ec" -eq 77 ]; then mkdir -p $out; exit 0; fi' EXIT
+        echo "SKIP: krun microVM detection (Linux-only test)" >&2
+        exit 77
       '';
 
   # Verify WRAPIX_NETWORK environment variable support in launcher and entrypoints

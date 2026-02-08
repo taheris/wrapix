@@ -170,7 +170,26 @@ CI systems can monitor skip and not-implemented counts to detect unexpected chan
 
 ### Nix Derivation Tests
 
-Nix derivation tests (`*.nix`) must still exit 0 for build success, since Nix treats any non-zero exit code as a build failure. The exit 77/78 convention applies only to standalone shell test scripts (`.sh` files) executed by the test runner.
+Nix derivation tests (`*.nix`) use `runCommandLocal`, which treats any non-zero exit code as a build failure. To use exit 77 for skips while keeping the Nix derivation successful, add an EXIT trap at the top of the script that catches exit 77, creates `$out`, and converts the exit to 0:
+
+```bash
+runCommandLocal "test-name" { } ''
+  # Nix-safe exit 77 handler: treat skip (77) as build success
+  trap '_ec=$?; if [ "$_ec" -eq 77 ]; then mkdir -p $out; exit 0; fi' EXIT
+
+  set -euo pipefail
+
+  if [ "$(uname)" != "Darwin" ]; then
+    echo "SKIP: Darwin-only test" >&2
+    exit 77
+  fi
+
+  # ... test logic ...
+  mkdir -p $out
+''
+```
+
+The trap must appear before `set -euo pipefail` so it is registered before any exit occurs. Skip messages go to stderr (`>&2`) so they remain visible in build logs even when the derivation succeeds.
 
 ### Skip Messages (NFR1)
 
