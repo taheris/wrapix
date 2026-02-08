@@ -60,6 +60,7 @@ test_mock_claude_exists() {
       test_fail "mock-claude produced no output"
     fi
   else
+    teardown_test_env
     test_skip "echo.sh scenario not found"
   fi
 
@@ -300,7 +301,8 @@ EOF
     # bd mol current may not support ad-hoc epics yet - skip rather than fail
     if echo "$mol_current_output" | grep -qi "not.*molecule\|not.*found\|unknown\|error"; then
       echo "  NOTE: bd mol current may require molecules created via bd mol pour"
-      test_skip "bd mol current position markers (ad-hoc epics not yet supported)"
+      teardown_test_env
+      test_not_implemented "bd mol current position markers (ad-hoc epics not yet supported)"
     else
       test_fail "bd mol current failed unexpectedly: $mol_current_output"
     fi
@@ -1082,6 +1084,7 @@ EOF
     # Known limitation: bd list --ready doesn't fully filter blocked-by-in_progress
     echo "  NOTE: Task C (blocked by in_progress A) appears in ready list"
     echo "        This is a known bd limitation - blocked check may not consider in_progress blockers"
+    teardown_test_env
     test_skip "Task C blocked-by-in_progress filtering (known bd limitation)"
   else
     test_pass "Task C (blocked by in_progress A) correctly excluded from ready list"
@@ -1107,6 +1110,7 @@ EOF
       # This happens due to bd limitation - document but don't fail hard
       echo "  NOTE: Step selected Task C despite it being blocked by in_progress Task A"
       echo "        This is due to bd list --ready not filtering blocked-by-in_progress items"
+      teardown_test_env
       test_skip "Correct task selection (bd --ready limitation)"
     else
       test_fail "Step selected unexpected task"
@@ -1732,7 +1736,8 @@ config_assert_run_max_iterations() {
   elif [ "$final_count" -eq 0 ]; then
     echo "  NOTE: max-iterations not yet implemented in loop.sh"
     echo "        Expected 3 remaining tasks, but loop completed all"
-    test_skip "loop.max-iterations (not yet implemented)"
+    teardown_test_env
+    test_not_implemented "loop.max-iterations (not yet implemented)"
   else
     test_fail "Expected 3 remaining tasks after max-iterations=2, got $final_count"
   fi
@@ -1844,7 +1849,8 @@ config_assert_run_pause_on_failure_false() {
   if [ "$CONFIG_EXIT_CODE" -ne 0 ]; then
     echo "  NOTE: pause-on-failure=false not yet implemented in loop.sh"
     echo "        Loop currently always pauses on failure"
-    test_skip "loop.pause-on-failure=false (not yet implemented)"
+    teardown_test_env
+    test_not_implemented "loop.pause-on-failure=false (not yet implemented)"
   else
     test_pass "Loop continued despite failure (pause-on-failure=false working)"
   fi
@@ -2299,7 +2305,8 @@ config_assert_failure_patterns() {
   if [ "$task_status" = "closed" ]; then
     echo "  NOTE: failure-patterns detection not yet implemented"
     echo "        Task completed despite CUSTOM_ERROR: pattern in output"
-    test_skip "failure-patterns (not yet implemented)"
+    teardown_test_env
+    test_not_implemented "failure-patterns (not yet implemented)"
   elif [ "$task_status" = "in_progress" ]; then
     test_pass "Failure pattern detected, task stayed in_progress"
   else
@@ -2576,6 +2583,7 @@ EOF
     test_pass "Sequential bond command succeeded"
   elif echo "$log_content" | grep -q "SEQUENTIAL_BOND_FAILED"; then
     echo "  NOTE: bd mol bond --type sequential may not be fully implemented"
+    teardown_test_env
     test_skip "Sequential bond (bd mol bond may need implementation)"
   elif echo "$log_content" | grep -q "Bonding with --type sequential"; then
     test_pass "Sequential bond was attempted"
@@ -2604,6 +2612,7 @@ EOF
       test_fail "Sequential task not found in database"
     fi
   else
+    teardown_test_env
     test_skip "Sequential task ID not captured (may not have been created)"
   fi
 
@@ -2642,6 +2651,7 @@ EOF
     test_pass "Parallel bond command succeeded"
   elif echo "$log_content2" | grep -q "PARALLEL_BOND_FAILED"; then
     echo "  NOTE: bd mol bond --type parallel may not be fully implemented"
+    teardown_test_env
     test_skip "Parallel bond (bd mol bond may need implementation)"
   elif echo "$log_content2" | grep -q "Bonding with --type parallel"; then
     test_pass "Parallel bond was attempted"
@@ -2670,6 +2680,7 @@ EOF
       test_fail "Parallel task not found in database"
     fi
   else
+    teardown_test_env
     test_skip "Parallel task ID not captured (may not have been created)"
   fi
 
@@ -2705,12 +2716,14 @@ EOF
       test_pass "Molecule structure shows bond information"
     else
       echo "  NOTE: bd mol show may not display bond types in current implementation"
+      teardown_test_env
       test_skip "Bond type visibility in bd mol show"
     fi
   else
     # bd mol show may not support ad-hoc epics
     if echo "$mol_show_output" | grep -qi "not.*molecule\|not.*found"; then
       echo "  NOTE: bd mol show may require molecules created via bd mol pour"
+      teardown_test_env
       test_skip "bd mol show (ad-hoc epics may not be supported)"
     else
       test_fail "bd mol show failed unexpectedly"
