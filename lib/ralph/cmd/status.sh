@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph status
+# ralph status [--watch|-w]
 # Show current workflow state using bd mol commands:
 # - Current label and spec name
 # - Molecule progress (completion %, rate, ETA)
 # - Current position in DAG
 # - Stale molecule warnings
+#
+# --watch / -w: Auto-refreshing live view using tmux split panes.
+#   Top pane: `watch -n5 ralph status` (molecule progress refresh)
+#   Bottom pane: live tail of agent output if ralph run is active,
+#                otherwise recent git log + last errors from ralph logs.
+#   Requires tmux — errors with a clear message if $TMUX is not set.
 
 # Source shared utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +21,73 @@ source "$SCRIPT_DIR/util.sh"
 
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 SPECS_DIR="specs"
+
+#-----------------------------------------------------------------------------
+# Flag parsing
+#-----------------------------------------------------------------------------
+WATCH_MODE=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --watch|-w)
+      WATCH_MODE=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: ralph status [--watch|-w]"
+      echo ""
+      echo "Show current workflow state."
+      echo ""
+      echo "Options:"
+      echo "  --watch, -w   Auto-refreshing live view (requires tmux)"
+      echo "  -h, --help    Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+#-----------------------------------------------------------------------------
+# Watch mode: tmux split layout
+#-----------------------------------------------------------------------------
+if [ "$WATCH_MODE" = "true" ]; then
+  # Require tmux
+  if [ -z "${TMUX:-}" ]; then
+    echo "Error: --watch requires a tmux session." >&2
+    echo "Start tmux first, then run 'ralph status --watch'." >&2
+    exit 1
+  fi
+
+  # Find the most recent active log file (from ralph run)
+  LOGS_DIR="$RALPH_DIR/logs"
+  ACTIVE_LOG=""
+  if [ -d "$LOGS_DIR" ]; then
+    ACTIVE_LOG=$(find "$LOGS_DIR" -maxdepth 1 -name "work-*.log" -type f \
+      -printf '%T@\t%p\n' 2>/dev/null \
+      | sort -rn \
+      | head -1 \
+      | cut -f2) || true
+  fi
+
+  # Build bottom pane command
+  if [ -n "$ACTIVE_LOG" ]; then
+    # Active log found — tail it for live agent output
+    BOTTOM_CMD="echo '=== Agent Output: $(basename "$ACTIVE_LOG") ===' && tail -f '$ACTIVE_LOG' | jq -r 'if .type == \"assistant\" then .message.content // .content // \"\" elif .type == \"result\" then \"--- result: \" + (.subtype // \"\") + \" ---\\n\" + (.result // \"\") else empty end' 2>/dev/null || tail -f '$ACTIVE_LOG'"
+  else
+    # No active log — show recent git log + last errors
+    BOTTOM_CMD="echo '=== Recent Activity ===' && echo '' && git log --oneline -15 2>/dev/null || echo '(no git history)' && echo '' && echo '=== Last Errors ===' && ralph logs 2>/dev/null || echo '(no ralph logs found)'"
+  fi
+
+  # Create tmux split layout
+  # Top pane: auto-refreshing ralph status
+  # Bottom pane: agent output or recent activity
+  tmux split-window -v -p 40 "$BOTTOM_CMD"
+  tmux select-pane -t 0
+  exec watch -n5 ralph status
+fi
 
 # Helper to indent each line of output
 indent() {
