@@ -324,6 +324,85 @@ in
         mkdir $out
       '';
 
+  # Verify WRAPIX_NETWORK environment variable support in launcher and entrypoints
+  # Security property: network filtering restricts outbound access in allow mode
+  # See specs/security-review.md "Network Modes" section
+  network-mode-configuration =
+    let
+      # Build sandboxes with different profiles to verify allowlist propagation
+      baseSandbox = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
+      rustSandbox = sandboxLib.mkSandbox { profile = sandboxLib.profiles.rust; };
+      pythonSandbox = sandboxLib.mkSandbox { profile = sandboxLib.profiles.python; };
+    in
+    runCommandLocal "smoke-network-mode"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        echo "Checking WRAPIX_NETWORK support..."
+
+        # Test 1: Launcher validates WRAPIX_NETWORK env var
+        SCRIPT="${wrapix}/bin/wrapix"
+        grep -q 'WRAPIX_NETWORK' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK env var handling"; exit 1; }
+        echo "PASS: WRAPIX_NETWORK env var handled in launcher"
+
+        # Test 2: Launcher validates mode values (full/allow)
+        grep -q "full|allow" "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK mode validation"; exit 1; }
+        echo "PASS: WRAPIX_NETWORK mode validation present"
+
+        # Test 3: Launcher passes WRAPIX_NETWORK_ALLOWLIST to container
+        grep -q 'WRAPIX_NETWORK_ALLOWLIST' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NETWORK_ALLOWLIST passthrough"; exit 1; }
+        echo "PASS: WRAPIX_NETWORK_ALLOWLIST passed to container"
+
+        # Test 4: Base allowlist includes required domains
+        grep -q 'api.anthropic.com' "$SCRIPT" || { echo "FAIL: Missing api.anthropic.com in allowlist"; exit 1; }
+        grep -q 'github.com' "$SCRIPT" || { echo "FAIL: Missing github.com in allowlist"; exit 1; }
+        grep -q 'cache.nixos.org' "$SCRIPT" || { echo "FAIL: Missing cache.nixos.org in allowlist"; exit 1; }
+        echo "PASS: Base allowlist domains present"
+
+        # Test 5: Rust profile includes crates.io domains
+        RUST_SCRIPT="${rustSandbox.package}/bin/wrapix"
+        grep -q 'crates.io' "$RUST_SCRIPT" || { echo "FAIL: Missing crates.io in rust allowlist"; exit 1; }
+        grep -q 'static.crates.io' "$RUST_SCRIPT" || { echo "FAIL: Missing static.crates.io in rust allowlist"; exit 1; }
+        grep -q 'index.crates.io' "$RUST_SCRIPT" || { echo "FAIL: Missing index.crates.io in rust allowlist"; exit 1; }
+        echo "PASS: Rust profile allowlist includes crates.io domains"
+
+        # Test 6: Python profile includes pypi domains
+        PYTHON_SCRIPT="${pythonSandbox.package}/bin/wrapix"
+        grep -q 'pypi.org' "$PYTHON_SCRIPT" || { echo "FAIL: Missing pypi.org in python allowlist"; exit 1; }
+        grep -q 'files.pythonhosted.org' "$PYTHON_SCRIPT" || { echo "FAIL: Missing files.pythonhosted.org in python allowlist"; exit 1; }
+        echo "PASS: Python profile allowlist includes pypi domains"
+
+        # Test 7: Launcher adds NET_ADMIN capability for allow mode
+        grep -q 'NET_ADMIN' "$SCRIPT" || { echo "FAIL: Missing NET_ADMIN capability for allow mode"; exit 1; }
+        echo "PASS: NET_ADMIN capability added for allow mode"
+
+        # Test 8: Linux entrypoint has iptables filtering logic
+        LINUX_EP="${../lib/sandbox/linux/entrypoint.sh}"
+        grep -q 'iptables' "$LINUX_EP" || { echo "FAIL: Missing iptables in Linux entrypoint"; exit 1; }
+        grep -q 'WRAPIX_NETWORK' "$LINUX_EP" || { echo "FAIL: Missing WRAPIX_NETWORK check in Linux entrypoint"; exit 1; }
+        echo "PASS: Linux entrypoint has network filtering"
+
+        # Test 9: Darwin entrypoint has iptables filtering logic
+        DARWIN_EP="${../lib/sandbox/darwin/entrypoint.sh}"
+        grep -q 'iptables' "$DARWIN_EP" || { echo "FAIL: Missing iptables in Darwin entrypoint"; exit 1; }
+        grep -q 'WRAPIX_NETWORK' "$DARWIN_EP" || { echo "FAIL: Missing WRAPIX_NETWORK check in Darwin entrypoint"; exit 1; }
+        echo "PASS: Darwin entrypoint has network filtering"
+
+        # Test 10: Sandboxes with all profiles build successfully
+        test -e ${baseSandbox.package} || { echo "FAIL: Base sandbox did not build"; exit 1; }
+        test -e ${rustSandbox.package} || { echo "FAIL: Rust sandbox did not build"; exit 1; }
+        test -e ${pythonSandbox.package} || { echo "FAIL: Python sandbox did not build"; exit 1; }
+        echo "PASS: All profile sandboxes build successfully"
+
+        echo ""
+        echo "WRAPIX_NETWORK configuration validation passed"
+        mkdir $out
+      '';
+
   # Verify GitHub SSH host keys match official fingerprints
   # Security property: ensures hardcoded keys haven't drifted from GitHub's published keys
   # Reference: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints

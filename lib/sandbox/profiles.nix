@@ -51,6 +51,15 @@ let
   # Environment variables in all profiles
   baseEnv = { };
 
+  # Base network allowlist for WRAPIX_NETWORK=allow mode
+  # These domains are always permitted regardless of profile
+  baseNetworkAllowlist = [
+    "api.anthropic.com" # Claude API
+    "github.com" # git operations
+    "ssh.github.com" # git SSH (port 443 fallback)
+    "cache.nixos.org" # Nix binary cache
+  ];
+
   # Helper to create a profile with base packages, mounts, and env merged in
   mkProfile =
     {
@@ -58,12 +67,14 @@ let
       packages ? [ ],
       env ? { },
       mounts ? [ ],
+      networkAllowlist ? [ ],
     }:
     {
       inherit name;
       packages = basePackages ++ packages;
       env = baseEnv // env;
       mounts = baseMounts ++ mounts;
+      networkAllowlist = baseNetworkAllowlist ++ networkAllowlist;
     };
 
   # Suppress GNU which's verbose "no X in (PATH)" errors
@@ -111,6 +122,12 @@ in
         optional = true;
       }
     ];
+
+    networkAllowlist = [
+      "crates.io"
+      "static.crates.io"
+      "index.crates.io"
+    ];
   };
 
   python = mkProfile {
@@ -134,6 +151,11 @@ in
         mode = "ro";
         optional = true;
       }
+    ];
+
+    networkAllowlist = [
+      "pypi.org"
+      "files.pythonhosted.org"
     ];
   };
 }

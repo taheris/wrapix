@@ -5,7 +5,12 @@
 }:
 
 let
-  inherit (builtins) elem mapAttrs attrValues;
+  inherit (builtins)
+    concatStringsSep
+    elem
+    mapAttrs
+    attrValues
+    ;
 
   isDarwin = system == "aarch64-darwin";
   isLinux = elem system [
@@ -78,19 +83,21 @@ let
       entrypointPkg = linuxPkgs.claude-code;
     };
 
-  # Merge extra packages/mounts/env into a profile
+  # Merge extra packages/mounts/env/networkAllowlist into a profile
   extendProfile =
     profile:
     {
       packages ? [ ],
       mounts ? [ ],
       env ? { },
+      networkAllowlist ? [ ],
     }:
     profile
     // {
       packages = (profile.packages or [ ]) ++ packages;
       mounts = (profile.mounts or [ ]) ++ mounts;
       env = (profile.env or { }) // env;
+      networkAllowlist = (profile.networkAllowlist or [ ]) ++ networkAllowlist;
     };
 
   # Build MCP server configurations from the mcp attrset
@@ -144,11 +151,19 @@ let
         inherit (mcpConfig) mcpServers;
       };
 
+      # Compute comma-separated network allowlist for WRAPIX_NETWORK=allow mode
+      networkAllowlist = concatStringsSep "," (finalProfile.networkAllowlist or [ ]);
+
       package =
         if isLinux then
           linuxSandbox.mkSandbox {
             profile = finalProfile;
-            inherit cpus memoryMb deployKey;
+            inherit
+              cpus
+              memoryMb
+              deployKey
+              networkAllowlist
+              ;
             profileImage = mkImage {
               profile = finalProfile;
               entrypointSh = ./linux/entrypoint.sh;
@@ -158,7 +173,12 @@ let
         else if isDarwin then
           darwinSandbox.mkSandbox {
             profile = finalProfile;
-            inherit cpus memoryMb deployKey;
+            inherit
+              cpus
+              memoryMb
+              deployKey
+              networkAllowlist
+              ;
             profileImage = mkImage {
               profile = finalProfile;
               entrypointSh = ./darwin/entrypoint.sh;
