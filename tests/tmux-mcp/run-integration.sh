@@ -4,9 +4,9 @@
 # This script runs all integration tests for the tmux-debug-mcp MCP server.
 # Tests exercise the MCP server directly (not inside containers) and require tmux.
 #
-# Prerequisites:
+# Prerequisites (provided by the NixOS VM in tests/tmux-mcp.nix):
 # - tmux
-# - tmux-debug-mcp binary (built via nix or cargo)
+# - tmux-debug-mcp binary
 # - jq (for JSON parsing)
 #
 # Usage:
@@ -18,7 +18,6 @@
 # Exit codes:
 #   0 - All tests passed
 #   1 - Some tests failed
-#   2 - Prerequisites not met
 
 set -euo pipefail
 
@@ -106,38 +105,6 @@ list_tests() {
     for test_name in "${!TESTS[@]}"; do
         printf "  %-20s %s\n" "$test_name" "${TEST_DESCRIPTIONS[$test_name]}"
     done | sort
-}
-
-check_prerequisites() {
-    local failed=0
-
-    if ! command -v tmux &>/dev/null; then
-        log_error "tmux is required but not installed"
-        log_info "Install with: nix develop (or your package manager)"
-        failed=1
-    fi
-
-    if ! command -v jq &>/dev/null; then
-        log_error "jq is required but not installed"
-        log_info "Install with: nix develop (or your package manager)"
-        failed=1
-    fi
-
-    # Check for tmux-debug-mcp binary
-    if ! command -v tmux-debug-mcp &>/dev/null; then
-        # Try to find it in the build directory
-        local cargo_bin="${REPO_ROOT}/lib/mcp/tmux/tmux-debug-mcp/target/debug/tmux-debug-mcp"
-        if [[ -x "$cargo_bin" ]]; then
-            export PATH="${REPO_ROOT}/lib/mcp/tmux/tmux-debug-mcp/target/debug:$PATH"
-            log_info "Using tmux-debug-mcp from cargo build"
-        else
-            log_error "tmux-debug-mcp binary not found"
-            log_info "Build with: cd lib/mcp/tmux/tmux-debug-mcp && cargo build"
-            failed=1
-        fi
-    fi
-
-    return $failed
 }
 
 run_test() {
@@ -245,15 +212,6 @@ main() {
     echo ""
 
     log_info "Tests to run: ${tests_to_run[*]}"
-    echo ""
-
-    # Check prerequisites — skip gracefully if not available
-    log_info "Checking prerequisites..."
-    if ! check_prerequisites; then
-        echo "SKIP: run-integration.sh prerequisites not met (tmux, jq, or tmux-debug-mcp not available)"
-        exit 0
-    fi
-    log_info "Prerequisites OK"
     echo ""
 
     # Run tests
