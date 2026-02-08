@@ -130,6 +130,10 @@ if [ "$UPDATE_MODE" = "true" ]; then
     echo "  Molecule: $MOLECULE_ID"
   else
     echo "  Mode: UPDATE (creating molecule for existing spec)"
+    echo "  Creating epic..."
+    MOLECULE_ID=$(bd create --type=epic --title="$SPEC_TITLE" --labels="spec-$LABEL" --silent)
+    jq --arg mol "$MOLECULE_ID" '.molecule = $mol' "$CURRENT_FILE" > "$CURRENT_FILE.tmp" && mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
+    echo "  Molecule: $MOLECULE_ID"
   fi
   echo "  Existing tasks: $EXISTING_COUNT"
 else
