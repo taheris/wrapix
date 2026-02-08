@@ -184,8 +184,33 @@ in
         # Pre-load image quietly to avoid "Copying blob" noise during podman run
         IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
 
+        # Detect krun availability for microVM boundary (see specs/security-review.md)
+        # Default: use krun when available and /dev/kvm exists
+        # WRAPIX_NO_MICROVM=1: explicit opt-out to container boundary
+        RUNTIME_ARGS=""
+        if [ "''${WRAPIX_NO_MICROVM:-}" = "1" ]; then
+          echo "Note: microVM disabled (WRAPIX_NO_MICROVM=1), using container boundary" >&2
+        elif ! [ -e /dev/kvm ]; then
+          echo "Error: /dev/kvm not found. A microVM boundary requires KVM support." >&2
+          echo "" >&2
+          echo "Options:" >&2
+          echo "  1. Enable KVM (bare metal or nested virtualization)" >&2
+          echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
+          exit 1
+        elif ! command -v krun >/dev/null 2>&1 && ! podman info --format '{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}' 2>/dev/null | grep -q krun; then
+          echo "Error: krun runtime not found. A microVM boundary requires crun-krun." >&2
+          echo "" >&2
+          echo "Options:" >&2
+          echo "  1. Install crun-krun (e.g., 'sudo dnf install crun-krun' or 'sudo apt install crun-krun')" >&2
+          echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
+          exit 1
+        else
+          RUNTIME_ARGS="--runtime krun"
+        fi
+
         # shellcheck disable=SC2086 # Intentional word splitting for volume args
         exec podman run --rm -it \
+          $RUNTIME_ARGS \
           --cpus="$CPUS" \
           --memory=${toString memoryMb}m \
           --network=pasta \
