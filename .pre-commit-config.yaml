@@ -31,7 +31,7 @@ repos:
 
       - id: no-hidden-specs
         name: no hidden specs in specs/
-        entry: bash -c 'for f in "$@"; do name="$(basename "$f")"; if [ -f ".wrapix/ralph/state/$name" ]; then echo "ERROR: $f is a hidden spec (exists in .wrapix/ralph/state/). Do not commit it to specs/." >&2; exit 1; fi; done' --
+        entry: "bash -c 'for f in \"$@\"; do name=\"$(basename \"$f\")\"; if [ -f \".wrapix/ralph/state/$name\" ]; then echo \"ERROR: $f is a hidden spec (exists in .wrapix/ralph/state/). Do not commit it to specs/.\" >&2; exit 1; fi; done' --"
         language: system
         files: ^specs/.*\.md$
         pass_filenames: true
