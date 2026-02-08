@@ -8,7 +8,7 @@ test_base_profile_functional() {
 
 test_rust_profile() {
   judge_files "lib/sandbox/profiles.nix"
-  judge_criterion "Rust profile includes rustc, cargo, and can compile and run Rust projects"
+  judge_criterion "Rust profile includes rustup (which provides rustc and cargo proxies), gcc for linking, openssl, pkg-config, and postgresql libs for building Rust projects. RUSTUP_HOME, CARGO_HOME, and OPENSSL environment variables are configured."
 }
 
 test_python_profile() {
