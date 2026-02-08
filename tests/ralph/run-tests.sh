@@ -650,6 +650,67 @@ EOF
     test_fail "Log file not found: $LOG_FILE"
   fi
 
+  # Verify awaiting:input label was added
+  assert_bead_has_label "$TASK_ID" "awaiting:input" "Issue should have awaiting:input label after RALPH_CLARIFY"
+
+  # Verify question text was stored in notes
+  assert_bead_notes_contain "$TASK_ID" "Question:" "Issue notes should contain question text after RALPH_CLARIFY"
+
+  teardown_test_env
+}
+
+# Test: run skips items with awaiting:input label
+test_run_skips_awaiting_input() {
+  CURRENT_TEST="run_skips_awaiting_input"
+  test_header "Step Skips Beads with awaiting:input Label"
+
+  setup_test_env "skip-awaiting"
+
+  # Create a spec file
+  cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
+# Test Feature
+
+## Requirements
+- Two tasks, one awaiting input
+EOF
+
+  # Set up label state
+  echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
+
+  # Create Task 1 and add awaiting:input label (simulates previous RALPH_CLARIFY)
+  TASK1_ID=$(bd create --title="Task 1 - Awaiting input" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+  bd update "$TASK1_ID" --add-label "awaiting:input" 2>/dev/null
+
+  # Create Task 2 (open, should be selected)
+  TASK2_ID=$(bd create --title="Task 2 - Available" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
+
+  test_pass "Created Task 1 (awaiting:input): $TASK1_ID"
+  test_pass "Created Task 2 (open): $TASK2_ID"
+
+  # Use complete scenario
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  # Run ralph run --once - should pick Task 2, not Task 1
+  set +e
+  OUTPUT=$(ralph-run --once 2>&1)
+  EXIT_CODE=$?
+  set -e
+
+  # Check which task was selected
+  if echo "$OUTPUT" | grep -q "Working on: $TASK2_ID"; then
+    test_pass "Step correctly selected Task 2 (skipped awaiting:input Task 1)"
+  elif echo "$OUTPUT" | grep -q "Working on: $TASK1_ID"; then
+    test_fail "Step incorrectly selected Task 1 (has awaiting:input label)"
+  else
+    test_fail "Could not determine which task was selected"
+  fi
+
+  # Task 2 should now be closed (completed by run)
+  assert_bead_closed "$TASK2_ID" "Task 2 should be closed after run"
+
+  # Task 1 should still have awaiting:input label
+  assert_bead_has_label "$TASK1_ID" "awaiting:input" "Task 1 should still have awaiting:input label"
+
   teardown_test_env
 }
 
@@ -4502,6 +4563,7 @@ ALL_TESTS=(
   test_run_exits_100_when_complete
   test_run_handles_blocked_signal
   test_run_handles_clarify_signal
+  test_run_skips_awaiting_input
   test_run_respects_dependencies
   test_run_loop_processes_all
   test_parallel_agent_simulation

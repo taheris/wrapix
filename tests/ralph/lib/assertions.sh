@@ -149,6 +149,36 @@ assert_bead_status() {
   fi
 }
 
+# Assert beads issue has a specific label
+# Usage: assert_bead_has_label <issue_id> <label> [message]
+assert_bead_has_label() {
+  local issue_id="$1"
+  local label="$2"
+  local msg="${3:-Issue $issue_id should have label $label}"
+  local has_label
+  has_label=$(bd show "$issue_id" --json 2>/dev/null | jq -r --arg lbl "$label" '.[0].labels // [] | map(select(. == $lbl)) | length' 2>/dev/null || echo "0")
+  if [ "$has_label" -gt 0 ]; then
+    test_pass "$msg"
+  else
+    test_fail "$msg"
+  fi
+}
+
+# Assert beads issue notes contain a string
+# Usage: assert_bead_notes_contain <issue_id> <pattern> [message]
+assert_bead_notes_contain() {
+  local issue_id="$1"
+  local pattern="$2"
+  local msg="${3:-Issue $issue_id notes should contain: $pattern}"
+  local notes
+  notes=$(bd show "$issue_id" --json 2>/dev/null | jq -r '.[0].notes // ""' 2>/dev/null || echo "")
+  if echo "$notes" | grep -qF "$pattern"; then
+    test_pass "$msg"
+  else
+    test_fail "$msg (notes: ${notes:0:200})"
+  fi
+}
+
 #-----------------------------------------------------------------------------
 # Molecule Test Assertions
 #-----------------------------------------------------------------------------
