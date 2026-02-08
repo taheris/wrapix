@@ -56,7 +56,7 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
 
   if [ -z "$SELECTED_PROFILE" ]; then
     # Get label from argument or current.json
-    RALPH_DIR="${RALPH_DIR:-.ralph}"
+    RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
     CURRENT_FILE="$RALPH_DIR/state/current.json"
     RUN_LABEL=""
 
@@ -118,7 +118,7 @@ source "$(dirname "$0")/util.sh"
 debug "Syncing beads database..."
 bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"

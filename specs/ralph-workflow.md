@@ -169,7 +169,7 @@ ralph tune
 > Analyzing templates...
 > This should go in step.md, section "Instructions"
 >
-> [makes edit to .ralph/template/step.md]
+> [makes edit to .wrapix/ralph/template/step.md]
 > [runs ralph check]
 > ✓ Template valid
 ```
@@ -204,8 +204,8 @@ ralph sync --dry-run # Preview sync without executing
 
 Synchronizes local templates with packaged versions:
 
-1. Creates `.ralph/template/` with fresh packaged templates
-2. Moves existing customized templates to `.ralph/backup/`
+1. Creates `.wrapix/ralph/template/` with fresh packaged templates
+2. Moves existing customized templates to `.wrapix/ralph/backup/`
 3. Copies all templates including variants and `partial/` directory
 
 **`--diff` mode**: Shows changes between local templates and packaged versions. Pipe to `ralph tune` for integration:
@@ -215,7 +215,7 @@ ralph sync --diff | ralph tune
 
 **Directory structure after sync:**
 ```
-.ralph/
+.wrapix/ralph/
 ├── config.nix
 ├── template/            # Fresh from packaged
 │   ├── partial/
@@ -423,10 +423,10 @@ lib/ralph/template/
 
 ## Project Configuration
 
-Projects configure ralph via `.ralph/config.nix` (local project overrides):
+Projects configure ralph via `.wrapix/ralph/config.nix` (local project overrides):
 
 ```nix
-# .ralph/config.nix
+# .wrapix/ralph/config.nix
 {
   # Wrapix flake reference (provides container profiles)
   wrapix = "github:user/wrapix";  # or local path
@@ -439,7 +439,7 @@ Projects configure ralph via `.ralph/config.nix` (local project overrides):
   stateDir = ./state;
 
   # Template overlay (optional, for local customizations)
-  templateDir = ./.ralph/template;  # null = use packaged only
+  templateDir = ./.wrapix/ralph/template;  # null = use packaged only
 }
 ```
 

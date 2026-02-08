@@ -13,7 +13,7 @@
 #   - Text patterns: error:, Error:, ERROR, failed, Failed, FAILED, stack traces
 set -euo pipefail
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 CONTEXT_LINES=20
 SHOW_ALL=false
 LOG_FILE=""

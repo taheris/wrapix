@@ -125,7 +125,7 @@ Provides assertion functions for test validation:
 Test setup and teardown helpers:
 - `setup_test_env` — Create isolated temp directory with clean beads DB
 - `teardown_test_env` — Clean up temp directory
-- `setup_ralph_config` — Initialize `.ralph/config.nix`
+- `setup_ralph_config` — Initialize `.wrapix/ralph/config.nix`
 - `create_test_spec <label> <content>` — Create spec file for testing
 
 ### `mock-claude.sh`

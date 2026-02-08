@@ -23,7 +23,7 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists
 if [ -n "${RALPH_TEMPLATE_DIR:-}" ] && [ -d "$RALPH_TEMPLATE_DIR" ]; then

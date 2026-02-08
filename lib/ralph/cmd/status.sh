@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=util.sh
 source "$SCRIPT_DIR/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 SPECS_DIR="specs"
 
 # Helper to indent each line of output

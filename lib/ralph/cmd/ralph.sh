@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 COMMAND="${1:-help}"
 shift || true
 
@@ -68,7 +68,7 @@ case "$COMMAND" in
     echo "  edit            Edit current spec file"
     echo ""
     echo "Environment:"
-    echo "  RALPH_DIR    Working directory (default: .ralph)"
+    echo "  RALPH_DIR    Working directory (default: .wrapix/ralph)"
     echo "  RALPH_DEBUG  Enable debug output (set to 1)"
     ;;
 

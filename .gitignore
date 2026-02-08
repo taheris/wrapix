@@ -1,6 +1,6 @@
 .cache/
 .claude/
 .direnv/
-.ralph/
+.wrapix/
 result
 target/
