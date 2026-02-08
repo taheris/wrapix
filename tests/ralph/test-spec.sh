@@ -183,17 +183,50 @@ JSON
     test_fail "Should show unannotated criterion: Works offline"
   fi
 
-  # Should indicate annotation types per criterion
-  if echo "$output" | grep -q "verify"; then
-    test_pass "Shows verify annotation type"
+  # Should indicate annotation types per criterion with bracketed type
+  if echo "$output" | grep -q "\[verify\]"; then
+    test_pass "Shows [verify] annotation type"
   else
-    test_fail "Should show verify annotation type"
+    test_fail "Should show [verify] annotation type"
   fi
 
-  if echo "$output" | grep -q "judge"; then
-    test_pass "Shows judge annotation type"
+  if echo "$output" | grep -q "\[judge"; then
+    test_pass "Shows [judge] annotation type"
   else
-    test_fail "Should show judge annotation type"
+    test_fail "Should show [judge] annotation type"
+  fi
+
+  if echo "$output" | grep -q "\[none"; then
+    test_pass "Shows [none] for unannotated criteria"
+  else
+    test_fail "Should show [none] for unannotated criteria"
+  fi
+
+  # Should show test path with arrow for annotated criteria
+  if echo "$output" | grep "Fast response time" | grep -q "→.*tests/perf-test.sh::test_response_time"; then
+    test_pass "Shows test path with arrow for verify criterion"
+  else
+    test_fail "Should show test path with arrow for verify criterion"
+  fi
+
+  if echo "$output" | grep "Output is human-readable" | grep -q "→.*tests/judges/readability.sh::test_readable_output"; then
+    test_pass "Shows test path with arrow for judge criterion"
+  else
+    test_fail "Should show test path with arrow for judge criterion"
+  fi
+
+  # Unannotated criteria should NOT have arrow/path
+  if echo "$output" | grep "Works offline" | grep -qv "→"; then
+    test_pass "Unannotated criterion has no arrow/path"
+  else
+    test_fail "Unannotated criterion should not have arrow/path"
+  fi
+
+  # Should still show summary totals at the bottom
+  if echo "$output" | grep -qi "total"; then
+    test_pass "Verbose output still includes totals"
+  else
+    test_fail "Verbose output should still include totals"
   fi
 
   teardown_test_env
