@@ -3992,7 +3992,6 @@ test_render_template_basic() {
 }
 
 # Test: render_template validates required variables
-# Requires RALPH_METADATA_DIR to be set (needed to know which variables are required)
 test_render_template_missing_required() {
   CURRENT_TEST="render_template_missing_required"
   test_header "render_template Missing Required Variable"
@@ -4003,13 +4002,6 @@ test_render_template_missing_required() {
   # shellcheck source=../../lib/ralph/cmd/util.sh
   source "$REPO_ROOT/lib/ralph/cmd/util.sh"
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
-
-  # Skip if metadata not available (can't validate required variables without it)
-  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
-    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
-    teardown_test_env
-    return
-  fi
 
   # Test with missing LABEL (required variable)
   set +e
@@ -4081,7 +4073,6 @@ Line 3"
 }
 
 # Test: render_template reads from environment variables
-# Requires RALPH_METADATA_DIR to be set (needed to know which env vars to check)
 test_render_template_env_vars() {
   CURRENT_TEST="render_template_env_vars"
   test_header "render_template Environment Variables"
@@ -4092,13 +4083,6 @@ test_render_template_env_vars() {
   # shellcheck source=../../lib/ralph/cmd/util.sh
   source "$REPO_ROOT/lib/ralph/cmd/util.sh"
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
-
-  # Skip if metadata not available (can't detect env vars without variable list)
-  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
-    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
-    teardown_test_env
-    return
-  fi
 
   # Set variables via environment
   export PINNED_CONTEXT="# Env Context"
@@ -4132,7 +4116,6 @@ test_render_template_env_vars() {
 }
 
 # Test: get_template_variables returns correct list
-# Requires RALPH_METADATA_DIR to be set (available in Nix environment)
 test_get_template_variables() {
   CURRENT_TEST="get_template_variables"
   test_header "get_template_variables Function"
@@ -4143,13 +4126,6 @@ test_get_template_variables() {
   # shellcheck source=../../lib/ralph/cmd/util.sh
   source "$REPO_ROOT/lib/ralph/cmd/util.sh"
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
-
-  # Skip if metadata not available (only available in Nix build)
-  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
-    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
-    teardown_test_env
-    return
-  fi
 
   local vars
   vars=$(get_template_variables run 2>&1)
@@ -4178,7 +4154,6 @@ test_get_template_variables() {
 }
 
 # Test: get_variable_definitions returns definitions
-# Requires RALPH_METADATA_DIR to be set (available in Nix environment)
 test_get_variable_definitions() {
   CURRENT_TEST="get_variable_definitions"
   test_header "get_variable_definitions Function"
@@ -4189,13 +4164,6 @@ test_get_variable_definitions() {
   # shellcheck source=../../lib/ralph/cmd/util.sh
   source "$REPO_ROOT/lib/ralph/cmd/util.sh"
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
-
-  # Skip if metadata not available (only available in Nix build)
-  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
-    test_skip "RALPH_METADATA_DIR not set (run via nix build .#ralphTests)"
-    teardown_test_env
-    return
-  fi
 
   local defs
   defs=$(get_variable_definitions 2>&1)

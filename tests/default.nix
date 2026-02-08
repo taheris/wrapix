@@ -113,7 +113,7 @@ let
     export REPO_ROOT="${src}"
     export RALPH_METADATA_DIR="${ralphModule.scripts}/share/ralph"
     export RALPH_TEMPLATE_DIR="${src}/lib/ralph/template"
-    export PATH="${ralphModule.scripts}/bin:$PATH"
+    export PATH="${pkgs.beads}/bin:${ralphModule.scripts}/bin:$PATH"
     exec ${ralphTestDir}/run-tests.sh
   '';
 
@@ -148,13 +148,7 @@ let
     set -euo pipefail
     echo "=== Ralph Integration Tests ==="
     echo ""
-    if command -v bd &>/dev/null && command -v ralph-run &>/dev/null; then
-      ${ralphIntegrationTests}/bin/test-ralph-integration
-    else
-      echo "SKIP: Ralph integration tests (bd or ralph-run not in PATH)"
-      echo "Run from devShell: nix develop"
-      exit 1
-    fi
+    ${ralphIntegrationTests}/bin/test-ralph-integration
   '';
 
   # ============================================================================
@@ -184,16 +178,11 @@ let
     echo "----------------------------------------"
     echo "Running: Ralph Integration Tests"
     echo "----------------------------------------"
-    if command -v bd &>/dev/null && command -v ralph-run &>/dev/null; then
-      if ${ralphIntegrationTests}/bin/test-ralph-integration; then
-        echo "PASS: Ralph integration tests"
-      else
-        echo "FAIL: Ralph integration tests"
-        FAILED=1
-      fi
+    if ${ralphIntegrationTests}/bin/test-ralph-integration; then
+      echo "PASS: Ralph integration tests"
     else
-      echo "SKIP: Ralph integration tests (bd or ralph-run not in PATH)"
-      SKIPPED_TESTS="$SKIPPED_TESTS ralph"
+      echo "FAIL: Ralph integration tests"
+      FAILED=1
     fi
     echo ""
 
