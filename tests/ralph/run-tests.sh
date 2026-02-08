@@ -5752,7 +5752,7 @@ main() {
     local result_file="$results_dir/${filter}.result"
     local output_file="$results_dir/${filter}.output"
 
-    run_test_isolated "$filter" "$result_file" "$output_file"
+    (set +e; run_test_isolated "$filter" "$result_file" "$output_file")
     cat "$output_file"
 
     # Read results

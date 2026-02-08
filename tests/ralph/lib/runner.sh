@@ -45,9 +45,9 @@ init_test_state() {
 # Run a single test in isolation and write results to file
 # Usage: run_test_isolated <test_func> <result_file> <output_file>
 run_test_isolated() {
-  local test_func="$1"
-  local result_file="$2"
-  local output_file="$3"
+  _RTI_TEST_FUNC="$1"
+  _RTI_RESULT_FILE="$2"
+  _RTI_OUTPUT_FILE="$3"
 
   # CRITICAL: Disable set -e for the entire function to ensure results are always written
   # This runs in a subshell, so this doesn't affect the parent shell's settings
@@ -72,14 +72,14 @@ run_test_isolated() {
       NOT_IMPLEMENTED=1
     elif [ "$exit_code" -ne 0 ] && [ "$PASSED" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
       FAILED=1
-      FAILED_TESTS+=("$test_func: exited with code $exit_code")
+      FAILED_TESTS+=("$_RTI_TEST_FUNC: exited with code $exit_code")
     fi
-    echo "passed=$PASSED" > "$result_file"
-    echo "failed=$FAILED" >> "$result_file"
-    echo "skipped=$SKIPPED" >> "$result_file"
-    echo "not_implemented=$NOT_IMPLEMENTED" >> "$result_file"
+    echo "passed=$PASSED" > "$_RTI_RESULT_FILE"
+    echo "failed=$FAILED" >> "$_RTI_RESULT_FILE"
+    echo "skipped=$SKIPPED" >> "$_RTI_RESULT_FILE"
+    echo "not_implemented=$NOT_IMPLEMENTED" >> "$_RTI_RESULT_FILE"
     for t in "${FAILED_TESTS[@]}"; do
-      echo "failed_test=$t" >> "$result_file"
+      echo "failed_test=$t" >> "$_RTI_RESULT_FILE"
     done
   }
   trap _rti_write_results EXIT
@@ -87,7 +87,7 @@ run_test_isolated() {
   # Run the test, capturing output
   # test_skip (exit 77) and test_not_implemented (exit 78) will exit this subshell —
   # the EXIT trap ensures results are always written with correct categorization
-  "$test_func" > "$output_file" 2>&1
+  "$_RTI_TEST_FUNC" > "$_RTI_OUTPUT_FILE" 2>&1
 }
 
 #-----------------------------------------------------------------------------
