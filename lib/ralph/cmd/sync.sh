@@ -118,6 +118,7 @@ fetch_github_templates() {
 # Parse arguments
 DRY_RUN=false
 DIFF_MODE=false
+DEPS_MODE=false
 DIFF_TEMPLATE_NAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -134,8 +135,12 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --deps)
+      DEPS_MODE=true
+      shift
+      ;;
     -h|--help)
-      echo "Usage: ralph sync [--dry-run] [--diff [template-name]]"
+      echo "Usage: ralph sync [--dry-run] [--diff [template-name]] [--deps]"
       echo ""
       echo "Synchronizes local templates with packaged versions."
       echo ""
@@ -143,6 +148,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --dry-run, -d  Preview changes without executing"
       echo "  --diff [name]  Show local template changes vs packaged (no sync)"
       echo "                 If template-name given, diff only that template/partial"
+      echo "  --deps         Show required nix packages for current spec's tests"
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Sync Actions:"
@@ -165,6 +171,7 @@ while [[ $# -gt 0 ]]; do
       echo "  ralph sync --diff             # Show all template changes"
       echo "  ralph sync --diff run         # Show run.md changes only"
       echo "  ralph sync --diff | ralph tune  # Pipe to tune for integration"
+      echo "  ralph sync --deps             # List nix packages for spec tests"
       echo ""
       echo "Environment:"
       echo "  RALPH_DIR           Local ralph directory (default: .wrapix/ralph)"
@@ -578,7 +585,169 @@ $diff_result
   fi
 }
 
+# === Deps Mode Functions ===
+
+# Map of command names to nixpkgs package names
+# Usage: tool_to_nix_package "curl" -> "curl"
+tool_to_nix_package() {
+  local tool="$1"
+  case "$tool" in
+    curl)     echo "curl" ;;
+    jq)       echo "jq" ;;
+    tmux)     echo "tmux" ;;
+    python|python3) echo "python3" ;;
+    node|nodejs)    echo "nodejs" ;;
+    git)      echo "git" ;;
+    rsync)    echo "rsync" ;;
+    wget)     echo "wget" ;;
+    ssh|scp)  echo "openssh" ;;
+    socat)    echo "socat" ;;
+    nc|ncat|netcat) echo "netcat" ;;
+    dig|nslookup)   echo "dnsutils" ;;
+    sqlite3)  echo "sqlite" ;;
+    psql)     echo "postgresql" ;;
+    docker)   echo "docker" ;;
+    podman)   echo "podman" ;;
+    nix)      echo "nix" ;;
+    shellcheck) echo "shellcheck" ;;
+    shfmt)    echo "shfmt" ;;
+    rg|ripgrep)  echo "ripgrep" ;;
+    fd)       echo "fd" ;;
+    fzf)      echo "fzf" ;;
+    bat)      echo "bat" ;;
+    diff)     echo "diffutils" ;;
+    patch)    echo "patch" ;;
+    make)     echo "gnumake" ;;
+    gcc|cc)   echo "gcc" ;;
+    go)       echo "go" ;;
+    cargo|rustc) echo "rustc" ;;
+    *)        return 1 ;;
+  esac
+}
+
+# Scan a file for tool references and return nix package names
+# Usage: scan_file_for_deps "tests/notify-test.sh"
+# Output: one nix package per line (deduplicated within this file)
+scan_file_for_deps() {
+  local file="$1"
+
+  if [ ! -f "$file" ]; then
+    debug "File not found for dep scan: $file"
+    return 0
+  fi
+
+  local content
+  content=$(cat "$file")
+
+  # Known tools to scan for — check command usage patterns
+  local tools=(
+    curl jq tmux python python3 node nodejs git rsync wget
+    ssh scp socat nc ncat netcat dig nslookup sqlite3 psql
+    docker podman nix shellcheck shfmt rg ripgrep fd fzf bat
+    diff patch make gcc cc go cargo rustc
+  )
+
+  local found_pkgs=()
+  for tool in "${tools[@]}"; do
+    # Match tool as a command: at start of line, after pipe, in $(), after &&/||,
+    # or as argument to command -v / which / type
+    # Use word-boundary-like matching to avoid false positives
+    if echo "$content" | grep -qE "(^|[[:space:]|;&\(])${tool}([[:space:]|;&\)]|$)" 2>/dev/null; then
+      local pkg
+      if pkg=$(tool_to_nix_package "$tool"); then
+        found_pkgs+=("$pkg")
+      fi
+    fi
+  done
+
+  # Deduplicate and output
+  printf '%s\n' "${found_pkgs[@]}" | sort -u
+}
+
+# Show required nix packages for current spec's verify/judge tests
+show_deps() {
+  # Find current spec
+  local current_file="$RALPH_DIR/state/current.json"
+  if [ ! -f "$current_file" ]; then
+    error "No active feature. Run 'ralph plan <label>' first."
+  fi
+
+  local label hidden spec_file
+  label=$(jq -r '.label // empty' "$current_file")
+  hidden=$(jq -r '.hidden // false' "$current_file")
+
+  if [ -z "$label" ]; then
+    error "No label in current.json. Run 'ralph plan <label>' first."
+  fi
+
+  if [ "$hidden" = "true" ]; then
+    spec_file="$RALPH_DIR/state/$label.md"
+  else
+    spec_file="specs/$label.md"
+  fi
+
+  if [ ! -f "$spec_file" ]; then
+    error "Spec file not found: $spec_file"
+  fi
+
+  debug "Scanning annotations in: $spec_file"
+
+  # Parse annotations from the spec
+  local annotations
+  annotations=$(parse_spec_annotations "$spec_file") || {
+    echo "No success criteria found in $spec_file" >&2
+    return 0
+  }
+
+  if [ -z "$annotations" ]; then
+    echo "No success criteria found in $spec_file" >&2
+    return 0
+  fi
+
+  # Collect all unique test files from annotations
+  local test_files=()
+  while IFS=$'\t' read -r _criterion ann_type file_path _function_name _checked; do
+    if [ "$ann_type" = "verify" ] || [ "$ann_type" = "judge" ]; then
+      if [ -n "$file_path" ]; then
+        test_files+=("$file_path")
+      fi
+    fi
+  done <<< "$annotations"
+
+  if [ ${#test_files[@]} -eq 0 ]; then
+    debug "No annotated test files found"
+    return 0
+  fi
+
+  # Deduplicate test files
+  local unique_files
+  unique_files=$(printf '%s\n' "${test_files[@]}" | sort -u)
+
+  # Scan each test file for deps
+  local all_pkgs=()
+  while IFS= read -r file; do
+    debug "Scanning for deps: $file"
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] && all_pkgs+=("$pkg")
+    done < <(scan_file_for_deps "$file")
+  done <<< "$unique_files"
+
+  if [ ${#all_pkgs[@]} -eq 0 ]; then
+    debug "No package dependencies detected"
+    return 0
+  fi
+
+  # Deduplicate and output one per line
+  printf '%s\n' "${all_pkgs[@]}" | sort -u
+}
+
 # Main
+
+# Handle deps mode separately - no sync, no diff
+if [ "$DEPS_MODE" = "true" ]; then
+  show_deps
+  exit 0
+fi
 
 # Handle diff mode separately - no sync, just show changes
 if [ "$DIFF_MODE" = "true" ]; then
