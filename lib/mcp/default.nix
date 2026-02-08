@@ -2,7 +2,7 @@
 #
 # Maps server names to their definitions. Each server exports:
 #   - name: Server identifier (string)
-#   - package: Nix package for the MCP server binary
+#   - packages: List of runtime packages (server binary + dependencies)
 #   - mkServerConfig: Function to generate server config from user options
 #
 # Usage:

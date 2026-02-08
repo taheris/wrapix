@@ -6,6 +6,7 @@
 
 let
   inherit (builtins)
+    concatMap
     concatStringsSep
     elem
     mapAttrs
@@ -102,7 +103,7 @@ let
 
   # Build MCP server configurations from the mcp attrset
   # Returns { packages, mcpServers } where:
-  #   - packages: list of server packages to add to the sandbox
+  #   - packages: flattened list of all server runtime packages
   #   - mcpServers: attrset of server configs for claudeSettings
   buildMcpConfig =
     mcp:
@@ -115,13 +116,13 @@ let
           serverConfig = serverDef.mkServerConfig userConfig;
         in
         {
-          inherit (serverDef) package;
+          inherit (serverDef) packages;
           config = serverConfig;
         }
       ) mcp;
     in
     {
-      packages = map (s: s.package) (attrValues serverConfigs);
+      packages = concatMap (s: s.packages) (attrValues serverConfigs);
       mcpServers = mapAttrs (_name: s: s.config) serverConfigs;
     };
 
