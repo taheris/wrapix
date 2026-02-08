@@ -181,7 +181,6 @@ run_test() {
 }
 
 main() {
-    local verbose=0
     local keep_going=0
     local tests_to_run=()
 
@@ -197,7 +196,6 @@ main() {
                 exit 0
                 ;;
             --verbose|-v)
-                verbose=1
                 export VERBOSE=1
                 shift
                 ;;

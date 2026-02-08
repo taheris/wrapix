@@ -69,7 +69,9 @@ main() {
     # Close file descriptors first
     exec 3>&- 2>/dev/null || true
     exec 4<&- 2>/dev/null || true
+    # shellcheck disable=SC2034  # globals from test_lib.sh used by cleanup_mcp
     MCP_FD_IN=""
+    # shellcheck disable=SC2034
     MCP_FD_OUT=""
 
     # Kill the server process
@@ -111,8 +113,8 @@ main() {
     mcp_initialized
 
     response=$(mcp_create_pane "sleep 300" "sigterm-test")
-    local pane_id
-    pane_id=$(extract_pane_id "$response")
+    # pane_id not needed; we only care that the pane was created
+    extract_pane_id "$response" >/dev/null
 
     session_name=$(get_mcp_session_name)
     assert_tmux_session_exists "$session_name"
@@ -122,7 +124,9 @@ main() {
     saved_pid="$MCP_PID"
     exec 3>&- 2>/dev/null || true
     exec 4<&- 2>/dev/null || true
+    # shellcheck disable=SC2034  # globals from test_lib.sh used by cleanup_mcp
     MCP_FD_IN=""
+    # shellcheck disable=SC2034
     MCP_FD_OUT=""
 
     kill -TERM "$saved_pid" 2>/dev/null || true

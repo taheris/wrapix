@@ -63,8 +63,7 @@ main() {
     log_test "Test 3: Verify JSON structure..."
 
     # The list should be valid JSON array
-    local panes_json
-    panes_json=$(echo "$content" | jq '.' 2>/dev/null) || {
+    echo "$content" | jq '.' >/dev/null 2>&1 || {
         log_fail "List output should be valid JSON"
         log_error "Content: $content"
         exit 1
