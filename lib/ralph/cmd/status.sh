@@ -23,6 +23,86 @@ RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 SPECS_DIR="specs"
 
 #-----------------------------------------------------------------------------
+# Helpers
+#-----------------------------------------------------------------------------
+
+# Format a duration in seconds as a human-readable age string
+# Usage: format_age <seconds>
+# Output: "2h ago", "3d ago", "5m ago", etc.
+format_age() {
+  local seconds="$1"
+  if [ "$seconds" -lt 60 ]; then
+    echo "${seconds}s ago"
+  elif [ "$seconds" -lt 3600 ]; then
+    echo "$(( seconds / 60 ))m ago"
+  elif [ "$seconds" -lt 86400 ]; then
+    echo "$(( seconds / 3600 ))h ago"
+  else
+    echo "$(( seconds / 86400 ))d ago"
+  fi
+}
+
+# Display beads with awaiting:input label for the current spec label
+# Usage: show_awaiting_items <bead_label>
+# Output: Formatted section showing awaiting items, or nothing if none found
+show_awaiting_items() {
+  local bead_label="$1"
+
+  # Query beads with both the spec label AND awaiting:input label
+  local awaiting_json
+  awaiting_json=$(bd_json list --label "$bead_label" --label "awaiting:input" --json --limit 50 2>/dev/null) || true
+
+  # Check if we have any results
+  if [ -z "$awaiting_json" ] || [ "$awaiting_json" = "[]" ] || ! echo "$awaiting_json" | jq -e 'length > 0' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local count
+  count=$(echo "$awaiting_json" | jq 'length')
+
+  echo "Awaiting Input ($count):"
+
+  local now
+  now=$(date +%s)
+
+  # Iterate over awaiting items
+  echo "$awaiting_json" | jq -r '.[] | [.id, .title, (.notes // ""), .updated_at] | @tsv' | while IFS=$'\t' read -r id title notes updated_at; do
+    # Extract question from notes (look for "Question: ..." format)
+    local question=""
+    if [ -n "$notes" ]; then
+      question=$(echo "$notes" | grep -oP 'Question:\s*\K.*' | head -1) || true
+    fi
+
+    # Calculate age from updated_at
+    local age_str=""
+    if [ -n "$updated_at" ]; then
+      local updated_epoch
+      updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null) || true
+      if [ -n "$updated_epoch" ]; then
+        local age_seconds=$(( now - updated_epoch ))
+        if [ "$age_seconds" -ge 0 ]; then
+          age_str=$(format_age "$age_seconds")
+        fi
+      fi
+    fi
+
+    # Display: [awaiting] <id>  <title>
+    printf '  [awaiting] %-14s %s\n' "$id" "$title"
+
+    # Display question and age on the next line if available
+    if [ -n "$question" ] && [ -n "$age_str" ]; then
+      printf '               "%s" (%s)\n' "$question" "$age_str"
+    elif [ -n "$question" ]; then
+      printf '               "%s"\n' "$question"
+    elif [ -n "$age_str" ]; then
+      printf '               (%s)\n' "$age_str"
+    fi
+  done
+
+  echo ""
+}
+
+#-----------------------------------------------------------------------------
 # Flag parsing
 #-----------------------------------------------------------------------------
 WATCH_MODE=false
@@ -242,6 +322,9 @@ if [ -n "$MOLECULE" ]; then
 
   echo ""
 
+  # Show awaiting input items
+  show_awaiting_items "spec-$LABEL"
+
   # Check for stale molecules (hygiene warnings)
   echo "Warnings:"
   if STALE_OUTPUT=$(bd mol stale --quiet 2>&1) && [ -n "$STALE_OUTPUT" ]; then
@@ -294,6 +377,10 @@ else
   fi
 
   echo ""
+
+  # Show awaiting input items
+  show_awaiting_items "$BEAD_LABEL"
+
   echo "Run 'ralph todo' to create a molecule for this spec."
 fi
 

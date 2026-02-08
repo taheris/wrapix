@@ -523,6 +523,170 @@ MOCK_EOF
   done
 }
 
+# Test: ralph status displays awaiting:input items with question text and age
+test_status_awaiting_display() {
+  CURRENT_TEST="status_awaiting_display"
+  test_header "Status Displays Awaiting Input Items"
+
+  setup_test_env "status-awaiting"
+
+  local label="test-feature"
+
+  # Create spec file
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Test Feature
+
+## Requirements
+- Test requirement
+SPEC_EOF
+
+  # Set up current.json (no molecule — use fallback path)
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  # Create a task with awaiting:input label and a question in notes
+  local task_json
+  task_json=$(bd create --title="Cross-platform CI" --type=task \
+    --labels="spec-$label,awaiting:input" \
+    --notes="Question: Should CI use GitHub Actions or Buildkite?" \
+    --json 2>/dev/null)
+  local task_id
+  task_id=$(echo "$task_json" | jq -r '.id')
+
+  test_pass "Created awaiting task: $task_id"
+
+  # Create a normal task (should NOT appear in awaiting section)
+  local normal_json
+  normal_json=$(bd create --title="Normal task" --type=task \
+    --labels="spec-$label" --json 2>/dev/null)
+  local normal_id
+  normal_id=$(echo "$normal_json" | jq -r '.id')
+
+  test_pass "Created normal task: $normal_id"
+
+  # Run ralph-status
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status completed successfully"
+  else
+    test_fail "ralph-status failed with exit code $status_exit"
+    echo "    Output: $status_output"
+  fi
+
+  # Verify "Awaiting Input" section header appears
+  if echo "$status_output" | grep -q "Awaiting Input"; then
+    test_pass "Output contains 'Awaiting Input' section"
+  else
+    test_fail "Output missing 'Awaiting Input' section"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify [awaiting] indicator with bead ID and title
+  if echo "$status_output" | grep -q "\[awaiting\].*$task_id"; then
+    test_pass "Output shows [awaiting] indicator with bead ID"
+  else
+    test_fail "Output missing [awaiting] indicator for $task_id"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify title is displayed
+  if echo "$status_output" | grep -q "Cross-platform CI"; then
+    test_pass "Output shows awaiting item title"
+  else
+    test_fail "Output missing awaiting item title"
+  fi
+
+  # Verify question text is displayed
+  if echo "$status_output" | grep -q "Should CI use GitHub Actions or Buildkite?"; then
+    test_pass "Output shows question text from notes"
+  else
+    test_fail "Output missing question text"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify age indicator is present (should be something like "0s ago" or "1m ago")
+  if echo "$status_output" | grep -qE '\([0-9]+[smhd] ago\)'; then
+    test_pass "Output shows age indicator"
+  else
+    test_fail "Output missing age indicator (expected format: Ns/m/h/d ago)"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify normal task does NOT appear with [awaiting] indicator
+  if echo "$status_output" | grep -q "\[awaiting\].*$normal_id"; then
+    test_fail "Normal task should not appear as [awaiting]"
+  else
+    test_pass "Normal task correctly excluded from awaiting section"
+  fi
+
+  # Verify count in header
+  if echo "$status_output" | grep -q "Awaiting Input (1)"; then
+    test_pass "Awaiting section shows correct count"
+  else
+    test_fail "Awaiting section count incorrect (expected 1)"
+    echo "    Output:"
+    echo "$status_output" | grep "Awaiting" | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status shows no awaiting section when no awaiting items exist
+test_status_no_awaiting_when_empty() {
+  CURRENT_TEST="status_no_awaiting_when_empty"
+  test_header "Status Omits Awaiting Section When Empty"
+
+  setup_test_env "status-no-awaiting"
+
+  local label="test-feature"
+
+  # Create spec file
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Test Feature
+
+## Requirements
+- Test requirement
+SPEC_EOF
+
+  # Set up current.json (no molecule)
+  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
+
+  # Create a normal task (no awaiting:input label)
+  bd create --title="Normal task" --type=task --labels="spec-$label" --json 2>/dev/null >/dev/null
+
+  # Run ralph-status
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status completed successfully"
+  else
+    test_fail "ralph-status failed with exit code $status_exit"
+  fi
+
+  # Verify "Awaiting Input" section does NOT appear
+  if echo "$status_output" | grep -q "Awaiting Input"; then
+    test_fail "Should not show 'Awaiting Input' section when no items are awaiting"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  else
+    test_pass "Correctly omits 'Awaiting Input' section when empty"
+  fi
+
+  teardown_test_env
+}
+
 # Test: run exits 100 when no issues remain
 test_run_exits_100_when_complete() {
   CURRENT_TEST="run_exits_100_when_complete"
@@ -4558,6 +4722,8 @@ ALL_TESTS=(
   test_run_marks_in_progress
   test_status_mol_current_position
   test_status_wrapper
+  test_status_awaiting_display
+  test_status_no_awaiting_when_empty
   test_run_closes_issue_on_complete
   test_run_no_close_without_signal
   test_run_exits_100_when_complete
