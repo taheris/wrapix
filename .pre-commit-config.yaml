@@ -31,10 +31,10 @@ repos:
 
       - id: no-hidden-specs
         name: no hidden specs in specs/
-        entry: "bash -c 'for f in \"$@\"; do name=\"$(basename \"$f\")\"; if [ -f \".wrapix/ralph/state/$name\" ]; then echo \"ERROR: $f is a hidden spec (exists in .wrapix/ralph/state/). Do not commit it to specs/.\" >&2; exit 1; fi; done' --"
+        entry: "bash -c 'failed=0; for f in .wrapix/ralph/state/*.md; do [ -f \"$f\" ] || continue; name=\"$(basename \"$f\")\"; if [ -f \"specs/$name\" ] || git ls-files --cached --error-unmatch \"specs/$name\" >/dev/null 2>&1; then echo \"ERROR: specs/$name is a hidden spec (exists in .wrapix/ralph/state/). Remove it from specs/.\" >&2; failed=1; fi; done; exit $failed'"
         language: system
-        files: ^specs/.*\.md$
-        pass_filenames: true
+        always_run: true
+        pass_filenames: false
         stages: [pre-commit]
 
       # === Slow hooks (pre-push stage) ===

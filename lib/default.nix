@@ -36,6 +36,12 @@ in
       inherit packages;
       shellHook = ''
         ${shellHook}
+        # Ensure prek owns .git/hooks/ — bd hooks install can overwrite the shim
+        if [ -d .git ] && ! grep -q 'prek' .git/hooks/pre-commit 2>/dev/null; then
+          echo "Installing prek hooks (bd shim detected or hooks missing)..."
+          prek install -f
+          chmod 555 .git/hooks/
+        fi
         echo "Wrapix development shell"
       '';
     };
