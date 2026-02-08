@@ -909,6 +909,188 @@ SPEC
 }
 
 #-----------------------------------------------------------------------------
+# Test: ralph spec --verify header includes molecule ID
+#-----------------------------------------------------------------------------
+test_spec_verify_molecule_header() {
+  CURRENT_TEST="spec_verify_molecule_header"
+  test_header "Ralph Spec --verify Molecule ID in Header"
+
+  setup_test_env "spec-verify-mol"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
+    teardown_test_env
+    return
+  fi
+
+  # Create spec with a verify annotation
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test passes
+  [verify](tests/pass-test.sh::test_passes)
+SPEC
+
+  # Set up current.json WITH molecule ID
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false,"molecule":"wx-abc"}
+JSON
+
+  # Create passing test
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_passes() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Header should include molecule ID in parentheses
+  if echo "$output" | grep -q "Ralph Verify: test-feature (wx-abc)"; then
+    test_pass "Header includes molecule ID: Ralph Verify: test-feature (wx-abc)"
+  else
+    test_fail "Header should include molecule ID. Got: $(echo "$output" | head -1)"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: ralph spec --verify header works without molecule ID
+#-----------------------------------------------------------------------------
+test_spec_verify_no_molecule_header() {
+  CURRENT_TEST="spec_verify_no_molecule_header"
+  test_header "Ralph Spec --verify Header Without Molecule"
+
+  setup_test_env "spec-verify-no-mol"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
+    teardown_test_env
+    return
+  fi
+
+  # Create spec with a verify annotation
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test passes
+  [verify](tests/pass-test.sh::test_passes)
+SPEC
+
+  # Set up current.json WITHOUT molecule ID
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_passes() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Header should show label only, no empty parens
+  if echo "$output" | grep -q "Ralph Verify: test-feature$"; then
+    test_pass "Header shows label only without molecule ID"
+  elif echo "$output" | grep -q "Ralph Verify: test-feature" && ! echo "$output" | grep -q "()"; then
+    test_pass "Header shows label only without empty parentheses"
+  else
+    test_fail "Header should show label only. Got: $(echo "$output" | head -1)"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: ralph spec --verify --verbose shows captured test output
+#-----------------------------------------------------------------------------
+test_spec_verify_verbose_output() {
+  CURRENT_TEST="spec_verify_verbose_output"
+  test_header "Ralph Spec --verify --verbose Shows Output"
+
+  setup_test_env "spec-verify-verbose"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available (spec.sh not yet implemented)"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test with output
+  [verify](tests/output-test.sh::test_with_output)
+SPEC
+
+  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
+{"label":"test-feature","hidden":false}
+JSON
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/output-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_with_output() {
+  echo "diagnostic line 1"
+  echo "diagnostic line 2"
+  return 0
+}
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/output-test.sh"
+
+  # Run --verify --verbose
+  local output
+  set +e
+  output=$(ralph-spec --verify --verbose 2>&1)
+  set -e
+
+  # Should show captured output with pipe prefix
+  if echo "$output" | grep -q "| diagnostic line 1"; then
+    test_pass "Verbose shows captured output line 1"
+  else
+    test_fail "Verbose should show captured output. Got: $output"
+  fi
+
+  if echo "$output" | grep -q "| diagnostic line 2"; then
+    test_pass "Verbose shows captured output line 2"
+  else
+    test_fail "Verbose should show captured output line 2"
+  fi
+
+  # Run --verify without --verbose — should NOT show diagnostic output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  if echo "$output" | grep -q "diagnostic line"; then
+    test_fail "Non-verbose should not show diagnostic output"
+  else
+    test_pass "Non-verbose suppresses diagnostic output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -925,6 +1107,9 @@ ALL_TESTS=(
   test_spec_criterion_text_preservation
   test_spec_multiple_files
   test_spec_criteria_at_eof
+  test_spec_verify_molecule_header
+  test_spec_verify_no_molecule_header
+  test_spec_verify_verbose_output
 )
 
 main() {
