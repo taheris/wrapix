@@ -50,15 +50,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Check prerequisites
+# Check prerequisites — skip gracefully if not available
 if ! command -v nix &>/dev/null; then
-    log_error "nix is required but not installed"
-    exit 1
+    echo "SKIP: test_filesystem_isolation.sh requires nix (not available)"
+    exit 0
 fi
 
 if ! command -v podman &>/dev/null; then
-    log_error "podman is required but not installed"
-    exit 1
+    echo "SKIP: test_filesystem_isolation.sh requires podman (not available)"
+    exit 0
 fi
 
 log_info "Building wrapix image with MCP opt-in (tmux-debug)..."

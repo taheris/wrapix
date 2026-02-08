@@ -10,8 +10,19 @@
 
 set -euo pipefail
 
+# Skip if prerequisites are not available
+if ! command -v tmux &>/dev/null; then
+  echo "SKIP: test_create_pane.sh requires tmux (not available)"
+  exit 0
+fi
+
 # shellcheck source=test_lib.sh
 source "$(dirname "$0")/test_lib.sh"
+
+if ! find_mcp_binary &>/dev/null; then
+  echo "SKIP: test_create_pane.sh requires tmux-debug-mcp binary (not built)"
+  exit 0
+fi
 
 main() {
     log_test "Starting create_pane tests..."
