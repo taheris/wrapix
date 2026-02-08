@@ -291,6 +291,39 @@ in
         mkdir $out
       '';
 
+  # Verify wrapix script contains krun microVM boundary detection
+  # Security property: Linux defaults to microVM boundary via krun runtime
+  # See specs/security-review.md "MicroVM Boundary" section
+  linux-microvm-krun-detection =
+    runCommandLocal "smoke-linux-microvm-krun"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+        echo "Checking krun microVM detection in wrapix script..."
+        SCRIPT="${wrapix}/bin/wrapix"
+
+        # Verify krun detection logic exists
+        grep -q 'WRAPIX_NO_MICROVM' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NO_MICROVM env var check"; exit 1; }
+        echo "PASS: WRAPIX_NO_MICROVM opt-out supported"
+
+        # Verify /dev/kvm detection
+        grep -q '/dev/kvm' "$SCRIPT" || { echo "FAIL: Missing /dev/kvm detection"; exit 1; }
+        echo "PASS: /dev/kvm availability check present"
+
+        # Verify krun runtime flag is used
+        grep -q '\-\-runtime krun' "$SCRIPT" || { echo "FAIL: Missing --runtime krun flag"; exit 1; }
+        echo "PASS: --runtime krun flag present"
+
+        # Verify error message mentions crun-krun installation
+        grep -q 'crun-krun' "$SCRIPT" || { echo "FAIL: Missing crun-krun install instructions"; exit 1; }
+        echo "PASS: crun-krun installation instructions present"
+
+        echo ""
+        echo "Linux microVM krun detection validation passed"
+        mkdir $out
+      '';
+
   # Verify GitHub SSH host keys match official fingerprints
   # Security property: ensures hardcoded keys haven't drifted from GitHub's published keys
   # Reference: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
