@@ -99,7 +99,7 @@ mkSandbox {
 - [ ] deriveProfile correctly merges packages and environment
   [judge](tests/judges/profiles.sh::test_derive_profile_merge)
 - [ ] Profiles are composable (can extend extended profiles)
-  [verify](tests/tmux-mcp/e2e/test_profile_composition.sh)
+  [verify:wrapix](tests/tmux-mcp/e2e/test_profile_composition.sh)
 
 ## Out of Scope
 

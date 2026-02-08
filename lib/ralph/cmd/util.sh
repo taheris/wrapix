@@ -837,9 +837,13 @@ parse_spec_annotations() {
     if [ -n "$prev_criterion" ]; then
       local ann_type="" ann_target=""
       # Use variables for regexes containing brackets (bash workaround)
+      local verify_wrapix_re='^[[:space:]]*\[verify:wrapix\]\(([^)]+)\)'
       local verify_re='^[[:space:]]*\[verify\]\(([^)]+)\)'
       local judge_re='^[[:space:]]*\[judge\]\(([^)]+)\)'
-      if [[ "$line" =~ $verify_re ]]; then
+      if [[ "$line" =~ $verify_wrapix_re ]]; then
+        ann_type="verify-wrapix"
+        ann_target="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ $verify_re ]]; then
         ann_type="verify"
         ann_target="${BASH_REMATCH[1]}"
       elif [[ "$line" =~ $judge_re ]]; then
