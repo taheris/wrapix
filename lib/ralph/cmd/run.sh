@@ -342,6 +342,9 @@ run_step() {
   # Mark as in-progress
   bd update "$next_issue" --status=in_progress
 
+  # Write bead ID for session audit trail (read by entrypoint on exit)
+  echo "$next_issue" > /tmp/wrapix-bead-id
+
   # Get issue details as JSON for prompt substitution
   debug "Fetching issue details for $next_issue"
   local issue_json
