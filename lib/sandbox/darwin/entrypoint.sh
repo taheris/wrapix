@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# Record session start for audit trail
+SESSION_START_EPOCH=$(date +%s)
+SESSION_START_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # UID mapping strategy for Darwin VirtioFS:
 #
 # VirtioFS maps all files to UID 0 inside the container. To get correct UID
@@ -233,14 +237,74 @@ if [ "${WRAPIX_NETWORK:-full}" = "allow" ]; then
   fi
 fi
 
+# Session audit trail: write structured log entry on exit
+# Log format documented in specs/security-review.md
+write_session_log() {
+  local exit_code="${1:-0}"
+  local end_epoch
+  end_epoch=$(date +%s)
+  local end_iso
+  end_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local duration=$(( end_epoch - SESSION_START_EPOCH ))
+
+  local mode="interactive"
+  if [ "${RALPH_MODE:-}" = "1" ]; then
+    mode="ralph"
+  fi
+
+  # Read bead ID if ralph wrote one during the session
+  local bead_id=""
+  if [ -f /tmp/wrapix-bead-id ]; then
+    bead_id=$(cat /tmp/wrapix-bead-id 2>/dev/null || true)
+  fi
+
+  # Find most recent claude session ID from history
+  local claude_session_id=""
+  if [ -f /workspace/.claude/history.jsonl ]; then
+    claude_session_id=$(tail -1 /workspace/.claude/history.jsonl 2>/dev/null \
+      | jq -r '.sessionId // empty' 2>/dev/null || true)
+  fi
+
+  mkdir -p /workspace/.wrapix/log
+  local log_file="/workspace/.wrapix/log/${SESSION_START_ISO//[:.]/-}.json"
+
+  # Build JSON with jq to ensure proper escaping
+  jq -n \
+    --arg start "$SESSION_START_ISO" \
+    --arg end "$end_iso" \
+    --argjson duration "$duration" \
+    --argjson exit_code "$exit_code" \
+    --arg mode "$mode" \
+    --arg bead_id "$bead_id" \
+    --arg session_id "${WRAPIX_SESSION_ID:-}" \
+    --arg claude_session_id "$claude_session_id" \
+    --arg claude_session_dir "/workspace/.claude" \
+    '{
+      timestamp_start: $start,
+      timestamp_end: $end,
+      duration_seconds: $duration,
+      exit_code: $exit_code,
+      mode: $mode,
+      bead_id: (if $bead_id == "" then null else $bead_id end),
+      wrapix_session_id: (if $session_id == "" then null else $session_id end),
+      claude_session_id: (if $claude_session_id == "" then null else $claude_session_id end),
+      claude_session_dir: $claude_session_dir
+    }' > "$log_file" 2>/dev/null || true
+}
+
 # Drop to HOST_UID via user namespace (maps inner HOST_UID to outer root,
 # so VirtioFS root-owned files appear as HOST_UID — proper UID mapping)
+# Run without exec so session log can be written after exit
+MAIN_EXIT=0
 if [ "${RALPH_MODE:-}" = "1" ]; then
   # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
   # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
-  exec unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
-    ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-}
+  unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
+    ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-} || MAIN_EXIT=$?
 else
-  exec unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
-    claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT"
+  unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
+    claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT" || MAIN_EXIT=$?
 fi
+
+write_session_log "$MAIN_EXIT"
+exit "$MAIN_EXIT"
