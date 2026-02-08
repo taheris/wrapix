@@ -113,6 +113,7 @@ find_mcp_binary() {
 }
 
 # Start MCP server with named pipes for communication
+# shellcheck disable=SC2120  # $@ is intentionally optional (env vars)
 start_mcp_server() {
     local env_vars=("$@")
 
