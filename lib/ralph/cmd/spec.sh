@@ -1,23 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph spec [--verbose] [--verify] [--judge] [--all]
+# ralph spec [--verbose] [--verify/-v] [--judge/-j] [--all/-a] [--spec/-s NAME]
 # Query spec annotations across all spec files.
 #
 # Default (no flags): fast annotation index — counts [verify], [judge],
 # and unannotated criteria per spec file. No test execution, no LLM calls.
 #
-# --verbose: expand to per-criterion detail showing each criterion and its
-#            annotation type.
-# --verify:  run all [verify] shell tests from the current spec's criteria.
-# --judge:   run all [judge] LLM evaluations from the current spec's criteria.
-# --all:     run both --verify and --judge.
+# --verbose:       expand to per-criterion detail showing each criterion and its
+#                  annotation type. No short flag.
+# --verify / -v:   run all [verify] shell tests (all specs by default, or --spec NAME).
+# --judge / -j:    run all [judge] LLM evaluations (all specs by default, or --spec NAME).
+# --all / -a:      run both --verify and --judge.
+# --spec / -s NAME: filter to a single spec file (specs/NAME.md).
 
 # Load shared helpers
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
 SPECS_DIR="specs"
+
+#-----------------------------------------------------------------------------
+# Helper: look up molecule ID for a spec from specs/README.md
+#-----------------------------------------------------------------------------
+lookup_molecule_id() {
+  local spec_name="$1"  # e.g. "notifications" (without .md)
+  local readme="$SPECS_DIR/README.md"
+
+  if [ ! -f "$readme" ]; then
+    echo ""
+    return
+  fi
+
+  # Parse the spec table in README.md for rows matching the spec filename
+  # Table format: | [spec.md](./spec.md) | code | beads-id | purpose |
+  local molecule_id=""
+  while IFS= read -r line; do
+    # Match table rows containing the spec filename as a link
+    if [[ "$line" == *"${spec_name}.md"* ]] && [[ "$line" == *"|"* ]]; then
+      # Extract the Beads column (3rd data column, 4th pipe-separated field)
+      # Format: | Spec | Code | Beads | Purpose |
+      molecule_id=$(echo "$line" | awk -F'|' '{print $4}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      # Clean up: remove markdown formatting, dashes used as empty markers
+      if [ "$molecule_id" = "—" ] || [ "$molecule_id" = "-" ] || [ -z "$molecule_id" ]; then
+        molecule_id=""
+      fi
+      break
+    fi
+  done < "$readme"
+
+  echo "$molecule_id"
+}
 
 #-----------------------------------------------------------------------------
 # Helper: run a [verify] test
@@ -188,44 +221,21 @@ show_annotation_index() {
 }
 
 #-----------------------------------------------------------------------------
-# Run verify/judge tests for the current spec
+# Run verify/judge tests for a single spec file
+# Usage: run_single_spec_tests <spec_file> <label> <molecule_id>
+# Increments passed/failed/skipped counters (caller must initialize).
+# Sets has_failure=true on any failure.
+# Prints per-spec header and results.
 #-----------------------------------------------------------------------------
-run_spec_tests() {
-  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
-  local current_file="$ralph_dir/state/current.json"
+run_single_spec_tests() {
+  local spec_file="$1"
+  local label="$2"
+  local molecule_id="$3"
 
-  if [ ! -f "$current_file" ]; then
-    error "No active feature. Run 'ralph plan <label>' first."
-  fi
-
-  local label spec_hidden spec_file molecule_id
-  label=$(jq -r '.label // empty' "$current_file")
-  spec_hidden=$(jq -r '.hidden // false' "$current_file")
-  molecule_id=$(jq -r '.molecule // empty' "$current_file")
-
-  if [ -z "$label" ]; then
-    error "No label in current.json. Run 'ralph plan <label>' first."
-  fi
-
-  if [ "$spec_hidden" = "true" ]; then
-    spec_file="$ralph_dir/state/$label.md"
-  else
-    spec_file="$SPECS_DIR/$label.md"
-  fi
-
-  if [ ! -f "$spec_file" ]; then
-    error "Spec file not found: $spec_file"
-  fi
-
-  # Parse annotations from the current spec
+  # Parse annotations from the spec
   local annotations
-  annotations=$(parse_spec_annotations "$spec_file") || {
-    echo "No success criteria found in $spec_file"
-    return 0
-  }
-
+  annotations=$(parse_spec_annotations "$spec_file" 2>/dev/null) || return 0
   if [ -z "$annotations" ]; then
-    echo "No success criteria found in $spec_file"
     return 0
   fi
 
@@ -246,11 +256,6 @@ run_spec_tests() {
   echo "$header_text"
   printf '=%.0s' $(seq 1 ${#header_text})
   echo ""
-
-  passed=0
-  failed=0
-  skipped=0
-  has_failure=false
 
   while IFS=$'\t' read -r criterion ann_type file_path function_name _checked <&3; do
     if [ "$VERIFY" = "true" ] && [ "$JUDGE" = "true" ]; then
@@ -283,7 +288,77 @@ run_spec_tests() {
   done 3<<< "$annotations"
 
   echo ""
-  echo "$passed passed, $failed failed, $skipped skipped"
+
+  # Signal that this spec had criteria (was not skipped)
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# Run verify/judge tests across specs
+# When SPEC_FILTER is set: run only that spec (single-spec format).
+# Otherwise: iterate all specs with grouped output and cross-spec summary.
+#-----------------------------------------------------------------------------
+run_spec_tests() {
+  passed=0
+  failed=0
+  skipped=0
+  has_failure=false
+
+  if [ -n "$SPEC_FILTER" ]; then
+    # Single-spec mode: run only the filtered spec
+    local spec_file="$SPECS_DIR/${SPEC_FILTER}.md"
+    if [ ! -f "$spec_file" ]; then
+      error "Spec file not found: $spec_file"
+    fi
+
+    local molecule_id
+    molecule_id=$(lookup_molecule_id "$SPEC_FILTER")
+
+    run_single_spec_tests "$spec_file" "$SPEC_FILTER" "$molecule_id"
+
+    echo "$passed passed, $failed failed, $skipped skipped"
+
+    if [ "$has_failure" = "true" ]; then
+      return 1
+    fi
+    return 0
+  fi
+
+  # Multi-spec mode: iterate all spec files
+  local spec_files=()
+  for f in "$SPECS_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    [ "$(basename "$f")" = "README.md" ] && continue
+    spec_files+=("$f")
+  done
+
+  if [ ${#spec_files[@]} -eq 0 ]; then
+    echo "No spec files found in $SPECS_DIR/"
+    return 0
+  fi
+
+  local spec_count=0
+
+  for spec_file in "${spec_files[@]}"; do
+    local label
+    label=$(basename "$spec_file" .md)
+
+    # Check if this spec has success criteria; skip silently if not
+    local annotations
+    annotations=$(parse_spec_annotations "$spec_file" 2>/dev/null) || continue
+    if [ -z "$annotations" ]; then
+      continue
+    fi
+
+    local molecule_id
+    molecule_id=$(lookup_molecule_id "$label")
+
+    run_single_spec_tests "$spec_file" "$label" "$molecule_id"
+    ((spec_count++)) || true
+  done
+
+  # Cross-spec summary
+  echo "Summary: $passed passed, $failed failed, $skipped skipped ($spec_count specs)"
 
   if [ "$has_failure" = "true" ]; then
     return 1
@@ -297,9 +372,10 @@ run_spec_tests() {
 VERBOSE=false
 VERIFY=false
 JUDGE=false
+SPEC_FILTER=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --verbose|-v)
+    --verbose)
       VERBOSE=true
       shift
       ;;
@@ -316,25 +392,63 @@ while [[ $# -gt 0 ]]; do
       JUDGE=true
       shift
       ;;
+    --spec)
+      SPEC_FILTER="$2"
+      shift 2
+      ;;
     -h|--help)
-      echo "Usage: ralph spec [--verbose] [--verify] [--judge] [--all]"
+      echo "Usage: ralph spec [--verbose] [--verify/-v] [--judge/-j] [--all/-a] [--spec/-s NAME]"
       echo ""
       echo "Query spec annotations across all spec files."
       echo ""
       echo "Options:"
-      echo "  --verbose, -v  Show per-criterion detail"
-      echo "  --verify       Run [verify] shell tests from current spec"
-      echo "  --judge        Run [judge] LLM evaluations from current spec"
-      echo "  --all          Run both --verify and --judge"
+      echo "  --verbose      Show per-criterion detail (no short flag)"
+      echo "  --verify, -v   Run [verify] shell tests (all specs by default)"
+      echo "  --judge, -j    Run [judge] LLM evaluations (all specs by default)"
+      echo "  --all, -a      Run both --verify and --judge"
+      echo "  --spec, -s     Filter to a single spec file (by name, without .md)"
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Default mode (no flags) is instant: scans annotations without"
       echo "executing tests or invoking LLMs."
       exit 0
       ;;
-    *)
-      error "Unknown option: $1
+    -*)
+      # Handle composed short flags: -v, -j, -a, -s, -vj, etc.
+      local_flags="${1#-}"
+      shift
+      while [ -n "$local_flags" ]; do
+        local_flag="${local_flags:0:1}"
+        local_flags="${local_flags:1}"
+        case "$local_flag" in
+          v)
+            VERIFY=true
+            ;;
+          j)
+            JUDGE=true
+            ;;
+          a)
+            VERIFY=true
+            JUDGE=true
+            ;;
+          s)
+            # -s consumes the next argument as the spec name
+            if [ $# -gt 0 ]; then
+              SPEC_FILTER="$1"
+              shift
+            else
+              error "Option -s requires a spec name argument.
 Run 'ralph spec --help' for usage."
+            fi
+            # Any remaining flags after -s would be ambiguous; stop processing
+            local_flags=""
+            ;;
+          *)
+            error "Unknown short flag: -$local_flag
+Run 'ralph spec --help' for usage."
+            ;;
+        esac
+      done
       ;;
   esac
 done

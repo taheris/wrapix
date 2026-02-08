@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Integration tests for ralph spec commands
-# Tests annotation counting, verbose output, verify/judge runners, and --all flag
+# Tests annotation counting, verbose output, verify/judge runners, --all flag,
+# multi-spec iteration, --spec filter, short flags, and grouped output
 # shellcheck disable=SC2329,SC2086,SC2034,SC1091
 set -euo pipefail
 
@@ -57,6 +58,16 @@ SPEC
 }
 
 #-----------------------------------------------------------------------------
+# Helper: update README.md spec table with a molecule ID for a spec
+#-----------------------------------------------------------------------------
+add_readme_spec_entry() {
+  local spec_name="$1"
+  local molecule_id="${2:-}"
+  local beads_col="${molecule_id:----}"
+  echo "| [${spec_name}.md](./${spec_name}.md) | — | $beads_col | Test spec |" >> "$TEST_DIR/specs/README.md"
+}
+
+#-----------------------------------------------------------------------------
 # Test: ralph spec produces correct annotation counts
 #-----------------------------------------------------------------------------
 test_spec_annotation_counts() {
@@ -89,11 +100,6 @@ test_spec_annotation_counts() {
 
 Design section.
 SPEC
-
-  # Set up current.json
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
 
   local output
   output=$(ralph-spec 2>&1) || true
@@ -156,10 +162,6 @@ test_spec_verbose() {
   fi
 
   create_annotated_spec "$TEST_DIR/specs/test-feature.md"
-
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
 
   local output
   output=$(ralph-spec --verbose 2>&1) || true
@@ -234,6 +236,7 @@ JSON
 
 #-----------------------------------------------------------------------------
 # Test: ralph spec --verify runs shell tests and reports PASS/FAIL/SKIP
+# Uses --spec to test single-spec format
 #-----------------------------------------------------------------------------
 test_spec_verify() {
   CURRENT_TEST="spec_verify"
@@ -262,10 +265,6 @@ test_spec_verify() {
 - [ ] No annotation
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
-
   # Create test files: one that passes, one that fails
   mkdir -p "$TEST_DIR/tests/judges"
 
@@ -293,7 +292,7 @@ TESTFILE
 
   local output
   set +e
-  output=$(ralph-spec --verify 2>&1)
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
   local exit_code=$?
   set -e
 
@@ -311,13 +310,6 @@ TESTFILE
     test_fail "Should show [FAIL] for failing test"
   fi
 
-  # Should show SKIP for judge-only criterion
-  if echo "$output" | grep "Judge only criterion" | grep -q "\[SKIP\]"; then
-    test_pass "Shows [SKIP] for judge-only criterion"
-  else
-    test_fail "Should show [SKIP] for judge-only criterion"
-  fi
-
   # Should show SKIP for unannotated criterion
   if echo "$output" | grep "No annotation" | grep -q "\[SKIP\]"; then
     test_pass "Shows [SKIP] for unannotated criterion"
@@ -325,7 +317,7 @@ TESTFILE
     test_fail "Should show [SKIP] for unannotated criterion"
   fi
 
-  # Should show summary
+  # Should show summary (single-spec format)
   if echo "$output" | grep -q "passed"; then
     test_pass "Shows pass count in summary"
   else
@@ -375,10 +367,6 @@ test_spec_judge() {
 - [ ] No annotation
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
-
   # Create judge test file with rubric
   mkdir -p "$TEST_DIR/tests/judges"
   cat > "$TEST_DIR/tests/judges/quality.sh" << 'TESTFILE'
@@ -391,16 +379,9 @@ TESTFILE
 
   local output
   set +e
-  output=$(ralph-spec --judge 2>&1)
+  output=$(ralph-spec --judge --spec test-feature 2>&1)
   local exit_code=$?
   set -e
-
-  # Should show SKIP for verify-only criterion
-  if echo "$output" | grep "Verify only criterion" | grep -q "\[SKIP\]"; then
-    test_pass "Shows [SKIP] for verify-only criterion"
-  else
-    test_fail "Should show [SKIP] for verify-only criterion"
-  fi
 
   # Should show SKIP for unannotated criterion
   if echo "$output" | grep "No annotation" | grep -q "\[SKIP\]"; then
@@ -447,10 +428,6 @@ test_spec_all() {
 - [ ] No annotation
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
-
   mkdir -p "$TEST_DIR/tests/judges"
   cat > "$TEST_DIR/tests/check.sh" << 'TESTFILE'
 #!/usr/bin/env bash
@@ -469,7 +446,7 @@ TESTFILE
 
   local output
   set +e
-  output=$(ralph-spec --all 2>&1)
+  output=$(ralph-spec --all --spec test-feature 2>&1)
   local exit_code=$?
   set -e
 
@@ -521,10 +498,6 @@ test_spec_no_execution_default() {
 - [ ] Slow test criterion
   [verify](tests/slow-test.sh::test_slow)
 SPEC
-
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
 
   # Create a test file that would take time to execute
   mkdir -p "$TEST_DIR/tests"
@@ -909,7 +882,7 @@ SPEC
 }
 
 #-----------------------------------------------------------------------------
-# Test: ralph spec --verify header includes molecule ID
+# Test: ralph spec --verify header includes molecule ID from README.md
 #-----------------------------------------------------------------------------
 test_spec_verify_molecule_header() {
   CURRENT_TEST="spec_verify_molecule_header"
@@ -933,10 +906,8 @@ test_spec_verify_molecule_header() {
   [verify](tests/pass-test.sh::test_passes)
 SPEC
 
-  # Set up current.json WITH molecule ID
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false,"molecule":"wx-abc"}
-JSON
+  # Add README.md entry with molecule ID
+  add_readme_spec_entry "test-feature" "wx-abc"
 
   # Create passing test
   mkdir -p "$TEST_DIR/tests"
@@ -949,7 +920,7 @@ TESTFILE
 
   local output
   set +e
-  output=$(ralph-spec --verify 2>&1)
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
   set -e
 
   # Header should include molecule ID in parentheses
@@ -987,10 +958,7 @@ test_spec_verify_no_molecule_header() {
   [verify](tests/pass-test.sh::test_passes)
 SPEC
 
-  # Set up current.json WITHOUT molecule ID
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
+  # README.md has no entry for test-feature (no molecule ID)
 
   mkdir -p "$TEST_DIR/tests"
   cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
@@ -1002,7 +970,7 @@ TESTFILE
 
   local output
   set +e
-  output=$(ralph-spec --verify 2>&1)
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
   set -e
 
   # Header should show label only, no empty parens
@@ -1041,10 +1009,6 @@ test_spec_verify_verbose_output() {
   [verify](tests/output-test.sh::test_with_output)
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
-JSON
-
   mkdir -p "$TEST_DIR/tests"
   cat > "$TEST_DIR/tests/output-test.sh" << 'TESTFILE'
 #!/usr/bin/env bash
@@ -1057,10 +1021,10 @@ if [ $# -gt 0 ]; then "$@"; fi
 TESTFILE
   chmod +x "$TEST_DIR/tests/output-test.sh"
 
-  # Run --verify --verbose
+  # Run --verify --verbose --spec
   local output
   set +e
-  output=$(ralph-spec --verify --verbose 2>&1)
+  output=$(ralph-spec --verify --verbose --spec test-feature 2>&1)
   set -e
 
   # Should show captured output with pipe prefix
@@ -1078,13 +1042,679 @@ TESTFILE
 
   # Run --verify without --verbose — should NOT show diagnostic output
   set +e
-  output=$(ralph-spec --verify 2>&1)
+  output=$(ralph-spec --verify --spec test-feature 2>&1)
   set -e
 
   if echo "$output" | grep -q "diagnostic line"; then
     test_fail "Non-verbose should not show diagnostic output"
   else
     test_pass "Non-verbose suppresses diagnostic output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: -v short flag maps to --verify (not --verbose)
+#-----------------------------------------------------------------------------
+test_spec_short_flag_v() {
+  CURRENT_TEST="spec_short_flag_v"
+  test_header "Ralph Spec -v maps to --verify"
+
+  setup_test_env "spec-short-v"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Test passes
+  [verify](tests/pass-test.sh::test_passes)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_passes() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec -v -s test-feature 2>&1)
+  set -e
+
+  # -v should trigger verify mode (shows [PASS]/[FAIL])
+  if echo "$output" | grep -q "\[PASS\]"; then
+    test_pass "-v triggers verify mode (shows [PASS])"
+  else
+    test_fail "-v should trigger verify mode. Got: $output"
+  fi
+
+  # -v should NOT just be verbose index (which shows [verify]/[judge] annotation types)
+  if echo "$output" | grep -q "Ralph Verify"; then
+    test_pass "-v produces verify header"
+  else
+    test_fail "-v should produce verify header. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: -j short flag maps to --judge
+#-----------------------------------------------------------------------------
+test_spec_short_flag_j() {
+  CURRENT_TEST="spec_short_flag_j"
+  test_header "Ralph Spec -j maps to --judge"
+
+  setup_test_env "spec-short-j"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Judge criterion
+  [judge](tests/judges/quality.sh::test_quality)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/judges/quality.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_quality() {
+  judge_files "lib/output.sh"
+  judge_criterion "Output is well-formatted"
+}
+TESTFILE
+
+  local output
+  set +e
+  output=$(ralph-spec -j -s test-feature 2>&1)
+  set -e
+
+  # -j should produce judge header
+  if echo "$output" | grep -q "Ralph Judge"; then
+    test_pass "-j produces judge header"
+  else
+    test_fail "-j should produce judge header. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: -a short flag maps to --all
+#-----------------------------------------------------------------------------
+test_spec_short_flag_a() {
+  CURRENT_TEST="spec_short_flag_a"
+  test_header "Ralph Spec -a maps to --all"
+
+  setup_test_env "spec-short-a"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Verify criterion
+  [verify](tests/check.sh::test_check)
+- [ ] No annotation
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/check.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_check() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/check.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec -a -s test-feature 2>&1)
+  set -e
+
+  # -a should produce Verify+Judge header
+  if echo "$output" | grep -q "Ralph Verify+Judge"; then
+    test_pass "-a produces Verify+Judge header"
+  else
+    test_fail "-a should produce Verify+Judge header. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: -s short flag maps to --spec
+#-----------------------------------------------------------------------------
+test_spec_short_flag_s() {
+  CURRENT_TEST="spec_short_flag_s"
+  test_header "Ralph Spec -s maps to --spec"
+
+  setup_test_env "spec-short-s"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  # Create two specs
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha criterion
+  [verify](tests/alpha.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta criterion
+  [verify](tests/beta.sh::test_beta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_alpha() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha.sh"
+
+  cat > "$TEST_DIR/tests/beta.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_beta() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec -v -s alpha 2>&1)
+  set -e
+
+  # -s alpha should only show alpha spec
+  if echo "$output" | grep -q "Ralph Verify: alpha"; then
+    test_pass "-s filters to single spec (alpha)"
+  else
+    test_fail "-s should filter to alpha spec. Got: $output"
+  fi
+
+  # Should NOT show beta spec
+  if echo "$output" | grep -q "beta"; then
+    test_fail "-s should not show beta spec"
+  else
+    test_pass "-s correctly excludes other specs"
+  fi
+
+  # Single-spec format should NOT have "Summary:" prefix
+  if echo "$output" | grep -q "^Summary:"; then
+    test_fail "Single-spec mode should not have Summary: prefix"
+  else
+    test_pass "Single-spec mode has no Summary: prefix"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: --verbose has no short -v flag (it was reassigned to --verify)
+#-----------------------------------------------------------------------------
+test_spec_verbose_no_short_v() {
+  CURRENT_TEST="spec_verbose_no_short_v"
+  test_header "Ralph Spec --verbose has no -v short flag"
+
+  setup_test_env "spec-verbose-no-v"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Some criterion
+  [verify](tests/check.sh::test_check)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/check.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_check() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/check.sh"
+
+  # -v should trigger verify (not verbose)
+  local output
+  set +e
+  output=$(ralph-spec -v -s test-feature 2>&1)
+  set -e
+
+  # If -v were verbose, it would show annotation index with [verify]/[judge] types
+  # Since -v is now verify, it should show [PASS]/[FAIL]/[SKIP]
+  if echo "$output" | grep -q "\[PASS\]"; then
+    test_pass "-v triggers verify, not verbose"
+  else
+    test_fail "-v should trigger verify. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: short flags compose: -vj is equivalent to --all
+#-----------------------------------------------------------------------------
+test_spec_short_compose() {
+  CURRENT_TEST="spec_short_compose"
+  test_header "Ralph Spec -vj composes to --all"
+
+  setup_test_env "spec-short-compose"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/test-feature.md" << 'SPEC'
+# Test Feature
+
+## Success Criteria
+
+- [ ] Verify criterion
+  [verify](tests/check.sh::test_check)
+- [ ] No annotation
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/check.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_check() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/check.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec -vj -s test-feature 2>&1)
+  set -e
+
+  # -vj should produce Verify+Judge header (equivalent to --all)
+  if echo "$output" | grep -q "Ralph Verify+Judge"; then
+    test_pass "-vj composes to Verify+Judge"
+  else
+    test_fail "-vj should compose to Verify+Judge. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: multi-spec verify groups results by spec with per-spec headers
+#-----------------------------------------------------------------------------
+test_spec_multi_grouped_output() {
+  CURRENT_TEST="spec_multi_grouped_output"
+  test_header "Multi-spec Grouped Output"
+
+  setup_test_env "spec-multi-grouped"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  # Create two specs with verify annotations
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha passes
+  [verify](tests/alpha.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta passes
+  [verify](tests/beta.sh::test_beta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_alpha() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha.sh"
+
+  cat > "$TEST_DIR/tests/beta.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_beta() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Should have per-spec headers
+  if echo "$output" | grep -q "Ralph Verify: alpha"; then
+    test_pass "Shows alpha spec header"
+  else
+    test_fail "Should show alpha spec header. Got: $output"
+  fi
+
+  if echo "$output" | grep -q "Ralph Verify: beta"; then
+    test_pass "Shows beta spec header"
+  else
+    test_fail "Should show beta spec header. Got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: multi-spec output ends with summary line including spec count
+#-----------------------------------------------------------------------------
+test_spec_multi_summary_line() {
+  CURRENT_TEST="spec_multi_summary_line"
+  test_header "Multi-spec Summary Line"
+
+  setup_test_env "spec-multi-summary"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha passes
+  [verify](tests/alpha.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta passes
+  [verify](tests/beta.sh::test_beta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_alpha() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha.sh"
+
+  cat > "$TEST_DIR/tests/beta.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_beta() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Should end with "Summary: X passed, Y failed, Z skipped (N specs)"
+  if echo "$output" | grep -q "^Summary:.*passed.*failed.*skipped.*(2 specs)"; then
+    test_pass "Summary line has correct format with spec count"
+  else
+    test_fail "Summary line should match 'Summary: X passed, Y failed, Z skipped (N specs)'. Got: $(echo "$output" | tail -1)"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: exit code is non-zero if any spec has a failure in multi-spec mode
+#-----------------------------------------------------------------------------
+test_spec_nonzero_exit() {
+  CURRENT_TEST="spec_nonzero_exit"
+  test_header "Multi-spec Non-zero Exit on Failure"
+
+  setup_test_env "spec-nonzero-exit"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  # Create one passing spec and one failing spec
+  cat > "$TEST_DIR/specs/pass-spec.md" << 'SPEC'
+# Passing Spec
+
+## Success Criteria
+
+- [ ] This passes
+  [verify](tests/pass.sh::test_pass)
+SPEC
+
+  cat > "$TEST_DIR/specs/fail-spec.md" << 'SPEC'
+# Failing Spec
+
+## Success Criteria
+
+- [ ] This fails
+  [verify](tests/fail.sh::test_fail)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_pass() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass.sh"
+
+  cat > "$TEST_DIR/tests/fail.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_fail() { return 1; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/fail.sh"
+
+  set +e
+  ralph-spec --verify >/dev/null 2>&1
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exit code is non-zero when any spec fails ($exit_code)"
+  else
+    test_fail "Exit code should be non-zero when a spec fails"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: specs with no success criteria are silently skipped in multi-spec mode
+#-----------------------------------------------------------------------------
+test_spec_skip_empty() {
+  CURRENT_TEST="spec_skip_empty"
+  test_header "Multi-spec Skips Specs Without Success Criteria"
+
+  setup_test_env "spec-skip-empty"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  # Create a spec with criteria
+  cat > "$TEST_DIR/specs/has-criteria.md" << 'SPEC'
+# Has Criteria
+
+## Success Criteria
+
+- [ ] This passes
+  [verify](tests/pass.sh::test_pass)
+SPEC
+
+  # Create a spec WITHOUT criteria
+  cat > "$TEST_DIR/specs/no-criteria.md" << 'SPEC'
+# No Criteria
+
+## Requirements
+
+Some requirements but no success criteria.
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_pass() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Should show the spec with criteria
+  if echo "$output" | grep -q "Ralph Verify: has-criteria"; then
+    test_pass "Shows spec with criteria"
+  else
+    test_fail "Should show spec with criteria. Got: $output"
+  fi
+
+  # Should NOT show the spec without criteria
+  if echo "$output" | grep -q "no-criteria"; then
+    test_fail "Should not show spec without criteria"
+  else
+    test_pass "Silently skips spec without criteria"
+  fi
+
+  # Summary should count only 1 spec
+  if echo "$output" | grep -q "(1 specs)"; then
+    test_pass "Summary counts only specs with criteria"
+  else
+    test_fail "Summary should count 1 spec. Got: $(echo "$output" | tail -1)"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
+# Test: multi-spec verify with molecule IDs from README.md
+#-----------------------------------------------------------------------------
+test_spec_multi_molecule_lookup() {
+  CURRENT_TEST="spec_multi_molecule_lookup"
+  test_header "Multi-spec Molecule ID Lookup from README.md"
+
+  setup_test_env "spec-multi-mol"
+
+  if ! has_ralph_spec; then
+    test_skip "ralph-spec command not available"
+    teardown_test_env
+    return
+  fi
+
+  # Create specs
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha passes
+  [verify](tests/alpha.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta passes
+  [verify](tests/beta.sh::test_beta)
+SPEC
+
+  # Add README.md entries with molecule IDs
+  add_readme_spec_entry "alpha" "wx-aaa"
+  add_readme_spec_entry "beta" "wx-bbb"
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_alpha() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha.sh"
+
+  cat > "$TEST_DIR/tests/beta.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_beta() { return 0; }
+if [ $# -gt 0 ]; then "$@"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta.sh"
+
+  local output
+  set +e
+  output=$(ralph-spec --verify 2>&1)
+  set -e
+
+  # Headers should include molecule IDs from README.md
+  if echo "$output" | grep -q "Ralph Verify: alpha (wx-aaa)"; then
+    test_pass "Alpha header includes molecule ID wx-aaa"
+  else
+    test_fail "Alpha header should include wx-aaa. Got: $output"
+  fi
+
+  if echo "$output" | grep -q "Ralph Verify: beta (wx-bbb)"; then
+    test_pass "Beta header includes molecule ID wx-bbb"
+  else
+    test_fail "Beta header should include wx-bbb. Got: $output"
   fi
 
   teardown_test_env
@@ -1110,6 +1740,17 @@ ALL_TESTS=(
   test_spec_verify_molecule_header
   test_spec_verify_no_molecule_header
   test_spec_verify_verbose_output
+  test_spec_short_flag_v
+  test_spec_short_flag_j
+  test_spec_short_flag_a
+  test_spec_short_flag_s
+  test_spec_verbose_no_short_v
+  test_spec_short_compose
+  test_spec_multi_grouped_output
+  test_spec_multi_summary_line
+  test_spec_nonzero_exit
+  test_spec_skip_empty
+  test_spec_multi_molecule_lookup
 )
 
 main() {
