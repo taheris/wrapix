@@ -25,10 +25,16 @@ test_fail() {
   FAILED_TESTS+=("${CURRENT_TEST:-unknown}: $1")
 }
 
-# Print skip result
+# Print skip result and exit test subshell with code 77
 test_skip() {
-  echo -e "  ${YELLOW:-}SKIP${NC:-}: $1"
-  ((SKIPPED++)) || true
+  echo -e "  ${YELLOW:-}SKIP${NC:-}: $1" >&2
+  exit 77
+}
+
+# Print not-implemented result and exit test subshell with code 78
+test_not_implemented() {
+  echo -e "  ${YELLOW:-}NOT_IMPL${NC:-}: $1" >&2
+  exit 78
 }
 
 #-----------------------------------------------------------------------------

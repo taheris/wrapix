@@ -33,8 +33,9 @@ init_test_state() {
   PASSED=0
   FAILED=0
   SKIPPED=0
+  NOT_IMPLEMENTED=0
   FAILED_TESTS=()
-  export PASSED FAILED SKIPPED FAILED_TESTS
+  export PASSED FAILED SKIPPED NOT_IMPLEMENTED FAILED_TESTS
 }
 
 #-----------------------------------------------------------------------------
@@ -56,25 +57,37 @@ run_test_isolated() {
   PASSED=0
   FAILED=0
   SKIPPED=0
+  NOT_IMPLEMENTED=0
   FAILED_TESTS=()
 
-  # Run the test, capturing output and exit code
+  # EXIT trap writes results when the subshell exits, even if test_skip (exit 77)
+  # or test_not_implemented (exit 78) terminate the subshell early
+  # shellcheck disable=SC2329  # invoked via EXIT trap
+  _rti_write_results() {
+    local exit_code=$?
+    # Categorize exit 77/78 if the test function exited directly
+    if [ "$exit_code" -eq 77 ]; then
+      SKIPPED=1
+    elif [ "$exit_code" -eq 78 ]; then
+      NOT_IMPLEMENTED=1
+    elif [ "$exit_code" -ne 0 ] && [ "$PASSED" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
+      FAILED=1
+      FAILED_TESTS+=("$test_func: exited with code $exit_code")
+    fi
+    echo "passed=$PASSED" > "$result_file"
+    echo "failed=$FAILED" >> "$result_file"
+    echo "skipped=$SKIPPED" >> "$result_file"
+    echo "not_implemented=$NOT_IMPLEMENTED" >> "$result_file"
+    for t in "${FAILED_TESTS[@]}"; do
+      echo "failed_test=$t" >> "$result_file"
+    done
+  }
+  trap _rti_write_results EXIT
+
+  # Run the test, capturing output
+  # test_skip (exit 77) and test_not_implemented (exit 78) will exit this subshell —
+  # the EXIT trap ensures results are always written with correct categorization
   "$test_func" > "$output_file" 2>&1
-  local test_exit_code=$?
-
-  # If test exited with non-zero and no assertions were recorded, treat as crash
-  if [ "$test_exit_code" -ne 0 ] && [ "$PASSED" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
-    FAILED=1
-    FAILED_TESTS+=("$test_func: exited with code $test_exit_code")
-  fi
-
-  # Write results (this always executes now that set -e is disabled)
-  echo "passed=$PASSED" > "$result_file"
-  echo "failed=$FAILED" >> "$result_file"
-  echo "skipped=$SKIPPED" >> "$result_file"
-  for t in "${FAILED_TESTS[@]}"; do
-    echo "failed_test=$t" >> "$result_file"
-  done
 }
 
 #-----------------------------------------------------------------------------
@@ -167,6 +180,7 @@ run_tests_parallel() {
   local total_passed=0
   local total_failed=0
   local total_skipped=0
+  local total_not_implemented=0
   local all_failed_tests=()
 
   for test_func in "${tests_ref[@]}"; do
@@ -174,13 +188,15 @@ run_tests_parallel() {
     local exit_code="${exit_codes[$test_func]:-1}"
 
     if [ -f "$result_file" ] && [ -s "$result_file" ]; then
-      local p f s
+      local p f s ni
       p=$(grep "^passed=" "$result_file" | cut -d= -f2)
       f=$(grep "^failed=" "$result_file" | cut -d= -f2)
       s=$(grep "^skipped=" "$result_file" | cut -d= -f2)
+      ni=$(grep "^not_implemented=" "$result_file" | cut -d= -f2 || echo 0)
       total_passed=$((total_passed + p))
       total_failed=$((total_failed + f))
       total_skipped=$((total_skipped + s))
+      total_not_implemented=$((total_not_implemented + ni))
 
       while IFS= read -r line; do
         all_failed_tests+=("${line#failed_test=}")
@@ -197,7 +213,7 @@ run_tests_parallel() {
   rm -rf "$results_dir"
 
   # Summary
-  print_test_summary "$total_passed" "$total_failed" "$total_skipped" "${all_failed_tests[@]}"
+  print_test_summary "$total_passed" "$total_failed" "$total_skipped" "$total_not_implemented" "${all_failed_tests[@]}"
 
   [ "$total_failed" -eq 0 ]
 }
@@ -217,6 +233,7 @@ run_tests_sequential() {
   local total_passed=0
   local total_failed=0
   local total_skipped=0
+  local total_not_implemented=0
   local all_failed_tests=()
 
   for test_func in "${tests_ref[@]}"; do
@@ -235,13 +252,15 @@ run_tests_sequential() {
 
     # Aggregate results
     if [ -f "$result_file" ] && [ -s "$result_file" ]; then
-      local p f s
+      local p f s ni
       p=$(grep "^passed=" "$result_file" | cut -d= -f2)
       f=$(grep "^failed=" "$result_file" | cut -d= -f2)
       s=$(grep "^skipped=" "$result_file" | cut -d= -f2)
+      ni=$(grep "^not_implemented=" "$result_file" | cut -d= -f2 || echo 0)
       total_passed=$((total_passed + p))
       total_failed=$((total_failed + f))
       total_skipped=$((total_skipped + s))
+      total_not_implemented=$((total_not_implemented + ni))
 
       while IFS= read -r line; do
         all_failed_tests+=("${line#failed_test=}")
@@ -258,7 +277,7 @@ run_tests_sequential() {
   rm -rf "$results_dir"
 
   # Summary
-  print_test_summary "$total_passed" "$total_failed" "$total_skipped" "${all_failed_tests[@]}"
+  print_test_summary "$total_passed" "$total_failed" "$total_skipped" "$total_not_implemented" "${all_failed_tests[@]}"
 
   [ "$total_failed" -eq 0 ]
 }
@@ -268,21 +287,25 @@ run_tests_sequential() {
 #-----------------------------------------------------------------------------
 
 # Print test summary
-# Usage: print_test_summary <passed> <failed> <skipped> [failed_tests...]
+# Usage: print_test_summary <passed> <failed> <skipped> <not_implemented> [failed_tests...]
 print_test_summary() {
   local passed="$1"
   local failed="$2"
   local skipped="$3"
-  shift 3
+  local not_implemented="$4"
+  shift 4
   local failed_tests=("$@")
 
   echo ""
   echo "=========================================="
   echo "  Test Summary"
   echo "=========================================="
-  echo -e "  ${GREEN}Passed:${NC}  $passed"
-  echo -e "  ${RED}Failed:${NC}  $failed"
-  echo -e "  ${YELLOW}Skipped:${NC} $skipped"
+  echo -e "  ${GREEN}Passed:${NC}           $passed"
+  echo -e "  ${RED}Failed:${NC}           $failed"
+  echo -e "  ${YELLOW}Skipped:${NC}          $skipped"
+  echo -e "  ${YELLOW}Not Implemented:${NC}  $not_implemented"
+  echo ""
+  echo "Results: $passed passed, $failed failed, $skipped skipped (exit 77), $not_implemented not implemented (exit 78)"
   echo ""
 
   if [ "$failed" -gt 0 ]; then
