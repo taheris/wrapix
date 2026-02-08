@@ -1181,4 +1181,254 @@ templateTests
         echo "PASS: ralph-check variable declarations tests"
         mkdir $out
       '';
+
+  # Test: parse_spec_annotations counts verify/judge/none correctly
+  util-parse-spec-annotations-counts =
+    runCommandLocal "ralph-util-parse-spec-annotations-counts"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        source ${utilScript}
+
+        # Create test spec file with mixed annotations
+        cat > spec.md << 'SPEC'
+        # Test Feature
+
+        ## Success Criteria
+
+        - [ ] Notification appears within 2s
+          [verify](tests/notify-test.sh::test_notification_timing)
+        - [ ] Clear visibility into current state
+          [judge](tests/judges/notify.sh::test_clear_visibility)
+        - [ ] Works on both Linux and macOS
+        - [x] Basic functionality works
+          [verify](tests/basic.sh)
+        - [ ] Handles edge cases gracefully
+          [judge](tests/judges/edge.sh::test_edge_cases)
+        - [ ] No security vulnerabilities
+
+        ## Out of Scope
+        SPEC
+
+        echo "Test: parse_spec_annotations counts annotations correctly..."
+        output=$(parse_spec_annotations spec.md)
+
+        # Count by type
+        verify_count=$(echo "$output" | awk -F'\t' '$2 == "verify"' | wc -l)
+        judge_count=$(echo "$output" | awk -F'\t' '$2 == "judge"' | wc -l)
+        none_count=$(echo "$output" | awk -F'\t' '$2 == "none"' | wc -l)
+        total=$(echo "$output" | wc -l)
+
+        if [ "$verify_count" -ne 2 ]; then
+          echo "FAIL: Expected 2 verify, got $verify_count"
+          exit 1
+        fi
+        echo "PASS: 2 verify annotations"
+
+        if [ "$judge_count" -ne 2 ]; then
+          echo "FAIL: Expected 2 judge, got $judge_count"
+          exit 1
+        fi
+        echo "PASS: 2 judge annotations"
+
+        if [ "$none_count" -ne 2 ]; then
+          echo "FAIL: Expected 2 unannotated, got $none_count"
+          exit 1
+        fi
+        echo "PASS: 2 unannotated criteria"
+
+        if [ "$total" -ne 6 ]; then
+          echo "FAIL: Expected 6 total, got $total"
+          exit 1
+        fi
+        echo "PASS: 6 total criteria"
+
+        # Verify checked status is captured
+        checked=$(echo "$output" | awk -F'\t' '$5 == "x"' | wc -l)
+        if [ "$checked" -ne 1 ]; then
+          echo "FAIL: Expected 1 checked, got $checked"
+          exit 1
+        fi
+        echo "PASS: 1 checked criterion"
+
+        echo "PASS: parse_spec_annotations counts tests"
+        mkdir $out
+      '';
+
+  # Test: parse_spec_annotations handles edge cases
+  util-parse-spec-annotations-edge-cases =
+    runCommandLocal "ralph-util-parse-spec-annotations-edge-cases"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        source ${utilScript}
+
+        echo "Test: no Success Criteria section..."
+        cat > no-criteria.md << 'SPEC'
+        # Feature
+        ## Requirements
+        Some requirements.
+        SPEC
+
+        if parse_spec_annotations no-criteria.md >/dev/null 2>&1; then
+          echo "FAIL: Should return error when no Success Criteria"
+          exit 1
+        fi
+        echo "PASS: Returns error for no Success Criteria"
+
+        echo "Test: nonexistent file..."
+        if parse_spec_annotations nonexistent.md >/dev/null 2>&1; then
+          echo "FAIL: Should return error for nonexistent file"
+          exit 1
+        fi
+        echo "PASS: Returns error for nonexistent file"
+
+        echo "Test: empty Success Criteria..."
+        cat > empty.md << 'SPEC'
+        # Feature
+        ## Success Criteria
+        ## Out of Scope
+        SPEC
+
+        if parse_spec_annotations empty.md >/dev/null 2>&1; then
+          echo "FAIL: Should return error for empty Success Criteria"
+          exit 1
+        fi
+        echo "PASS: Returns error for empty Success Criteria"
+
+        echo "Test: all unannotated..."
+        cat > unannotated.md << 'SPEC'
+        # Feature
+        ## Success Criteria
+        - [ ] First criterion
+        - [ ] Second criterion
+        - [ ] Third criterion
+        ## Out of Scope
+        SPEC
+
+        output=$(parse_spec_annotations unannotated.md)
+        total=$(echo "$output" | wc -l)
+        none_count=$(echo "$output" | awk -F'\t' '$2 == "none"' | wc -l)
+
+        if [ "$total" -ne 3 ]; then
+          echo "FAIL: Expected 3 total, got $total"
+          exit 1
+        fi
+        if [ "$none_count" -ne 3 ]; then
+          echo "FAIL: Expected 3 unannotated, got $none_count"
+          exit 1
+        fi
+        echo "PASS: All unannotated criteria parsed correctly"
+
+        echo "Test: criteria at end of file (no closing heading)..."
+        cat > eof.md << 'SPEC'
+        # Feature
+        ## Success Criteria
+        - [ ] First criterion
+          [verify](tests/first.sh::test_first)
+        - [ ] Last criterion at EOF
+        SPEC
+
+        output=$(parse_spec_annotations eof.md)
+        total=$(echo "$output" | wc -l)
+        if [ "$total" -ne 2 ]; then
+          echo "FAIL: Expected 2 criteria at EOF, got $total"
+          exit 1
+        fi
+        echo "PASS: Handles criteria at EOF"
+
+        echo "Test: malformed annotation treated as unannotated..."
+        cat > malformed.md << 'SPEC'
+        # Feature
+        ## Success Criteria
+        - [ ] Has valid verify
+          [verify](tests/foo.sh::bar)
+        - [ ] Has invalid annotation
+          [notaverb](something)
+        - [ ] Normal criterion
+        SPEC
+
+        output=$(parse_spec_annotations malformed.md)
+        total=$(echo "$output" | wc -l)
+        if [ "$total" -ne 3 ]; then
+          echo "FAIL: Expected 3 criteria with malformed, got $total"
+          exit 1
+        fi
+        line2=$(echo "$output" | sed -n '2p')
+        if ! echo "$line2" | grep -q 'none'; then
+          echo "FAIL: Malformed annotation should be 'none': $line2"
+          exit 1
+        fi
+        echo "PASS: Malformed annotation treated as unannotated"
+
+        echo "PASS: parse_spec_annotations edge case tests"
+        mkdir $out
+      '';
+
+  # Test: parse_annotation_link function
+  util-parse-annotation-link =
+    runCommandLocal "ralph-util-parse-annotation-link"
+      {
+        nativeBuildInputs = [
+          bash
+          coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        source ${utilScript}
+
+        echo "Test: path::function format..."
+        output=$(parse_annotation_link "tests/notify-test.sh::test_notification_timing")
+        file_path=$(echo "$output" | sed -n '1p')
+        function_name=$(echo "$output" | sed -n '2p')
+
+        if [ "$file_path" != "tests/notify-test.sh" ]; then
+          echo "FAIL: Expected file path 'tests/notify-test.sh', got '$file_path'"
+          exit 1
+        fi
+        if [ "$function_name" != "test_notification_timing" ]; then
+          echo "FAIL: Expected function 'test_notification_timing', got '$function_name'"
+          exit 1
+        fi
+        echo "PASS: path::function parsed correctly"
+
+        echo "Test: path-only format..."
+        output=$(parse_annotation_link "tests/basic.sh")
+        file_path=$(echo "$output" | sed -n '1p')
+        function_name=$(echo "$output" | sed -n '2p')
+
+        if [ "$file_path" != "tests/basic.sh" ]; then
+          echo "FAIL: Expected file path 'tests/basic.sh', got '$file_path'"
+          exit 1
+        fi
+        if [ -n "$function_name" ]; then
+          echo "FAIL: Expected empty function, got '$function_name'"
+          exit 1
+        fi
+        echo "PASS: path-only parsed correctly"
+
+        echo "Test: empty input returns error..."
+        if parse_annotation_link "" 2>/dev/null; then
+          echo "FAIL: Should return error for empty input"
+          exit 1
+        fi
+        echo "PASS: Empty input returns error"
+
+        echo "PASS: parse_annotation_link tests"
+        mkdir $out
+      '';
+
+  # Note: spec.sh syntax is checked by the ralph-script-syntax test above
+  # which validates all *.sh files in lib/ralph/cmd/.
 }

@@ -96,6 +96,10 @@ let
   ralphTestDir = pkgs.runCommandLocal "ralph-test-dir" { } ''
     cp -r ${./ralph} $out
     chmod +x $out/run-tests.sh $out/mock-claude $out/scenarios/*.sh
+    # Make standalone test scripts executable if they exist
+    for f in $out/test-*.sh; do
+      [ -f "$f" ] && chmod +x "$f"
+    done
   '';
 
   # Get ralph scripts for RALPH_METADATA_DIR (contains variables.json, templates.json)
