@@ -4706,6 +4706,972 @@ test_sync_deps_no_feature() {
 }
 
 #-----------------------------------------------------------------------------
+# Multi-Spec Verify/Judge and Short Flag Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph spec --verify with no --spec runs across all specs
+test_spec_verify_all_specs() {
+  CURRENT_TEST="spec_verify_all_specs"
+  test_header "Spec --verify Runs Across All Specs"
+
+  setup_test_env "spec-verify-all"
+
+  # Create specs/README.md with molecule IDs
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [alpha.md](./alpha.md) | — | wx-aaa | Alpha feature |
+| [beta.md](./beta.md) | — | wx-bbb | Beta feature |
+EOF
+
+  # Create spec files with verify annotations
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha works
+  [verify](tests/alpha-test.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta works
+  [verify](tests/beta-test.sh::test_beta)
+SPEC
+
+  # Create passing test scripts
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_alpha() { echo "alpha ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha-test.sh"
+
+  cat > "$TEST_DIR/tests/beta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_beta() { echo "beta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta-test.sh"
+
+  # Run ralph-spec --verify (should iterate all specs)
+  local output exit_code=0
+  output=$(ralph-spec --verify 2>&1) || exit_code=$?
+
+  # Should have output for both specs
+  if echo "$output" | grep -q "alpha"; then
+    test_pass "Output includes alpha spec"
+  else
+    test_fail "Output should include alpha spec: $output"
+  fi
+
+  if echo "$output" | grep -q "beta"; then
+    test_pass "Output includes beta spec"
+  else
+    test_fail "Output should include beta spec: $output"
+  fi
+
+  # Should have a cross-spec summary line
+  if echo "$output" | grep -q "Summary:.*specs)"; then
+    test_pass "Output includes cross-spec summary"
+  else
+    test_fail "Output should include cross-spec summary: $output"
+  fi
+
+  # Should exit 0 (all tests pass)
+  if [ "$exit_code" -eq 0 ]; then
+    test_pass "Exit code 0 when all tests pass"
+  else
+    test_fail "Expected exit code 0, got $exit_code"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph spec --judge with no --spec runs across all specs
+test_spec_judge_all_specs() {
+  CURRENT_TEST="spec_judge_all_specs"
+  test_header "Spec --judge Runs Across All Specs"
+
+  setup_test_env "spec-judge-all"
+
+  # Create specs/README.md
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [alpha.md](./alpha.md) | — | wx-aaa | Alpha feature |
+EOF
+
+  # Create spec with judge annotations
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha looks correct
+  [judge](tests/judges/alpha.sh::test_alpha_look)
+SPEC
+
+  # Create judge test file (judge tests only define rubrics via judge_files/judge_criterion)
+  mkdir -p "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/judges/alpha.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_alpha_look() {
+  judge_files "specs/alpha.md"
+  judge_criterion "Alpha feature is correctly specified"
+}
+TESTFILE
+
+  # Run ralph-spec --judge (will fail because claude is a mock, but we verify
+  # it attempts to iterate specs and produces judge output format)
+  local output exit_code=0
+  output=$(ralph-spec --judge 2>&1) || exit_code=$?
+
+  # Should produce output mentioning the alpha spec
+  if echo "$output" | grep -q "alpha"; then
+    test_pass "Judge output includes alpha spec"
+  else
+    test_fail "Judge output should include alpha spec: $output"
+  fi
+
+  # Should have Summary line (multi-spec mode)
+  if echo "$output" | grep -q "Summary:"; then
+    test_pass "Judge output includes Summary line"
+  else
+    test_fail "Judge output should include Summary line: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph spec --all with no --spec runs both verify and judge
+test_spec_all_all_specs() {
+  CURRENT_TEST="spec_all_all_specs"
+  test_header "Spec --all Runs Both Verify and Judge Across All Specs"
+
+  setup_test_env "spec-all-all"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [gamma.md](./gamma.md) | — | wx-ggg | Gamma feature |
+EOF
+
+  # Create spec with both verify and judge annotations
+  cat > "$TEST_DIR/specs/gamma.md" << 'SPEC'
+# Gamma
+
+## Success Criteria
+
+- [ ] Gamma verifiable
+  [verify](tests/gamma-test.sh::test_gamma)
+- [ ] Gamma judgeable
+  [judge](tests/judges/gamma.sh::test_gamma_judge)
+- [ ] Gamma unannotated
+SPEC
+
+  mkdir -p "$TEST_DIR/tests" "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/gamma-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_gamma() { echo "gamma ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/gamma-test.sh"
+
+  cat > "$TEST_DIR/tests/judges/gamma.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_gamma_judge() {
+  judge_files "specs/gamma.md"
+  judge_criterion "Gamma feature is well-specified"
+}
+TESTFILE
+
+  # Run ralph-spec --all
+  local output exit_code=0
+  output=$(ralph-spec --all 2>&1) || exit_code=$?
+
+  # Should contain Verify+Judge in header
+  if echo "$output" | grep -qi "Verify+Judge\|Verify.*Judge"; then
+    test_pass "--all mode header indicates both verify and judge"
+  else
+    # The header says "Verify+Judge"
+    test_fail "--all mode header should indicate both verify and judge: $output"
+  fi
+
+  # Should have the verify test result for gamma
+  if echo "$output" | grep -q "Gamma verifiable"; then
+    test_pass "--all includes verify criteria"
+  else
+    test_fail "--all should include verify criteria: $output"
+  fi
+
+  # Should show unannotated as SKIP
+  if echo "$output" | grep -q "SKIP.*Gamma unannotated"; then
+    test_pass "--all skips unannotated criteria"
+  else
+    test_fail "--all should skip unannotated criteria: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: --spec <name> filters to a single spec
+test_spec_filter_single() {
+  CURRENT_TEST="spec_filter_single"
+  test_header "Spec --spec Filters to Single Spec"
+
+  setup_test_env "spec-filter-single"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [alpha.md](./alpha.md) | — | wx-aaa | Alpha |
+| [beta.md](./beta.md) | — | wx-bbb | Beta |
+EOF
+
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha works
+  [verify](tests/alpha-test.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta works
+  [verify](tests/beta-test.sh::test_beta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_alpha() { echo "alpha ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha-test.sh"
+
+  cat > "$TEST_DIR/tests/beta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_beta() { echo "beta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta-test.sh"
+
+  # Run with --spec alpha (should only run alpha, not beta)
+  local output exit_code=0
+  output=$(ralph-spec --verify --spec alpha 2>&1) || exit_code=$?
+
+  # Should include alpha
+  if echo "$output" | grep -q "Alpha works"; then
+    test_pass "--spec alpha includes alpha criteria"
+  else
+    test_fail "--spec alpha should include alpha criteria: $output"
+  fi
+
+  # Should NOT include beta
+  if echo "$output" | grep -q "Beta works"; then
+    test_fail "--spec alpha should not include beta criteria"
+  else
+    test_pass "--spec alpha excludes beta criteria"
+  fi
+
+  # Should NOT have cross-spec Summary line (single-spec format)
+  if echo "$output" | grep -q "Summary:.*specs)"; then
+    test_fail "Single-spec mode should not have cross-spec summary"
+  else
+    test_pass "Single-spec mode has no cross-spec summary"
+  fi
+
+  teardown_test_env
+}
+
+# Test: -v is equivalent to --verify
+test_spec_short_flag_v() {
+  CURRENT_TEST="spec_short_flag_v"
+  test_header "Short Flag -v = --verify"
+
+  setup_test_env "spec-short-v"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [delta.md](./delta.md) | — | wx-ddd | Delta |
+EOF
+
+  cat > "$TEST_DIR/specs/delta.md" << 'SPEC'
+# Delta
+
+## Success Criteria
+
+- [ ] Delta works
+  [verify](tests/delta-test.sh::test_delta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/delta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_delta() { echo "delta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/delta-test.sh"
+
+  # Run with -v (short for --verify)
+  local output exit_code=0
+  output=$(ralph-spec -v 2>&1) || exit_code=$?
+
+  # Should have verify output
+  if echo "$output" | grep -q "\\[PASS\\].*Delta works"; then
+    test_pass "-v triggers verify and shows PASS"
+  else
+    test_fail "-v should trigger verify: $output"
+  fi
+
+  # Exit code should be 0
+  if [ "$exit_code" -eq 0 ]; then
+    test_pass "-v exits 0 on success"
+  else
+    test_fail "-v should exit 0 on success, got $exit_code"
+  fi
+
+  teardown_test_env
+}
+
+# Test: -j is equivalent to --judge
+test_spec_short_flag_j() {
+  CURRENT_TEST="spec_short_flag_j"
+  test_header "Short Flag -j = --judge"
+
+  setup_test_env "spec-short-j"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [epsilon.md](./epsilon.md) | — | wx-eee | Epsilon |
+EOF
+
+  cat > "$TEST_DIR/specs/epsilon.md" << 'SPEC'
+# Epsilon
+
+## Success Criteria
+
+- [ ] Epsilon looks right
+  [judge](tests/judges/epsilon.sh::test_epsilon)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/judges/epsilon.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_epsilon() {
+  judge_files "specs/epsilon.md"
+  judge_criterion "Epsilon is well-specified"
+}
+TESTFILE
+
+  # Run with -j (short for --judge)
+  local output exit_code=0
+  output=$(ralph-spec -j 2>&1) || exit_code=$?
+
+  # Should produce judge-style output (it will attempt to run judge)
+  if echo "$output" | grep -q "Epsilon looks right"; then
+    test_pass "-j triggers judge and shows criterion"
+  else
+    test_fail "-j should trigger judge: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: -a is equivalent to --all
+test_spec_short_flag_a() {
+  CURRENT_TEST="spec_short_flag_a"
+  test_header "Short Flag -a = --all"
+
+  setup_test_env "spec-short-a"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [zeta.md](./zeta.md) | — | wx-zzz | Zeta |
+EOF
+
+  cat > "$TEST_DIR/specs/zeta.md" << 'SPEC'
+# Zeta
+
+## Success Criteria
+
+- [ ] Zeta verifiable
+  [verify](tests/zeta-test.sh::test_zeta)
+- [ ] Zeta judgeable
+  [judge](tests/judges/zeta.sh::test_zeta_judge)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests" "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/zeta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_zeta() { echo "zeta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/zeta-test.sh"
+
+  cat > "$TEST_DIR/tests/judges/zeta.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_zeta_judge() {
+  judge_files "specs/zeta.md"
+  judge_criterion "Zeta is well-specified"
+}
+TESTFILE
+
+  # Run with -a (short for --all)
+  local output exit_code=0
+  output=$(ralph-spec -a 2>&1) || exit_code=$?
+
+  # Should have Verify+Judge header
+  if echo "$output" | grep -q "Verify+Judge"; then
+    test_pass "-a triggers both verify and judge (Verify+Judge header)"
+  else
+    test_fail "-a should trigger both verify and judge: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: -s is equivalent to --spec
+test_spec_short_flag_s() {
+  CURRENT_TEST="spec_short_flag_s"
+  test_header "Short Flag -s = --spec"
+
+  setup_test_env "spec-short-s"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [alpha.md](./alpha.md) | — | wx-aaa | Alpha |
+| [beta.md](./beta.md) | — | wx-bbb | Beta |
+EOF
+
+  cat > "$TEST_DIR/specs/alpha.md" << 'SPEC'
+# Alpha
+
+## Success Criteria
+
+- [ ] Alpha works
+  [verify](tests/alpha-test.sh::test_alpha)
+SPEC
+
+  cat > "$TEST_DIR/specs/beta.md" << 'SPEC'
+# Beta
+
+## Success Criteria
+
+- [ ] Beta works
+  [verify](tests/beta-test.sh::test_beta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/alpha-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_alpha() { echo "alpha ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/alpha-test.sh"
+
+  cat > "$TEST_DIR/tests/beta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_beta() { echo "beta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/beta-test.sh"
+
+  # Run with -s beta -v (short flags for --spec beta --verify)
+  local output exit_code=0
+  output=$(ralph-spec -v -s beta 2>&1) || exit_code=$?
+
+  # Should include beta
+  if echo "$output" | grep -q "Beta works"; then
+    test_pass "-s beta includes beta criteria"
+  else
+    test_fail "-s beta should include beta criteria: $output"
+  fi
+
+  # Should NOT include alpha
+  if echo "$output" | grep -q "Alpha works"; then
+    test_fail "-s beta should not include alpha criteria"
+  else
+    test_pass "-s beta excludes alpha criteria"
+  fi
+
+  teardown_test_env
+}
+
+# Test: -v no longer maps to --verbose; --verbose has no short flag
+test_spec_verbose_no_short_v() {
+  CURRENT_TEST="spec_verbose_no_short_v"
+  test_header "-v Is Not --verbose"
+
+  setup_test_env "spec-verbose-no-v"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [theta.md](./theta.md) | — | wx-ttt | Theta |
+EOF
+
+  cat > "$TEST_DIR/specs/theta.md" << 'SPEC'
+# Theta
+
+## Success Criteria
+
+- [ ] Theta works
+  [verify](tests/theta-test.sh::test_theta)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/theta-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_theta() { echo "theta ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/theta-test.sh"
+
+  # -v should trigger verify mode (run tests), not verbose mode (annotation index)
+  local output exit_code=0
+  output=$(ralph-spec -v 2>&1) || exit_code=$?
+
+  # If -v were --verbose, we'd get the annotation index format (counts).
+  # Instead, -v should trigger verify mode with [PASS]/[FAIL] output.
+  if echo "$output" | grep -q "\\[PASS\\]"; then
+    test_pass "-v triggers verify mode (shows [PASS])"
+  else
+    test_fail "-v should trigger verify mode, not verbose: $output"
+  fi
+
+  # Verify that the output does NOT look like the annotation index
+  # (which shows "N verify, N judge, N unannotated")
+  if echo "$output" | grep -q "verify,.*judge,.*unannotated"; then
+    test_fail "-v should not show annotation index (that's verbose mode)"
+  else
+    test_pass "-v does not show annotation index"
+  fi
+
+  teardown_test_env
+}
+
+# Test: Short flags compose: ralph spec -vj = --all
+test_spec_short_compose() {
+  CURRENT_TEST="spec_short_compose"
+  test_header "Short Flags Compose: -vj = --all"
+
+  setup_test_env "spec-compose"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [kappa.md](./kappa.md) | — | wx-kkk | Kappa |
+EOF
+
+  cat > "$TEST_DIR/specs/kappa.md" << 'SPEC'
+# Kappa
+
+## Success Criteria
+
+- [ ] Kappa verifiable
+  [verify](tests/kappa-test.sh::test_kappa)
+- [ ] Kappa judgeable
+  [judge](tests/judges/kappa.sh::test_kappa_judge)
+- [ ] Kappa unannotated
+SPEC
+
+  mkdir -p "$TEST_DIR/tests" "$TEST_DIR/tests/judges"
+  cat > "$TEST_DIR/tests/kappa-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_kappa() { echo "kappa ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/kappa-test.sh"
+
+  cat > "$TEST_DIR/tests/judges/kappa.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+test_kappa_judge() {
+  judge_files "specs/kappa.md"
+  judge_criterion "Kappa is well-specified"
+}
+TESTFILE
+
+  # Run with -vj (composed flags = --all)
+  local output exit_code=0
+  output=$(ralph-spec -vj 2>&1) || exit_code=$?
+
+  # Should produce Verify+Judge header (same as --all)
+  if echo "$output" | grep -q "Verify+Judge"; then
+    test_pass "-vj composes to Verify+Judge mode"
+  else
+    test_fail "-vj should compose to Verify+Judge mode: $output"
+  fi
+
+  # Should include both verify and judge criteria
+  if echo "$output" | grep -q "Kappa verifiable"; then
+    test_pass "-vj includes verify criteria"
+  else
+    test_fail "-vj should include verify criteria: $output"
+  fi
+
+  if echo "$output" | grep -q "Kappa judgeable"; then
+    test_pass "-vj includes judge criteria"
+  else
+    test_fail "-vj should include judge criteria: $output"
+  fi
+
+  # Unannotated should be skipped in --all mode
+  if echo "$output" | grep -q "SKIP.*Kappa unannotated"; then
+    test_pass "-vj skips unannotated criteria"
+  else
+    test_fail "-vj should skip unannotated criteria: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: multi-spec output groups results by spec with per-spec headers
+test_spec_grouped_output() {
+  CURRENT_TEST="spec_grouped_output"
+  test_header "Multi-Spec Grouped Output with Per-Spec Headers"
+
+  setup_test_env "spec-grouped"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [first.md](./first.md) | — | wx-111 | First |
+| [second.md](./second.md) | — | wx-222 | Second |
+EOF
+
+  cat > "$TEST_DIR/specs/first.md" << 'SPEC'
+# First
+
+## Success Criteria
+
+- [ ] First works
+  [verify](tests/first-test.sh::test_first_fn)
+SPEC
+
+  cat > "$TEST_DIR/specs/second.md" << 'SPEC'
+# Second
+
+## Success Criteria
+
+- [ ] Second works
+  [verify](tests/second-test.sh::test_second_fn)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/first-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_first_fn() { echo "first ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/first-test.sh"
+
+  cat > "$TEST_DIR/tests/second-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_second_fn() { echo "second ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/second-test.sh"
+
+  local output exit_code=0
+  output=$(ralph-spec --verify 2>&1) || exit_code=$?
+
+  # Check for per-spec headers with molecule IDs
+  if echo "$output" | grep -q "Ralph Verify: first (wx-111)"; then
+    test_pass "First spec has per-spec header with molecule ID"
+  else
+    test_fail "Expected per-spec header for first (wx-111): $output"
+  fi
+
+  if echo "$output" | grep -q "Ralph Verify: second (wx-222)"; then
+    test_pass "Second spec has per-spec header with molecule ID"
+  else
+    test_fail "Expected per-spec header for second (wx-222): $output"
+  fi
+
+  # Check for separator line (=====) under headers
+  if echo "$output" | grep -q "^=\+$"; then
+    test_pass "Headers have separator lines"
+  else
+    test_fail "Headers should have separator lines: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: multi-spec output ends with summary line
+test_spec_summary_line() {
+  CURRENT_TEST="spec_summary_line"
+  test_header "Multi-Spec Summary Line"
+
+  setup_test_env "spec-summary"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [one.md](./one.md) | — | wx-o11 | One |
+| [two.md](./two.md) | — | wx-t22 | Two |
+EOF
+
+  cat > "$TEST_DIR/specs/one.md" << 'SPEC'
+# One
+
+## Success Criteria
+
+- [ ] One passes
+  [verify](tests/one-test.sh::test_one)
+- [ ] One unannotated
+SPEC
+
+  cat > "$TEST_DIR/specs/two.md" << 'SPEC'
+# Two
+
+## Success Criteria
+
+- [ ] Two passes
+  [verify](tests/two-test.sh::test_two)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/one-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_one() { echo "one ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/one-test.sh"
+
+  cat > "$TEST_DIR/tests/two-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_two() { echo "two ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/two-test.sh"
+
+  local output exit_code=0
+  output=$(ralph-spec --verify 2>&1) || exit_code=$?
+
+  # Summary line format: "Summary: X passed, Y failed, Z skipped (N specs)"
+  if echo "$output" | grep -qE "Summary: [0-9]+ passed, [0-9]+ failed, [0-9]+ skipped \([0-9]+ specs\)"; then
+    test_pass "Summary line has correct format"
+  else
+    test_fail "Summary line should match format 'Summary: X passed, Y failed, Z skipped (N specs)': $output"
+  fi
+
+  # Check specific counts: 2 passed, 0 failed, 1 skipped (unannotated in verify mode), 2 specs
+  if echo "$output" | grep -q "Summary: 2 passed, 0 failed, 1 skipped (2 specs)"; then
+    test_pass "Summary counts are correct (2 passed, 0 failed, 1 skipped, 2 specs)"
+  else
+    # Extract actual summary for debugging
+    local summary_line
+    summary_line=$(echo "$output" | grep "Summary:" || echo "(no summary)")
+    test_fail "Summary should be '2 passed, 0 failed, 1 skipped (2 specs)', got: $summary_line"
+  fi
+
+  teardown_test_env
+}
+
+# Test: non-zero exit code on failure in multi-spec mode
+test_spec_nonzero_exit() {
+  CURRENT_TEST="spec_nonzero_exit"
+  test_header "Non-Zero Exit Code on Failure"
+
+  setup_test_env "spec-nonzero"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [pass.md](./pass.md) | — | wx-ppp | Passing |
+| [fail.md](./fail.md) | — | wx-fff | Failing |
+EOF
+
+  cat > "$TEST_DIR/specs/pass.md" << 'SPEC'
+# Passing Spec
+
+## Success Criteria
+
+- [ ] This passes
+  [verify](tests/pass-test.sh::test_pass_fn)
+SPEC
+
+  cat > "$TEST_DIR/specs/fail.md" << 'SPEC'
+# Failing Spec
+
+## Success Criteria
+
+- [ ] This fails
+  [verify](tests/fail-test.sh::test_fail_fn)
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/pass-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_pass_fn() { echo "ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/pass-test.sh"
+
+  cat > "$TEST_DIR/tests/fail-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_fail_fn() { echo "fail"; exit 1; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/fail-test.sh"
+
+  local output exit_code=0
+  output=$(ralph-spec --verify 2>&1) || exit_code=$?
+
+  # Should exit non-zero because one spec has a failure
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exit code is non-zero when a spec has a failure"
+  else
+    test_fail "Exit code should be non-zero when a spec has a failure"
+  fi
+
+  # Summary should show at least 1 failed
+  if echo "$output" | grep -qE "Summary:.*[1-9][0-9]* failed"; then
+    test_pass "Summary shows failure count"
+  else
+    test_fail "Summary should show non-zero failure count: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: specs with no success criteria are silently skipped in multi-spec mode
+test_spec_skip_empty() {
+  CURRENT_TEST="spec_skip_empty"
+  test_header "Specs Without Criteria Silently Skipped"
+
+  setup_test_env "spec-skip-empty"
+
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Specs
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [has-criteria.md](./has-criteria.md) | — | wx-hc1 | Has criteria |
+| [no-criteria.md](./no-criteria.md) | — | wx-nc1 | No criteria |
+EOF
+
+  cat > "$TEST_DIR/specs/has-criteria.md" << 'SPEC'
+# Has Criteria
+
+## Success Criteria
+
+- [ ] This is tested
+  [verify](tests/criteria-test.sh::test_criteria)
+SPEC
+
+  # Spec with no Success Criteria section at all
+  cat > "$TEST_DIR/specs/no-criteria.md" << 'SPEC'
+# No Criteria
+
+## Requirements
+
+Just requirements, no success criteria.
+
+## Out of Scope
+
+Nothing here.
+SPEC
+
+  mkdir -p "$TEST_DIR/tests"
+  cat > "$TEST_DIR/tests/criteria-test.sh" << 'TESTFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+test_criteria() { echo "ok"; exit 0; }
+if [ -n "${1:-}" ] && declare -f "$1" >/dev/null 2>&1; then "$1"; fi
+TESTFILE
+  chmod +x "$TEST_DIR/tests/criteria-test.sh"
+
+  local output exit_code=0
+  output=$(ralph-spec --verify 2>&1) || exit_code=$?
+
+  # Should have output for has-criteria spec
+  if echo "$output" | grep -q "has-criteria"; then
+    test_pass "Spec with criteria is included"
+  else
+    test_fail "Spec with criteria should be included: $output"
+  fi
+
+  # Should NOT have output for no-criteria spec (silently skipped)
+  if echo "$output" | grep -q "no-criteria"; then
+    test_fail "Spec without criteria should be silently skipped"
+  else
+    test_pass "Spec without criteria is silently skipped"
+  fi
+
+  # Summary should show only 1 spec
+  if echo "$output" | grep -q "(1 specs)"; then
+    test_pass "Summary counts only specs with criteria"
+  else
+    local summary_line
+    summary_line=$(echo "$output" | grep "Summary:" || echo "(no summary)")
+    test_fail "Summary should count only 1 spec, got: $summary_line"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -4769,6 +5735,20 @@ ALL_TESTS=(
   test_sync_deps_missing_files
   test_sync_deps_dedup
   test_sync_deps_no_feature
+  test_spec_verify_all_specs
+  test_spec_judge_all_specs
+  test_spec_all_all_specs
+  test_spec_filter_single
+  test_spec_short_flag_v
+  test_spec_short_flag_j
+  test_spec_short_flag_a
+  test_spec_short_flag_s
+  test_spec_verbose_no_short_v
+  test_spec_short_compose
+  test_spec_grouped_output
+  test_spec_summary_line
+  test_spec_nonzero_exit
+  test_spec_skip_empty
 )
 
 #-----------------------------------------------------------------------------
