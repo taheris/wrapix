@@ -77,27 +77,39 @@ run_judge_test() {
     return
   fi
 
-  # Source the judge test file and call the function to get rubric
-  local judge_files_val="" judge_criterion_val=""
+  # Reset judge state, source the test file, and call the rubric function
+  judge_reset
 
-  # Define judge_files and judge_criterion as capture functions
-  # shellcheck disable=SC2034  # judge_files_val read via variable name
-  judge_files() { judge_files_val="$1"; }
-  judge_criterion() { judge_criterion_val="$1"; }
-
-  # Source and call
   # shellcheck disable=SC1090
   source "$file_path"
   if [ -n "$function_name" ] && declare -f "$function_name" >/dev/null 2>&1; then
     "$function_name"
   fi
 
-  # For now, report as PASS with criterion info (full LLM integration is a later task)
-  echo "  [PASS] $criterion"
-  if [ -n "$judge_criterion_val" ]; then
-    echo "         \"$judge_criterion_val\""
+  # Invoke LLM judge via run_judge
+  local judge_exit=0
+  run_judge && judge_exit=0 || judge_exit=$?
+
+  if [ "$judge_exit" -eq 0 ]; then
+    echo "  [PASS] $criterion"
+    if [ -n "$JUDGE_REASONING" ]; then
+      echo "         \"$JUDGE_REASONING\""
+    fi
+    ((passed++)) || true
+  elif [ "$judge_exit" -eq 2 ]; then
+    # Error (missing files, LLM unavailable, etc.) — report as FAIL with reason
+    echo "  [FAIL] $criterion"
+    echo "         $JUDGE_REASONING"
+    ((failed++)) || true
+    has_failure=true
+  else
+    echo "  [FAIL] $criterion"
+    if [ -n "$JUDGE_REASONING" ]; then
+      echo "         \"$JUDGE_REASONING\""
+    fi
+    ((failed++)) || true
+    has_failure=true
   fi
-  ((passed++)) || true
 }
 
 #-----------------------------------------------------------------------------

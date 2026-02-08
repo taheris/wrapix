@@ -877,3 +877,156 @@ parse_spec_annotations() {
 
   return 0
 }
+
+#-----------------------------------------------------------------------------
+# Judge test infrastructure
+#
+# Judge tests define rubrics via two setter functions:
+#   judge_files "file1" "file2" ...   — source files for LLM to evaluate
+#   judge_criterion "text"            — what the LLM evaluates
+#
+# The run_judge function reads those files, constructs a prompt, calls an LLM,
+# and returns PASS/FAIL + reasoning.
+#-----------------------------------------------------------------------------
+
+# Accumulator variables for judge rubrics (set by judge_files/judge_criterion)
+JUDGE_FILES=""
+JUDGE_CRITERION=""
+
+# Set source files for LLM evaluation
+# Usage: judge_files "lib/ralph/cmd/status.sh" "lib/ralph/cmd/util.sh"
+# Multiple files are space-separated
+judge_files() {
+  JUDGE_FILES="$*"
+}
+
+# Set the evaluation criterion text
+# Usage: judge_criterion "Output includes progress percentage and status indicators"
+judge_criterion() {
+  JUDGE_CRITERION="$1"
+}
+
+# Reset judge state between test invocations
+# Usage: judge_reset
+judge_reset() {
+  JUDGE_FILES=""
+  JUDGE_CRITERION=""
+}
+
+# Run LLM judge evaluation
+# Reads files from JUDGE_FILES, constructs prompt with JUDGE_CRITERION,
+# calls Claude, and parses PASS/FAIL verdict + reasoning.
+#
+# Usage:
+#   judge_files "lib/foo.sh"
+#   judge_criterion "Code handles edge cases"
+#   run_judge
+#
+# Output: Sets JUDGE_VERDICT (PASS or FAIL) and JUDGE_REASONING (text)
+# Returns: 0 on PASS, 1 on FAIL, 2 on error (LLM unavailable, missing files, etc.)
+run_judge() {
+  JUDGE_VERDICT=""
+  JUDGE_REASONING=""
+
+  if [ -z "$JUDGE_FILES" ]; then
+    warn "run_judge: no files specified (call judge_files first)"
+    JUDGE_VERDICT="FAIL"
+    JUDGE_REASONING="No source files specified for evaluation"
+    return 2
+  fi
+
+  if [ -z "$JUDGE_CRITERION" ]; then
+    warn "run_judge: no criterion specified (call judge_criterion first)"
+    JUDGE_VERDICT="FAIL"
+    JUDGE_REASONING="No evaluation criterion specified"
+    return 2
+  fi
+
+  # Read contents of all specified files
+  local file_contents=""
+  for file in $JUDGE_FILES; do
+    if [ ! -f "$file" ]; then
+      warn "run_judge: file not found: $file"
+      JUDGE_VERDICT="FAIL"
+      JUDGE_REASONING="Source file not found: $file"
+      return 2
+    fi
+    file_contents+="
+--- $file ---
+$(cat "$file")
+"
+  done
+
+  # Check that claude CLI is available
+  if ! command -v claude &>/dev/null; then
+    warn "run_judge: claude CLI not found"
+    JUDGE_VERDICT="FAIL"
+    JUDGE_REASONING="claude CLI not available"
+    return 2
+  fi
+
+  # Construct the judge prompt
+  local prompt
+  prompt="You are a code reviewer evaluating whether source code meets a specific criterion.
+
+## Criterion
+${JUDGE_CRITERION}
+
+## Source Files
+${file_contents}
+
+## Instructions
+Evaluate whether the source code meets the criterion above.
+Respond with exactly one of these verdicts on the FIRST line:
+PASS
+FAIL
+
+Then on subsequent lines, provide a brief explanation (1-3 sentences) of your reasoning.
+
+Example response:
+PASS
+The code implements progress percentage display via the calc_progress function and shows status indicators for each issue state."
+
+  debug "run_judge: evaluating criterion: $JUDGE_CRITERION"
+  debug "run_judge: files: $JUDGE_FILES"
+
+  # Call Claude with --print for simple text response
+  local llm_output exit_code
+  export JUDGE_PROMPT="$prompt"
+  llm_output=$(claude --dangerously-skip-permissions --print "$prompt" 2>&1) && exit_code=0 || exit_code=$?
+  unset JUDGE_PROMPT
+
+  if [ $exit_code -ne 0 ]; then
+    warn "run_judge: claude invocation failed (exit $exit_code)"
+    JUDGE_VERDICT="FAIL"
+    JUDGE_REASONING="LLM invocation failed (exit $exit_code): ${llm_output:0:200}"
+    return 2
+  fi
+
+  # Parse verdict from first non-empty line
+  local first_line
+  first_line=$(echo "$llm_output" | grep -m1 -E '^(PASS|FAIL)' || true)
+
+  if [ -z "$first_line" ]; then
+    warn "run_judge: could not parse PASS/FAIL from LLM response"
+    JUDGE_VERDICT="FAIL"
+    JUDGE_REASONING="Could not parse verdict from LLM response: ${llm_output:0:200}"
+    return 2
+  fi
+
+  JUDGE_VERDICT="${first_line%%[[:space:]]*}"
+  # Extract reasoning: everything after the verdict line
+  JUDGE_REASONING=$(echo "$llm_output" | sed '1{/^$/d}' | tail -n +2 | sed '/^$/d' | head -5)
+
+  if [ -z "$JUDGE_REASONING" ]; then
+    JUDGE_REASONING="(no reasoning provided)"
+  fi
+
+  debug "run_judge: verdict=$JUDGE_VERDICT"
+
+  if [ "$JUDGE_VERDICT" = "PASS" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
