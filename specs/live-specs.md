@@ -40,20 +40,29 @@ The "frontend dissolves" insight: instead of building dashboards and status page
    - Reads spec files and parses annotations; no test execution or LLM calls
    - `--verbose`: expand to per-criterion detail showing each criterion and its annotation type
 
-3. **`ralph spec --verify`** — Run all `[verify]` tests from the current spec's success criteria:
+3. **`ralph spec --verify` / `-v`** — Run all `[verify]` tests across all spec files by default:
    ```
    Ralph Verify: notifications (wx-q6x)
    ======================================
      [PASS] Notification appears within 2s
             tests/notify-test.sh::test_notification_timing (exit 0)
      [SKIP] Clear visibility into current state (judge only)
-     [SKIP] Works on both Linux and macOS (no annotation)
 
-   1 passed, 0 failed, 2 skipped
+   Ralph Verify: live-specs (wx-a13n)
+   ======================================
+     [PASS] Annotations parse correctly
+     [FAIL] ralph spec --verify runs shell tests
+
+   Summary: 2 passed, 1 failed, 1 skipped (2 specs)
    ```
+   - Iterates all spec files in `specs/` (excluding README.md) by default
+   - Specs with no success criteria are silently skipped
+   - Results grouped by spec with per-spec headers
+   - Ends with a cross-spec summary line
+   - Exits non-zero if any spec has at least one failure
    - Runs on the host (user is responsible for having required tools)
 
-4. **`ralph spec --judge`** — Run all `[judge]` evaluations from the current spec's success criteria:
+4. **`ralph spec --judge` / `-j`** — Run all `[judge]` evaluations across all spec files by default:
    ```
    Ralph Judge: notifications (wx-q6x)
    =====================================
@@ -61,15 +70,22 @@ The "frontend dissolves" insight: instead of building dashboards and status page
      [PASS] Clear visibility into current state
             "ralph status displays progress %, per-issue status,
              and blocked/awaiting indicators"
-     [SKIP] Works on both Linux and macOS (no annotation)
 
-   1 passed, 0 failed, 2 skipped
+   Summary: 1 passed, 0 failed, 1 skipped (1 spec)
    ```
+   - Same multi-spec iteration and grouping as `--verify`
    - Runs on the host; invokes LLM with source files + criterion
 
-5. **`ralph spec --all`** — Run both verify and judge checks (shorthand for `--verify --judge`).
+5. **`ralph spec --all` / `-a`** — Run both verify and judge checks (shorthand for `--verify --judge`). Short flags compose: `ralph spec -vj` is equivalent to `ralph spec --all`.
 
-6. **Judge test infrastructure** — Judge tests live in `tests/judges/` and define rubrics:
+6. **`--spec` / `-s` flag** — Filter verify/judge/all to a single spec:
+   - `ralph spec --verify --spec notifications` runs only against `specs/notifications.md`
+   - The name matches the spec filename without the `.md` extension
+   - When `--spec` is provided, output matches single-spec format (no cross-spec summary)
+
+7. **Short flags** — `-v` for `--verify`, `-j` for `--judge`, `-a` for `--all`, `-s` for `--spec`. The `-v` flag is reassigned from `--verbose`; `--verbose` has no short flag.
+
+8. **Judge test infrastructure** — Judge tests live in `tests/judges/` and define rubrics:
    ```bash
    test_clear_visibility() {
      judge_files "lib/ralph/cmd/status.sh"
@@ -80,12 +96,12 @@ The "frontend dissolves" insight: instead of building dashboards and status page
    - `judge_criterion` specifies what the LLM evaluates
    - The runner invokes an LLM with files + criterion, returns PASS/FAIL + short reasoning
 
-7. **`ralph sync --deps`** — Print required nix packages for verify and judge tests:
+9. **`ralph sync --deps`** — Print required nix packages for verify and judge tests:
    - Scans annotations in the current spec
    - Determines what tools/packages the test files need
    - Outputs a list suitable for `nix shell` or profile construction
 
-8. **`ralph status --watch` / `-w`** — Auto-refreshing live view:
+10. **`ralph status --watch` / `-w`** — Auto-refreshing live view:
    - Top pane: molecule progress (refreshes periodically)
    - Bottom pane: live tail of agent output if `ralph run` is active
    - Works standalone (shows status + recent activity even when nothing is running)
@@ -93,7 +109,7 @@ The "frontend dissolves" insight: instead of building dashboards and status page
    - **Requires tmux** — errors with a clear message if not in a tmux session
    - Individual underlying commands (`ralph status`, `ralph logs`) remain usable outside tmux
 
-9. **Awaiting input convention** — Tracker-agnostic label for human-blocked items:
+11. **Awaiting input convention** — Tracker-agnostic label for human-blocked items:
    - When agent emits `RALPH_CLARIFY`, orchestrator adds `awaiting:input` label to bead
    - Question stored in bead notes
    - `ralph status` surfaces awaiting items distinctly:
@@ -118,6 +134,22 @@ The "frontend dissolves" insight: instead of building dashboards and status page
 ### Annotation parsing
 
 Scan success criteria sections for `[verify](...)` and `[judge](...)` links on lines following `- [ ]` or `- [x]` items. Extract path and optional function name from the link target (split on `::`).
+
+### Multi-spec iteration
+
+When `--verify`, `--judge`, or `--all` is used without `--spec`:
+- Iterate all `specs/*.md` files (excluding `README.md`)
+- For each spec, look up the molecule ID from `specs/README.md` for the header
+- Skip specs with no success criteria silently
+- Run tests per-spec, grouping output with per-spec headers
+- Track cumulative pass/fail/skip counts and spec count
+- Print cross-spec summary: `Summary: X passed, Y failed, Z skipped (N specs)`
+- Exit non-zero if any failure occurred across any spec
+
+When `--spec NAME` is provided:
+- Resolve to `specs/NAME.md`
+- Run only that spec's tests
+- Use single-spec output format (no cross-spec summary)
 
 ### Verify runner
 
@@ -172,10 +204,11 @@ Spec-Driven Workflow Commands:
   status          Show current workflow state
     --watch/-w      Live tmux view (requires tmux)
   spec            Query spec annotations
-    --verify        Run [verify] shell tests
-    --judge         Run [judge] LLM evaluations
-    --all           Run both verify and judge
-    --verbose       Show per-criterion detail
+    --verify/-v     Run [verify] shell tests (all specs by default)
+    --judge/-j      Run [judge] LLM evaluations (all specs by default)
+    --all/-a        Run both verify and judge
+    --spec/-s NAME  Filter to a single spec file
+    --verbose       Show per-criterion detail (no short flag)
 
 Template Commands:
   check           (unchanged)
@@ -210,9 +243,9 @@ Utility Commands:
   [judge](tests/judges/live-specs.sh::test_spec_index_output)
 - [ ] `ralph spec --verbose` shows per-criterion detail
   [judge](tests/judges/live-specs.sh::test_spec_verbose_output)
-- [ ] `ralph spec --verify` runs shell tests and reports PASS/FAIL/SKIP
+- [ ] `ralph spec --verify` runs shell tests across all specs and reports PASS/FAIL/SKIP
   [judge](tests/judges/live-specs.sh::test_spec_verify_runner)
-- [ ] `ralph spec --judge` invokes LLM with rubric and reports PASS/FAIL/SKIP
+- [ ] `ralph spec --judge` invokes LLM with rubric across all specs and reports PASS/FAIL/SKIP
   [judge](tests/judges/live-specs.sh::test_spec_judge_runner)
 - [ ] `ralph spec --all` runs both verify and judge
   [judge](tests/judges/live-specs.sh::test_spec_all_flag)
@@ -238,12 +271,97 @@ Utility Commands:
   [verify](tests/ralph/run-tests.sh::test_sync_deps_basic)
 - [ ] Annotations are clickable links in GitHub and VS Code
   [judge](tests/judges/live-specs.sh::test_clickable_links)
+- [ ] `ralph spec --verify` with no `--spec` flag runs verify tests across all spec files
+  [judge](tests/judges/live-specs.sh::test_spec_verify_all_specs)
+- [ ] `ralph spec --judge` with no `--spec` flag runs judge tests across all spec files
+  [judge](tests/judges/live-specs.sh::test_spec_judge_all_specs)
+- [ ] `ralph spec --all` with no `--spec` flag runs both across all spec files
+  [judge](tests/judges/live-specs.sh::test_spec_all_all_specs)
+- [ ] `ralph spec --verify --spec notifications` runs verify tests only for `specs/notifications.md`
+  [judge](tests/judges/live-specs.sh::test_spec_filter_single)
+- [ ] `ralph spec -v` is equivalent to `ralph spec --verify`
+  [verify](tests/ralph/run-tests.sh::test_spec_short_flag_v)
+- [ ] `ralph spec -j` is equivalent to `ralph spec --judge`
+  [verify](tests/ralph/run-tests.sh::test_spec_short_flag_j)
+- [ ] `ralph spec -a` is equivalent to `ralph spec --all`
+  [verify](tests/ralph/run-tests.sh::test_spec_short_flag_a)
+- [ ] `ralph spec -s notifications` is equivalent to `ralph spec --spec notifications`
+  [verify](tests/ralph/run-tests.sh::test_spec_short_flag_s)
+- [ ] `-v` no longer maps to `--verbose`; `--verbose` has no short flag
+  [verify](tests/ralph/run-tests.sh::test_spec_verbose_no_short_v)
+- [ ] Short flags compose: `ralph spec -vj` is equivalent to `ralph spec --all`
+  [verify](tests/ralph/run-tests.sh::test_spec_short_compose)
+- [ ] Multi-spec output groups results by spec with per-spec headers
+  [judge](tests/judges/live-specs.sh::test_spec_grouped_output)
+- [ ] Multi-spec output ends with a summary line including total pass/fail/skip and spec count
+  [judge](tests/judges/live-specs.sh::test_spec_summary_line)
+- [ ] Exit code is non-zero if any spec has a failure in multi-spec mode
+  [verify](tests/ralph/run-tests.sh::test_spec_nonzero_exit)
+- [ ] Specs with no success criteria are silently skipped in multi-spec mode
+  [verify](tests/ralph/run-tests.sh::test_spec_skip_empty)
 
 ## Out of Scope
 
 - Deprecating `ralph logs` (stays as-is, extended independently)
 - Auto-updating `- [ ]` to `- [x]` in specs based on verify/judge results
 - Web-based dashboard or GUI
-- Cross-spec verification (verify one spec at a time)
 - Judge model selection (use whatever model ralph is configured with)
 - Running verify/judge inside wrapix containers (host execution only)
+
+## Updates
+
+# New Requirements for live-specs
+
+## Requirements
+
+1. **`ralph spec --verify/--judge/--all` run across all specs by default** — Instead of only running against the current spec (from `current.json`), these flags now scan and execute tests across all spec files in `specs/`. Results are grouped by spec with a per-spec header and a cross-spec summary line at the end.
+
+2. **`--spec`/`-s` flag to filter to a single spec** — `ralph spec --verify --spec notifications` runs only against `specs/notifications.md`. The name matches the spec filename without the `.md` extension. When `--spec` is provided, behavior matches current single-spec output format (with the addition of the spec name in the header).
+
+3. **Short flags for verify/judge/all** — Add `-v` for `--verify`, `-j` for `--judge`, `-a` for `--all`. These are composable (e.g., `ralph spec -vj` is equivalent to `ralph spec --all`).
+
+4. **Drop `-v` short flag for `--verbose`** — Currently `-v` maps to `--verbose`. Reassign `-v` to `--verify`. `--verbose` has no short flag.
+
+5. **Grouped output format** — When running across all specs, output groups results by spec file with headers, then ends with a cross-spec summary:
+   ```
+   Ralph Verify: notifications (wx-q6x)
+   ======================================
+     [PASS] Notification appears within 2s
+     [SKIP] Clear visibility into current state (judge only)
+
+   Ralph Verify: live-specs (wx-a13n)
+   ======================================
+     [PASS] Annotations parse correctly
+     [FAIL] ralph spec --verify runs shell tests
+
+   Summary: 2 passed, 1 failed, 1 skipped (2 specs)
+   ```
+
+6. **Non-zero exit code on any failure** — When running across all specs, exit non-zero if any spec has at least one failure.
+
+## Success Criteria
+
+- [ ] `ralph spec --verify` with no `--spec` flag runs verify tests across all spec files
+- [ ] `ralph spec --judge` with no `--spec` flag runs judge tests across all spec files
+- [ ] `ralph spec --all` with no `--spec` flag runs both across all spec files
+- [ ] `ralph spec --verify --spec notifications` runs verify tests only for `specs/notifications.md`
+- [ ] `ralph spec -v` is equivalent to `ralph spec --verify`
+- [ ] `ralph spec -j` is equivalent to `ralph spec --judge`
+- [ ] `ralph spec -a` is equivalent to `ralph spec --all`
+- [ ] `ralph spec -s notifications` is equivalent to `ralph spec --spec notifications`
+- [ ] `-v` no longer maps to `--verbose`; `--verbose` has no short flag
+- [ ] Short flags compose: `ralph spec -vj` is equivalent to `ralph spec --all`
+- [ ] Multi-spec output groups results by spec with per-spec headers
+- [ ] Multi-spec output ends with a summary line including total pass/fail/skip and spec count
+- [ ] Exit code is non-zero if any spec has a failure in multi-spec mode
+- [ ] Specs with no success criteria are silently skipped in multi-spec mode
+
+## Affected Files
+
+| File | Change |
+|------|--------|
+| `lib/ralph/cmd/spec.sh` | Refactor `run_spec_tests` to iterate all specs by default; add `--spec`/`-s` flag; reassign `-v` to `--verify`; add `-j`, `-a` short flags; grouped output with cross-spec summary |
+
+## Implementation Notes (non-spec)
+
+- Create separate beads for each spec file to run `--all` tests and fix any failures found
