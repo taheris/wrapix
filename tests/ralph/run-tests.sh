@@ -3725,13 +3725,13 @@ test_default_config_has_hooks() {
     test_fail "hooks.post-step should run prek to validate after each step"
   fi
 
-  # Check hooks.post-loop is defined (commit and push)
+  # Check hooks.post-loop is defined (validates worktree is clean per FR3)
   local post_loop
   post_loop=$(echo "$config" | jq -r '.hooks."post-loop" // empty' 2>/dev/null || true)
-  if [ -n "$post_loop" ] && echo "$post_loop" | grep -q "git commit"; then
-    test_pass "hooks.post-loop includes git commit"
+  if [ -n "$post_loop" ] && echo "$post_loop" | grep -q "git diff --quiet"; then
+    test_pass "hooks.post-loop validates worktree is clean"
   else
-    test_fail "hooks.post-loop should include git commit"
+    test_fail "hooks.post-loop should validate worktree is clean (git diff --quiet)"
   fi
 
   # Check hooks-on-failure defaults to "block"
