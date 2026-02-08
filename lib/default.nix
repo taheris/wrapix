@@ -24,6 +24,7 @@ in
       packages = (baseProfile.packages or [ ]) ++ (extensions.packages or [ ]);
       mounts = (baseProfile.mounts or [ ]) ++ (extensions.mounts or [ ]);
       env = (baseProfile.env or { }) // (extensions.env or { });
+      networkAllowlist = (baseProfile.networkAllowlist or [ ]) ++ (extensions.networkAllowlist or [ ]);
     };
 
   mkDevShell =

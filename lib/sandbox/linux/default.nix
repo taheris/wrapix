@@ -27,6 +27,7 @@ in
       cpus ? null,
       memoryMb ? 4096,
       deployKey ? null,
+      networkAllowlist ? "",
       ...
     }:
     let
@@ -168,6 +169,22 @@ in
         }
         trap cleanup_session EXIT
 
+        # Validate WRAPIX_NETWORK mode (default: full)
+        WRAPIX_NETWORK="''${WRAPIX_NETWORK:-full}"
+        case "$WRAPIX_NETWORK" in
+          full|allow) ;;
+          *)
+            echo "Error: WRAPIX_NETWORK must be 'full' or 'allow' (got: $WRAPIX_NETWORK)" >&2
+            exit 1
+            ;;
+        esac
+
+        # Network filtering requires NET_ADMIN capability for iptables
+        NETWORK_CAP_ARGS=""
+        if [ "$WRAPIX_NETWORK" = "allow" ]; then
+          NETWORK_CAP_ARGS="--cap-add=NET_ADMIN"
+        fi
+
         # Calculate CPUs (use override or half of available, minimum 2)
         ${
           if cpus != null then
@@ -211,6 +228,7 @@ in
         # shellcheck disable=SC2086 # Intentional word splitting for volume args
         exec podman run --rm -it \
           $RUNTIME_ARGS \
+          $NETWORK_CAP_ARGS \
           --cpus="$CPUS" \
           --memory=${toString memoryMb}m \
           --network=pasta \
@@ -233,6 +251,8 @@ in
           -e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME" \
           -e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL" \
           -e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID" \
+          -e "WRAPIX_NETWORK=$WRAPIX_NETWORK" \
+          -e "WRAPIX_NETWORK_ALLOWLIST=${networkAllowlist}" \
           ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \
           -w /workspace \
           "$IMAGE_ID" \

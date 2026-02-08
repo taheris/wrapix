@@ -27,6 +27,7 @@ in
       cpus ? null,
       memoryMb ? 4096,
       deployKey ? null,
+      networkAllowlist ? "",
       ...
     }:
     let
@@ -242,6 +243,16 @@ in
             }
             trap cleanup_session EXIT
 
+            # Validate WRAPIX_NETWORK mode (default: full)
+            WRAPIX_NETWORK="''${WRAPIX_NETWORK:-full}"
+            case "$WRAPIX_NETWORK" in
+              full|allow) ;;
+              *)
+                echo "Error: WRAPIX_NETWORK must be 'full' or 'allow' (got: $WRAPIX_NETWORK)" >&2
+                exit 1
+                ;;
+            esac
+
             # Build environment arguments (use array to handle spaces in values)
             ENV_ARGS=()
             ENV_ARGS+=(-e "BD_NO_DAEMON=1")
@@ -264,6 +275,9 @@ in
             ENV_ARGS+=(-e "WRAPIX_NOTIFY_TCP=1")
             # Pass session ID for focus-aware notifications (empty if not in tmux)
             ENV_ARGS+=(-e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID")
+            # Pass network mode and allowlist for WRAPIX_NETWORK=allow filtering
+            ENV_ARGS+=(-e "WRAPIX_NETWORK=$WRAPIX_NETWORK")
+            ENV_ARGS+=(-e "WRAPIX_NETWORK_ALLOWLIST=${networkAllowlist}")
 
             # Generate unique container name
             CONTAINER_NAME="wrapix-$$"

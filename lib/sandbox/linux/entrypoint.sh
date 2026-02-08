@@ -83,6 +83,56 @@ if [ -f /workspace/specs/README.md ]; then
 $(cat /workspace/specs/README.md)"
 fi
 
+# Apply network filtering when WRAPIX_NETWORK=allow
+# Resolves allowlisted domains to IPs and configures iptables OUTPUT chain
+if [ "${WRAPIX_NETWORK:-full}" = "allow" ]; then
+  echo "Network mode: allow (restricting outbound to allowlist)" >&2
+
+  if iptables -P OUTPUT DROP 2>/dev/null; then
+    # Allow loopback traffic
+    iptables -A OUTPUT -o lo -j ACCEPT
+
+    # Allow established/related connections (responses to allowed requests)
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Allow DNS (needed to resolve allowlisted domains at runtime)
+    iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+
+    # Resolve and allow each domain in the allowlist
+    IFS=',' read -ra DOMAINS <<< "${WRAPIX_NETWORK_ALLOWLIST:-}"
+    for domain in "${DOMAINS[@]}"; do
+      [ -z "$domain" ] && continue
+      # Resolve domain to IPv4 addresses
+      while IFS=' ' read -r ip _rest; do
+        [ -z "$ip" ] && continue
+        iptables -A OUTPUT -d "$ip" -j ACCEPT
+      done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+    done
+
+    # IPv6: set default drop policy and allow same exceptions
+    if ip6tables -P OUTPUT DROP 2>/dev/null; then
+      ip6tables -A OUTPUT -o lo -j ACCEPT
+      ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+      ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+      ip6tables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+
+      for domain in "${DOMAINS[@]}"; do
+        [ -z "$domain" ] && continue
+        while IFS=' ' read -r ip _rest; do
+          [ -z "$ip" ] && continue
+          ip6tables -A OUTPUT -d "$ip" -j ACCEPT
+        done < <(getent ahostsv6 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+      done
+    fi
+
+    echo "Network filtering active: ${WRAPIX_NETWORK_ALLOWLIST:-}" >&2
+  else
+    echo "Warning: iptables not available, network filtering disabled" >&2
+    echo "  WRAPIX_NETWORK=allow requires NET_ADMIN capability (microVM recommended)" >&2
+  fi
+fi
+
 # Check for ralph mode
 if [ "${RALPH_MODE:-}" = "1" ]; then
   # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
