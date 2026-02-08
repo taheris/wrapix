@@ -33,6 +33,7 @@ let
   # Test scripts that run inside the container
   networkTestScript = ./network-test.sh;
   mountTestScript = ./mount-test.sh;
+  uidTestScript = ./uid-test.sh;
 
 in
 pkgs.writeShellScriptBin "test-darwin" ''
@@ -191,6 +192,49 @@ pkgs.writeShellScriptBin "test-darwin" ''
     echo "PASS: Mount test"
   else
     echo "FAIL: Mount test (exit code: $MOUNT_EXIT)"
+    FAILED=1
+  fi
+  echo ""
+
+  # ============================================
+  # UID Mapping Integration Test
+  # ============================================
+  echo "----------------------------------------"
+  echo "Running: UID Mapping Integration Test"
+  echo "----------------------------------------"
+
+  rm -rf "$TEST_DIR"
+  TEST_DIR=$(mktemp -d)
+  WORKSPACE="$TEST_DIR/workspace"
+  mkdir -p "$WORKSPACE"
+  git -C "$WORKSPACE" init --quiet
+  git -C "$WORKSPACE" commit --allow-empty -m "init" --quiet
+  cp ${uidTestScript} "$WORKSPACE/uid-test.sh"
+  chmod +x "$WORKSPACE/uid-test.sh"
+
+  set +e
+  container run --rm \
+    -w / \
+    -v "$WORKSPACE:/workspace" \
+    -e BD_NO_DB=1 \
+    -e HOST_UID=$(id -u) \
+    -e WRAPIX_PROMPT="test" \
+    --network default \
+    --entrypoint /bin/bash \
+    "$TEST_IMAGE" -c '
+      # Simulate entrypoint passwd setup (test bypasses entrypoint)
+      sed -i "s/^wrapix:x:1000:1000:/wrapix:x:'"$(id -u)"':'"$(id -u)"':/" /etc/passwd
+      sed -i "s/^wrapix:x:1000:/wrapix:x:'"$(id -u)"':/" /etc/group
+      export HOME="/home/wrapix"
+      exec /workspace/uid-test.sh
+    '
+  UID_EXIT=$?
+  set -e
+
+  if [ "$UID_EXIT" -eq 0 ]; then
+    echo "PASS: UID mapping test"
+  else
+    echo "FAIL: UID mapping test (exit code: $UID_EXIT)"
     FAILED=1
   fi
   echo ""
