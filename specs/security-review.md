@@ -169,7 +169,7 @@ Open network is a conscious tradeoff: agent autonomy (dependency installation, w
 
 ### Resource Limits
 
-**PID limit**: `--pids-limit 4096` prevents fork bombs. Enforced on both platforms.
+**PID limit**: `--pids-limit 4096` prevents fork bombs. Enforced on Linux (podman). On macOS, the Apple `container` CLI has no `--pids-limit` flag; each container runs in its own microVM, so a fork bomb is contained within that VM and cannot affect the host.
 
 **Not enforced:**
 - **Disk**: `/workspace` is a host bind mount; capping it requires host-side filesystem quotas, which is outside wrapix's scope.
