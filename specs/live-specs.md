@@ -205,22 +205,39 @@ Utility Commands:
 ## Success Criteria
 
 - [ ] `[verify]` and `[judge]` annotations parse correctly from spec success criteria
+  [verify](tests/ralph/run-tests.sh::test_parse_spec_annotations)
 - [ ] `ralph spec` lists all spec files with annotation counts (verify/judge/unannotated)
+  [judge](tests/judges/live-specs.sh::test_spec_index_output)
 - [ ] `ralph spec --verbose` shows per-criterion detail
+  [judge](tests/judges/live-specs.sh::test_spec_verbose_output)
 - [ ] `ralph spec --verify` runs shell tests and reports PASS/FAIL/SKIP
+  [judge](tests/judges/live-specs.sh::test_spec_verify_runner)
 - [ ] `ralph spec --judge` invokes LLM with rubric and reports PASS/FAIL/SKIP
+  [judge](tests/judges/live-specs.sh::test_spec_judge_runner)
 - [ ] `ralph spec --all` runs both verify and judge
+  [judge](tests/judges/live-specs.sh::test_spec_all_flag)
 - [ ] Criteria with no annotation show as SKIP in verify/judge output
+  [verify](tests/ralph/run-tests.sh::test_parse_spec_annotations)
 - [ ] `ralph spec` and `ralph status` with no flags remain instant (no test/LLM execution)
+  [judge](tests/judges/live-specs.sh::test_spec_instant_default)
 - [ ] `ralph status --watch` creates tmux split with auto-refresh
+  [judge](tests/judges/live-specs.sh::test_status_watch_tmux)
 - [ ] `ralph status --watch` errors clearly when not in tmux
+  [judge](tests/judges/live-specs.sh::test_status_watch_no_tmux)
 - [ ] `ralph status --watch` works standalone (no active ralph run required)
+  [judge](tests/judges/live-specs.sh::test_status_watch_standalone)
 - [ ] `RALPH_CLARIFY` in orchestrator adds `awaiting:input` label to bead
+  [verify](tests/ralph/run-tests.sh::test_run_handles_clarify_signal)
 - [ ] `ralph run` skips beads with `awaiting:input` label
+  [judge](tests/judges/live-specs.sh::test_run_skips_awaiting)
 - [ ] `ralph status` displays awaiting items with question text and age
+  [judge](tests/judges/live-specs.sh::test_status_awaiting_display)
 - [ ] Judge test files define rubrics via `judge_files` and `judge_criterion`
+  [judge](tests/judges/live-specs.sh::test_judge_rubric_format)
 - [ ] `ralph sync --deps` lists required nix packages for current spec's tests
+  [verify](tests/ralph/run-tests.sh::test_sync_deps_basic)
 - [ ] Annotations are clickable links in GitHub and VS Code
+  [judge](tests/judges/live-specs.sh::test_clickable_links)
 
 ## Out of Scope
 
