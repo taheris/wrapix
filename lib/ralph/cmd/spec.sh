@@ -79,6 +79,14 @@ run_verify_test() {
     echo "  [PASS] $criterion"
     echo "         $file_path${function_name:+::$function_name} (exit 0)"
     ((passed++)) || true
+  elif [ "$exit_code" -eq 77 ]; then
+    echo "  [SKIP] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit 77 — skipped)"
+    ((skipped++)) || true
+  elif [ "$exit_code" -eq 78 ]; then
+    echo "  [SKIP] $criterion"
+    echo "         $file_path${function_name:+::$function_name} (exit 78 — not implemented)"
+    ((skipped++)) || true
   else
     echo "  [FAIL] $criterion"
     echo "         $file_path${function_name:+::$function_name} (exit $exit_code)"
