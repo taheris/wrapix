@@ -47,8 +47,8 @@ in
             WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
             PROJECT_DIR="''${1:-$(pwd)}"
             shift || true
-            # Remaining args override the container command (default: /entrypoint.sh)
-            CONTAINER_CMD=(/entrypoint.sh)
+            # Remaining args override the container command (passed to entrypoint as $@)
+            CONTAINER_CMD=()
             if [ $# -gt 0 ]; then
               CONTAINER_CMD=("$@")
             fi
