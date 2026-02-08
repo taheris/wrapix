@@ -10,6 +10,7 @@ case "$COMMAND" in
   logs)   exec ralph-logs   "$@" ;;
   plan)   exec ralph-plan   "$@" ;;
   run)    exec ralph-run    "$@" ;;
+  spec)   exec ralph-spec   "$@" ;;
   status) exec ralph-status "$@" ;;
   sync)   exec ralph-sync   "$@" ;;
   todo)   exec ralph-todo   "$@" ;;
@@ -55,6 +56,11 @@ case "$COMMAND" in
     echo "  run [feature]   Execute work items for a feature"
     echo "    --once/-1       Execute single issue then exit"
     echo "    --profile=X     Override container profile (rust, python, base)"
+    echo "  spec            Query spec annotations"
+    echo "    --verbose       Show per-criterion detail"
+    echo "    --verify        Run [verify] shell tests"
+    echo "    --judge         Run [judge] LLM evaluations"
+    echo "    --all           Run both verify and judge"
     echo "  status          Show current workflow state"
     echo ""
     echo "Template Commands:"
