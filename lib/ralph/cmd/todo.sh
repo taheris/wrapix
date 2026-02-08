@@ -23,7 +23,7 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"

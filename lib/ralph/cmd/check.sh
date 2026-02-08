@@ -222,8 +222,8 @@ let
     else if source == "state" then "dummy-state-${lowerName}"
     else if source == "computed" then
       if name == "SPEC_PATH" then "specs/dummy.md"
-      else if name == "CURRENT_FILE" then ".ralph/state/current.json"
-      else if name == "NEW_REQUIREMENTS_PATH" then ".ralph/state/dummy-feature.md"
+      else if name == "CURRENT_FILE" then ".wrapix/ralph/state/current.json"
+      else if name == "NEW_REQUIREMENTS_PATH" then ".wrapix/ralph/state/dummy-feature.md"
       else if name == "MOLECULE_PROGRESS" then "50% (5/10)"
       else "dummy-computed-${lowerName}"
     else if source == "file" then "# Dummy content for ${name}"

@@ -87,7 +87,7 @@ let
       source = "computed";
       required = false;
       derivedFrom = "LABEL";
-      description = "Path to new requirements file: .ralph/state/{LABEL}.md";
+      description = "Path to new requirements file: .wrapix/ralph/state/{LABEL}.md";
     };
 
     MOLECULE_PROGRESS = {

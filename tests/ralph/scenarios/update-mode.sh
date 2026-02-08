@@ -16,13 +16,13 @@
 # State tracking (set by test harness)
 # LABEL - feature label (e.g., "test-feature")
 # TEST_DIR - test directory root
-# RALPH_DIR - ralph directory (typically .ralph)
+# RALPH_DIR - ralph directory (typically .wrapix/ralph)
 
 phase_plan() {
   # In update mode, we gather NEW requirements and write to state/<label>.md
   # (NOT to the main spec file - that happens in ready phase after merge)
   local label="${LABEL:-update-mode-test}"
-  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
   local state_file="$ralph_dir/state/$label.md"
 
   echo "Reviewing existing spec for updates..."
@@ -60,7 +60,7 @@ REQEOF
 phase_todo() {
   # Get label from state or environment
   local label="${LABEL:-update-mode-test}"
-  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
   local current_file="$ralph_dir/state/current.json"
 
   # Get existing molecule ID from current.json (set up by test harness)

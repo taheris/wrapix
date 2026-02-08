@@ -3,8 +3,8 @@ set -euo pipefail
 
 # ralph sync [--dry-run] [--diff]
 # Synchronizes local templates with packaged versions
-# - Creates .ralph/template/ with fresh packaged templates
-# - Backs up existing customized templates to .ralph/backup/
+# - Creates .wrapix/ralph/template/ with fresh packaged templates
+# - Backs up existing customized templates to .wrapix/ralph/backup/
 # - Copies all templates including partial/ directory
 # - Verbose by default (prints actions taken)
 # - Use --diff to show changes without syncing
@@ -13,7 +13,7 @@ set -euo pipefail
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-RALPH_DIR="${RALPH_DIR:-.ralph}"
+RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 
 # GitHub repo and branch for fetching templates when RALPH_TEMPLATE_DIR not set
 RALPH_GITHUB_REPO="${RALPH_GITHUB_REPO:-taheris/wrapix}"
@@ -29,7 +29,7 @@ else
 fi
 
 # Templates to compare (base names without .md)
-# Main templates in .ralph/template/
+# Main templates in .wrapix/ralph/template/
 DIFF_TEMPLATES=(
   "plan-new"
   "plan-update"
@@ -38,7 +38,7 @@ DIFF_TEMPLATES=(
   "run"
 )
 
-# Partials in .ralph/template/partial/
+# Partials in .wrapix/ralph/template/partial/
 DIFF_PARTIALS=(
   "context-pinning"
   "exit-signals"
@@ -146,8 +146,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --help, -h     Show this help message"
       echo ""
       echo "Sync Actions:"
-      echo "  1. Creates .ralph/template/ with fresh packaged templates"
-      echo "  2. Backs up existing customized templates to .ralph/backup/"
+      echo "  1. Creates .wrapix/ralph/template/ with fresh packaged templates"
+      echo "  2. Backs up existing customized templates to .wrapix/ralph/backup/"
       echo "  3. Copies all templates including partial/ directory"
       echo ""
       echo "Templates (for --diff):"
@@ -167,7 +167,7 @@ while [[ $# -gt 0 ]]; do
       echo "  ralph sync --diff | ralph tune  # Pipe to tune for integration"
       echo ""
       echo "Environment:"
-      echo "  RALPH_DIR           Local ralph directory (default: .ralph)"
+      echo "  RALPH_DIR           Local ralph directory (default: .wrapix/ralph)"
       echo "  RALPH_TEMPLATE_DIR  Packaged template directory (from nix develop)"
       echo "  RALPH_GITHUB_REPO   GitHub repo for templates (default: taheris/wrapix)"
       echo "  RALPH_GITHUB_REF    Git ref to fetch (default: main)"

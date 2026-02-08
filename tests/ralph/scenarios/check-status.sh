@@ -34,7 +34,7 @@ phase_run() {
 # This phase is used when CHECK_MOL_CURRENT=true
 phase_run_mol_current() {
   local molecule_id="${CHECK_MOLECULE_ID:-}"
-  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
 
   if [ -z "$molecule_id" ]; then
     echo "ERROR: CHECK_MOLECULE_ID not set"
@@ -90,7 +90,7 @@ phase_run_mol_current() {
 
 # Test ralph status output which wraps bd mol commands
 phase_status_check() {
-  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
   local current_file="$ralph_dir/state/current.json"
 
   echo "Testing ralph status integration..."
@@ -153,7 +153,7 @@ phase_plan() {
 
 phase_todo() {
   local label="${LABEL:-check-status-test}"
-  local ralph_dir="${RALPH_DIR:-.ralph}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
 
   # Create a molecule (epic as root)
   local epic_json

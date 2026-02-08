@@ -2210,7 +2210,7 @@ test_plan_template_with_partials() {
   local original_template_dir="$RALPH_TEMPLATE_DIR"
   unset RALPH_TEMPLATE_DIR
 
-  # Set up a local .ralph/template with a template using partials (like plan-new.md)
+  # Set up a local .wrapix/ralph/template with a template using partials (like plan-new.md)
   mkdir -p "$RALPH_DIR/template/partial"
 
   # Create plan-new.md that uses {{> spec-header}} partial instead of {{LABEL}} directly

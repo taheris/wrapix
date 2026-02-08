@@ -24,9 +24,9 @@ setup_test_env() {
 
   # Create project structure
   mkdir -p "$TEST_DIR/specs"
-  mkdir -p "$TEST_DIR/.ralph/state"
-  mkdir -p "$TEST_DIR/.ralph/logs"
-  mkdir -p "$TEST_DIR/.ralph/template"
+  mkdir -p "$TEST_DIR/.wrapix/ralph/state"
+  mkdir -p "$TEST_DIR/.wrapix/ralph/logs"
+  mkdir -p "$TEST_DIR/.wrapix/ralph/template"
   mkdir -p "$TEST_DIR/.beads"
 
   # Create minimal specs/README.md
@@ -38,14 +38,14 @@ setup_test_env() {
 EOF
 
   # Create minimal ralph config
-  cat > "$TEST_DIR/.ralph/config.nix" << 'EOF'
+  cat > "$TEST_DIR/.wrapix/ralph/config.nix" << 'EOF'
 {
   beads.priority = 2;
 }
 EOF
 
   # Create run.md template
-  cat > "$TEST_DIR/.ralph/template/run.md" << 'EOF'
+  cat > "$TEST_DIR/.wrapix/ralph/template/run.md" << 'EOF'
 # Implementation Step
 
 ## Context Pinning
@@ -87,7 +87,7 @@ Output ONE of these when done:
 EOF
 
   # Create todo.md template
-  cat > "$TEST_DIR/.ralph/template/todo.md" << 'EOF'
+  cat > "$TEST_DIR/.wrapix/ralph/template/todo.md" << 'EOF'
 # Convert Spec to Tasks
 
 Read: {{SPEC_PATH}}
@@ -113,7 +113,7 @@ Output `RALPH_COMPLETE` when all issues are created.
 EOF
 
   # Create plan.md template
-  cat > "$TEST_DIR/.ralph/template/plan.md" << 'EOF'
+  cat > "$TEST_DIR/.wrapix/ralph/template/plan.md" << 'EOF'
 # Specification Interview
 
 You are conducting a specification interview.
@@ -214,7 +214,7 @@ EOF
   cd "$TEST_DIR" || return 1
 
   # Set ralph directory
-  export RALPH_DIR=".ralph"
+  export RALPH_DIR=".wrapix/ralph"
 
   # Set template directory for diff/sync/check commands
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"

@@ -578,7 +578,7 @@ get_template_variables() {
 # Render a template with variable substitution
 # Usage: render_template <template-name> [VAR=value ...]
 #
-# Reads the template from RALPH_TEMPLATE_DIR (or local .ralph/template),
+# Reads the template from RALPH_TEMPLATE_DIR (or local .wrapix/ralph/template),
 # resolves partials, validates required variables, and substitutes placeholders.
 #
 # Variables can be passed as arguments (VAR=value) or read from environment.
@@ -593,7 +593,7 @@ render_template() {
 
   # Determine template directory
   local template_dir="${RALPH_TEMPLATE_DIR:-}"
-  local local_template_dir="${RALPH_DIR:-.ralph}/template"
+  local local_template_dir="${RALPH_DIR:-.wrapix/ralph}/template"
 
   # Prefer local template if it exists, otherwise use RALPH_TEMPLATE_DIR
   local template_path
