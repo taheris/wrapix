@@ -196,7 +196,10 @@ write_session_log() {
 
 # Run main process (without exec, so EXIT trap can write session log)
 MAIN_EXIT=0
-if [ "${RALPH_MODE:-}" = "1" ]; then
+if [ $# -gt 0 ]; then
+  # Command override: run the specified command instead of Claude/Ralph
+  "$@" || MAIN_EXIT=$?
+elif [ "${RALPH_MODE:-}" = "1" ]; then
   # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
   # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
   ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-} || MAIN_EXIT=$?

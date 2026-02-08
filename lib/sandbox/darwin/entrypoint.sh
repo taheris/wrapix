@@ -298,7 +298,11 @@ write_session_log() {
 # so VirtioFS root-owned files appear as HOST_UID — proper UID mapping)
 # Run without exec so session log can be written after exit
 MAIN_EXIT=0
-if [ "${RALPH_MODE:-}" = "1" ]; then
+if [ $# -gt 0 ]; then
+  # Command override: run the specified command instead of Claude/Ralph
+  unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
+    "$@" || MAIN_EXIT=$?
+elif [ "${RALPH_MODE:-}" = "1" ]; then
   # RALPH_CMD and RALPH_ARGS set by launcher (default: help)
   # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
   unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
