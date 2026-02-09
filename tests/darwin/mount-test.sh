@@ -9,6 +9,16 @@ set -euo pipefail
 # Platform gating is at the Nix level (tests/darwin/default.nix); this script runs
 # inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
+# Precondition: test fixtures must be set up by the darwin test harness
+# (tests/darwin/default.nix). It creates workspace-test.txt, staging directories
+# at /mnt/wrapix/dir0, and sets WRAPIX_DIR_MOUNTS. When running without the
+# harness (e.g., via wrapix-debug on Linux), these fixtures are absent.
+if [ ! -f /workspace/workspace-test.txt ] && [ -z "${WRAPIX_DIR_MOUNTS:-}" ]; then
+  echo "SKIP: Darwin test fixtures not present (workspace-test.txt missing, WRAPIX_DIR_MOUNTS unset)"
+  echo "This test requires the test harness from tests/darwin/default.nix."
+  exit 77
+fi
+
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"
 echo "HOME: $HOME"

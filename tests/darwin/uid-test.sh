@@ -11,6 +11,16 @@ set -euo pipefail
 # Platform gating is at the Nix level (tests/darwin/default.nix); this script runs
 # inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
+# Precondition: VirtioFS must be in use. VirtioFS maps all files to UID 0 inside
+# the container. When running outside an Apple Container VM (e.g., via wrapix-debug
+# on Linux), VirtioFS is not present and this test is not applicable.
+WORKSPACE_OWNER_CHECK=$(stat -c %u /workspace 2>/dev/null || echo "unknown")
+if [ "$WORKSPACE_OWNER_CHECK" != "0" ]; then
+  echo "SKIP: VirtioFS not detected (/workspace owned by UID $WORKSPACE_OWNER_CHECK, expected 0)"
+  echo "This test only applies to Apple Container CLI VMs with VirtioFS mounts."
+  exit 77
+fi
+
 echo "=== Container UID Mapping Verification ==="
 echo "Running as: $(id)"
 echo "HOME: $HOME"
