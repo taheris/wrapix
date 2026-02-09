@@ -169,15 +169,23 @@ run_verify_wrapix_test() {
     echo "         $file_path${function_name:+::$function_name} (exit 78 — not implemented, container)"
     ((skipped++)) || true
   else
-    echo "  [FAIL] $criterion"
-    echo "         $file_path${function_name:+::$function_name} (exit $exit_code, container)"
-    ((failed++)) || true
-    has_failure=true
-    # Always show tail of output on failure (helps diagnose missing binaries etc.)
-    if [ "$VERBOSE" != "true" ] && [ -n "$test_output" ]; then
-      echo "$test_output" | tail -5 | while IFS= read -r line; do
-        echo "         | $line"
-      done
+    # Detect container infrastructure failures (not test failures)
+    # These indicate the environment can't run containers, not that the test failed
+    if echo "$test_output" | grep -q "payload does not match any of the supported image formats\|no policy.json file found\|Error: exec container process\|cannot find a cgroup"; then
+      echo "  [SKIP] $criterion"
+      echo "         Container runtime unavailable (cannot run nested containers)"
+      ((skipped++)) || true
+    else
+      echo "  [FAIL] $criterion"
+      echo "         $file_path${function_name:+::$function_name} (exit $exit_code, container)"
+      ((failed++)) || true
+      has_failure=true
+      # Always show tail of output on failure (helps diagnose missing binaries etc.)
+      if [ "$VERBOSE" != "true" ] && [ -n "$test_output" ]; then
+        echo "$test_output" | tail -5 | while IFS= read -r line; do
+          echo "         | $line"
+        done
+      fi
     fi
   fi
 

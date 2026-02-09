@@ -90,7 +90,7 @@ if [ -d /mnt/wrapix/dir0 ]; then
     echo "  PASS: Nested mcp/config.json exists in staging"
   else
     echo "  FAIL: mcp/config.json not found in staging"
-    ls -laR /mnt/wrapix/dir0/ || true
+    ls -la /mnt/wrapix/dir0/ 2>/dev/null || true
     FAILED=1
   fi
 else
@@ -144,7 +144,7 @@ if [ -d "$TEST_HOME/.claude" ]; then
     echo "  PASS: Nested mcp/config.json exists in copy"
   else
     echo "  FAIL: mcp/config.json not found in copy"
-    ls -laR "$TEST_HOME/.claude/" || true
+    ls -la "$TEST_HOME/.claude/" 2>/dev/null || true
     FAILED=1
   fi
 else
