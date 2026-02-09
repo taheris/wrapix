@@ -111,6 +111,27 @@ run_verify_test() {
 #-----------------------------------------------------------------------------
 # Helper: run a [verify:wrapix] test inside a wrapix container
 #-----------------------------------------------------------------------------
+
+# Cached wrapix-debug build state: "" = untried, "ok" = built, "skip" = unavailable
+_WRAPIX_BUILD_STATE=""
+_WRAPIX_BUILD_MSG=""
+
+ensure_wrapix_build() {
+  if [ -n "$_WRAPIX_BUILD_STATE" ]; then
+    return 0
+  fi
+
+  local build_output build_exit
+  build_output=$(nix build .#wrapix-debug --no-link 2>&1) && build_exit=0 || build_exit=$?
+
+  if [ "$build_exit" -eq 0 ]; then
+    _WRAPIX_BUILD_STATE="ok"
+  else
+    _WRAPIX_BUILD_STATE="skip"
+    _WRAPIX_BUILD_MSG=$(echo "$build_output" | tail -3)
+  fi
+}
+
 run_verify_wrapix_test() {
   local criterion="$1"
   local file_path="$2"
@@ -124,15 +145,14 @@ run_verify_wrapix_test() {
     return
   fi
 
-  # Build the wrapix-debug sandbox
-  local build_output build_exit
-  build_output=$(nix build .#wrapix-debug --no-link 2>&1) && build_exit=0 || build_exit=$?
+  # Build the wrapix-debug sandbox (cached across invocations)
+  ensure_wrapix_build
 
-  if [ "$build_exit" -ne 0 ]; then
+  if [ "$_WRAPIX_BUILD_STATE" = "skip" ]; then
     echo "  [FAIL] $criterion"
     echo "         Failed to build wrapix-debug container"
-    if [ -n "$build_output" ]; then
-      echo "$build_output" | tail -3 | while IFS= read -r line; do
+    if [ -n "$_WRAPIX_BUILD_MSG" ]; then
+      echo "$_WRAPIX_BUILD_MSG" | while IFS= read -r line; do
         echo "         | $line"
       done
     fi
@@ -141,19 +161,16 @@ run_verify_wrapix_test() {
     return
   fi
 
-  # Run the test inside the container
-  # Pass project dir as $1 so sandbox mounts the workspace correctly,
-  # then pass the test command as remaining args (entrypoint execs $@ when present)
+  # Run the test inside the container (skip krun microVM for spec tests)
   local exit_code test_output
-  # Use /workspace-relative path since project is mounted at /workspace inside container
   local container_file_path="/workspace/$file_path"
   local project_dir
   project_dir="$(pwd)"
 
   if [ -n "$function_name" ]; then
-    test_output=$(nix run .#wrapix-debug -- "$project_dir" bash -c "source $container_file_path && $function_name" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(WRAPIX_NO_MICROVM=1 nix run .#wrapix-debug -- "$project_dir" bash -c "source $container_file_path && $function_name" 2>&1) && exit_code=0 || exit_code=$?
   else
-    test_output=$(nix run .#wrapix-debug -- "$project_dir" "$container_file_path" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(WRAPIX_NO_MICROVM=1 nix run .#wrapix-debug -- "$project_dir" "$container_file_path" 2>&1) && exit_code=0 || exit_code=$?
   fi
 
   if [ "$exit_code" -eq 0 ]; then
@@ -170,7 +187,6 @@ run_verify_wrapix_test() {
     ((skipped++)) || true
   else
     # Detect container infrastructure failures (not test failures)
-    # These indicate the environment can't run containers, not that the test failed
     if echo "$test_output" | grep -q "payload does not match any of the supported image formats\|no policy.json file found\|Error: exec container process\|cannot find a cgroup"; then
       echo "  [SKIP] $criterion"
       echo "         Container runtime unavailable (cannot run nested containers)"
@@ -180,7 +196,6 @@ run_verify_wrapix_test() {
       echo "         $file_path${function_name:+::$function_name} (exit $exit_code, container)"
       ((failed++)) || true
       has_failure=true
-      # Always show tail of output on failure (helps diagnose missing binaries etc.)
       if [ "$VERBOSE" != "true" ] && [ -n "$test_output" ]; then
         echo "$test_output" | tail -5 | while IFS= read -r line; do
           echo "         | $line"
