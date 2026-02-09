@@ -557,6 +557,10 @@ Run 'ralph spec --help' for usage."
         esac
       done
       ;;
+    *)
+      error "Unknown argument: $1
+Run 'ralph spec --help' for usage."
+      ;;
   esac
 done
 
