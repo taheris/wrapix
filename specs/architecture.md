@@ -27,7 +27,7 @@ lib/
 │   ├── default.nix      # Platform dispatcher, MCP integration
 │   ├── profiles.nix     # Built-in profiles (see profiles.md)
 │   ├── image.nix        # OCI image builder (see image-builder.md)
-│   ├── linux/           # Podman implementation
+│   ├── linux/           # Podman implementation + krun microVM support
 │   └── darwin/          # Apple container implementation
 ├── mcp/                 # MCP server registry (see tmux-mcp.md)
 │   ├── default.nix      # Server registry: { tmux-debug = ...; }
@@ -45,6 +45,10 @@ lib/
 **Protected**: Filesystem (only `/workspace` accessible), processes (isolated), user namespace (correct UID), capabilities (none elevated)
 
 **Not protected**: Network traffic is unrestricted by design for autonomous work with web research.
+
+### MicroVM Boundary (Linux)
+
+On Linux with KVM, containers run inside a [libkrun](https://github.com/containers/libkrun) microVM (`podman --runtime krun`) for hardware-level isolation. krun's virtio console doesn't support terminal raw mode, so a PTY relay (`krun-relay`) runs as PID 1 inside the VM to provide a real PTY for Claude Code's TUI. An LD_PRELOAD library (`libfakeuid.so`) spoofs the UID since krun maps the host user to root. Set `WRAPIX_NO_MICROVM=1` to fall back to container-only isolation.
 
 ## Component Overview
 
