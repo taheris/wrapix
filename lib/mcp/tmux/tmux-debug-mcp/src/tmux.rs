@@ -163,13 +163,16 @@ impl<E: CommandExecutor> TmuxSession<E> {
             &height,
         ])?;
 
-        // Configure remain-on-exit so panes stay after process exits
+        // Configure remain-on-exit so panes stay after process exits.
+        // Use set-hook to apply remain-on-exit on each new window at creation
+        // time, before fast-exiting commands can destroy the pane.
+        // A plain set-option on the session doesn't propagate to later windows.
         self.run_tmux(&[
-            "set-option",
+            "set-hook",
             "-t",
             &self.session_name,
-            "remain-on-exit",
-            "on",
+            "after-new-window",
+            "set-option remain-on-exit on",
         ])?;
 
         self.session_created = true;
@@ -182,16 +185,16 @@ impl<E: CommandExecutor> TmuxSession<E> {
     pub fn create_pane(&mut self, command: &str, name: &str) -> TmuxResult<String> {
         self.ensure_session()?;
 
-        // Create a new window with the given name
+        // Create a new window running the command directly.
+        // Passing the command to new-window ensures pane_dead reflects when
+        // the command exits (vs send-keys to a shell, where the shell persists).
         let target = format!("{}:{}", self.session_name, name);
-        self.run_tmux(&["new-window", "-t", &self.session_name, "-n", name])?;
+        self.run_tmux(&["new-window", "-t", &self.session_name, "-n", name, command])?;
 
-        // Set remain-on-exit for this window so pane stays after process exits
-        // Note: session-level remain-on-exit doesn't apply to windows created after it's set
-        self.run_tmux(&["set-option", "-t", &target, "remain-on-exit", "on"])?;
-
-        // Send the command to the window
-        self.run_tmux(&["send-keys", "-t", &target, command, "Enter"])?;
+        // Best-effort per-window remain-on-exit for robustness across tmux versions.
+        // Session-level remain-on-exit (set in ensure_session) handles fast-exit
+        // commands where the window dies before this runs.
+        let _ = self.run_tmux(&["set-option", "-t", &target, "remain-on-exit", "on"]);
 
         Ok(name.to_string())
     }
@@ -506,35 +509,24 @@ mod tests {
 
         let calls = session.executor.get_calls();
 
-        // Should have: new-session, set-option (session), new-window, set-option (window), send-keys
-        assert!(calls.len() >= 5);
+        // Should have: new-session, set-hook, new-window (with command), set-option (window)
+        assert!(calls.len() >= 4);
 
         // First call should be new-session
         assert_eq!(calls[0][0], "new-session");
         assert!(calls[0].contains(&"-d".to_string()));
         assert!(calls[0].contains(&"-s".to_string()));
 
-        // Second call should be set-option for remain-on-exit (session level)
-        assert_eq!(calls[1][0], "set-option");
-        assert!(calls[1].contains(&"remain-on-exit".to_string()));
-        assert!(calls[1].contains(&"on".to_string()));
+        // Second call should be set-hook for remain-on-exit
+        assert_eq!(calls[1][0], "set-hook");
+        assert!(calls[1].contains(&"after-new-window".to_string()));
+        assert!(calls[1].contains(&"set-option remain-on-exit on".to_string()));
 
-        // Third call should be new-window
+        // Third call should be new-window with the command
         assert_eq!(calls[2][0], "new-window");
         assert!(calls[2].contains(&"-n".to_string()));
         assert!(calls[2].contains(&"server".to_string()));
-
-        // Fourth call should be set-option for remain-on-exit on the window
-        assert_eq!(calls[3][0], "set-option");
-        assert!(calls[3].contains(&"remain-on-exit".to_string()));
-        assert!(calls[3].contains(&"on".to_string()));
-        // Should target the specific window
-        assert!(calls[3].iter().any(|s| s.contains("server")));
-
-        // Fifth call should be send-keys
-        assert_eq!(calls[4][0], "send-keys");
-        assert!(calls[4].contains(&"cargo run".to_string()));
-        assert!(calls[4].contains(&"Enter".to_string()));
+        assert!(calls[2].contains(&"cargo run".to_string()));
     }
 
     #[test]
