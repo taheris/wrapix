@@ -3,13 +3,9 @@
 # This runs INSIDE the container to verify networking is working
 set -euo pipefail
 
-# Skip on non-Darwin platforms — this test uses darwin-specific networking
-# (VZNATNetworkDeviceAttachment, vmnet). See tests/darwin/default.nix for
-# the nix-level gate; this check handles direct script execution.
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "SKIP: network-test.sh is darwin-only (current platform: $(uname -s))"
-  exit 77
-fi
+# Darwin-only test: uses darwin-specific networking (VZNATNetworkDeviceAttachment, vmnet).
+# Platform gating is at the Nix level (tests/darwin/default.nix); this script runs
+# inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
 echo "=== Container Network Verification ==="
 echo "Running as: $(id)"

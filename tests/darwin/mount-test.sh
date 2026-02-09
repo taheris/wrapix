@@ -5,13 +5,9 @@
 # Key security test: symlinks are dereferenced on HOST, /nix/store is NOT mounted
 set -euo pipefail
 
-# Skip on non-Darwin platforms — this test uses darwin-specific mounts
-# (VirtioFS, WRAPIX_DIR_MOUNTS staging). See tests/darwin/default.nix for
-# the nix-level gate; this check handles direct script execution.
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "SKIP: mount-test.sh is darwin-only (current platform: $(uname -s))"
-  exit 77
-fi
+# Darwin-only test: uses darwin-specific mounts (VirtioFS, WRAPIX_DIR_MOUNTS staging).
+# Platform gating is at the Nix level (tests/darwin/default.nix); this script runs
+# inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
 echo "=== Container Mount Verification ==="
 echo "Running as: $(id)"
