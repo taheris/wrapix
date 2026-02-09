@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # wrapix-builder integration test
 # Tests the Linux builder functionality on macOS 26+
 # Use with: nix run .#test-builder (when added to flake.nix)

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Notification connectivity test - run inside container
 #
 # Tests notification connectivity to host daemon.
