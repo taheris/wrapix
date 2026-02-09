@@ -185,6 +185,7 @@ in
         fi
 
         # Cleanup function for session file
+        # shellcheck disable=SC2329 # Invoked via trap
         cleanup_session() {
           [ -n "$WRAPIX_SESSION_FILE" ] && [ -f "$WRAPIX_SESSION_FILE" ] && rm -f "$WRAPIX_SESSION_FILE"
         }
@@ -246,9 +247,42 @@ in
           RUNTIME_ARGS="--runtime krun"
         fi
 
+        # krun microVM: PTY relay + LD_PRELOAD for root UID
+        #
+        # krun's virtio console doesn't support raw mode (TCSETS may silently
+        # fail or be ignored). krun-relay creates a real PTY inside the VM
+        # where raw mode works, and relays I/O between console and PTY.
+        # It also converts \n→\r on input (console ICRNL converts Enter's
+        # \r to \n; Claude expects \r for submit).
+        #
+        # libfakeuid.so handles UID spoofing (krun maps host user to root,
+        # claude refuses root) and TIOCGWINSZ fallback.
+        KRUN_ENTRYPOINT_ARGS=""
+        KRUN_ENV_ARGS=""
+        if [ -n "$RUNTIME_ARGS" ]; then
+          # Capture host terminal dimensions for PTY sizing
+          TERM_ROWS=$(stty size 2>/dev/null | awk '{print $1}') || true
+          TERM_COLS=$(stty size 2>/dev/null | awk '{print $2}') || true
+          : "''${TERM_ROWS:=24}" "''${TERM_COLS:=80}"
+
+          # krun-relay as PID 1: creates real PTY, relays I/O, execs krun-init.sh
+          KRUN_ENTRYPOINT_ARGS="--entrypoint /krun-relay"
+          KRUN_ENV_ARGS="-e WRAPIX_TERM_ROWS=$TERM_ROWS -e WRAPIX_TERM_COLS=$TERM_COLS"
+
+          # Serialize container command for krun-init.sh (preserves quoting)
+          if [ ''${#CONTAINER_CMD[@]} -gt 0 ]; then
+            KRUN_CMD_ESCAPED=$(printf '%q ' "''${CONTAINER_CMD[@]}")
+            KRUN_ENV_ARGS="$KRUN_ENV_ARGS -e WRAPIX_KRUN_CMD=$KRUN_CMD_ESCAPED"
+          fi
+
+          # krun-relay execs /krun-init.sh which handles args via WRAPIX_KRUN_CMD
+          CONTAINER_CMD=()
+        fi
+
         # shellcheck disable=SC2086 # Intentional word splitting for volume args
         exec podman run --rm -it \
           $RUNTIME_ARGS \
+          $KRUN_ENTRYPOINT_ARGS \
           $NETWORK_CAP_ARGS \
           --cpus="$CPUS" \
           --memory=${toString memoryMb}m \
@@ -260,6 +294,7 @@ in
           $VOLUME_ARGS \
           $BEADS_ARGS \
           $DEPLOY_KEY_ARGS \
+          $KRUN_ENV_ARGS \
           -e "BD_NO_DAEMON=1" \
           -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
           -e "RALPH_MODE=''${RALPH_MODE:-}" \

@@ -71,6 +71,7 @@ let
     {
       profile,
       entrypointSh,
+      krunSupport ? false,
       claudeSettings ? baseClaudeSettings,
     }:
     import ./image.nix {
@@ -78,6 +79,7 @@ let
       inherit
         profile
         entrypointSh
+        krunSupport
         claudeConfig
         claudeSettings
         ;
@@ -168,6 +170,7 @@ let
             profileImage = mkImage {
               profile = finalProfile;
               entrypointSh = ./linux/entrypoint.sh;
+              krunSupport = true;
               claudeSettings = finalClaudeSettings;
             };
           }
