@@ -7,13 +7,9 @@
 # so all files (including VirtioFS mounts) appear with correct ownership.
 set -euo pipefail
 
-# Skip on non-Darwin platforms — this test uses darwin-specific UID mapping
-# (VirtioFS, unshare with HOST_UID). See tests/darwin/default.nix for
-# the nix-level gate; this check handles direct script execution.
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "SKIP: uid-test.sh is darwin-only (current platform: $(uname -s))"
-  exit 77
-fi
+# Darwin-only test: uses darwin-specific UID mapping (VirtioFS, unshare with HOST_UID).
+# Platform gating is at the Nix level (tests/darwin/default.nix); this script runs
+# inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
 echo "=== Container UID Mapping Verification ==="
 echo "Running as: $(id)"

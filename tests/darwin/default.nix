@@ -71,7 +71,7 @@ pkgs.writeShellScriptBin "test-darwin" ''
   echo "Loading test image..."
   container image delete "$TEST_IMAGE" 2>/dev/null || true
   OCI_TAR="$WRAPIX_CACHE/integration-test-image.tar"
-  ${pkgs.skopeo}/bin/skopeo --insecure-policy copy "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
+  ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
   LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
   LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
   if [ -n "$LOADED_REF" ]; then
