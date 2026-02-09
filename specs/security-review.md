@@ -36,7 +36,7 @@ No boundary-level asymmetry remains. Differences are implementation details.
 
 **Linux: `podman --runtime krun`**
 
-Linux defaults to `podman --runtime krun` when krun is available and `/dev/kvm` exists. If krun is unavailable or `/dev/kvm` is missing, wrapix errors with instructions to install `crun-krun` or set `WRAPIX_NO_MICROVM=1`.
+Linux defaults to `podman --runtime krun` when `/dev/kvm` exists. The `krun` binary (crun built with libkrun) is bundled via Nix. If `/dev/kvm` is missing, wrapix errors with instructions to enable KVM or set `WRAPIX_NO_MICROVM=1`.
 
 `WRAPIX_NO_MICROVM=1` explicitly opts out to a container boundary (shared host kernel). Use this for cloud VMs without nested KVM, or when GPU passthrough is needed.
 

@@ -318,9 +318,9 @@ in
           grep -q '\-\-runtime krun' "$SCRIPT" || { echo "FAIL: Missing --runtime krun flag"; exit 1; }
           echo "PASS: --runtime krun flag present"
 
-          # Verify error message mentions crun-krun installation
-          grep -q 'crun-krun' "$SCRIPT" || { echo "FAIL: Missing crun-krun install instructions"; exit 1; }
-          echo "PASS: crun-krun installation instructions present"
+          # Verify crun-krun is bundled in runtimeInputs
+          grep -q 'crun-krun' "$SCRIPT" || { echo "FAIL: Missing crun-krun in PATH"; exit 1; }
+          echo "PASS: crun-krun bundled in PATH"
 
           echo ""
           echo "Linux microVM krun detection validation passed"
