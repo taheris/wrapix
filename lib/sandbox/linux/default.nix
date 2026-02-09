@@ -256,7 +256,7 @@ in
           --network=pasta \
           --userns=keep-id \
           --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
-          --mount type=tmpfs,destination=/home/wrapix \
+          --mount type=tmpfs,destination=/home/wrapix,U=true \
           $VOLUME_ARGS \
           $BEADS_ARGS \
           $DEPLOY_KEY_ARGS \
