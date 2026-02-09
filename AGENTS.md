@@ -53,7 +53,7 @@ bd sync
 git commit -m "..."   # Hooks run: nixfmt, shellcheck, flake check, tests
 git push
 git -C .git/beads-worktrees/beads add -A && \
-git -C .git/beads-worktrees/beads commit -m "bd sync" && \
+PREK_ALLOW_NO_CONFIG=1 git -C .git/beads-worktrees/beads commit -m "bd sync" && \
 git push origin beads
 ```
 
