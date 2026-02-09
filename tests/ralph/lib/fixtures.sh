@@ -5,6 +5,49 @@
 # shellcheck disable=SC2034  # Variables may be used externally
 
 #-----------------------------------------------------------------------------
+# Ralph Metadata Generation
+#-----------------------------------------------------------------------------
+
+# Generate ralph metadata files (variables.json, templates.json) from Nix source.
+# Called once per test run when RALPH_METADATA_DIR is not set by the Nix wrapper.
+# Caches output in a shared temp dir so nix eval only runs once across all tests.
+_ensure_ralph_metadata() {
+  # Already generated this run
+  if [ -n "${RALPH_METADATA_DIR:-}" ]; then
+    return 0
+  fi
+
+  local cache_dir="/tmp/ralph-test-metadata-$$"
+  if [ -f "$cache_dir/variables.json" ] && [ -f "$cache_dir/templates.json" ]; then
+    RALPH_METADATA_DIR="$cache_dir"
+    return 0
+  fi
+
+  mkdir -p "$cache_dir"
+  local template_nix="$REPO_ROOT/lib/ralph/template/default.nix"
+
+  # Generate variables.json from Nix template definitions
+  nix eval --impure --raw --expr \
+    'let lib = (builtins.getFlake "nixpkgs").lib; tm = import '"$template_nix"' { inherit lib; }; in tm.variablesJson' \
+    > "$cache_dir/variables.json" 2>/dev/null || {
+    echo "WARNING: Could not generate ralph metadata (nix eval failed)" >&2
+    rm -rf "$cache_dir"
+    return 1
+  }
+
+  # Generate templates.json from Nix template definitions
+  nix eval --impure --raw --expr \
+    'let lib = (builtins.getFlake "nixpkgs").lib; tm = import '"$template_nix"' { inherit lib; }; in builtins.toJSON (builtins.mapAttrs (n: t: t.variables) tm.templates)' \
+    > "$cache_dir/templates.json" 2>/dev/null || {
+    echo "WARNING: Could not generate ralph metadata (nix eval failed)" >&2
+    rm -rf "$cache_dir"
+    return 1
+  }
+
+  RALPH_METADATA_DIR="$cache_dir"
+}
+
+#-----------------------------------------------------------------------------
 # Test Environment Setup
 #-----------------------------------------------------------------------------
 
@@ -219,11 +262,13 @@ EOF
   # Set template directory for diff/sync/check commands
   export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
 
-  # Preserve RALPH_METADATA_DIR if set (needed for get_template_variables and get_variable_definitions)
-  # This is set by the nix test runner to point to pre-computed metadata files
-  if [ -n "${RALPH_METADATA_DIR:-}" ]; then
-    export RALPH_METADATA_DIR
+  # Set RALPH_METADATA_DIR for template functions (get_template_variables, get_variable_definitions).
+  # When run via `nix run .#test`, the Nix wrapper pre-sets this. When run directly
+  # (bash run-tests.sh), generate the metadata from Nix source once and cache it.
+  if [ -z "${RALPH_METADATA_DIR:-}" ]; then
+    _ensure_ralph_metadata
   fi
+  export RALPH_METADATA_DIR
 
   echo "  Test environment: $TEST_DIR"
 }
