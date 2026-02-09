@@ -18,6 +18,18 @@ let
 
   prompt = writeText "wrapix-prompt" (readFile ../prompt.txt);
 
+  # crun built with libkrun support for microVM boundary
+  # Provides 'krun' binary (symlink to crun) for podman --runtime krun
+  # libkrun is dlopen'd at runtime, so we patch RPATH to find it
+  crun-krun = pkgs.crun.overrideAttrs (old: {
+    pname = "crun-krun";
+    buildInputs = old.buildInputs ++ [ pkgs.libkrun ];
+    configureFlags = (old.configureFlags or [ ]) ++ [ "--with-libkrun" ];
+    postFixup = (old.postFixup or "") + ''
+      patchelf --add-rpath ${pkgs.lib.getLib pkgs.libkrun}/lib $out/bin/crun
+    '';
+  });
+
 in
 {
   mkSandbox =
@@ -36,7 +48,10 @@ in
     in
     writeShellApplication {
       name = "wrapix";
-      runtimeInputs = [ pkgs.podman ];
+      runtimeInputs = [
+        crun-krun
+        pkgs.podman
+      ];
       text = ''
         # Ensure USER is set (may be unset in some environments)
         USER="''${USER:-$(id -un)}"
@@ -221,10 +236,10 @@ in
           echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
           exit 1
         elif ! command -v krun >/dev/null 2>&1 && ! podman info --format '{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}' 2>/dev/null | grep -q krun; then
-          echo "Error: krun runtime not found. A microVM boundary requires crun-krun." >&2
+          echo "Error: krun runtime not found. A microVM boundary requires crun with libkrun." >&2
           echo "" >&2
           echo "Options:" >&2
-          echo "  1. Install crun-krun (e.g., 'sudo dnf install crun-krun' or 'sudo apt install crun-krun')" >&2
+          echo "  1. Install via nix: nix shell nixpkgs#crun nixpkgs#libkrun (or use 'nix run' to get krun bundled)" >&2
           echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
           exit 1
         else
