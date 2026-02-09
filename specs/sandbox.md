@@ -25,7 +25,7 @@ Running AI coding assistants with unrestricted host access creates security risk
 ### Non-Functional
 
 1. **No Elevated Privileges** - Containers run without root or elevated capabilities
-2. **Full Network Access** - Unrestricted TCP/UDP/ICMP for web research
+2. **Full Network Access** - Unrestricted TCP/UDP for web research (ICMP unavailable without `cap_net_raw`)
 3. **Near-Native Performance** - Minimal overhead from containerization
 
 ## Platform Implementations
