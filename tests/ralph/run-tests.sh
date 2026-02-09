@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ralph integration test harness
 # Runs ralph workflow tests with mock Claude in isolated environments
-# shellcheck disable=SC2329,SC2086,SC2034,SC1091  # SC2329: functions invoked via ALL_TESTS; SC2086: numeric vars; SC2034: unused var; SC1091: dynamic source paths
+# shellcheck disable=SC2329,SC2086,SC2034,SC1091,SC2001  # SC2329: functions invoked via ALL_TESTS; SC2086: numeric vars; SC2034: unused var; SC1091: dynamic source paths; SC2001: sed in pipes
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +26,9 @@ source "$LIB_DIR/runner.sh"
 # Initialize test state and colors
 init_test_state
 setup_colors
+
+# Pre-generate ralph metadata before forking parallel tests (avoids race conditions)
+_ensure_ralph_metadata
 
 #-----------------------------------------------------------------------------
 # Individual Tests
