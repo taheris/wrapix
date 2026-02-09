@@ -13,6 +13,7 @@
   profile,
   entrypointPkg,
   entrypointSh,
+  krunSupport ? false,
   claudeConfig,
   claudeSettings,
 }:
@@ -22,6 +23,24 @@ let
 
   notifyClient = import ../notify/client.nix { inherit pkgs; };
   ralph = import ../ralph { inherit pkgs; };
+
+  # krun microVM support: UID spoofing library + PTY relay
+  # See lib/sandbox/linux/ for source files
+  libfakeuid = pkgs.stdenv.mkDerivation {
+    name = "libfakeuid";
+    src = ./linux/fakeuid.c;
+    dontUnpack = true;
+    buildPhase = "$CC -shared -fPIC -D_GNU_SOURCE -o libfakeuid.so $src -ldl";
+    installPhase = "mkdir -p $out/lib && cp libfakeuid.so $out/lib/";
+  };
+
+  krunRelay = pkgs.stdenv.mkDerivation {
+    name = "krun-relay";
+    src = ./linux/krun-relay.c;
+    dontUnpack = true;
+    buildPhase = "$CC -D_GNU_SOURCE -o krun-relay $src -lutil";
+    installPhase = "mkdir -p $out/bin && cp krun-relay $out/bin/";
+  };
 
   # Nix sandbox disabled: outer container provides isolation.
   # See specs/security-review.md "Nix Sandbox Disabled" for security rationale.
@@ -96,6 +115,15 @@ pkgs.dockerTools.buildLayeredImage {
 
     cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
+
+    ${pkgs.lib.optionalString krunSupport ''
+      cp ${./linux/krun-init.sh} krun-init.sh
+      chmod +x krun-init.sh
+      mkdir -p lib
+      cp ${libfakeuid}/lib/libfakeuid.so lib/libfakeuid.so
+      cp ${krunRelay}/bin/krun-relay krun-relay
+      chmod +x krun-relay
+    ''}
 
     cp ${claudeConfigJson} etc/wrapix/claude-config.json
     cp ${claudeSettingsJson} etc/wrapix/claude-settings.json
