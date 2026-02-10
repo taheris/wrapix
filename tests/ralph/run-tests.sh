@@ -2431,6 +2431,156 @@ test_plan_flag_validation() {
   teardown_test_env
 }
 
+# Test: plan writes per-label state files (state/<label>.json + state/current)
+# Verifies the structural change from singleton current.json to per-label state files.
+test_plan_per_label_state_files() {
+  CURRENT_TEST="plan_per_label_state_files"
+  test_header "Plan Per-Label State Files"
+
+  setup_test_env "plan-state"
+
+  # Test 1: -n flag writes state/<label>.json (not state/current.json)
+  set +e
+  local output
+  output=$(ralph-plan -n my-feature 2>&1)
+  set -e
+
+  # state/<label>.json should exist
+  if [ -f "$RALPH_DIR/state/my-feature.json" ]; then
+    test_pass "state/my-feature.json created"
+  else
+    test_fail "state/my-feature.json should be created by ralph plan -n"
+  fi
+
+  # state/current.json should NOT exist
+  if [ -f "$RALPH_DIR/state/current.json" ]; then
+    test_fail "state/current.json should not be created (per-label files replace it)"
+  else
+    test_pass "state/current.json not created (correct)"
+  fi
+
+  # state/current (plain text) should contain the label
+  if [ -f "$RALPH_DIR/state/current" ]; then
+    local current_label
+    current_label=$(<"$RALPH_DIR/state/current")
+    if [ "$current_label" = "my-feature" ]; then
+      test_pass "state/current contains label 'my-feature'"
+    else
+      test_fail "state/current should contain 'my-feature', got '$current_label'"
+    fi
+  else
+    test_fail "state/current should be created by ralph plan"
+  fi
+
+  # Verify JSON structure contains expected fields
+  if [ -f "$RALPH_DIR/state/my-feature.json" ]; then
+    local label hidden update spec_path
+    label=$(jq -r '.label' "$RALPH_DIR/state/my-feature.json")
+    hidden=$(jq -r '.hidden' "$RALPH_DIR/state/my-feature.json")
+    update=$(jq -r '.update' "$RALPH_DIR/state/my-feature.json")
+    spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/my-feature.json")
+
+    if [ "$label" = "my-feature" ]; then
+      test_pass "JSON .label = 'my-feature'"
+    else
+      test_fail "JSON .label should be 'my-feature', got '$label'"
+    fi
+
+    if [ "$hidden" = "false" ]; then
+      test_pass "JSON .hidden = false (new spec)"
+    else
+      test_fail "JSON .hidden should be false for -n mode, got '$hidden'"
+    fi
+
+    if [ "$update" = "false" ]; then
+      test_pass "JSON .update = false (new spec)"
+    else
+      test_fail "JSON .update should be false for -n mode, got '$update'"
+    fi
+
+    if [ "$spec_path" = "specs/my-feature.md" ]; then
+      test_pass "JSON .spec_path = 'specs/my-feature.md'"
+    else
+      test_fail "JSON .spec_path should be 'specs/my-feature.md', got '$spec_path'"
+    fi
+  fi
+
+  # Test 2: -h flag writes hidden spec path in JSON
+  set +e
+  output=$(ralph-plan -h hidden-feat 2>&1)
+  set -e
+
+  if [ -f "$RALPH_DIR/state/hidden-feat.json" ]; then
+    local h_hidden h_spec_path
+    h_hidden=$(jq -r '.hidden' "$RALPH_DIR/state/hidden-feat.json")
+    h_spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/hidden-feat.json")
+
+    if [ "$h_hidden" = "true" ]; then
+      test_pass "Hidden mode: .hidden = true"
+    else
+      test_fail "Hidden mode: .hidden should be true, got '$h_hidden'"
+    fi
+
+    if echo "$h_spec_path" | grep -q "state/hidden-feat.md"; then
+      test_pass "Hidden mode: .spec_path points to state/"
+    else
+      test_fail "Hidden mode: .spec_path should point to state/, got '$h_spec_path'"
+    fi
+  else
+    test_fail "state/hidden-feat.json should be created by ralph plan -h"
+  fi
+
+  # Verify state/current was updated to most recent label
+  if [ -f "$RALPH_DIR/state/current" ]; then
+    local latest_label
+    latest_label=$(<"$RALPH_DIR/state/current")
+    if [ "$latest_label" = "hidden-feat" ]; then
+      test_pass "state/current updated to latest label 'hidden-feat'"
+    else
+      test_fail "state/current should be 'hidden-feat' after second plan, got '$latest_label'"
+    fi
+  fi
+
+  # Both per-label state files should coexist
+  if [ -f "$RALPH_DIR/state/my-feature.json" ] && [ -f "$RALPH_DIR/state/hidden-feat.json" ]; then
+    test_pass "Multiple per-label state files coexist"
+  else
+    test_fail "Both state files should coexist after two ralph plan calls"
+  fi
+
+  # Test 3: -u mode writes update=true and preserves molecule
+  # Create a spec to update and a pre-existing state file with molecule
+  echo "# Existing Spec" > "$TEST_DIR/specs/existing-spec.md"
+  jq -n '{label:"existing-spec",update:false,hidden:false,spec_path:"specs/existing-spec.md",molecule:"epic-123"}' \
+    > "$RALPH_DIR/state/existing-spec.json"
+
+  set +e
+  output=$(ralph-plan -u existing-spec 2>&1)
+  set -e
+
+  if [ -f "$RALPH_DIR/state/existing-spec.json" ]; then
+    local u_update u_molecule
+    u_update=$(jq -r '.update' "$RALPH_DIR/state/existing-spec.json")
+    u_molecule=$(jq -r '.molecule' "$RALPH_DIR/state/existing-spec.json")
+
+    if [ "$u_update" = "true" ]; then
+      test_pass "Update mode: .update = true"
+    else
+      test_fail "Update mode: .update should be true, got '$u_update'"
+    fi
+
+    if [ "$u_molecule" = "epic-123" ]; then
+      test_pass "Update mode preserves existing molecule ID"
+    else
+      test_fail "Update mode should preserve molecule 'epic-123', got '$u_molecule'"
+    fi
+  else
+    test_fail "state/existing-spec.json should exist after update"
+  fi
+
+  teardown_test_env
+}
+
 # Test: plan template validation accepts Mustache partials
 # Bug: validate_template checked for {{LABEL}} directly, but plan-new.md uses
 # {{> spec-header}} partial which contains {{LABEL}}. This caused false errors
@@ -5910,6 +6060,7 @@ ALL_TESTS=(
   test_malformed_bd_output_parsing
   test_partial_epic_completion
   test_plan_flag_validation
+  test_plan_per_label_state_files
   test_plan_template_with_partials
   test_discovered_work
   test_config_data_driven
