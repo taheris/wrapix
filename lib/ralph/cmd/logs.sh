@@ -2,9 +2,11 @@
 # ralph logs - Error-focused log viewer
 #
 # Usage:
-#   ralph logs              # Find most recent error, show 20 lines before
+#   ralph logs              # Find most recent error for current spec
 #   ralph logs -n 50        # Show 50 lines of context
 #   ralph logs --all        # Show full log without error filtering
+#   ralph logs --spec <name>  # Show logs for named spec
+#   ralph logs -s <name>      # Short form
 #   ralph logs <logfile>    # Analyze specific log file
 #
 # Error patterns scanned:
@@ -13,14 +15,31 @@
 #   - Text patterns: error:, Error:, ERROR, failed, Failed, FAILED, stack traces
 set -euo pipefail
 
+# Source shared utilities (provides resolve_spec_label, debug, error, etc.)
+# shellcheck source=util.sh
+source "$(dirname "${BASH_SOURCE[0]}")/util.sh"
+
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 CONTEXT_LINES=20
 SHOW_ALL=false
 LOG_FILE=""
+SPEC_FLAG=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --spec|-s)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: $1 requires a spec name argument" >&2
+        exit 1
+      fi
+      SPEC_FLAG="$2"
+      shift 2
+      ;;
+    --spec=*)
+      SPEC_FLAG="${1#--spec=}"
+      shift
+      ;;
     -n)
       if [[ -z "${2:-}" ]]; then
         echo "Error: -n requires a count argument" >&2
@@ -39,11 +58,12 @@ while [[ $# -gt 0 ]]; do
       echo "Error-focused log viewer. Finds errors and shows context."
       echo ""
       echo "Options:"
-      echo "  -n <count>    Show <count> lines of context before error (default: 20)"
-      echo "  --all, -a     Show full log without error filtering"
-      echo "  -h, --help    Show this help message"
+      echo "  --spec, -s <name>  Show logs for named spec (default: current spec)"
+      echo "  -n <count>         Show <count> lines of context before error (default: 20)"
+      echo "  --all, -a          Show full log without error filtering"
+      echo "  -h, --help         Show this help message"
       echo ""
-      echo "Without LOGFILE, uses the most recent work-*.log"
+      echo "Without LOGFILE, finds the most recent work-*.log for the resolved spec."
       exit 0
       ;;
     -*)
@@ -65,11 +85,46 @@ if [[ -z "$LOG_FILE" ]]; then
     exit 1
   fi
 
-  LOG_FILE=$(find "$LOGS_DIR" -maxdepth 1 -name "work-*.log" -type f \
-    -printf '%T@\t%p\n' 2>/dev/null \
-    | sort -rn \
-    | head -1 \
-    | cut -f2) || true
+  # Resolve spec label to filter logs by workflow
+  LABEL=$(resolve_spec_label "$SPEC_FLAG")
+  BEAD_LABEL="spec-$LABEL"
+  debug "logs: resolved label=$LABEL, bead_label=$BEAD_LABEL"
+
+  # Get issue IDs for this spec's workflow
+  ISSUE_IDS=$(bd list --label "$BEAD_LABEL" --json 2>/dev/null \
+    | jq -r '.[].id // empty' 2>/dev/null) || true
+
+  if [[ -n "$ISSUE_IDS" ]]; then
+    # Build a find pattern matching work-<issue_id>.log for each issue
+    FIND_ARGS=()
+    first=true
+    while IFS= read -r issue_id; do
+      [[ -z "$issue_id" ]] && continue
+      if [[ "$first" == "true" ]]; then
+        FIND_ARGS+=(-name "work-${issue_id}.log")
+        first=false
+      else
+        FIND_ARGS+=(-o -name "work-${issue_id}.log")
+      fi
+    done <<< "$ISSUE_IDS"
+
+    if [[ ${#FIND_ARGS[@]} -gt 0 ]]; then
+      LOG_FILE=$(find "$LOGS_DIR" -maxdepth 1 -type f \( "${FIND_ARGS[@]}" \) \
+        -printf '%T@\t%p\n' 2>/dev/null \
+        | sort -rn \
+        | head -1 \
+        | cut -f2) || true
+    fi
+  fi
+
+  # Fallback: if no spec-specific logs found, try most recent work-*.log
+  if [[ -z "$LOG_FILE" ]]; then
+    LOG_FILE=$(find "$LOGS_DIR" -maxdepth 1 -name "work-*.log" -type f \
+      -printf '%T@\t%p\n' 2>/dev/null \
+      | sort -rn \
+      | head -1 \
+      | cut -f2) || true
+  fi
 
   if [[ -z "$LOG_FILE" ]]; then
     echo "No work logs found in $LOGS_DIR" >&2
