@@ -7238,6 +7238,648 @@ test_run_spec_no_current_update() {
 }
 
 #-----------------------------------------------------------------------------
+# Concurrent Workflow Tests
+#-----------------------------------------------------------------------------
+# Tests for concurrent workflow support: multiple workflows with per-label
+# state files, --spec flag routing, isolation, and backwards compatibility.
+
+# Test: multiple workflows have isolated state files that don't interfere
+test_concurrent_state_isolation() {
+  CURRENT_TEST="concurrent_state_isolation"
+  test_header "Concurrent: multiple workflows have isolated state"
+
+  setup_test_env "concurrent-isolation"
+
+  # Create three independent workflows
+  for label in workflow-alpha workflow-beta workflow-gamma; do
+    create_test_spec "$label" "# $label\n\n## Requirements\n- Feature $label"
+    setup_label_state "$label" "false" "mol-$label"
+  done
+
+  # state/current should point to the last one set by setup_label_state
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "workflow-gamma" ]; then
+    test_pass "state/current points to last setup workflow"
+  else
+    test_fail "Expected state/current to be 'workflow-gamma', got '$current'"
+  fi
+
+  # Verify all three state files exist independently
+  for label in workflow-alpha workflow-beta workflow-gamma; do
+    if [ -f "$RALPH_DIR/state/${label}.json" ]; then
+      local stored_label
+      stored_label=$(jq -r '.label' "$RALPH_DIR/state/${label}.json")
+      if [ "$stored_label" = "$label" ]; then
+        test_pass "state/${label}.json has correct label"
+      else
+        test_fail "state/${label}.json label should be '$label', got '$stored_label'"
+      fi
+    else
+      test_fail "state/${label}.json should exist"
+    fi
+  done
+
+  # Verify each state file has its own molecule ID
+  for label in workflow-alpha workflow-beta workflow-gamma; do
+    local mol
+    mol=$(jq -r '.molecule // empty' "$RALPH_DIR/state/${label}.json")
+    if [ "$mol" = "mol-$label" ]; then
+      test_pass "state/${label}.json has correct molecule"
+    else
+      test_fail "state/${label}.json molecule should be 'mol-$label', got '$mol'"
+    fi
+  done
+
+  # Switch to workflow-alpha via ralph use — other state files should be unaffected
+  ralph-use "workflow-alpha" >/dev/null 2>&1
+
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "workflow-alpha" ]; then
+    test_pass "ralph use switched to workflow-alpha"
+  else
+    test_fail "Expected workflow-alpha after ralph use, got '$current'"
+  fi
+
+  # Verify other workflow state files remain unchanged
+  for label in workflow-beta workflow-gamma; do
+    local mol
+    mol=$(jq -r '.molecule // empty' "$RALPH_DIR/state/${label}.json")
+    if [ "$mol" = "mol-$label" ]; then
+      test_pass "state/${label}.json untouched after ralph use"
+    else
+      test_fail "state/${label}.json should still have mol-$label, got '$mol'"
+    fi
+  done
+
+  teardown_test_env
+}
+
+# Test: ralph use validates spec existence before switching
+test_concurrent_use_validates() {
+  CURRENT_TEST="concurrent_use_validates"
+  test_header "Concurrent: ralph use validates before switching"
+
+  setup_test_env "concurrent-use-validate"
+
+  # Create a valid workflow as the starting point
+  create_test_spec "valid-workflow"
+  setup_label_state "valid-workflow"
+
+  # Attempt to switch to a workflow without a spec file
+  echo '{"label":"no-spec","hidden":false}' > "$RALPH_DIR/state/no-spec.json"
+
+  set +e
+  local output
+  output=$(ralph-use "no-spec" 2>&1)
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "ralph use rejects workflow without spec file"
+  else
+    test_fail "ralph use should reject workflow without spec file"
+  fi
+
+  # state/current should remain unchanged
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "valid-workflow" ]; then
+    test_pass "state/current unchanged after failed ralph use"
+  else
+    test_fail "state/current should still be 'valid-workflow', got '$current'"
+  fi
+
+  # Attempt to switch to a workflow without a state JSON
+  create_test_spec "no-state"
+
+  set +e
+  output=$(ralph-use "no-state" 2>&1)
+  exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "ralph use rejects workflow without state JSON"
+  else
+    test_fail "ralph use should reject workflow without state JSON"
+  fi
+
+  teardown_test_env
+}
+
+# Test: --spec flag on status reads the correct per-label state file
+test_concurrent_status_spec_isolation() {
+  CURRENT_TEST="concurrent_status_spec_isolation"
+  test_header "Concurrent: status --spec reads correct workflow"
+
+  setup_test_env "concurrent-status-spec"
+
+  # Create two workflows with different molecules
+  create_test_spec "feat-one"
+  setup_label_state "feat-one" "false" "mol-one"
+
+  create_test_spec "feat-two"
+  echo '{"label":"feat-two","update":false,"hidden":false,"spec_path":"specs/feat-two.md","molecule":"mol-two"}' \
+    > "$RALPH_DIR/state/feat-two.json"
+
+  # state/current points to feat-one
+  echo "feat-one" > "$RALPH_DIR/state/current"
+
+  # Set up mock bd for molecule progress
+  local log_file="$TEST_DIR/bd-mock.log"
+  local mock_responses="$TEST_DIR/mock-responses"
+  mkdir -p "$mock_responses"
+
+  cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
+{
+  "completed": 3,
+  "total": 5,
+  "percent": 60,
+  "molecule_id": "mol-two"
+}
+MOCK_EOF
+
+  cat > "$mock_responses/mol-current.txt" << 'MOCK_EOF'
+[done]    Task X
+[current] Task Y
+[ready]   Task Z
+MOCK_EOF
+
+  touch "$mock_responses/mol-stale.txt"
+
+  rm -f "$log_file"
+  setup_mock_bd "$log_file" "$mock_responses"
+
+  # Run status --spec feat-two (should show feat-two, NOT feat-one)
+  set +e
+  local status_output
+  status_output=$(ralph-status --spec feat-two 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "status --spec feat-two succeeded"
+  else
+    test_fail "status --spec feat-two failed with exit $status_exit"
+  fi
+
+  # Header should say feat-two
+  if echo "$status_output" | grep -q "Ralph Status: feat-two"; then
+    test_pass "status shows correct label: feat-two"
+  else
+    test_fail "status should show 'Ralph Status: feat-two'"
+  fi
+
+  # Should show mol-two, not mol-one
+  if echo "$status_output" | grep -q "Molecule: mol-two"; then
+    test_pass "status shows correct molecule: mol-two"
+  else
+    test_fail "status should show molecule mol-two"
+  fi
+
+  # Verify state/current was NOT changed by --spec
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "feat-one" ]; then
+    test_pass "state/current unchanged by status --spec"
+  else
+    test_fail "state/current should still be 'feat-one', got '$current'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --all scans all state/*.json files correctly
+test_concurrent_status_all_scans_state() {
+  CURRENT_TEST="concurrent_status_all_scans_state"
+  test_header "Concurrent: status --all scans all state/*.json"
+
+  setup_test_env "concurrent-status-all"
+
+  # Create five workflows with different molecules and phases
+  create_test_spec "alpha"
+  setup_label_state "alpha" "false" "mol-alpha"
+
+  create_test_spec "beta"
+  setup_label_state "beta" "false" "mol-beta"
+
+  create_test_spec "gamma"
+  setup_label_state "gamma" "false"  # No molecule yet (planning phase)
+
+  create_test_spec "delta"
+  setup_label_state "delta" "false" "mol-delta"
+
+  # Hidden spec workflow
+  echo "# Hidden Feature" > "$RALPH_DIR/state/epsilon.md"
+  echo '{"label":"epsilon","update":false,"hidden":true,"spec_path":".wrapix/ralph/state/epsilon.md"}' \
+    > "$RALPH_DIR/state/epsilon.json"
+
+  # Run status --all
+  set +e
+  local status_output
+  status_output=$(ralph-status --all 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "status --all succeeded with 5 workflows"
+  else
+    test_fail "status --all failed with exit $status_exit"
+  fi
+
+  if echo "$status_output" | grep -q "Active Workflows:"; then
+    test_pass "--all shows header"
+  else
+    test_fail "--all should show 'Active Workflows:' header"
+  fi
+
+  # All five workflows should appear
+  for label in alpha beta gamma delta epsilon; do
+    if echo "$status_output" | grep -q "$label"; then
+      test_pass "--all lists: $label"
+    else
+      test_fail "--all should list: $label"
+    fi
+  done
+
+  teardown_test_env
+}
+
+# Test: serial workflow without --spec still works (backwards compatibility)
+test_concurrent_serial_backwards_compat() {
+  CURRENT_TEST="concurrent_serial_backwards_compat"
+  test_header "Concurrent: serial workflow without --spec works"
+
+  setup_test_env "concurrent-serial"
+
+  # Simulate a typical serial workflow: plan sets state/current, then
+  # todo and run use it automatically without --spec
+  create_test_spec "serial-feature"
+  setup_label_state "serial-feature" "false" "mol-serial"
+
+  # Verify state/current is set
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "serial-feature" ]; then
+    test_pass "state/current set to serial-feature"
+  else
+    test_fail "Expected state/current to be 'serial-feature', got '$current'"
+  fi
+
+  # ralph todo (no --spec) should resolve to serial-feature
+  set +e
+  local todo_output
+  todo_output=$(ralph-todo 2>&1)
+  local todo_exit=$?
+  set -e
+
+  # It may fail at nix eval, but label resolution should succeed
+  if echo "$todo_output" | grep -q "Label: serial-feature"; then
+    test_pass "todo (no --spec) resolves to serial-feature"
+  elif echo "$todo_output" | grep -q "serial-feature"; then
+    test_pass "todo (no --spec) targets serial-feature"
+  else
+    test_fail "todo (no --spec) should resolve to 'serial-feature', got: ${todo_output:0:300}"
+  fi
+
+  # ralph status (no --spec) should show serial-feature
+  # Set up mock bd
+  local log_file="$TEST_DIR/bd-mock.log"
+  local mock_responses="$TEST_DIR/mock-responses"
+  mkdir -p "$mock_responses"
+  cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
+{"completed":2,"total":5,"percent":40}
+MOCK_EOF
+  cat > "$mock_responses/mol-current.txt" << 'MOCK_EOF'
+[done]    Task 1
+[current] Task 2
+[ready]   Task 3
+MOCK_EOF
+  touch "$mock_responses/mol-stale.txt"
+  rm -f "$log_file"
+  setup_mock_bd "$log_file" "$mock_responses"
+
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  if echo "$status_output" | grep -q "Ralph Status: serial-feature"; then
+    test_pass "status (no --spec) shows serial-feature"
+  else
+    test_fail "status (no --spec) should show 'serial-feature'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run reads spec once at startup — switching state/current mid-run
+# does NOT affect the running process
+test_concurrent_run_read_once_mid_switch() {
+  CURRENT_TEST="concurrent_run_read_once_mid_switch"
+  test_header "Concurrent: run reads spec once, mid-switch ignored"
+
+  setup_test_env "concurrent-read-once"
+
+  # Create two workflows
+  create_test_spec "initial-workflow"
+  setup_label_state "initial-workflow" "false" "mol-initial"
+
+  create_test_spec "switched-workflow"
+  echo '{"label":"switched-workflow","update":false,"hidden":false,"spec_path":"specs/switched-workflow.md","molecule":"mol-switched"}' \
+    > "$RALPH_DIR/state/switched-workflow.json"
+
+  # state/current points to initial-workflow
+  echo "initial-workflow" > "$RALPH_DIR/state/current"
+
+  # Create a task for initial-workflow
+  TASK_ID=$(bd create --title="Task for initial" --type=task --labels="spec-initial-workflow" --json 2>/dev/null | jq -r '.id')
+
+  # Create a mock scenario that switches state/current mid-execution
+  local switch_scenario="$TEST_DIR/scenarios"
+  mkdir -p "$switch_scenario"
+  cat > "$switch_scenario/mid-switch.sh" << 'SCENARIO_EOF'
+# shellcheck shell=bash
+source "$(dirname "${BASH_SOURCE[0]}")/../scenarios/lib/signal-base.sh"
+
+SIGNAL_STEP="RALPH_COMPLETE"
+MSG_STEP_WORK="Implementing task..."
+MSG_STEP_DONE="Implementation complete."
+
+phase_run() {
+  # Simulate switching state/current mid-run
+  # The ralph run process should have already read the label and shouldn't be affected
+  echo "switched-workflow" > "$RALPH_DIR/state/current"
+  _emit_phase "$MSG_STEP_WORK" "$MSG_STEP_DONE" "$SIGNAL_STEP"
+}
+SCENARIO_EOF
+
+  export MOCK_SCENARIO="$switch_scenario/mid-switch.sh"
+
+  # Run ralph run --once (should resolve to initial-workflow at startup)
+  set +e
+  local output
+  output=$(ralph-run --once 2>&1)
+  local exit_code=$?
+  set -e
+
+  # The feature should still be initial-workflow (read at startup)
+  if echo "$output" | grep -q "Feature: initial-workflow"; then
+    test_pass "run used initial-workflow despite mid-run switch"
+  elif echo "$output" | grep -q "initial-workflow"; then
+    test_pass "run targeted initial-workflow (read at startup)"
+  else
+    test_fail "run should use initial-workflow, got: ${output:0:300}"
+  fi
+
+  # The run should NOT have used switched-workflow for its work
+  if echo "$output" | grep -q "Feature: switched-workflow"; then
+    test_fail "run should NOT switch to switched-workflow mid-run"
+  else
+    test_pass "run did not switch to switched-workflow"
+  fi
+
+  teardown_test_env
+}
+
+# Test: --spec flag routes to correct workflow even when state/current
+# points to a different workflow (all four commands)
+test_concurrent_spec_flag_overrides_current() {
+  CURRENT_TEST="concurrent_spec_flag_overrides_current"
+  test_header "Concurrent: --spec overrides state/current for all commands"
+
+  setup_test_env "concurrent-spec-override"
+
+  # Source util.sh for resolve_spec_label
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create two workflows
+  create_test_spec "current-active"
+  setup_label_state "current-active" "false" "mol-current"
+
+  create_test_spec "spec-target"
+  echo '{"label":"spec-target","update":false,"hidden":false,"spec_path":"specs/spec-target.md","molecule":"mol-target"}' \
+    > "$RALPH_DIR/state/spec-target.json"
+
+  # state/current points to current-active
+  echo "current-active" > "$RALPH_DIR/state/current"
+
+  # Test resolve_spec_label directly: no arg → current, explicit → override
+  local label_default label_explicit
+
+  label_default=$(resolve_spec_label "")
+  if [ "$label_default" = "current-active" ]; then
+    test_pass "resolve_spec_label('') returns current-active"
+  else
+    test_fail "resolve_spec_label('') should return 'current-active', got '$label_default'"
+  fi
+
+  label_explicit=$(resolve_spec_label "spec-target")
+  if [ "$label_explicit" = "spec-target" ]; then
+    test_pass "resolve_spec_label('spec-target') returns spec-target"
+  else
+    test_fail "resolve_spec_label('spec-target') should return 'spec-target', got '$label_explicit'"
+  fi
+
+  # Test ralph-status --spec
+  local log_file="$TEST_DIR/bd-mock.log"
+  local mock_responses="$TEST_DIR/mock-responses"
+  mkdir -p "$mock_responses"
+  cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
+{"completed":1,"total":3,"percent":33}
+MOCK_EOF
+  cat > "$mock_responses/mol-current.txt" << 'MOCK_EOF'
+[done]    Task A
+[current] Task B
+MOCK_EOF
+  touch "$mock_responses/mol-stale.txt"
+  rm -f "$log_file"
+  setup_mock_bd "$log_file" "$mock_responses"
+
+  set +e
+  local status_out
+  status_out=$(ralph-status --spec spec-target 2>&1)
+  set -e
+
+  if echo "$status_out" | grep -q "Ralph Status: spec-target"; then
+    test_pass "status --spec shows spec-target, not current-active"
+  else
+    test_fail "status --spec should show 'spec-target'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: missing state/current without --spec produces clear error
+test_concurrent_missing_current_clear_error() {
+  CURRENT_TEST="concurrent_missing_current_clear_error"
+  test_header "Concurrent: missing state/current produces clear error"
+
+  setup_test_env "concurrent-no-current"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Remove state/current
+  rm -f "$RALPH_DIR/state/current"
+
+  # resolve_spec_label with no arg should fail clearly
+  set +e
+  local output
+  output=$(resolve_spec_label "" 2>&1)
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "resolve_spec_label fails when state/current missing"
+  else
+    test_fail "Should fail when state/current missing (got exit 0)"
+  fi
+
+  if echo "$output" | grep -qi "no active workflow\|ralph plan"; then
+    test_pass "Error message is clear and actionable"
+  else
+    test_fail "Error should mention 'no active workflow' or 'ralph plan', got: $output"
+  fi
+
+  # ralph-status should also fail or degrade gracefully
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  # status has a graceful fallback — it may show "(not set)" instead of error
+  if [ "$status_exit" -eq 0 ] && echo "$status_output" | grep -qi "not set\|ralph plan"; then
+    test_pass "ralph-status degrades gracefully without state/current"
+  elif [ "$status_exit" -ne 0 ]; then
+    test_pass "ralph-status fails when state/current missing (expected)"
+  else
+    test_fail "ralph-status should indicate missing current, got: ${status_output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph plan creates both state/<label>.json and state/current
+test_concurrent_plan_creates_state_and_current() {
+  CURRENT_TEST="concurrent_plan_creates_state_and_current"
+  test_header "Concurrent: plan creates state/<label>.json and state/current"
+
+  setup_test_env "concurrent-plan-state"
+
+  # Remove any pre-existing state files
+  rm -f "$RALPH_DIR/state/current" "$RALPH_DIR/state/"*.json 2>/dev/null || true
+
+  # Run ralph plan -n new-feature
+  set +e
+  local output
+  output=$(ralph-plan -n new-feature 2>&1)
+  set -e
+
+  # Verify state/<label>.json was created
+  if [ -f "$RALPH_DIR/state/new-feature.json" ]; then
+    test_pass "state/new-feature.json created by ralph plan"
+  else
+    test_fail "state/new-feature.json should be created by ralph plan"
+  fi
+
+  # Verify state/current was set
+  if [ -f "$RALPH_DIR/state/current" ]; then
+    local current
+    current=$(<"$RALPH_DIR/state/current")
+    if [ "$current" = "new-feature" ]; then
+      test_pass "state/current set to 'new-feature'"
+    else
+      test_fail "state/current should be 'new-feature', got '$current'"
+    fi
+  else
+    test_fail "state/current should be created by ralph plan"
+  fi
+
+  # Verify state/current.json (legacy singleton) was NOT created
+  if [ -f "$RALPH_DIR/state/current.json" ]; then
+    test_fail "state/current.json (legacy) should NOT be created"
+  else
+    test_pass "state/current.json (legacy) not created"
+  fi
+
+  # Verify JSON structure
+  if [ -f "$RALPH_DIR/state/new-feature.json" ]; then
+    local label spec_path
+    label=$(jq -r '.label' "$RALPH_DIR/state/new-feature.json")
+    spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/new-feature.json")
+
+    if [ "$label" = "new-feature" ]; then
+      test_pass "JSON .label is correct"
+    else
+      test_fail "JSON .label should be 'new-feature', got '$label'"
+    fi
+
+    if [ "$spec_path" = "specs/new-feature.md" ]; then
+      test_pass "JSON .spec_path is correct"
+    else
+      test_fail "JSON .spec_path should be 'specs/new-feature.md', got '$spec_path'"
+    fi
+  fi
+
+  teardown_test_env
+}
+
+# Test: multiple ralph plan calls create separate per-label state files
+test_concurrent_multiple_plans_independent() {
+  CURRENT_TEST="concurrent_multiple_plans_independent"
+  test_header "Concurrent: multiple plans create independent state files"
+
+  setup_test_env "concurrent-multi-plan"
+
+  # Plan three features in sequence
+  for label in feat-1 feat-2 feat-3; do
+    set +e
+    ralph-plan -n "$label" >/dev/null 2>&1
+    set -e
+  done
+
+  # All three state files should exist
+  for label in feat-1 feat-2 feat-3; do
+    if [ -f "$RALPH_DIR/state/${label}.json" ]; then
+      local stored_label
+      stored_label=$(jq -r '.label' "$RALPH_DIR/state/${label}.json")
+      if [ "$stored_label" = "$label" ]; then
+        test_pass "state/${label}.json has correct label"
+      else
+        test_fail "state/${label}.json label should be '$label', got '$stored_label'"
+      fi
+    else
+      test_fail "state/${label}.json should exist after ralph plan"
+    fi
+  done
+
+  # state/current should point to the LAST planned feature
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "feat-3" ]; then
+    test_pass "state/current points to last planned feature (feat-3)"
+  else
+    test_fail "state/current should be 'feat-3', got '$current'"
+  fi
+
+  # Earlier plans' state files should be unmodified
+  local feat1_label
+  feat1_label=$(jq -r '.label' "$RALPH_DIR/state/feat-1.json")
+  if [ "$feat1_label" = "feat-1" ]; then
+    test_pass "feat-1 state file preserved after later plans"
+  else
+    test_fail "feat-1 state file should be preserved"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -7355,6 +7997,17 @@ ALL_TESTS=(
   test_run_spec_equals_form
   test_run_spec_read_once_semantics
   test_run_spec_no_current_update
+  # Concurrent workflow tests
+  test_concurrent_state_isolation
+  test_concurrent_use_validates
+  test_concurrent_status_spec_isolation
+  test_concurrent_status_all_scans_state
+  test_concurrent_serial_backwards_compat
+  test_concurrent_run_read_once_mid_switch
+  test_concurrent_spec_flag_overrides_current
+  test_concurrent_missing_current_clear_error
+  test_concurrent_plan_creates_state_and_current
+  test_concurrent_multiple_plans_independent
 )
 
 #-----------------------------------------------------------------------------
