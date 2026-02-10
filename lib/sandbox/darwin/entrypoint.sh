@@ -156,6 +156,8 @@ fi
 
 # Initialize container-local beads database
 # Detect backend from metadata.json and use appropriate init strategy
+# --skip-hooks: prek manages git hooks, bd must not touch them
+# --skip-merge-driver: prevents bd from creating .gitattributes
 if [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
   if [ -n "$PREFIX" ]; then
@@ -168,13 +170,15 @@ if [ -f /workspace/.beads/config.yaml ]; then
       # Dolt mode: copy dolt-remote as working database, then init
       mkdir -p /workspace/.beads/dolt
       cp -r "$DOLT_REMOTE/." /workspace/.beads/dolt/beads/
-      bd init --prefix "$PREFIX" --backend dolt --quiet 2>/dev/null || true
+      bd init --prefix "$PREFIX" --backend dolt --quiet --skip-hooks --skip-merge-driver 2>/dev/null || true
       # bd init overwrites .gitignore with its template (missing dolt/ rule)
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
       # SQLite/fallback mode: init from JSONL
-      bd init --prefix "$PREFIX" --from-jsonl --quiet
+      bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
     fi
+    # bd init generates AGENTS.md; restore workspace copy if it existed
+    git checkout -- AGENTS.md 2>/dev/null || true
   fi
 fi
 
