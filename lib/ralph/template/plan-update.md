@@ -45,6 +45,7 @@ When the conversation is complete:
 
    ## Success Criteria
    - [Specific criteria for the new work]
+     [verify](tests/<label>-test.sh::test_function) or [judge](tests/judges/<label>.sh::test_function)
 
    ## Affected Files
    - [Files that will need changes]
