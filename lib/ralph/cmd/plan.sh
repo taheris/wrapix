@@ -214,7 +214,9 @@ if [ ! -d "$RALPH_DIR" ]; then
     echo "Error: Cannot initialize ralph - RALPH_TEMPLATE_DIR not set or doesn't exist."
     [ -n "${RALPH_TEMPLATE_DIR:-}" ] && echo "  RALPH_TEMPLATE_DIR=$RALPH_TEMPLATE_DIR (not found)"
     echo ""
-    echo "Run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR."
+    echo "To fix this, do one of the following:"
+    echo "  - Run 'ralph sync' to fetch templates from GitHub"
+    echo "  - Set RALPH_TEMPLATE_DIR to point to an existing template directory"
     exit 1
   fi
 
