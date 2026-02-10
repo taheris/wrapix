@@ -214,7 +214,6 @@ EOF
 
   # Set up label state
   local label="test-feature"
-  echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create an epic (molecule root)
   local epic_json
@@ -222,10 +221,10 @@ EOF
   local epic_id
   epic_id=$(echo "$epic_json" | jq -r '.id')
 
-  # Store molecule ID in current.json
-  local updated_json
-  updated_json=$(jq --arg mol "$epic_id" '. + {molecule: $mol}' "$RALPH_DIR/state/current.json")
-  echo "$updated_json" > "$RALPH_DIR/state/current.json"
+  # Set up per-label state file + current pointer (new format)
+  setup_label_state "$label" "false" "$epic_id"
+  # Also create legacy current.json for backwards compat
+  echo "{\"label\":\"$label\",\"hidden\":false,\"molecule\":\"$epic_id\"}" > "$RALPH_DIR/state/current.json"
 
   test_pass "Created molecule root (epic): $epic_id"
 
@@ -352,9 +351,12 @@ test_status_wrapper() {
 SPEC_EOF
     fi
 
-    # Set up current.json based on test case
+    # Set up state files based on test case
     case "$test_case" in
       with_molecule)
+        # Per-label state file + current pointer (new format)
+        setup_label_state "$label" "false" "$molecule_id"
+        # Also create legacy current.json for backwards compat tests
         echo "{\"label\":\"$label\",\"molecule\":\"$molecule_id\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
         # Source the scenario helper
@@ -401,6 +403,9 @@ MOCK_EOF
         setup_mock_bd "$log_file" "$mock_responses"
         ;;
       without_molecule)
+        # Per-label state file + current pointer (new format)
+        setup_label_state "$label" "false"
+        # Also create legacy current.json
         echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
         ;;
       no_label)
@@ -545,7 +550,8 @@ test_status_awaiting_display() {
 - Test requirement
 SPEC_EOF
 
-  # Set up current.json (no molecule — use fallback path)
+  # Set up per-label state file + current pointer (no molecule — use fallback path)
+  setup_label_state "$label" "false"
   echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create a task with awaiting:input label and a question in notes
@@ -661,7 +667,8 @@ test_status_no_awaiting_when_empty() {
 - Test requirement
 SPEC_EOF
 
-  # Set up current.json (no molecule)
+  # Set up per-label state file + current pointer (no molecule)
+  setup_label_state "$label" "false"
   echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
   # Create a normal task (no awaiting:input label)
@@ -687,6 +694,361 @@ SPEC_EOF
     echo "$status_output" | sed 's/^/      /'
   else
     test_pass "Correctly omits 'Awaiting Input' section when empty"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --spec shows status for a named workflow
+test_status_spec_flag() {
+  CURRENT_TEST="status_spec_flag"
+  test_header "Status --spec Shows Named Workflow"
+
+  setup_test_env "status-spec-flag"
+
+  local label="other-feature"
+
+  # Create spec file for the named workflow
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Other Feature
+
+## Requirements
+- Test requirement
+SPEC_EOF
+
+  # Set up per-label state file (NOT the current workflow)
+  setup_label_state "$label" "false" "test-mol-other"
+
+  # Set a DIFFERENT current workflow to prove --spec overrides it
+  echo "different-feature" > "$RALPH_DIR/state/current"
+
+  # Source the scenario helper for mock bd
+  # shellcheck source=/dev/null
+  source "$SCENARIOS_DIR/status-wrapper.sh"
+
+  local log_file="$TEST_DIR/bd-mock.log"
+  local mock_responses="$TEST_DIR/mock-responses"
+  mkdir -p "$mock_responses"
+
+  # Set up mock progress JSON
+  cat > "$mock_responses/mol-progress.json" << 'MOCK_EOF'
+{
+  "completed": 4,
+  "total": 10,
+  "percent": 40,
+  "molecule_id": "test-mol-other"
+}
+MOCK_EOF
+
+  cat > "$mock_responses/mol-current.txt" << 'MOCK_EOF'
+[done]    Task A
+[current] Task B
+[ready]   Task C
+MOCK_EOF
+
+  touch "$mock_responses/mol-stale.txt"
+
+  rm -f "$log_file"
+  setup_mock_bd "$log_file" "$mock_responses"
+
+  # Run ralph-status with --spec flag
+  set +e
+  local status_output
+  status_output=$(ralph-status --spec "$label" 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status --spec completed successfully"
+  else
+    test_fail "ralph-status --spec failed with exit code $status_exit"
+    echo "    Output: $status_output"
+  fi
+
+  # Verify the header shows the named label, not the current one
+  if echo "$status_output" | grep -q "Ralph Status: $label"; then
+    test_pass "--spec shows correct label in header"
+  else
+    test_fail "--spec should show '$label' in header"
+    echo "    Output:"
+    echo "$status_output" | head -5 | sed 's/^/      /'
+  fi
+
+  # Verify molecule ID from the named workflow
+  if echo "$status_output" | grep -q "Molecule: test-mol-other"; then
+    test_pass "--spec shows molecule from named workflow"
+  else
+    test_fail "--spec should show molecule from named workflow"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify bd mol progress was called with the named workflow's molecule
+  if grep -q "bd mol progress test-mol-other" "$log_file" 2>/dev/null; then
+    test_pass "--spec queries correct molecule for progress"
+  else
+    test_fail "--spec should query test-mol-other for progress"
+    echo "    Log:"
+    cat "$log_file" 2>/dev/null | sed 's/^/      /' || echo "      (empty)"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --spec short form (-s) works
+test_status_spec_short_flag() {
+  CURRENT_TEST="status_spec_short_flag"
+  test_header "Status -s Short Flag Works"
+
+  setup_test_env "status-spec-short"
+
+  local label="short-test"
+
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Short Test
+## Requirements
+- Test
+SPEC_EOF
+
+  setup_label_state "$label" "false"
+
+  # Run ralph-status with -s flag
+  set +e
+  local status_output
+  status_output=$(ralph-status -s "$label" 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status -s completed successfully"
+  else
+    test_fail "ralph-status -s failed with exit code $status_exit"
+  fi
+
+  if echo "$status_output" | grep -q "Ralph Status: $label"; then
+    test_pass "-s shows correct label"
+  else
+    test_fail "-s should show '$label' in header"
+    echo "    Output:"
+    echo "$status_output" | head -3 | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --all shows summary of all active workflows
+test_status_all_flag() {
+  CURRENT_TEST="status_all_flag"
+  test_header "Status --all Shows All Workflows"
+
+  setup_test_env "status-all"
+
+  # Create multiple workflows with state files
+  for wf_label in feature-a feature-b feature-c; do
+    cat > "$TEST_DIR/specs/$wf_label.md" << SPEC_EOF
+# $wf_label
+## Requirements
+- Test
+SPEC_EOF
+    setup_label_state "$wf_label" "false"
+  done
+
+  # Run ralph-status --all
+  set +e
+  local status_output
+  status_output=$(ralph-status --all 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status --all completed successfully"
+  else
+    test_fail "ralph-status --all failed with exit code $status_exit"
+  fi
+
+  # Verify header
+  if echo "$status_output" | grep -q "Active Workflows:"; then
+    test_pass "--all shows 'Active Workflows' header"
+  else
+    test_fail "--all should show 'Active Workflows' header"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify all three workflows appear
+  for wf_label in feature-a feature-b feature-c; do
+    if echo "$status_output" | grep -q "$wf_label"; then
+      test_pass "--all lists workflow: $wf_label"
+    else
+      test_fail "--all should list workflow: $wf_label"
+    fi
+  done
+
+  # Verify each workflow shows a phase
+  if echo "$status_output" | grep -qE '(planning|todo|running|done)'; then
+    test_pass "--all shows phase indicators"
+  else
+    test_fail "--all should show phase indicators"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  # Verify progress bar format appears
+  if echo "$status_output" | grep -qE '\[[#-]+\] [0-9]+% \([0-9]+/[0-9]+\)'; then
+    test_pass "--all shows progress bar format"
+  else
+    test_fail "--all should show progress bar format"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --all with no workflows shows helpful message
+test_status_all_empty() {
+  CURRENT_TEST="status_all_empty"
+  test_header "Status --all With No Workflows"
+
+  setup_test_env "status-all-empty"
+
+  # Remove any default state files (keep the directory)
+  rm -f "$RALPH_DIR/state"/*.json 2>/dev/null || true
+
+  # Run ralph-status --all
+  set +e
+  local status_output
+  status_output=$(ralph-status --all 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status --all with no workflows succeeds"
+  else
+    test_fail "ralph-status --all with no workflows failed"
+  fi
+
+  if echo "$status_output" | grep -qi "no active workflows\|ralph plan"; then
+    test_pass "--all with no workflows shows helpful message"
+  else
+    test_fail "--all should show message about no workflows or suggest ralph plan"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status (no flags) uses resolve_spec_label from state/current
+test_status_no_flag_uses_current() {
+  CURRENT_TEST="status_no_flag_uses_current"
+  test_header "Status (No Flags) Uses state/current"
+
+  setup_test_env "status-no-flag"
+
+  local label="my-feature"
+
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# My Feature
+## Requirements
+- Test
+SPEC_EOF
+
+  # Set up per-label state file and current pointer
+  setup_label_state "$label" "false"
+
+  # Run ralph-status without any flags
+  set +e
+  local status_output
+  status_output=$(ralph-status 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status (no flags) completed successfully"
+  else
+    test_fail "ralph-status (no flags) failed with exit code $status_exit"
+  fi
+
+  # Verify it resolves via state/current
+  if echo "$status_output" | grep -q "Ralph Status: $label"; then
+    test_pass "Resolves label from state/current"
+  else
+    test_fail "Should resolve '$label' from state/current"
+    echo "    Output:"
+    echo "$status_output" | head -3 | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --spec=value (equals form) works
+test_status_spec_equals_form() {
+  CURRENT_TEST="status_spec_equals_form"
+  test_header "Status --spec=value Works"
+
+  setup_test_env "status-spec-equals"
+
+  local label="equals-feature"
+
+  cat > "$TEST_DIR/specs/$label.md" << 'SPEC_EOF'
+# Equals Feature
+## Requirements
+- Test
+SPEC_EOF
+
+  setup_label_state "$label" "false"
+
+  # Run ralph-status with --spec=value form
+  set +e
+  local status_output
+  status_output=$(ralph-status --spec="$label" 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -eq 0 ]; then
+    test_pass "ralph-status --spec=value completed successfully"
+  else
+    test_fail "ralph-status --spec=value failed with exit code $status_exit"
+  fi
+
+  if echo "$status_output" | grep -q "Ralph Status: $label"; then
+    test_pass "--spec=value resolves correctly"
+  else
+    test_fail "--spec=value should show '$label' in header"
+    echo "    Output:"
+    echo "$status_output" | head -3 | sed 's/^/      /'
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph status --spec with missing state file errors
+test_status_spec_missing_state() {
+  CURRENT_TEST="status_spec_missing_state"
+  test_header "Status --spec With Missing State File Errors"
+
+  setup_test_env "status-spec-missing"
+
+  # Run ralph-status with --spec for a non-existent workflow
+  set +e
+  local status_output
+  status_output=$(ralph-status --spec nonexistent 2>&1)
+  local status_exit=$?
+  set -e
+
+  if [ $status_exit -ne 0 ]; then
+    test_pass "--spec with missing state file exits non-zero"
+  else
+    test_fail "--spec with missing state file should exit non-zero"
+  fi
+
+  if echo "$status_output" | grep -qi "not found\|error"; then
+    test_pass "--spec with missing state file shows error message"
+  else
+    test_fail "Should show error about missing state file"
+    echo "    Output:"
+    echo "$status_output" | sed 's/^/      /'
   fi
 
   teardown_test_env
@@ -6654,6 +7016,13 @@ ALL_TESTS=(
   test_status_wrapper
   test_status_awaiting_display
   test_status_no_awaiting_when_empty
+  test_status_spec_flag
+  test_status_spec_short_flag
+  test_status_all_flag
+  test_status_all_empty
+  test_status_no_flag_uses_current
+  test_status_spec_equals_form
+  test_status_spec_missing_state
   test_run_closes_issue_on_complete
   test_run_no_close_without_signal
   test_run_exits_100_when_complete
