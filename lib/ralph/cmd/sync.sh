@@ -755,7 +755,10 @@ if [ "$DIFF_MODE" = "true" ]; then
   if [ -z "$PACKAGED_DIR" ]; then
     error "RALPH_TEMPLATE_DIR not set or directory doesn't exist.
 
-Run from 'nix develop' shell which sets RALPH_TEMPLATE_DIR.
+To fix this, do one of the following:
+  - Run 'ralph sync' to fetch templates from GitHub
+  - Set RALPH_TEMPLATE_DIR to point to an existing template directory
+
 Current value: ${RALPH_TEMPLATE_DIR:-<not set>}"
   fi
 
