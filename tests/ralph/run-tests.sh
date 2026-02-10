@@ -3130,6 +3130,242 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
+# Ralph Logs --spec Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph logs --spec filters to the named spec's logs
+test_logs_spec_flag() {
+  CURRENT_TEST="logs_spec_flag"
+  test_header "ralph logs --spec: filters logs to named spec"
+
+  setup_test_env "logs-spec-flag"
+
+  # Create two specs with state files
+  create_test_spec "feature-a"
+  setup_label_state "feature-a"
+  create_test_spec "feature-b"
+  echo '{"label":"feature-b","update":false,"hidden":false,"spec_path":"specs/feature-b.md"}' \
+    > "$RALPH_DIR/state/feature-b.json"
+
+  # Create beads for each spec
+  local issue_a issue_b
+  issue_a=$(bd create --title="Task A" --type=task --labels="spec-feature-a" --silent)
+  issue_b=$(bd create --title="Task B" --type=task --labels="spec-feature-b" --silent)
+
+  # Create log files for each issue
+  cat > "$RALPH_DIR/logs/work-${issue_a}.log" << 'EOF'
+{"type":"assistant","content":"Working on feature A"}
+{"type":"result","subtype":"error","result":"Feature A error: build failed"}
+EOF
+
+  cat > "$RALPH_DIR/logs/work-${issue_b}.log" << 'EOF'
+{"type":"assistant","content":"Working on feature B"}
+{"type":"result","subtype":"success","result":"Feature B done. RALPH_COMPLETE"}
+EOF
+
+  # Touch feature-b log to be newer
+  sleep 1
+  touch "$RALPH_DIR/logs/work-${issue_b}.log"
+
+  # ralph logs --spec feature-a should show feature A's log (not the newer B log)
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" --spec feature-a 2>&1)
+  local exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "ralph logs --spec feature-a should succeed"
+
+  if echo "$output" | grep -q "Feature A error"; then
+    test_pass "Shows logs for feature-a"
+  else
+    test_fail "Should show feature-a logs"
+    echo "  Output: $output"
+  fi
+
+  if echo "$output" | grep -q "work-${issue_a}.log"; then
+    test_pass "Correct log file selected for feature-a"
+  else
+    test_fail "Should select feature-a's log file"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs -s (short form) works like --spec
+test_logs_spec_short_flag() {
+  CURRENT_TEST="logs_spec_short_flag"
+  test_header "ralph logs -s: short form of --spec"
+
+  setup_test_env "logs-spec-short"
+
+  create_test_spec "my-feature"
+  setup_label_state "my-feature"
+
+  local issue_id
+  issue_id=$(bd create --title="My task" --type=task --labels="spec-my-feature" --silent)
+
+  cat > "$RALPH_DIR/logs/work-${issue_id}.log" << 'EOF'
+{"type":"assistant","content":"Working on my feature"}
+{"type":"result","subtype":"success","result":"All done. RALPH_COMPLETE"}
+EOF
+
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" -s my-feature 2>&1)
+  local exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "ralph logs -s should succeed"
+
+  if echo "$output" | grep -q "work-${issue_id}.log"; then
+    test_pass "Short flag -s resolves to correct log"
+  else
+    test_fail "Short flag should resolve to spec's log"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs (no --spec) uses state/current
+test_logs_no_spec_uses_current() {
+  CURRENT_TEST="logs_no_spec_uses_current"
+  test_header "ralph logs: uses state/current when no --spec"
+
+  setup_test_env "logs-no-spec"
+
+  create_test_spec "current-feat"
+  setup_label_state "current-feat"
+
+  local issue_id
+  issue_id=$(bd create --title="Current task" --type=task --labels="spec-current-feat" --silent)
+
+  cat > "$RALPH_DIR/logs/work-${issue_id}.log" << 'EOF'
+{"type":"assistant","content":"Working on current feat"}
+{"type":"result","subtype":"error","result":"error: something broke"}
+EOF
+
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" 2>&1)
+  local exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "ralph logs should succeed"
+
+  if echo "$output" | grep -q "something broke"; then
+    test_pass "Uses current spec's logs by default"
+  else
+    test_fail "Should use logs from state/current spec"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs --spec=<name> (equals form) works
+test_logs_spec_equals_form() {
+  CURRENT_TEST="logs_spec_equals_form"
+  test_header "ralph logs --spec=<name>: equals form"
+
+  setup_test_env "logs-spec-equals"
+
+  create_test_spec "eq-feature"
+  echo '{"label":"eq-feature","update":false,"hidden":false,"spec_path":"specs/eq-feature.md"}' \
+    > "$RALPH_DIR/state/eq-feature.json"
+  echo "eq-feature" > "$RALPH_DIR/state/current"
+
+  local issue_id
+  issue_id=$(bd create --title="Eq task" --type=task --labels="spec-eq-feature" --silent)
+
+  cat > "$RALPH_DIR/logs/work-${issue_id}.log" << 'EOF'
+{"type":"assistant","content":"Working on eq feature"}
+{"type":"result","subtype":"success","result":"Done. RALPH_COMPLETE"}
+EOF
+
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" --spec=eq-feature 2>&1)
+  local exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "ralph logs --spec=name should succeed"
+
+  if echo "$output" | grep -q "work-${issue_id}.log"; then
+    test_pass "Equals form resolves to correct log"
+  else
+    test_fail "Equals form should resolve to spec's log"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs --spec errors when state/<label>.json missing
+test_logs_spec_flag_missing_state_json() {
+  CURRENT_TEST="logs_spec_flag_missing_state_json"
+  test_header "ralph logs --spec: error when state/<label>.json missing"
+
+  setup_test_env "logs-spec-missing-json"
+
+  # Create spec but no state JSON
+  create_test_spec "orphan-spec"
+
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" --spec orphan-spec 2>&1)
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/<label>.json missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "workflow state not found\|state.*not found"; then
+    test_pass "Error message references missing state file"
+  else
+    test_fail "Expected error about missing state, got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph logs with explicit logfile still works (--spec is ignored if logfile given)
+test_logs_explicit_logfile_with_spec() {
+  CURRENT_TEST="logs_explicit_logfile_with_spec"
+  test_header "ralph logs: explicit logfile bypasses spec resolution"
+
+  setup_test_env "logs-explicit-with-spec"
+
+  # No state/current needed when logfile is explicit
+  cat > "$RALPH_DIR/logs/work-test-explicit.log" << 'EOF'
+{"type":"assistant","content":"Explicit log content"}
+{"type":"result","subtype":"success","result":"All good. RALPH_COMPLETE"}
+EOF
+
+  set +e
+  local output
+  output=$(bash "$REPO_ROOT/lib/ralph/cmd/logs.sh" "$RALPH_DIR/logs/work-test-explicit.log" 2>&1)
+  local exit_code=$?
+  set -e
+
+  assert_exit_code 0 $exit_code "ralph logs with explicit logfile should succeed"
+
+  if echo "$output" | grep -q "No errors found"; then
+    test_pass "Explicit logfile works without spec state"
+  else
+    test_fail "Should process explicit logfile"
+    echo "  Output: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Ralph Sync --diff Tests (formerly ralph diff)
 #-----------------------------------------------------------------------------
 
@@ -6441,6 +6677,12 @@ ALL_TESTS=(
   test_logs_context_lines
   test_logs_no_errors
   test_logs_exit_code_error
+  test_logs_spec_flag
+  test_logs_spec_short_flag
+  test_logs_no_spec_uses_current
+  test_logs_spec_equals_form
+  test_logs_spec_flag_missing_state_json
+  test_logs_explicit_logfile_with_spec
   test_diff_no_changes
   test_diff_local_modifications
   test_diff_specific_template
