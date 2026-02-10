@@ -33,7 +33,7 @@ else
 fi
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
-CURRENT_FILE="$RALPH_DIR/state/current.json"
+CURRENT_POINTER="$RALPH_DIR/state/current"
 
 # Parse arguments
 LABEL=""
@@ -135,15 +135,20 @@ fi
 
 # Require at least one mode flag (unless resuming from state file)
 if [ "$SPEC_NEW" = "false" ] && [ "$SPEC_HIDDEN" = "false" ] && [ -z "$UPDATE_SPEC" ]; then
-  # Check if we can resume from state file
-  if [ -f "$CURRENT_FILE" ]; then
-    LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+  # Check if we can resume from state/current pointer + state/<label>.json
+  if [ -f "$CURRENT_POINTER" ]; then
+    LABEL=$(<"$CURRENT_POINTER")
+    LABEL="${LABEL#"${LABEL%%[![:space:]]*}"}"  # trim leading whitespace
+    LABEL="${LABEL%"${LABEL##*[![:space:]]}"}"  # trim trailing whitespace
     if [ -n "$LABEL" ]; then
-      # Resuming from state file - read the hidden and update flags too
-      SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
-      UPDATE_MODE=$(jq -r '.update // false' "$CURRENT_FILE" 2>/dev/null || echo "false")
-      if [ "$UPDATE_MODE" = "true" ]; then
-        UPDATE_SPEC="$LABEL"
+      LABEL_STATE_RESUME="$RALPH_DIR/state/${LABEL}.json"
+      if [ -f "$LABEL_STATE_RESUME" ]; then
+        # Resuming from per-label state file
+        SPEC_HIDDEN=$(jq -r '.hidden // false' "$LABEL_STATE_RESUME" 2>/dev/null || echo "false")
+        UPDATE_MODE=$(jq -r '.update // false' "$LABEL_STATE_RESUME" 2>/dev/null || echo "false")
+        if [ "$UPDATE_MODE" = "true" ]; then
+          UPDATE_SPEC="$LABEL"
+        fi
       fi
     fi
   fi
@@ -252,27 +257,41 @@ EOF
   echo "Created $SPECS_README"
 fi
 
-# Set/update state in current.json
+# Set/update state in per-label state file: state/<label>.json
 # Track whether this is an update to an existing spec (vs new spec)
 UPDATE_MODE="false"
 if [ -n "$UPDATE_SPEC" ]; then
   UPDATE_MODE="true"
 fi
 
-# In update mode, preserve existing molecule ID from current.json
+LABEL_STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
+
+# In update mode, preserve existing molecule ID from per-label state file
 EXISTING_MOLECULE=""
-if [ "$UPDATE_MODE" = "true" ] && [ -f "$CURRENT_FILE" ]; then
-  EXISTING_MOLECULE=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
+if [ "$UPDATE_MODE" = "true" ] && [ -f "$LABEL_STATE_FILE" ]; then
+  EXISTING_MOLECULE=$(jq -r '.molecule // empty' "$LABEL_STATE_FILE" 2>/dev/null || true)
+fi
+
+# Compute spec_path for JSON state
+if [ "$SPEC_HIDDEN" = "true" ]; then
+  STATE_SPEC_PATH="$RALPH_DIR/state/$LABEL.md"
+else
+  STATE_SPEC_PATH="$SPECS_DIR/$LABEL.md"
 fi
 
 # Build the new state JSON, preserving molecule if it exists
 if [ -n "$EXISTING_MOLECULE" ]; then
-  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" --arg molecule "$EXISTING_MOLECULE" \
-    '{label: $label, hidden: $hidden, update: $update, molecule: $molecule}' > "$CURRENT_FILE"
+  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
+    --arg spec_path "$STATE_SPEC_PATH" --arg molecule "$EXISTING_MOLECULE" \
+    '{label: $label, update: $update, hidden: $hidden, spec_path: $spec_path, molecule: $molecule}' > "$LABEL_STATE_FILE"
 else
   jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
-    '{label: $label, hidden: $hidden, update: $update}' > "$CURRENT_FILE"
+    --arg spec_path "$STATE_SPEC_PATH" \
+    '{label: $label, update: $update, hidden: $hidden, spec_path: $spec_path}' > "$LABEL_STATE_FILE"
 fi
+
+# Write label to state/current (plain text pointer to active workflow)
+echo "$LABEL" > "$CURRENT_POINTER"
 
 # Compute spec path and README instructions based on hidden flag
 if [ "$SPEC_HIDDEN" = "true" ]; then

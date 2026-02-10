@@ -310,20 +310,31 @@ create_test_spec() {
   echo "$content" > "$TEST_DIR/specs/$label.md"
 }
 
-# Set up label state in current.json
+# Set up per-label state file and active workflow pointer
+# Writes state/<label>.json and state/current (plain text)
 # Usage: setup_label_state <label> [hidden] [molecule]
 setup_label_state() {
   local label="$1"
   local hidden="${2:-false}"
   local molecule="${3:-}"
 
-  local json="{\"label\":\"$label\",\"hidden\":$hidden"
+  # Compute spec_path based on hidden flag
+  local spec_path
+  if [ "$hidden" = "true" ]; then
+    spec_path="$RALPH_DIR/state/$label.md"
+  else
+    spec_path="specs/$label.md"
+  fi
+
+  local json="{\"label\":\"$label\",\"update\":false,\"hidden\":$hidden,\"spec_path\":\"$spec_path\""
   if [ -n "$molecule" ]; then
     json="$json,\"molecule\":\"$molecule\""
   fi
   json="$json}"
 
-  echo "$json" > "$RALPH_DIR/state/current.json"
+  mkdir -p "$RALPH_DIR/state"
+  echo "$json" > "$RALPH_DIR/state/${label}.json"
+  echo "$label" > "$RALPH_DIR/state/current"
 }
 
 #-----------------------------------------------------------------------------
