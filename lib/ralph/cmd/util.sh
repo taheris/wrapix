@@ -883,6 +883,63 @@ parse_spec_annotations() {
 }
 
 #-----------------------------------------------------------------------------
+# Spec Label Resolution
+#
+# Resolves the target workflow label for commands that accept --spec/-s.
+# Resolution order:
+#   1. If a label argument is provided (from --spec/-s flag), use it
+#   2. Otherwise, read label from state/current (plain text file)
+#   3. If state/current does not exist and no label given, error
+#   4. Validate that state/<label>.json exists
+#
+# Usage: resolve_spec_label [label]
+# Output: resolved label on stdout
+# Returns: 0 on success, 1 on error (with message to stderr)
+#
+# Environment:
+#   RALPH_DIR — ralph state directory (default: .wrapix/ralph)
+#-----------------------------------------------------------------------------
+
+# Resolve the spec label from --spec flag or state/current
+# Usage: resolve_spec_label [label]
+#   label — explicit label from --spec/-s flag (empty string if not provided)
+# Output: resolved label on stdout
+# Returns: 0 on success, exits with error on failure
+resolve_spec_label() {
+  local spec_arg="${1:-}"
+  local ralph_dir="${RALPH_DIR:-.wrapix/ralph}"
+  local label=""
+
+  if [ -n "$spec_arg" ]; then
+    # (1) Explicit --spec/-s flag provided
+    label="$spec_arg"
+    debug "resolve_spec_label: using explicit label: $label"
+  else
+    # (2) Read from state/current
+    local current_file="$ralph_dir/state/current"
+    if [ ! -f "$current_file" ]; then
+      error "No active workflow. Run 'ralph plan <label>' first, or use --spec <name> to target a specific workflow."
+    fi
+    label=$(<"$current_file")
+    label="${label#"${label%%[![:space:]]*}"}"  # trim leading whitespace
+    label="${label%"${label##*[![:space:]]}"}"  # trim trailing whitespace
+    if [ -z "$label" ]; then
+      error "state/current is empty. Run 'ralph plan <label>' to set a workflow, or use --spec <name>."
+    fi
+    debug "resolve_spec_label: read label from state/current: $label"
+  fi
+
+  # (3) Validate state/<label>.json exists
+  local state_file="$ralph_dir/state/${label}.json"
+  if [ ! -f "$state_file" ]; then
+    error "Workflow state not found: $state_file — run 'ralph plan $label' to initialize this workflow."
+  fi
+
+  debug "resolve_spec_label: validated state file: $state_file"
+  echo "$label"
+}
+
+#-----------------------------------------------------------------------------
 # Judge test infrastructure
 #
 # Judge tests define rubrics via two setter functions:
