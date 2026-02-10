@@ -37,7 +37,29 @@ When you have gathered enough information, create the spec file with:
 2. **Problem statement** - Why this feature is needed
 3. **Requirements** - Functional and non-functional requirements
 4. **Affected files/modules** - What parts of the codebase will change
-5. **Success criteria** - Checkboxes for what "done" looks like
+5. **Success criteria** - Checkboxes for what "done" looks like. Each criterion should
+   include a verification annotation on the line below it:
+   - `[verify](tests/<label>-test.sh::test_function_name)` for criteria testable with a
+     shell script (exit 0 = pass, non-zero = fail)
+   - `[judge](tests/judges/<label>.sh::test_function_name)` for criteria requiring LLM
+     evaluation of source code
+   - Use `[verify]` when the criterion can be checked programmatically (output format,
+     exit codes, file existence, CLI behavior)
+   - Use `[judge]` when the criterion requires reading source code and evaluating
+     qualities (code structure, error handling, documentation clarity)
+   - Example:
+     ```markdown
+     ## Success Criteria
+
+     - [ ] CLI accepts --format flag with json and table options
+       [verify](tests/my-feature-test.sh::test_format_flag)
+     - [ ] Error messages are clear and actionable
+       [judge](tests/judges/my-feature.sh::test_clear_errors)
+     ```
+   - Test paths are relative to the repo root
+   - Function names use `test_` prefix and snake_case
+   - Do NOT create the test files — just define the annotations. `ralph run` will
+     implement them during the implementation phase.
 6. **Out of scope** - What this feature will NOT do (important for boundaries)
 
 ## Implementation Notes Section

@@ -41,12 +41,29 @@ Title: {{TITLE}}
    - Need user input? → `RALPH_BLOCKED: <reason>`
    - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
 
+## Spec Verifications
+
+After implementing the issue, check the spec's Success Criteria for `[verify]` and
+`[judge]` annotations that reference test files relevant to this issue's work.
+
+- **`[verify]` tests**: Create the referenced shell test file if it doesn't exist.
+  The test function should exercise the implemented feature and exit 0 on success,
+  non-zero on failure. Use `set -euo pipefail`. Exit 77 to skip (e.g. platform
+  not available).
+- **`[judge]` tests**: Create the referenced judge rubric file if it doesn't exist.
+  Each function calls `judge_files "path/to/source"` and
+  `judge_criterion "what to evaluate"`. See `tests/judges/example.sh` for format.
+- Only create tests for criteria related to the current issue — don't implement
+  all spec verifications, just the ones relevant to your work.
+- If the test file already exists, add your function to it rather than overwriting.
+
 ## Quality Gates
 
 Before outputting RALPH_COMPLETE:
 - [ ] Tests written and passing
 - [ ] Lint checks pass
 - [ ] Changes staged (`git add`)
+- [ ] Spec verification test files created for relevant criteria
 
 Post-step hooks verify compliance automatically.
 
