@@ -28,6 +28,8 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 7. **Template Validation** — `ralph check` validates all templates and partials
 8. **Template Tuning** — `ralph tune` edits templates (interactive or integration mode)
 9. **Template Sync** — `ralph sync` updates local templates (use `--diff` to preview changes)
+10. **Concurrent Workflows** — Per-label state files (`state/<label>.json`) replace singleton `state/current.json`, enabling multiple ralph workflows simultaneously
+11. **Spec Switching** — `ralph use <name>` sets the active workflow; `--spec <name>` flag on `todo`, `run`, `status`, `logs` targets a specific workflow
 
 ### Non-Functional
 
@@ -62,7 +64,8 @@ ralph plan -u -h <label>        # Update existing spec in state/
 - No flag or invalid combination: Error with usage help
 
 **Behavior:**
-- Creates `state/current.json` with feature metadata
+- Creates `state/<label>.json` with feature metadata (per-label, not singleton)
+- Writes label to `state/current` (plain text, no extension) — the active planning target becomes the default
 - Launches wrapix container with base profile
 - Runs spec interview using appropriate template
 - **New mode**: Writes spec to target location (`specs/` or `state/`)
@@ -72,16 +75,18 @@ ralph plan -u -h <label>        # Update existing spec in state/
 ### `ralph todo`
 
 ```bash
-ralph todo
+ralph todo                  # Operate on current spec (from state/current)
+ralph todo --spec <name>    # Operate on named spec
+ralph todo -s <name>        # Short form
 ```
 
-Launches wrapix container with base profile. Reads `state/current.json` to determine mode:
+Launches wrapix container with base profile. Reads `state/<label>.json` (resolved via `--spec` flag or `state/current`) to determine mode:
 - **New spec**: Creates molecule (epic + child issues) from `specs/<label>.md`
 - **Update mode**: Reads NEW requirements from `state/<label>.md`, creates tasks only for those, then merges into `specs/<label>.md`
 
 **Profile assignment:** The LLM analyzes each task's requirements and assigns appropriate `profile:X` labels based on implementation needs (e.g., tasks touching `.rs` files get `profile:rust`). This happens per-task, not per-spec.
 
-Stores molecule ID in `state/current.json`. In update mode, cleans up `state/<label>.md` after successful merge.
+Stores molecule ID in `state/<label>.json`. In update mode, cleans up `state/<label>.md` after successful merge.
 
 ### `ralph run`
 
@@ -90,7 +95,11 @@ ralph run                   # Continuous mode: process all issues until complete
 ralph run --once            # Single-issue mode: process one issue then exit
 ralph run -1                # Alias for --once
 ralph run --profile=rust    # Override profile (applies to all iterations)
+ralph run --spec <name>     # Operate on named spec
+ralph run -s <name>         # Short form
 ```
+
+**Spec resolution:** Reads the spec label once at startup (from `--spec` flag or `state/current`). The label is held in memory for the duration of the run — switching `state/current` via `ralph use` does not affect a running `ralph run`. Does NOT update `state/current` during execution.
 
 **Default (continuous) mode** — Runs on host as orchestrator:
 - Queries for next ready issue from molecule
@@ -111,10 +120,13 @@ ralph run --profile=rust    # Override profile (applies to all iterations)
 ### `ralph status`
 
 ```bash
-ralph status
+ralph status                # Show status for current spec (from state/current)
+ralph status --spec <name>  # Show status for named spec
+ralph status -s <name>      # Short form
+ralph status --all          # Summary of all active workflows
 ```
 
-Shows molecule progress:
+Shows molecule progress for the resolved spec:
 ```
 Ralph Status: my-feature
 ===============================
@@ -132,12 +144,22 @@ Current Position:
   [blocked] Final review (waiting on tests)
 ```
 
+**`--all` mode** shows a summary of all active workflows:
+```
+Active Workflows:
+  my-feature      running  [####------] 40% (4/10)
+  auth-refactor   todo     [----------]  0% (0/5)
+  bugfix-123      done     [##########] 100% (3/3)
+```
+
 ### `ralph logs`
 
 ```bash
-ralph logs              # Find most recent error, show 20 lines of context
+ralph logs              # Find most recent error for current spec
 ralph logs -n 50        # Show 50 lines of context before error
 ralph logs --all        # Show full log without error filtering
+ralph logs --spec <name>  # Show logs for named spec
+ralph logs -s <name>      # Short form
 ```
 
 Error-focused output: Scans for error patterns (exit code != 0, "error:", "failed"), shows context leading up to first match.
@@ -234,6 +256,18 @@ ralph sync --diff | ralph tune
 
 Use `ralph sync --diff` to see what changed, then `ralph tune` to merge customizations from backup.
 
+### `ralph use`
+
+```bash
+ralph use <name>        # Switch active workflow
+```
+
+Sets `state/current` to the given label after validation:
+1. Validates the spec exists (`specs/<name>.md` or hidden spec in `state/`)
+2. Validates `state/<name>.json` exists (workflow must be initialized via `ralph plan`)
+3. Writes the label to `state/current`
+4. Errors with clear message if either validation fails
+
 ## Workflow Phases
 
 ```
@@ -269,6 +303,7 @@ Ralph runs Claude-calling commands inside wrapix containers for isolation and re
 | `ralph check` | host | N/A (utility) |
 | `ralph tune` | host | N/A (utility) |
 | `ralph sync` | host | N/A (utility) |
+| `ralph use` | host | N/A (utility) |
 
 **Rationale:**
 - `plan` and `todo` involve AI decision-making that benefits from isolation
@@ -402,7 +437,7 @@ lib/ralph/template/
 | `SPEC_CONTENT` | Read from spec file | todo-new, step |
 | `EXISTING_SPEC` | Read from `specs/<label>.md` | plan-update, todo-update |
 | `NEW_REQUIREMENTS` | Read from `state/<label>.md` | todo-update |
-| `MOLECULE_ID` | From `state/current.json` | todo-update, step |
+| `MOLECULE_ID` | From `state/<label>.json` | todo-update, step |
 | `ISSUE_ID` | From `bd ready` | step |
 | `TITLE` | From issue | step |
 | `DESCRIPTION` | From issue | step |
@@ -595,7 +630,11 @@ Spec file: {{SPEC_PATH}}
 
 ## State Management
 
-**`state/current.json`:**
+### Per-Label State Files
+
+Each workflow has its own state file at `state/<label>.json`:
+
+**`state/<label>.json`:**
 ```json
 {
   "label": "my-feature",
@@ -613,6 +652,29 @@ Spec file: {{SPEC_PATH}}
 | `hidden` | Whether spec is in `state/` (not committed) |
 | `spec_path` | Full path to spec file |
 | `molecule` | Beads molecule ID (set by `ralph todo`) |
+
+### Active Workflow Pointer
+
+**`state/current`** (plain text, no extension) holds the active label name:
+```
+my-feature
+```
+
+This file is the default when no `--spec` flag is given. Set by `ralph plan` and `ralph use`.
+
+### Spec Label Resolution
+
+Commands that accept `--spec/-s` resolve the target workflow as follows:
+1. If `--spec <name>` provided → use `state/<name>.json`
+2. If no `--spec` → read label from `state/current` → use `state/<label>.json`
+3. If `state/current` does not exist and no `--spec` given → error with clear message
+
+Commands with `--spec` support: `ralph todo`, `ralph run`, `ralph status`, `ralph logs`
+Commands without `--spec`: `ralph plan` (takes label as positional arg), `ralph check`, `ralph tune`, `ralph sync`, `ralph use` (takes label as positional arg)
+
+### Backwards Compatibility
+
+Serial workflow is unchanged: `ralph plan` sets `state/current`, subsequent commands pick it up automatically. The only structural difference is the state file location (`state/<label>.json` + `state/current` vs the old singleton `state/current.json`).
 
 **`state/<label>.md`** (update mode only):
 
@@ -673,7 +735,8 @@ Why this feature is needed.
 | `lib/ralph/cmd/check.sh` | Template validation |
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
 | `lib/ralph/cmd/sync.sh` | Template sync from packaged (includes --diff) |
-| `lib/ralph/cmd/util.sh` | Shared helper functions |
+| `lib/ralph/cmd/use.sh` | Active workflow switching with validation |
+| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`) |
 | `lib/ralph/template/` | Prompt templates |
 | `lib/ralph/template/default.nix` | Nix template definitions |
 
@@ -684,7 +747,7 @@ Ralph uses `bd mol` for work tracking:
 - **Specs are NOT molecules** — Specs are persistent markdown; molecules are work batches
 - **Each `ralph todo` creates/updates a molecule** — Epic becomes molecule root
 - **Update mode bonds to existing molecules** — New tasks attach to prior work
-- **Molecule ID stored in current.json** — Enables `ralph status` convenience wrapper
+- **Molecule ID stored in `state/<label>.json`** — Enables `ralph status` convenience wrapper
 
 **Key molecule commands used by Ralph:**
 
@@ -758,10 +821,23 @@ Ralph uses `bd mol` for work tracking:
   [verify](tests/ralph/run-tests.sh::test_render_template_basic)
 - [ ] Partials work via `{{> partial-name}}` markers
   [verify](tests/ralph/run-tests.sh::test_plan_template_with_partials)
+- [ ] `state/current.json` replaced by per-label `state/<label>.json` files
+- [ ] `state/current` (plain text) tracks the active label
+- [ ] `ralph use <name>` switches active label with validation
+- [ ] `ralph todo --spec <name>` operates on the named workflow
+- [ ] `ralph run --spec <name>` operates on the named workflow
+- [ ] `ralph run` reads spec once at startup and is unaffected by later `ralph use`
+- [ ] `ralph status --all` shows summary of all active workflows
+- [ ] `ralph status --spec <name>` shows specific workflow status
+- [ ] `ralph logs --spec <name>` shows specific workflow logs
+- [ ] Serial workflow (no `--spec` flag) continues to work as before
+- [ ] Clear error messages when `state/current` is missing and no `--spec` given
 
 ## Out of Scope
 
-- Multi-feature parallel work
+- Cross-workflow file conflicts (user's responsibility to pick non-overlapping features)
+- Workflow locking or mutual exclusion
+- Limiting the number of concurrent workflows
 - Automated testing integration
 - PR creation automation
 - Formula-based workflows (Ralph uses specs, not formulas)
