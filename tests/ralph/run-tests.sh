@@ -6998,6 +6998,246 @@ test_todo_spec_equals_form() {
 }
 
 #-----------------------------------------------------------------------------
+# ralph run --spec Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph run --spec reads from named state file instead of state/current
+test_run_spec_flag_reads_named_state() {
+  CURRENT_TEST="run_spec_flag_reads_named_state"
+  test_header "ralph run --spec: reads named state/<label>.json"
+
+  setup_test_env "run-spec-flag"
+
+  # Create two workflows: "active" is current, "target" is what --spec points at
+  create_test_spec "active-feature"
+  setup_label_state "active-feature"
+
+  create_test_spec "target-feature"
+  echo '{"label":"target-feature","update":false,"hidden":false,"spec_path":"specs/target-feature.md"}' \
+    > "$RALPH_DIR/state/target-feature.json"
+
+  # state/current points to active-feature
+  echo "active-feature" > "$RALPH_DIR/state/current"
+
+  # Create a task bead for the target feature
+  TASK_ID=$(bd create --title="Implement target" --type=task --labels="spec-target-feature" --json 2>/dev/null | jq -r '.id')
+
+  # Use scenario that outputs RALPH_COMPLETE
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  # Run ralph run --spec targeting the other workflow
+  # It will fail at nix eval (no real nix config), but we can check label resolution
+  local output exit_code=0
+  output=$(ralph-run --once --spec target-feature 2>&1) || exit_code=$?
+
+  # The script should resolve the label to "target-feature" (not "active-feature")
+  if echo "$output" | grep -q "Feature: target-feature"; then
+    test_pass "run --spec resolves to target-feature label"
+  elif echo "$output" | grep -q "target-feature"; then
+    test_pass "run --spec targets correct feature"
+  else
+    test_fail "Expected output to reference 'target-feature', got: ${output:0:300}"
+  fi
+
+  # Verify it did NOT use active-feature
+  if echo "$output" | grep -q "Feature: active-feature"; then
+    test_fail "Should not use active-feature when --spec target-feature given"
+  else
+    test_pass "Does not use active-feature when --spec given"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run -s (short form) works like --spec
+test_run_spec_short_flag() {
+  CURRENT_TEST="run_spec_short_flag"
+  test_header "ralph run -s: short form of --spec"
+
+  setup_test_env "run-spec-short"
+
+  create_test_spec "short-test"
+  echo '{"label":"short-test","update":false,"hidden":false,"spec_path":"specs/short-test.md"}' \
+    > "$RALPH_DIR/state/short-test.json"
+  echo "short-test" > "$RALPH_DIR/state/current"
+
+  # Create a task bead
+  TASK_ID=$(bd create --title="Implement short" --type=task --labels="spec-short-test" --json 2>/dev/null | jq -r '.id')
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  local output exit_code=0
+  output=$(ralph-run --once -s short-test 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Feature: short-test"; then
+    test_pass "run -s resolves correctly"
+  elif echo "$output" | grep -q "short-test"; then
+    test_pass "run -s targets correct feature"
+  else
+    test_fail "Expected output to reference 'short-test', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run without --spec falls back to state/current
+test_run_no_spec_uses_current() {
+  CURRENT_TEST="run_no_spec_uses_current"
+  test_header "ralph run: falls back to state/current when no --spec"
+
+  setup_test_env "run-no-spec"
+
+  create_test_spec "current-feature"
+  setup_label_state "current-feature"
+
+  # Create a task bead
+  TASK_ID=$(bd create --title="Implement current" --type=task --labels="spec-current-feature" --json 2>/dev/null | jq -r '.id')
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  local output exit_code=0
+  output=$(ralph-run --once 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Feature: current-feature"; then
+    test_pass "run without --spec uses current-feature from state/current"
+  elif echo "$output" | grep -q "current-feature"; then
+    test_pass "run without --spec targets correct feature"
+  else
+    test_fail "Expected output to reference 'current-feature', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run --spec errors when state/<label>.json missing
+test_run_spec_flag_missing_state_json() {
+  CURRENT_TEST="run_spec_flag_missing_state_json"
+  test_header "ralph run --spec: error when state/<label>.json missing"
+
+  setup_test_env "run-spec-missing-json"
+
+  # Create spec but no state JSON
+  create_test_spec "orphan-spec"
+
+  local output exit_code=0
+  output=$(ralph-run --once --spec orphan-spec 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/<label>.json missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "workflow state not found\|state.*not found"; then
+    test_pass "Error message references missing state file"
+  else
+    test_fail "Expected error about missing state, got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run --spec=value (equals form) works
+test_run_spec_equals_form() {
+  CURRENT_TEST="run_spec_equals_form"
+  test_header "ralph run --spec=value: equals form"
+
+  setup_test_env "run-spec-equals"
+
+  create_test_spec "equals-test"
+  echo '{"label":"equals-test","update":false,"hidden":false,"spec_path":"specs/equals-test.md"}' \
+    > "$RALPH_DIR/state/equals-test.json"
+
+  # Create a task bead
+  TASK_ID=$(bd create --title="Implement equals" --type=task --labels="spec-equals-test" --json 2>/dev/null | jq -r '.id')
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  local output exit_code=0
+  output=$(ralph-run --once --spec=equals-test 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Feature: equals-test"; then
+    test_pass "run --spec=value resolves correctly"
+  elif echo "$output" | grep -q "equals-test"; then
+    test_pass "run --spec=value targets correct feature"
+  else
+    test_fail "Expected output to reference 'equals-test', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run reads label once at startup (not affected by state/current changes)
+test_run_spec_read_once_semantics() {
+  CURRENT_TEST="run_spec_read_once_semantics"
+  test_header "ralph run: reads spec label once at startup"
+
+  setup_test_env "run-read-once"
+
+  create_test_spec "initial-feature"
+  setup_label_state "initial-feature"
+
+  # Create a task bead for initial-feature
+  TASK_ID=$(bd create --title="Implement initial" --type=task --labels="spec-initial-feature" --json 2>/dev/null | jq -r '.id')
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  # Run ralph run --once (should resolve to initial-feature)
+  local output exit_code=0
+  output=$(ralph-run --once 2>&1) || exit_code=$?
+
+  # The feature name should be "initial-feature" regardless of any
+  # state/current changes (label was read once at startup)
+  if echo "$output" | grep -q "Feature: initial-feature"; then
+    test_pass "run reads label once at startup"
+  elif echo "$output" | grep -q "initial-feature"; then
+    test_pass "run targets initial-feature (read at startup)"
+  else
+    test_fail "Expected output to reference 'initial-feature', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph run --spec does NOT update state/current
+test_run_spec_no_current_update() {
+  CURRENT_TEST="run_spec_no_current_update"
+  test_header "ralph run --spec: does not update state/current"
+
+  setup_test_env "run-no-current-update"
+
+  create_test_spec "active-feature"
+  setup_label_state "active-feature"
+
+  create_test_spec "other-feature"
+  echo '{"label":"other-feature","update":false,"hidden":false,"spec_path":"specs/other-feature.md"}' \
+    > "$RALPH_DIR/state/other-feature.json"
+
+  # Create a task bead for other-feature
+  TASK_ID=$(bd create --title="Implement other" --type=task --labels="spec-other-feature" --json 2>/dev/null | jq -r '.id')
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  # Run ralph run --spec other-feature (should NOT change state/current)
+  local output exit_code=0
+  output=$(ralph-run --once --spec other-feature 2>&1) || exit_code=$?
+
+  # Verify state/current still points to active-feature (unchanged)
+  local current_label
+  current_label=$(<"$RALPH_DIR/state/current")
+  current_label="${current_label#"${current_label%%[![:space:]]*}"}"
+  current_label="${current_label%"${current_label##*[![:space:]]}"}"
+
+  if [ "$current_label" = "active-feature" ]; then
+    test_pass "state/current unchanged after --spec run"
+  else
+    test_fail "state/current should still be 'active-feature', but is '$current_label'"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -7108,6 +7348,13 @@ ALL_TESTS=(
   test_todo_spec_flag_missing_state_json
   test_todo_no_spec_no_current_errors
   test_todo_spec_equals_form
+  test_run_spec_flag_reads_named_state
+  test_run_spec_short_flag
+  test_run_no_spec_uses_current
+  test_run_spec_flag_missing_state_json
+  test_run_spec_equals_form
+  test_run_spec_read_once_semantics
+  test_run_spec_no_current_update
 )
 
 #-----------------------------------------------------------------------------

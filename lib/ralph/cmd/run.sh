@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph run [--once|-1] [--profile=X] [feature-name]
+# ralph run [--once|-1] [--profile=X] [--spec <name>|-s <name>]
 # Execute work items for a feature
 #
 # Modes:
@@ -10,16 +10,28 @@ set -euo pipefail
 #
 # Options:
 #   --profile=X: Override container profile (rust, python, base)
+#   --spec/-s <name>: Operate on named spec (default: current spec from state/current)
+#
+# Spec resolution: reads the spec label ONCE at startup (from --spec flag or
+# state/current). The label is held in memory for the duration of the run —
+# switching state/current via 'ralph use' does not affect a running 'ralph run'.
+# Does NOT update state/current during execution.
 #
 # Each iteration runs with fresh context (new claude process).
 # When all beads complete, transitions WIP -> REVIEW.
 
-# Parse flags
+# Parse flags (including --spec/-s early, before container detection)
 RUN_ONCE=false
 PROFILE_OVERRIDE=""
+SPEC_FLAG=""
 RUN_ARGS=()
 
 for arg in "$@"; do
+  if [ "${_next_is_spec:-}" = "1" ]; then
+    SPEC_FLAG="$arg"
+    unset _next_is_spec
+    continue
+  fi
   case "$arg" in
     --once|-1)
       RUN_ONCE=true
@@ -27,11 +39,18 @@ for arg in "$@"; do
     --profile=*)
       PROFILE_OVERRIDE="${arg#--profile=}"
       ;;
+    --spec|-s)
+      _next_is_spec=1
+      ;;
+    --spec=*)
+      SPEC_FLAG="${arg#--spec=}"
+      ;;
     *)
       RUN_ARGS+=("$arg")
       ;;
   esac
 done
+unset _next_is_spec
 
 # Replace positional params with filtered args
 set -- "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
@@ -41,12 +60,15 @@ set -- "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
 if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; then
   export RALPH_MODE=1
   export RALPH_CMD=run
-  # Preserve --once flag in args for container re-exec
+  # Preserve --once and --spec flags in args for container re-exec
+  RALPH_ARGS_PARTS=""
   if [ "$RUN_ONCE" = "true" ]; then
-    export RALPH_ARGS="--once ${*:-}"
-  else
-    export RALPH_ARGS="${*:-}"
+    RALPH_ARGS_PARTS="--once"
   fi
+  if [ -n "$SPEC_FLAG" ]; then
+    RALPH_ARGS_PARTS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }--spec $SPEC_FLAG"
+  fi
+  export RALPH_ARGS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }${*:-}"
 
   # Determine profile to use:
   # 1. --profile=X flag takes precedence
@@ -55,15 +77,22 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   SELECTED_PROFILE="${PROFILE_OVERRIDE:-}"
 
   if [ -z "$SELECTED_PROFILE" ]; then
-    # Get label from argument or current.json
+    # Resolve label from --spec flag or state/current (read once)
     RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
-    CURRENT_FILE="$RALPH_DIR/state/current.json"
     RUN_LABEL=""
 
-    if [ -n "${1:-}" ]; then
+    if [ -n "$SPEC_FLAG" ]; then
+      RUN_LABEL="$SPEC_FLAG"
+    elif [ -n "${1:-}" ]; then
       RUN_LABEL="$1"
-    elif [ -f "$CURRENT_FILE" ]; then
-      RUN_LABEL=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+    else
+      # Read from state/current (plain text file)
+      local_current="$RALPH_DIR/state/current"
+      if [ -f "$local_current" ]; then
+        RUN_LABEL=$(<"$local_current")
+        RUN_LABEL="${RUN_LABEL#"${RUN_LABEL%%[![:space:]]*}"}"
+        RUN_LABEL="${RUN_LABEL%"${RUN_LABEL##*[![:space:]]}"}"
+      fi
     fi
 
     if [ -n "$RUN_LABEL" ]; then
@@ -122,20 +151,42 @@ RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
 SPECS_DIR="specs"
 SPECS_README="$SPECS_DIR/README.md"
-CURRENT_FILE="$RALPH_DIR/state/current.json"
 
-# Get feature name and molecule ID from argument or state
-FEATURE_NAME="${1:-}"
+# Resolve the spec label ONCE at startup using --spec flag or state/current.
+# This label is held in a shell variable for the entire run duration —
+# switching state/current via 'ralph use' does NOT affect a running 'ralph run'.
+FEATURE_NAME=""
 MOLECULE_ID=""
+SPEC_HIDDEN="false"
 
-if [ -f "$CURRENT_FILE" ]; then
-  if [ -z "$FEATURE_NAME" ]; then
-    FEATURE_NAME=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
-  fi
-  MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
-  SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || true)
+if [ -n "$SPEC_FLAG" ]; then
+  # Explicit --spec flag: use resolve_spec_label (errors on missing state file)
+  FEATURE_NAME=$(resolve_spec_label "$SPEC_FLAG")
 else
-  SPEC_HIDDEN="false"
+  # No --spec flag: try resolve_spec_label first, fall back to legacy current.json
+  FEATURE_NAME=$(resolve_spec_label "" 2>/dev/null) || true
+
+  if [ -z "$FEATURE_NAME" ]; then
+    # Legacy fallback: try reading from current.json
+    CURRENT_FILE="$RALPH_DIR/state/current.json"
+    if [ -f "$CURRENT_FILE" ]; then
+      FEATURE_NAME=$(jq -r '.label // empty' "$CURRENT_FILE" 2>/dev/null || true)
+    fi
+  fi
+fi
+
+# Read state from per-label state file: state/<label>.json
+STATE_FILE="$RALPH_DIR/state/${FEATURE_NAME}.json"
+if [ -f "$STATE_FILE" ]; then
+  MOLECULE_ID=$(jq -r '.molecule // empty' "$STATE_FILE" 2>/dev/null || true)
+  SPEC_HIDDEN=$(jq -r '.hidden // false' "$STATE_FILE" 2>/dev/null || true)
+else
+  # Legacy fallback: try reading from current.json if per-label state file doesn't exist
+  CURRENT_FILE="$RALPH_DIR/state/current.json"
+  if [ -f "$CURRENT_FILE" ]; then
+    MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
+    SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || true)
+  fi
 fi
 
 # Validate we have required state
