@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ralph integration test harness
 # Runs ralph workflow tests with mock Claude in isolated environments
-# shellcheck disable=SC2329,SC2086,SC2034,SC1091,SC2001  # SC2329: functions invoked via ALL_TESTS; SC2086: numeric vars; SC2034: unused var; SC1091: dynamic source paths; SC2001: sed in pipes
+# shellcheck disable=SC2329,SC2086,SC2034,SC1091,SC2001,SC2153  # SC2329: functions invoked via ALL_TESTS; SC2086: numeric vars; SC2034: unused var; SC1091: dynamic source paths; SC2001: sed in pipes; SC2153: RALPH_DIR set by fixtures.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -5656,6 +5656,228 @@ TESTFILE
 }
 
 #-----------------------------------------------------------------------------
+# Spec Label Resolution Tests
+#-----------------------------------------------------------------------------
+
+# Test: resolve_spec_label with explicit --spec argument
+test_resolve_spec_label_explicit() {
+  CURRENT_TEST="resolve_spec_label_explicit"
+  test_header "resolve_spec_label: explicit label"
+
+  setup_test_env "resolve-spec-label-explicit"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create state/<label>.json
+  echo '{"label":"my-feature","hidden":false}' > "$RALPH_DIR/state/my-feature.json"
+
+  # Resolve with explicit label
+  local result
+  result=$(resolve_spec_label "my-feature")
+
+  if [ "$result" = "my-feature" ]; then
+    test_pass "Returns explicit label"
+  else
+    test_fail "Expected 'my-feature', got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label reads from state/current when no --spec given
+test_resolve_spec_label_from_current() {
+  CURRENT_TEST="resolve_spec_label_from_current"
+  test_header "resolve_spec_label: reads state/current"
+
+  setup_test_env "resolve-spec-label-current"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create state/current and state/<label>.json
+  echo "auth-refactor" > "$RALPH_DIR/state/current"
+  echo '{"label":"auth-refactor","hidden":false}' > "$RALPH_DIR/state/auth-refactor.json"
+
+  # Resolve without explicit label
+  local result
+  result=$(resolve_spec_label "")
+
+  if [ "$result" = "auth-refactor" ]; then
+    test_pass "Reads label from state/current"
+  else
+    test_fail "Expected 'auth-refactor', got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label trims whitespace from state/current
+test_resolve_spec_label_trims_whitespace() {
+  CURRENT_TEST="resolve_spec_label_trims_whitespace"
+  test_header "resolve_spec_label: trims whitespace"
+
+  setup_test_env "resolve-spec-label-trim"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create state/current with trailing newline/whitespace and state/<label>.json
+  printf "  my-feature  \n" > "$RALPH_DIR/state/current"
+  echo '{"label":"my-feature","hidden":false}' > "$RALPH_DIR/state/my-feature.json"
+
+  local result
+  result=$(resolve_spec_label "")
+
+  if [ "$result" = "my-feature" ]; then
+    test_pass "Trims whitespace from state/current"
+  else
+    test_fail "Expected 'my-feature', got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label errors when state/current missing and no --spec
+test_resolve_spec_label_no_current() {
+  CURRENT_TEST="resolve_spec_label_no_current"
+  test_header "resolve_spec_label: error when no state/current"
+
+  setup_test_env "resolve-spec-label-no-current"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Ensure state/current does NOT exist
+  rm -f "$RALPH_DIR/state/current"
+
+  # Should fail with error
+  local output exit_code=0
+  output=$(resolve_spec_label "" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/current missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "no active workflow"; then
+    test_pass "Error message mentions missing active workflow"
+  else
+    test_fail "Error message should mention 'no active workflow', got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label errors when state/<label>.json missing
+test_resolve_spec_label_no_state_json() {
+  CURRENT_TEST="resolve_spec_label_no_state_json"
+  test_header "resolve_spec_label: error when state/<label>.json missing"
+
+  setup_test_env "resolve-spec-label-no-json"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Do NOT create state/my-feature.json
+
+  # With explicit label
+  local output exit_code=0
+  output=$(resolve_spec_label "my-feature" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/<label>.json missing (explicit)"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -q "ralph plan"; then
+    test_pass "Error message suggests running ralph plan"
+  else
+    test_fail "Error message should suggest 'ralph plan', got: $output"
+  fi
+
+  # Also test via state/current path
+  echo "nonexistent-feature" > "$RALPH_DIR/state/current"
+  exit_code=0
+  output=$(resolve_spec_label "" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/<label>.json missing (via current)"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label errors when state/current is empty
+test_resolve_spec_label_empty_current() {
+  CURRENT_TEST="resolve_spec_label_empty_current"
+  test_header "resolve_spec_label: error when state/current is empty"
+
+  setup_test_env "resolve-spec-label-empty-current"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create empty state/current
+  echo "" > "$RALPH_DIR/state/current"
+
+  local output exit_code=0
+  output=$(resolve_spec_label "" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/current is empty"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "empty"; then
+    test_pass "Error message mentions empty state/current"
+  else
+    test_fail "Error message should mention 'empty', got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: resolve_spec_label explicit label takes precedence over state/current
+test_resolve_spec_label_explicit_overrides_current() {
+  CURRENT_TEST="resolve_spec_label_explicit_overrides_current"
+  test_header "resolve_spec_label: explicit overrides state/current"
+
+  setup_test_env "resolve-spec-label-override"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # state/current points to a different label
+  echo "old-feature" > "$RALPH_DIR/state/current"
+  echo '{"label":"old-feature","hidden":false}' > "$RALPH_DIR/state/old-feature.json"
+  echo '{"label":"new-feature","hidden":false}' > "$RALPH_DIR/state/new-feature.json"
+
+  local result
+  result=$(resolve_spec_label "new-feature")
+
+  if [ "$result" = "new-feature" ]; then
+    test_pass "Explicit label overrides state/current"
+  else
+    test_fail "Expected 'new-feature', got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -5733,6 +5955,13 @@ ALL_TESTS=(
   test_spec_summary_line
   test_spec_nonzero_exit
   test_spec_skip_empty
+  test_resolve_spec_label_explicit
+  test_resolve_spec_label_from_current
+  test_resolve_spec_label_trims_whitespace
+  test_resolve_spec_label_no_current
+  test_resolve_spec_label_no_state_json
+  test_resolve_spec_label_empty_current
+  test_resolve_spec_label_explicit_overrides_current
 )
 
 #-----------------------------------------------------------------------------
