@@ -307,8 +307,8 @@ in
           SCRIPT="${wrapix}/bin/wrapix"
 
           # Verify krun detection logic exists
-          grep -q 'WRAPIX_NO_MICROVM' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_NO_MICROVM env var check"; exit 1; }
-          echo "PASS: WRAPIX_NO_MICROVM opt-out supported"
+          grep -q 'WRAPIX_MICROVM' "$SCRIPT" || { echo "FAIL: Missing WRAPIX_MICROVM env var check"; exit 1; }
+          echo "PASS: WRAPIX_MICROVM opt-in supported"
 
           # Verify /dev/kvm detection
           grep -q '/dev/kvm' "$SCRIPT" || { echo "FAIL: Missing /dev/kvm detection"; exit 1; }

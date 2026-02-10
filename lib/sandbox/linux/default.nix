@@ -224,27 +224,19 @@ in
         IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
 
         # Detect krun availability for microVM boundary (see specs/security-review.md)
-        # Default: use krun when available and /dev/kvm exists
-        # WRAPIX_NO_MICROVM=1: explicit opt-out to container boundary
+        # Default: container boundary (krun microVM currently disabled)
+        # WRAPIX_MICROVM=1: explicit opt-in to microVM boundary
         RUNTIME_ARGS=""
-        if [ "''${WRAPIX_NO_MICROVM:-}" = "1" ]; then
-          echo "Note: microVM disabled (WRAPIX_NO_MICROVM=1), using container boundary" >&2
-        elif ! [ -e /dev/kvm ]; then
-          echo "Error: /dev/kvm not found. A microVM boundary requires KVM support." >&2
-          echo "" >&2
-          echo "Options:" >&2
-          echo "  1. Enable KVM (bare metal or nested virtualization)" >&2
-          echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
-          exit 1
-        elif ! command -v krun >/dev/null 2>&1 && ! podman info --format '{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}' 2>/dev/null | grep -q krun; then
-          echo "Error: krun runtime not found. A microVM boundary requires crun with libkrun." >&2
-          echo "" >&2
-          echo "Options:" >&2
-          echo "  1. Install via nix: nix shell nixpkgs#crun nixpkgs#libkrun (or use 'nix run' to get krun bundled)" >&2
-          echo "  2. Set WRAPIX_NO_MICROVM=1 to use container boundary instead" >&2
-          exit 1
-        else
-          RUNTIME_ARGS="--runtime krun"
+        if [ "''${WRAPIX_MICROVM:-}" = "1" ]; then
+          if ! [ -e /dev/kvm ]; then
+            echo "Error: /dev/kvm not found. A microVM boundary requires KVM support." >&2
+            exit 1
+          elif ! command -v krun >/dev/null 2>&1 && ! podman info --format '{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}' 2>/dev/null | grep -q krun; then
+            echo "Error: krun runtime not found. A microVM boundary requires crun with libkrun." >&2
+            exit 1
+          else
+            RUNTIME_ARGS="--runtime krun"
+          fi
         fi
 
         # krun microVM: PTY relay + LD_PRELOAD for root UID
@@ -259,6 +251,7 @@ in
         # claude refuses root) and TIOCGWINSZ fallback.
         KRUN_ENTRYPOINT_ARGS=""
         KRUN_ENV_ARGS=""
+        KRUN_CMD_ENV=""
         if [ -n "$RUNTIME_ARGS" ]; then
           # Capture host terminal dimensions for PTY sizing
           TERM_ROWS=$(stty size 2>/dev/null | awk '{print $1}') || true
@@ -270,9 +263,9 @@ in
           KRUN_ENV_ARGS="-e WRAPIX_TERM_ROWS=$TERM_ROWS -e WRAPIX_TERM_COLS=$TERM_COLS"
 
           # Serialize container command for krun-init.sh (preserves quoting)
+          # Kept separate from KRUN_ENV_ARGS to avoid word-splitting the value
           if [ ''${#CONTAINER_CMD[@]} -gt 0 ]; then
-            KRUN_CMD_ESCAPED=$(printf '%q ' "''${CONTAINER_CMD[@]}")
-            KRUN_ENV_ARGS="$KRUN_ENV_ARGS -e WRAPIX_KRUN_CMD=$KRUN_CMD_ESCAPED"
+            KRUN_CMD_ENV="WRAPIX_KRUN_CMD=$(printf '%q ' "''${CONTAINER_CMD[@]}")"
           fi
 
           # krun-relay execs /krun-init.sh which handles args via WRAPIX_KRUN_CMD
@@ -295,6 +288,7 @@ in
           $BEADS_ARGS \
           $DEPLOY_KEY_ARGS \
           $KRUN_ENV_ARGS \
+          ''${KRUN_CMD_ENV:+-e "$KRUN_CMD_ENV"} \
           -e "BD_NO_DAEMON=1" \
           -e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}" \
           -e "RALPH_MODE=''${RALPH_MODE:-}" \

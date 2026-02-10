@@ -168,9 +168,9 @@ run_verify_wrapix_test() {
   project_dir="$(pwd)"
 
   if [ -n "$function_name" ]; then
-    test_output=$(WRAPIX_NO_MICROVM=1 nix run .#wrapix-debug -- "$project_dir" bash -c "source $container_file_path && $function_name" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(nix run .#wrapix-debug -- "$project_dir" bash -c "source $container_file_path && $function_name" 2>&1) && exit_code=0 || exit_code=$?
   else
-    test_output=$(WRAPIX_NO_MICROVM=1 nix run .#wrapix-debug -- "$project_dir" "$container_file_path" 2>&1) && exit_code=0 || exit_code=$?
+    test_output=$(nix run .#wrapix-debug -- "$project_dir" "$container_file_path" 2>&1) && exit_code=0 || exit_code=$?
   fi
 
   if [ "$exit_code" -eq 0 ]; then

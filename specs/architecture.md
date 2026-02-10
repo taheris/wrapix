@@ -48,7 +48,7 @@ lib/
 
 ### MicroVM Boundary (Linux)
 
-On Linux with KVM, containers run inside a [libkrun](https://github.com/containers/libkrun) microVM (`podman --runtime krun`) for hardware-level isolation. krun's virtio console doesn't support terminal raw mode, so a PTY relay (`krun-relay`) runs as PID 1 inside the VM to provide a real PTY for Claude Code's TUI. An LD_PRELOAD library (`libfakeuid.so`) spoofs the UID since krun maps the host user to root. Set `WRAPIX_NO_MICROVM=1` to fall back to container-only isolation.
+On Linux with KVM, containers can optionally run inside a [libkrun](https://github.com/containers/libkrun) microVM (`podman --runtime krun`) for hardware-level isolation. Set `WRAPIX_MICROVM=1` to opt in. krun's virtio console doesn't support terminal raw mode, so a PTY relay (`krun-relay`) runs as PID 1 inside the VM to provide a real PTY for Claude Code's TUI. An LD_PRELOAD library (`libfakeuid.so`) spoofs the UID since krun maps the host user to root.
 
 ## Component Overview
 
