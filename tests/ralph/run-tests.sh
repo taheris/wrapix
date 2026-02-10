@@ -6028,6 +6028,198 @@ test_resolve_spec_label_explicit_overrides_current() {
 }
 
 #-----------------------------------------------------------------------------
+# ralph use Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph use switches active workflow with valid spec and state
+test_use_switches_active_workflow() {
+  CURRENT_TEST="use_switches_active_workflow"
+  test_header "ralph use: switches active workflow"
+
+  setup_test_env "use-switch"
+
+  # Create spec file and state JSON
+  create_test_spec "my-feature"
+  setup_label_state "my-feature"
+
+  # Set current to something else first
+  echo "other-feature" > "$RALPH_DIR/state/current"
+
+  # Run ralph use
+  local output exit_code=0
+  output=$(ralph-use "my-feature" 2>&1) || exit_code=$?
+
+  assert_exit_code 0 "$exit_code" "ralph use should succeed"
+
+  # Verify state/current was updated
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "my-feature" ]; then
+    test_pass "state/current updated to 'my-feature'"
+  else
+    test_fail "Expected state/current to be 'my-feature', got '$current'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph use works with hidden spec (state/<name>.md)
+test_use_hidden_spec() {
+  CURRENT_TEST="use_hidden_spec"
+  test_header "ralph use: works with hidden spec"
+
+  setup_test_env "use-hidden"
+
+  # Create hidden spec file (in state/) and state JSON
+  echo "# Hidden Feature" > "$RALPH_DIR/state/hidden-feature.md"
+  echo '{"label":"hidden-feature","hidden":true,"spec_path":".wrapix/ralph/state/hidden-feature.md"}' > "$RALPH_DIR/state/hidden-feature.json"
+
+  # Run ralph use
+  local output exit_code=0
+  output=$(ralph-use "hidden-feature" 2>&1) || exit_code=$?
+
+  assert_exit_code 0 "$exit_code" "ralph use should succeed with hidden spec"
+
+  local current
+  current=$(<"$RALPH_DIR/state/current")
+  if [ "$current" = "hidden-feature" ]; then
+    test_pass "state/current updated to 'hidden-feature'"
+  else
+    test_fail "Expected state/current to be 'hidden-feature', got '$current'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph use errors when spec file does not exist
+test_use_missing_spec() {
+  CURRENT_TEST="use_missing_spec"
+  test_header "ralph use: error when spec missing"
+
+  setup_test_env "use-missing-spec"
+
+  # Create state JSON but no spec file
+  echo '{"label":"no-spec","hidden":false}' > "$RALPH_DIR/state/no-spec.json"
+
+  # Run ralph use
+  local output exit_code=0
+  output=$(ralph-use "no-spec" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when spec missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "spec not found"; then
+    test_pass "Error message mentions spec not found"
+  else
+    test_fail "Error message should mention 'spec not found', got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph use errors when state/<name>.json does not exist
+test_use_missing_state_json() {
+  CURRENT_TEST="use_missing_state_json"
+  test_header "ralph use: error when state JSON missing"
+
+  setup_test_env "use-missing-json"
+
+  # Create spec file but no state JSON
+  create_test_spec "orphan-feature"
+
+  # Run ralph use
+  local output exit_code=0
+  output=$(ralph-use "orphan-feature" 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state JSON missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "workflow state not found"; then
+    test_pass "Error message mentions workflow state not found"
+  else
+    test_fail "Error message should mention 'workflow state not found', got: $output"
+  fi
+
+  if echo "$output" | grep -q "ralph plan"; then
+    test_pass "Error message suggests running ralph plan"
+  else
+    test_fail "Error message should suggest 'ralph plan', got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph use errors when no label argument provided
+test_use_no_label() {
+  CURRENT_TEST="use_no_label"
+  test_header "ralph use: error when no label provided"
+
+  setup_test_env "use-no-label"
+
+  # Run ralph use with no arguments
+  local output exit_code=0
+  output=$(ralph-use 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when no label provided"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "label is required"; then
+    test_pass "Error message mentions label is required"
+  else
+    test_fail "Error message should mention 'label is required', got: $output"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph use writes plain text (no JSON, no extension)
+test_use_writes_plain_text() {
+  CURRENT_TEST="use_writes_plain_text"
+  test_header "ralph use: writes plain text to state/current"
+
+  setup_test_env "use-plain-text"
+
+  # Create spec and state
+  create_test_spec "plain-test"
+  setup_label_state "plain-test"
+
+  # Run ralph use
+  ralph-use "plain-test" >/dev/null 2>&1
+
+  # Verify state/current is plain text (not JSON)
+  local content
+  content=$(<"$RALPH_DIR/state/current")
+  if [ "$content" = "plain-test" ]; then
+    test_pass "state/current contains plain label text"
+  else
+    test_fail "Expected 'plain-test', got '$content'"
+  fi
+
+  # Verify it's not JSON
+  if echo "$content" | jq empty 2>/dev/null; then
+    # If it parses as JSON AND has braces, it's JSON (a bare string also parses as JSON in some jq versions)
+    if echo "$content" | grep -q '{'; then
+      test_fail "state/current should not be JSON"
+    else
+      test_pass "state/current is not JSON object"
+    fi
+  else
+    test_pass "state/current is not JSON"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -6113,6 +6305,12 @@ ALL_TESTS=(
   test_resolve_spec_label_no_state_json
   test_resolve_spec_label_empty_current
   test_resolve_spec_label_explicit_overrides_current
+  test_use_switches_active_workflow
+  test_use_hidden_spec
+  test_use_missing_spec
+  test_use_missing_state_json
+  test_use_no_label
+  test_use_writes_plain_text
 )
 
 #-----------------------------------------------------------------------------

@@ -15,6 +15,7 @@ case "$COMMAND" in
   sync)   exec ralph-sync   "$@" ;;
   todo)   exec ralph-todo   "$@" ;;
   tune)   exec ralph-tune   "$@" ;;
+  use)    exec ralph-use    "$@" ;;
 
   edit)
       # Get current label and hidden flag from current.json
@@ -62,6 +63,7 @@ case "$COMMAND" in
     echo "    --judge         Run [judge] LLM evaluations"
     echo "    --all           Run both verify and judge"
     echo "  status          Show current workflow state"
+    echo "  use <name>      Switch active workflow"
     echo ""
     echo "Template Commands:"
     echo "  check           Validate all templates (syntax, partials, rendering)"
