@@ -1,21 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph todo
+# ralph todo [--spec <name>|-s <name>]
 # Converts spec to beads with task breakdown
+# - Accepts --spec/-s flag to target a specific workflow
 # - Pins context by reading specs/README.md
-# - Reads current spec from state
+# - Reads spec from per-label state file (state/<label>.json)
 # - Analyzes spec and creates task breakdown
 # - Creates parent/epic bead, then child tasks
 # - Updates specs/README.md WIP table with parent bead ID
 # - Finalizes spec to specs/ (stripping Implementation Notes section)
+
+# Parse --spec/-s flag early (before container detection, so it's included in RALPH_ARGS)
+SPEC_FLAG=""
+TODO_ARGS=()
+
+for arg in "$@"; do
+  if [ "${_next_is_spec:-}" = "1" ]; then
+    SPEC_FLAG="$arg"
+    unset _next_is_spec
+    continue
+  fi
+  case "$arg" in
+    --spec|-s)
+      _next_is_spec=1
+      ;;
+    --spec=*)
+      SPEC_FLAG="${arg#--spec=}"
+      ;;
+    *)
+      TODO_ARGS+=("$arg")
+      ;;
+  esac
+done
+unset _next_is_spec
+
+# Replace positional params with filtered args
+set -- "${TODO_ARGS[@]+"${TODO_ARGS[@]}"}"
 
 # Container detection: if not in container and wrapix is available, re-launch in container
 # /etc/wrapix/claude-config.json only exists inside containers (baked into image)
 if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; then
   export RALPH_MODE=1
   export RALPH_CMD=todo
-  export RALPH_ARGS="${*:-}"
+  # Preserve --spec flag in args for container re-exec
+  if [ -n "$SPEC_FLAG" ]; then
+    export RALPH_ARGS="--spec $SPEC_FLAG ${*:-}"
+  else
+    export RALPH_ARGS="${*:-}"
+  fi
   exec wrapix
 fi
 
@@ -35,20 +68,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-# Get label, hidden flag, and update mode from state
-CURRENT_FILE="$RALPH_DIR/state/current.json"
-if [ ! -f "$CURRENT_FILE" ]; then
-  echo "Error: No current.json found. Run 'ralph plan <label>' first."
-  exit 1
-fi
-LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
-SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
-UPDATE_MODE=$(jq -r '.update // false' "$CURRENT_FILE")
+# Resolve the spec label using --spec flag or state/current
+LABEL=$(resolve_spec_label "$SPEC_FLAG")
 
-if [ -z "$LABEL" ]; then
-  echo "Error: No label in current.json. Run 'ralph plan <label>' first."
-  exit 1
-fi
+# Read state from per-label state file: state/<label>.json
+STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
+SPEC_HIDDEN=$(jq -r '.hidden // false' "$STATE_FILE")
+UPDATE_MODE=$(jq -r '.update // false' "$STATE_FILE")
 
 # Load config for stream filter
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")
@@ -108,10 +134,10 @@ if [ -f "$SPECS_README" ]; then
 fi
 
 # Extract title from spec file (first heading)
-SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$SPEC_NAME")
+SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$LABEL")
 
-# Get molecule ID from current.json (for update mode)
-MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE")
+# Get molecule ID from per-label state file (for update mode)
+MOLECULE_ID=$(jq -r '.molecule // empty' "$STATE_FILE")
 
 # Count existing tasks (for status display in update mode)
 EXISTING_COUNT=0
@@ -132,7 +158,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
     echo "  Mode: UPDATE (creating molecule for existing spec)"
     echo "  Creating epic..."
     MOLECULE_ID=$(bd create --type=epic --title="$SPEC_TITLE" --labels="spec-$LABEL" --silent)
-    jq --arg mol "$MOLECULE_ID" '.molecule = $mol' "$CURRENT_FILE" > "$CURRENT_FILE.tmp" && mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
+    jq --arg mol "$MOLECULE_ID" '.molecule = $mol' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
     echo "  Molecule: $MOLECULE_ID"
   fi
   echo "  Existing tasks: $EXISTING_COUNT"
@@ -176,7 +202,7 @@ else
     "LABEL=$LABEL" \
     "SPEC_PATH=$SPEC_PATH" \
     "SPEC_CONTENT=$SPEC_CONTENT" \
-    "CURRENT_FILE=$CURRENT_FILE" \
+    "CURRENT_FILE=$STATE_FILE" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
     "EXIT_SIGNALS=")
@@ -254,7 +280,7 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
   fi
 
   # Display the molecule ID if available
-  STORED_MOLECULE=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
+  STORED_MOLECULE=$(jq -r '.molecule // empty' "$STATE_FILE" 2>/dev/null || true)
   if [ -n "$STORED_MOLECULE" ]; then
     echo ""
     echo "Molecule ID: $STORED_MOLECULE"

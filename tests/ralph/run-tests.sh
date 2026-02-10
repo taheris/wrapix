@@ -6220,6 +6220,186 @@ test_use_writes_plain_text() {
 }
 
 #-----------------------------------------------------------------------------
+# ralph todo --spec Tests
+#-----------------------------------------------------------------------------
+
+# Test: ralph todo --spec reads from named state file instead of state/current
+test_todo_spec_flag_reads_named_state() {
+  CURRENT_TEST="todo_spec_flag_reads_named_state"
+  test_header "ralph todo --spec: reads named state/<label>.json"
+
+  setup_test_env "todo-spec-flag"
+
+  # Create two workflows: "active" is current, "target" is what --spec points at
+  create_test_spec "active-feature"
+  setup_label_state "active-feature"
+
+  create_test_spec "target-feature"
+  echo '{"label":"target-feature","update":false,"hidden":false,"spec_path":"specs/target-feature.md"}' \
+    > "$RALPH_DIR/state/target-feature.json"
+
+  # state/current points to active-feature
+  echo "active-feature" > "$RALPH_DIR/state/current"
+
+  # Run ralph todo with --spec targeting the other workflow
+  # It will fail at nix eval (no real nix config), but we can check it gets past
+  # label resolution by inspecting output
+  local output exit_code=0
+  output=$(ralph-todo --spec target-feature 2>&1) || exit_code=$?
+
+  # The script should resolve the label to "target-feature" (not "active-feature")
+  # It may fail later (e.g., nix eval), but the label should be in the output
+  if echo "$output" | grep -q "Label: target-feature"; then
+    test_pass "todo --spec resolves to target-feature label"
+  elif echo "$output" | grep -q "target-feature"; then
+    test_pass "todo --spec targets correct feature"
+  else
+    test_fail "Expected output to reference 'target-feature', got: ${output:0:300}"
+  fi
+
+  # Verify it did NOT use active-feature
+  if echo "$output" | grep -q "Label: active-feature"; then
+    test_fail "Should not use active-feature when --spec target-feature given"
+  else
+    test_pass "Does not use active-feature when --spec given"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph todo -s (short form) works like --spec
+test_todo_spec_short_flag() {
+  CURRENT_TEST="todo_spec_short_flag"
+  test_header "ralph todo -s: short form of --spec"
+
+  setup_test_env "todo-spec-short"
+
+  create_test_spec "short-test"
+  echo '{"label":"short-test","update":false,"hidden":false,"spec_path":"specs/short-test.md"}' \
+    > "$RALPH_DIR/state/short-test.json"
+  echo "short-test" > "$RALPH_DIR/state/current"
+
+  local output exit_code=0
+  output=$(ralph-todo -s short-test 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Label: short-test"; then
+    test_pass "todo -s resolves correctly"
+  elif echo "$output" | grep -q "short-test"; then
+    test_pass "todo -s targets correct feature"
+  else
+    test_fail "Expected output to reference 'short-test', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph todo without --spec falls back to state/current
+test_todo_no_spec_uses_current() {
+  CURRENT_TEST="todo_no_spec_uses_current"
+  test_header "ralph todo: falls back to state/current when no --spec"
+
+  setup_test_env "todo-no-spec"
+
+  create_test_spec "current-feature"
+  setup_label_state "current-feature"
+
+  local output exit_code=0
+  output=$(ralph-todo 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Label: current-feature"; then
+    test_pass "todo without --spec uses current-feature from state/current"
+  elif echo "$output" | grep -q "current-feature"; then
+    test_pass "todo without --spec targets correct feature"
+  else
+    test_fail "Expected output to reference 'current-feature', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph todo --spec errors when state/<label>.json missing
+test_todo_spec_flag_missing_state_json() {
+  CURRENT_TEST="todo_spec_flag_missing_state_json"
+  test_header "ralph todo --spec: error when state/<label>.json missing"
+
+  setup_test_env "todo-spec-missing-json"
+
+  # Create spec but no state JSON
+  create_test_spec "orphan-spec"
+
+  local output exit_code=0
+  output=$(ralph-todo --spec orphan-spec 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when state/<label>.json missing"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "workflow state not found\|state.*not found"; then
+    test_pass "Error message references missing state file"
+  else
+    test_fail "Expected error about missing state, got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph todo --spec errors when state/current missing and no --spec
+test_todo_no_spec_no_current_errors() {
+  CURRENT_TEST="todo_no_spec_no_current_errors"
+  test_header "ralph todo: error when no --spec and no state/current"
+
+  setup_test_env "todo-no-current"
+
+  # Remove state/current if it exists
+  rm -f "$RALPH_DIR/state/current"
+
+  local output exit_code=0
+  output=$(ralph-todo 2>&1) || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Exits with error when no state/current and no --spec"
+  else
+    test_fail "Should exit with error, but got exit code 0"
+  fi
+
+  if echo "$output" | grep -qi "no active workflow\|state/current"; then
+    test_pass "Error message references missing state/current"
+  else
+    test_fail "Expected error about missing state/current, got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph todo --spec=value (equals form) works
+test_todo_spec_equals_form() {
+  CURRENT_TEST="todo_spec_equals_form"
+  test_header "ralph todo --spec=value: equals form"
+
+  setup_test_env "todo-spec-equals"
+
+  create_test_spec "equals-test"
+  echo '{"label":"equals-test","update":false,"hidden":false,"spec_path":"specs/equals-test.md"}' \
+    > "$RALPH_DIR/state/equals-test.json"
+  echo "equals-test" > "$RALPH_DIR/state/current"
+
+  local output exit_code=0
+  output=$(ralph-todo --spec=equals-test 2>&1) || exit_code=$?
+
+  if echo "$output" | grep -q "Label: equals-test"; then
+    test_pass "todo --spec=value resolves correctly"
+  elif echo "$output" | grep -q "equals-test"; then
+    test_pass "todo --spec=value targets correct feature"
+  else
+    test_fail "Expected output to reference 'equals-test', got: ${output:0:300}"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -6311,6 +6491,12 @@ ALL_TESTS=(
   test_use_missing_state_json
   test_use_no_label
   test_use_writes_plain_text
+  test_todo_spec_flag_reads_named_state
+  test_todo_spec_short_flag
+  test_todo_no_spec_uses_current
+  test_todo_spec_flag_missing_state_json
+  test_todo_no_spec_no_current_errors
+  test_todo_spec_equals_form
 )
 
 #-----------------------------------------------------------------------------
