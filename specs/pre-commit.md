@@ -68,7 +68,7 @@ Update `config.nix` with simplified hook structure:
   hooks = {
     pre-loop = "prek run";
     pre-step = "bd sync";
-    post-step = "prek run && git add -A && bd sync";
+    post-step = "prek run";
     post-loop = ''
       bd sync
       git diff --quiet || { echo "Error: worktree is dirty; commit or stash before pushing" >&2; exit 1; }
