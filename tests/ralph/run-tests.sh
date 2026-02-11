@@ -4998,6 +4998,40 @@ test_parse_annotation_link() {
     test_fail "Expected empty function name, got '$function_name'"
   fi
 
+  # Test path#function format (new-style)
+  output=$(parse_annotation_link "tests/notify-test.sh#test_notification_timing")
+  file_path=$(echo "$output" | sed -n '1p')
+  function_name=$(echo "$output" | sed -n '2p')
+
+  if [ "$file_path" = "tests/notify-test.sh" ]; then
+    test_pass "Extracts file path from path#function"
+  else
+    test_fail "Expected file path 'tests/notify-test.sh', got '$file_path'"
+  fi
+
+  if [ "$function_name" = "test_notification_timing" ]; then
+    test_pass "Extracts function name from path#function"
+  else
+    test_fail "Expected function name 'test_notification_timing', got '$function_name'"
+  fi
+
+  # Test spec-relative path resolution
+  output=$(parse_annotation_link "../tests/notify-test.sh#test_notification_timing" "specs")
+  file_path=$(echo "$output" | sed -n '1p')
+  function_name=$(echo "$output" | sed -n '2p')
+
+  if [ "$file_path" = "tests/notify-test.sh" ]; then
+    test_pass "Resolves spec-relative path to repo-root-relative"
+  else
+    test_fail "Expected resolved path 'tests/notify-test.sh', got '$file_path'"
+  fi
+
+  if [ "$function_name" = "test_notification_timing" ]; then
+    test_pass "Function name preserved with spec-relative path"
+  else
+    test_fail "Expected function name 'test_notification_timing', got '$function_name'"
+  fi
+
   # Test empty input
   if ! parse_annotation_link "" 2>/dev/null; then
     test_pass "Returns error for empty input"

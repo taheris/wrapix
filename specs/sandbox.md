@@ -73,15 +73,15 @@ mkSandbox {
 ## Success Criteria
 
 - [ ] Container starts on both Linux and macOS
-  [verify:wrapix](tests/darwin/uid-test.sh)
+  [verify:wrapix](../tests/darwin/uid-test.sh)
 - [ ] Files created in /workspace have correct host ownership
-  [verify:wrapix](tests/darwin/uid-test.sh)
+  [verify:wrapix](../tests/darwin/uid-test.sh)
 - [ ] Claude Code can access internet for research
-  [verify:wrapix](tests/darwin/network-test.sh)
+  [verify:wrapix](../tests/darwin/network-test.sh)
 - [ ] Host filesystem outside /workspace is inaccessible
-  [verify:wrapix](tests/darwin/mount-test.sh)
+  [verify:wrapix](../tests/darwin/mount-test.sh)
 - [ ] Custom mounts and environment variables work
-  [verify:wrapix](tests/darwin/mount-test.sh)
+  [verify:wrapix](../tests/darwin/mount-test.sh)
 
 ## Out of Scope
 
