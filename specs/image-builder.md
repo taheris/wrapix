@@ -71,15 +71,15 @@ mkImage {
 ## Success Criteria
 
 - [ ] Generated images are valid OCI format
-  [judge](tests/judges/image-builder.sh::test_oci_format)
+  [judge](../tests/judges/image-builder.sh#test_oci_format)
 - [ ] All profile packages are available in container
-  [judge](tests/judges/image-builder.sh::test_profile_packages)
+  [judge](../tests/judges/image-builder.sh#test_profile_packages)
 - [ ] Claude Code starts correctly
-  [judge](tests/judges/image-builder.sh::test_claude_code_starts)
+  [judge](../tests/judges/image-builder.sh#test_claude_code_starts)
 - [ ] Nix commands work inside container
-  [judge](tests/judges/image-builder.sh::test_nix_in_container)
+  [judge](../tests/judges/image-builder.sh#test_nix_in_container)
 - [ ] HTTPS connections succeed (CA certs present)
-  [verify:wrapix](tests/darwin/network-test.sh)
+  [verify:wrapix](../tests/darwin/network-test.sh)
 
 ## Out of Scope
 

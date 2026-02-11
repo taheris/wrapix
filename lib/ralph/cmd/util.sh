@@ -742,12 +742,15 @@ resolve_partials() {
   echo "$result"
 }
 
-# Parse annotation link in 'path::function' format
-# Usage: parse_annotation_link "tests/notify-test.sh::test_notification_timing"
-# Output: two lines: file_path and function_name (function_name empty if no ::)
+# Parse annotation link in 'path#function' or legacy 'path::function' format
+# Usage: parse_annotation_link "tests/notify-test.sh#test_notification_timing"
+#        parse_annotation_link "../tests/notify-test.sh#test_timing" "specs"
+# Output: two lines: file_path and function_name (function_name empty if no separator)
+# When spec_dir is provided, resolves relative paths (e.g. ../tests/foo.sh -> tests/foo.sh)
 # Returns: 0 on valid input, 1 on empty input
 parse_annotation_link() {
   local link="$1"
+  local spec_dir="${2:-}"
 
   if [ -z "$link" ]; then
     warn "Empty annotation link"
@@ -755,12 +758,27 @@ parse_annotation_link() {
   fi
 
   local file_path function_name
-  if [[ "$link" == *"::"* ]]; then
+  # Support # (primary) or :: (legacy) as separator
+  if [[ "$link" == *"#"* ]]; then
+    file_path="${link%%#*}"
+    function_name="${link#*#}"
+  elif [[ "$link" == *"::"* ]]; then
     file_path="${link%%::*}"
     function_name="${link#*::}"
   else
     file_path="$link"
     function_name=""
+  fi
+
+  # Resolve spec-relative paths to repo-root-relative
+  if [ -n "$spec_dir" ] && [[ "$file_path" == ../* ]]; then
+    # Combine spec_dir with relative path and normalize ../
+    local combined="${spec_dir}/${file_path}"
+    # Repeatedly collapse "dir/../" segments
+    while [[ "$combined" == *"/../"* || "$combined" == *"/.." ]]; do
+      combined=$(echo "$combined" | sed 's|[^/][^/]*/\.\./||; s|[^/][^/]*/\.\.$||')
+    done
+    file_path="$combined"
   fi
 
   echo "$file_path"
@@ -788,6 +806,10 @@ parse_spec_annotations() {
     warn "Spec file not found: $spec_file"
     return 1
   fi
+
+  # Get the directory containing the spec file for resolving relative paths
+  local spec_dir
+  spec_dir=$(dirname "$spec_file")
 
   local in_criteria=0
   local prev_criterion=""
@@ -852,15 +874,11 @@ parse_spec_annotations() {
       fi
 
       if [ -n "$ann_type" ]; then
-        # Parse the annotation link
-        local file_path="" function_name=""
-        if [[ "$ann_target" == *"::"* ]]; then
-          file_path="${ann_target%%::*}"
-          function_name="${ann_target#*::}"
-        else
-          file_path="$ann_target"
-          function_name=""
-        fi
+        # Parse the annotation link using parse_annotation_link with spec dir
+        local parsed_output file_path function_name
+        parsed_output=$(parse_annotation_link "$ann_target" "$spec_dir")
+        file_path=$(echo "$parsed_output" | sed -n '1p')
+        function_name=$(echo "$parsed_output" | sed -n '2p')
         printf '%s\t%s\t%s\t%s\t%s\n' "$prev_criterion" "$ann_type" "$file_path" "$function_name" "$prev_checked"
         prev_criterion=""
         prev_checked=""

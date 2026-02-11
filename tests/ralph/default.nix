@@ -1418,6 +1418,36 @@ templateTests
         fi
         echo "PASS: path-only parsed correctly"
 
+        echo "Test: path#function format (new-style)..."
+        output=$(parse_annotation_link "tests/notify-test.sh#test_notification_timing")
+        file_path=$(echo "$output" | sed -n '1p')
+        function_name=$(echo "$output" | sed -n '2p')
+
+        if [ "$file_path" != "tests/notify-test.sh" ]; then
+          echo "FAIL: Expected file path 'tests/notify-test.sh', got '$file_path'"
+          exit 1
+        fi
+        if [ "$function_name" != "test_notification_timing" ]; then
+          echo "FAIL: Expected function 'test_notification_timing', got '$function_name'"
+          exit 1
+        fi
+        echo "PASS: path#function parsed correctly"
+
+        echo "Test: spec-relative path resolution..."
+        output=$(parse_annotation_link "../tests/notify-test.sh#test_notification_timing" "specs")
+        file_path=$(echo "$output" | sed -n '1p')
+        function_name=$(echo "$output" | sed -n '2p')
+
+        if [ "$file_path" != "tests/notify-test.sh" ]; then
+          echo "FAIL: Expected resolved path 'tests/notify-test.sh', got '$file_path'"
+          exit 1
+        fi
+        if [ "$function_name" != "test_notification_timing" ]; then
+          echo "FAIL: Expected function 'test_notification_timing', got '$function_name'"
+          exit 1
+        fi
+        echo "PASS: spec-relative path resolved correctly"
+
         echo "Test: empty input returns error..."
         if parse_annotation_link "" 2>/dev/null; then
           echo "FAIL: Should return error for empty input"

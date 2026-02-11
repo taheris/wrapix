@@ -418,23 +418,23 @@ nix flake check
 ## Success Criteria
 
 - [ ] Pane lifecycle works: Create, list, kill panes successfully
-  [verify:wrapix](tests/tmux-mcp/test_create_pane.sh)
+  [verify:wrapix](../tests/tmux-mcp/test_create_pane.sh)
 - [ ] I/O works: Send keys and capture output accurately
-  [verify:wrapix](tests/tmux-mcp/test_send_keys.sh)
+  [verify:wrapix](../tests/tmux-mcp/test_send_keys.sh)
 - [ ] Exited pane visibility: Exited panes show status and allow final output capture
-  [verify:wrapix](tests/tmux-mcp/test_exited_pane.sh)
+  [verify:wrapix](../tests/tmux-mcp/test_exited_pane.sh)
 - [ ] Context isolation: Main session has 0 token overhead; debug subagent ~1.5k
-  [judge](tests/judges/tmux-mcp.sh::test_context_isolation)
+  [judge](../tests/judges/tmux-mcp.sh#test_context_isolation)
 - [ ] Sandbox contained: All pane commands run within wrapix isolation
-  [verify:wrapix](tests/tmux-mcp/e2e/test_filesystem_isolation.sh)
+  [verify:wrapix](../tests/tmux-mcp/e2e/test_filesystem_isolation.sh)
 - [ ] Audit works: When enabled, all operations logged correctly
-  [verify:wrapix](tests/tmux-mcp/test_audit_log.sh)
+  [verify:wrapix](../tests/tmux-mcp/test_audit_log.sh)
 - [ ] Cleanup: Panes and session terminated on MCP server exit
-  [verify:wrapix](tests/tmux-mcp/test_cleanup_on_exit.sh)
+  [verify:wrapix](../tests/tmux-mcp/test_cleanup_on_exit.sh)
 - [ ] MCP integration: MCP servers integrate cleanly with any profile via `mcp` parameter
-  [verify:wrapix](tests/tmux-mcp/e2e/test_profile_composition.sh)
+  [verify:wrapix](../tests/tmux-mcp/e2e/test_profile_composition.sh)
 - [ ] Tests pass: All unit, integration, and e2e tests pass
-  [verify:wrapix](tests/tmux-mcp/run-integration.sh)
+  [verify:wrapix](../tests/tmux-mcp/run-integration.sh)
 
 ## Out of Scope
 
