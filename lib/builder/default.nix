@@ -298,17 +298,17 @@ let
 
       cmd_setup_routes() {
         # Get the container network subnet from the default network
-        # JSON has escaped slashes: "address":"192.168.64.0\/24"
+        # JSON has escaped slashes: "ipv4Subnet":"192.168.65.0\/24"
         # Note: container commands must run as original user when script is run with sudo
         local network
         if [ -n "''${SUDO_USER:-}" ]; then
           network=$(sudo -u "$SUDO_USER" container network inspect default 2>/dev/null | \
-            grep -oE '"address":"[0-9./\\]+"' | head -1 | \
-            sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+            grep -oE '"ipv4Subnet":"[0-9./\\]+"' | head -1 | \
+            sed 's/.*"ipv4Subnet":"//' | sed 's/"$//' | sed 's/\\//g')
         else
           network=$(container network inspect default 2>/dev/null | \
-            grep -oE '"address":"[0-9./\\]+"' | head -1 | \
-            sed 's/.*"address":"//' | sed 's/"$//' | sed 's/\\//g')
+            grep -oE '"ipv4Subnet":"[0-9./\\]+"' | head -1 | \
+            sed 's/.*"ipv4Subnet":"//' | sed 's/"$//' | sed 's/\\//g')
         fi
         if [ -z "$network" ]; then
           echo "Error: Could not determine container network subnet"
@@ -317,8 +317,8 @@ let
         fi
 
         echo "Fixing route for container network $network..."
-        route delete "$network" 2>/dev/null || true
-        route add "$network" -interface bridge100
+        route delete -net "$network" 2>/dev/null || true
+        route add -net "$network" -interface bridge100
         echo "Route configured successfully"
       }
 
