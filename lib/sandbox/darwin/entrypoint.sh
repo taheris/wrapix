@@ -168,10 +168,9 @@ if [ -f /workspace/.beads/config.yaml ]; then
     DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
     if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_REMOTE" ]; then
       # Dolt mode: clone dolt-remote as working database with proper tracking refs
-      # bd names the database directory "beads_${PREFIX}"
-      DOLT_DB="/workspace/.beads/dolt/beads_${PREFIX}"
+      # bd connects to database "beads" (the directory name under .beads/dolt/)
       mkdir -p /workspace/.beads/dolt
-      dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" 2>/dev/null || true
+      dolt clone "file://$DOLT_REMOTE" /workspace/.beads/dolt/beads 2>/dev/null || true
       # Defensive: restore .gitignore in case future changes overwrite it
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
