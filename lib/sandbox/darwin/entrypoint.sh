@@ -164,16 +164,29 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
     BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
-    # Dolt remote lives in beads branch worktree
+    # Dolt database setup: bd connects to database "beads" (directory under .beads/dolt/)
+    # The beads branch stores a pre-cloned snapshot (dolt-snapshot/) and bare noms
+    # remote (dolt-remote/). The worktree may have a broken gitdir in containers,
+    # so we extract from the beads branch via git when the worktree isn't usable.
+    DOLT_SNAPSHOT="/workspace/.git/beads-worktrees/beads/.beads/dolt-snapshot"
     DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
-    if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_REMOTE" ]; then
-      # Dolt mode: clone dolt-remote as working database with proper tracking refs
-      # bd connects to database "beads_${PREFIX}" (the directory name under .beads/dolt/)
+    DOLT_DB="/workspace/.beads/dolt/beads"
+    if [ "$BACKEND" = "dolt" ] && [ ! -d "$DOLT_DB" ]; then
       mkdir -p /workspace/.beads/dolt
-      dolt clone "file://$DOLT_REMOTE" "/workspace/.beads/dolt/beads_${PREFIX}" 2>/dev/null || true
-      # Defensive: restore .gitignore in case future changes overwrite it
+      if [ -d "$DOLT_SNAPSHOT/.dolt" ]; then
+        cp -r "$DOLT_SNAPSHOT" "$DOLT_DB"
+      elif git ls-tree beads -- .beads/dolt-snapshot/.dolt/repo_state.json &>/dev/null; then
+        # Extract snapshot from beads branch (worktree gitdir broken in container)
+        while IFS=$'\t' read -r _mode _type _hash path; do
+          rel="${path#.beads/dolt-snapshot/}"
+          mkdir -p "$DOLT_DB/$(dirname "$rel")"
+          git show "beads:$path" > "$DOLT_DB/$rel"
+        done < <(git ls-tree -r beads -- .beads/dolt-snapshot/)
+      elif [ -d "$DOLT_REMOTE" ] && command -v dolt &>/dev/null; then
+        dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" 2>/dev/null || true
+      fi
       git checkout -- .beads/.gitignore 2>/dev/null || true
-    elif [ -f /workspace/.beads/issues.jsonl ]; then
+    elif [ "$BACKEND" != "dolt" ] && [ -f /workspace/.beads/issues.jsonl ]; then
       # Legacy fallback: init from JSONL (pre-Dolt repos)
       bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
     fi
