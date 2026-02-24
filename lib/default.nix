@@ -36,6 +36,11 @@ in
       inherit packages;
       shellHook = ''
         ${shellHook}
+        # Configure Dolt origin remote for bd dolt pull/push (no-op if already set)
+        if [ -d .beads/dolt/beads/.dolt ] && [ -d .git/beads-worktrees/beads/.beads/dolt-remote ]; then
+          (cd .beads/dolt/beads && dolt remote add origin "file://$PWD/.git/beads-worktrees/beads/.beads/dolt-remote" 2>/dev/null || true)
+        fi
+
         # Ensure prek owns .git/hooks/ — bd hooks install can overwrite the shim
         if [ -d .git ] && ! grep -q 'prek' .git/hooks/pre-commit 2>/dev/null; then
           echo "Installing prek hooks (bd shim detected or hooks missing)..."
