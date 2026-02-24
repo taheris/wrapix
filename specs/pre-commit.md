@@ -32,10 +32,10 @@ Configure `.pre-commit-config.yaml` with staged hooks:
 
 | Stage | Hooks | Purpose |
 |-------|-------|---------|
-| pre-commit | bd sync, nixfmt, shellcheck, builtin hooks | Fast validation on every commit |
+| pre-commit | bd dolt pull, nixfmt, shellcheck, builtin hooks | Fast validation on every commit |
 | prepare-commit-msg | bd agent trailers | Add agent identity to commits |
-| post-checkout | bd import | Import JSONL after branch switch |
-| post-merge | bd import | Import JSONL after pull/merge |
+| post-checkout | bd dolt pull | Pull Dolt state after branch switch |
+| post-merge | bd dolt pull | Pull Dolt state after pull/merge |
 | pre-push | bd stale check, nix flake check, tests | Slow validation before sharing |
 
 Builtin hooks to add:
@@ -67,10 +67,10 @@ Update `config.nix` with simplified hook structure:
 {
   hooks = {
     pre-loop = "prek run";
-    pre-step = "bd sync";
+    pre-step = "bd dolt pull";
     post-step = "prek run";
     post-loop = ''
-      bd sync
+      bd dolt push
       git diff --quiet || { echo "Error: worktree is dirty; commit or stash before pushing" >&2; exit 1; }
     '';
   };

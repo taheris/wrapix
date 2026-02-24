@@ -4471,11 +4471,11 @@ test_default_config_has_hooks() {
     test_fail "hooks.pre-loop should run prek to validate before loop starts"
   fi
 
-  # Check hooks.pre-step is defined (bd sync)
+  # Check hooks.pre-step is defined (bd dolt pull)
   local pre_step
   pre_step=$(echo "$config" | jq -r '.hooks."pre-step" // empty' 2>/dev/null || true)
   if [ -n "$pre_step" ]; then
-    test_pass "hooks.pre-step is defined (bd sync)"
+    test_pass "hooks.pre-step is defined (bd dolt pull)"
   else
     test_fail "hooks.pre-step should be defined"
   fi

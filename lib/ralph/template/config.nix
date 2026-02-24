@@ -48,10 +48,10 @@
   # Template variables: {{LABEL}}, {{ISSUE_ID}}, {{STEP_COUNT}}, {{STEP_EXIT_CODE}}
   hooks = {
     pre-loop = "prek run";
-    pre-step = "bd sync";
+    pre-step = "bd dolt pull";
     post-step = "prek run";
     post-loop = ''
-      bd sync
+      bd dolt push
       git diff --quiet || { echo "Error: worktree is dirty; commit or stash before pushing" >&2; exit 1; }
     '';
   };

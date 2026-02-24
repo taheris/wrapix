@@ -21,7 +21,7 @@ AI coding agents need persistent issue tracking that:
 4. **Status Tracking** - Issues move through open → in_progress → closed
 5. **Priority Levels** - P0 (critical) through P4 (backlog)
 6. **Issue Types** - task, bug, feature, epic, question, docs
-7. **Sync** - `bd sync` commits changes to git branch
+7. **Sync** - `bd dolt push` / `bd dolt pull` sync via Dolt remotes
 
 ### Non-Functional
 
@@ -40,7 +40,8 @@ AI coding agents need persistent issue tracking that:
 | `bd update <id> --status=in_progress` | Update issue |
 | `bd close <id>` | Close issue |
 | `bd dep add <issue> <depends-on>` | Add dependency |
-| `bd sync` | Sync with git remote |
+| `bd dolt pull` | Pull from Dolt remote |
+| `bd dolt push` | Push to Dolt remote |
 
 ## Storage
 
@@ -52,24 +53,22 @@ AI coding agents need persistent issue tracking that:
 └── dolt-remote/     # Dolt remote for container sync
 ```
 
-### Sync Modes
+### Sync
 
-| Mode | Description |
-|------|-------------|
-| JSONL | Export/import via `.beads/issues.jsonl` |
-| Dolt-native | Use Dolt remotes for sync (preferred) |
+Dolt-native sync via `bd dolt pull` / `bd dolt push`. Requires `dolt sql-server` running
+on port 3307 (auto-started by devShell). The Dolt remote lives in the beads branch worktree.
 
 ## Workflow Integration
 
 ### Agent Session Pattern
 
 ```bash
-bd sync                              # Pull latest
+bd dolt pull                         # Pull latest
 bd ready                             # Find work
 bd update <id> --status=in_progress  # Claim
 # ... do work ...
 bd close <id>                        # Complete
-bd sync                              # Push changes
+bd dolt push                         # Push changes
 ```
 
 ### Ralph Integration
@@ -86,8 +85,8 @@ Key settings in `.beads/config.yaml`:
 | Setting | Purpose |
 |---------|---------|
 | `issue-prefix` | Prefix for issue IDs (e.g., "wx" → "wx-1") |
-| `sync-branch` | Git branch for beads commits |
-| `sync.mode` | Sync mode: `dolt-native` or JSONL |
+| `sync-branch` | Git branch for beads data |
+| `sync.mode` | Sync mode: `dolt-native` |
 | `federation.remote` | Dolt remote URL for container sync |
 
 ## Affected Files
@@ -104,7 +103,7 @@ Key settings in `.beads/config.yaml`:
   [verify](../tests/ralph/run-tests.sh#test_isolated_beads_db)
 - [ ] Dependencies correctly block `bd ready` output
   [verify](../tests/ralph/run-tests.sh#test_run_respects_dependencies)
-- [ ] `bd sync` works in container environment
+- [ ] `bd dolt pull`/`bd dolt push` works in container environment
   [judge](../tests/judges/beads.sh#test_sync_in_container)
 - [ ] Priority and status filtering works
   [verify](../tests/ralph/run-tests.sh#test_config_data_driven)
