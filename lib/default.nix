@@ -42,6 +42,7 @@ in
           prek install -f
           chmod 555 .git/hooks/
         fi
+
         echo "Wrapix development shell"
       '';
     };
