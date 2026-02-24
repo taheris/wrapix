@@ -73,7 +73,7 @@ if [ -f /workspace/.beads/config.yaml ]; then
       # bd init overwrites .gitignore with its template (missing dolt/ rule)
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
-      # SQLite/fallback mode: init from JSONL
+      # Legacy fallback: init from JSONL (pre-Dolt repos)
       bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
     fi
     # bd init generates AGENTS.md; restore workspace copy if it existed

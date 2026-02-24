@@ -142,10 +142,10 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
-# Sync beads database to ensure we have latest state
+# Pull latest beads state to ensure we have current data
 # This is critical - container may have stale data
-debug "Syncing beads database..."
-bd sync >/dev/null 2>&1 || warn "bd sync failed, continuing with local state"
+debug "Pulling beads database..."
+bd dolt pull >/dev/null 2>&1 || warn "bd dolt pull failed, continuing with local state"
 
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 CONFIG_FILE="$RALPH_DIR/config.nix"
