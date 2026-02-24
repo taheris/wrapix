@@ -194,12 +194,15 @@ Output ONE of these at the end of your response:
 - `RALPH_CLARIFY: <question>` - Need clarification
 EOF
 
-  # Initialize isolated beads database (BD_DB points to the database FILE)
+  # Initialize isolated beads database with unique dolt server port per test.
+  # Parallel tests MUST each have their own server to avoid database contention.
   export BD_DB="$TEST_DIR/.beads/issues.db"
   mkdir -p "$(dirname "$BD_DB")"
+  TEST_BD_PORT=$((10000 + RANDOM % 50000))
+  export TEST_BD_PORT
 
-  # Initialize beads database with test prefix
-  (cd "$TEST_DIR" && bd init --prefix test >/dev/null 2>&1) || true
+  # Initialize beads database with test prefix on isolated port
+  (cd "$TEST_DIR" && bd init --prefix test --server-port "$TEST_BD_PORT" >/dev/null 2>&1) || true
 
   # Create bin directory with mock claude as 'claude'
   mkdir -p "$TEST_DIR/bin"
@@ -276,6 +279,11 @@ EOF
 # Clean up test environment
 # Usage: teardown_test_env
 teardown_test_env() {
+  # Stop the test's dolt server before cleanup
+  if [ -n "${TEST_DIR:-}" ]; then
+    (cd "$TEST_DIR" && bd dolt stop 2>/dev/null) || true
+  fi
+
   # Return to original directory and PATH
   cd "$ORIGINAL_DIR" 2>/dev/null || true
   export PATH="$ORIGINAL_PATH"
@@ -286,7 +294,7 @@ teardown_test_env() {
   fi
 
   # Unset test environment variables
-  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
+  unset TEST_DIR BD_DB TEST_BD_PORT MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
 }
 
 #-----------------------------------------------------------------------------
