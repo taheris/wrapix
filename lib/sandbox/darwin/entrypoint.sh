@@ -175,7 +175,7 @@ if [ -f /workspace/.beads/config.yaml ]; then
       mkdir -p /workspace/.beads/dolt
       if [ -d "$DOLT_SNAPSHOT/.dolt" ]; then
         cp -r "$DOLT_SNAPSHOT" "$DOLT_DB"
-      elif git ls-tree beads -- .beads/dolt-snapshot/.dolt/repo_state.json &>/dev/null; then
+      elif git ls-tree beads -- .beads/dolt-snapshot/.dolt/repo_state.json 2>/dev/null | grep -q .; then
         # Extract snapshot from beads branch (worktree gitdir broken in container)
         while IFS=$'\t' read -r _info path; do
           rel="${path#.beads/dolt-snapshot/}"
@@ -183,13 +183,19 @@ if [ -f /workspace/.beads/config.yaml ]; then
           git show "beads:$path" > "$DOLT_DB/$rel"
         done < <(git ls-tree -r beads -- .beads/dolt-snapshot/)
       elif [ -d "$DOLT_REMOTE" ] && command -v dolt &>/dev/null; then
-        dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" 2>/dev/null || true
+        dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone from dolt-remote failed" >&2
       fi
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ "$BACKEND" != "dolt" ] && [ -f /workspace/.beads/issues.jsonl ]; then
       # Legacy fallback: init from JSONL (pre-Dolt repos)
       bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
     fi
+    # Configure dolt origin remote for bd dolt pull/push
+    # Runs unconditionally: covers entrypoint-created and bd auto-created databases
+    if [ -d "$DOLT_DB/.dolt" ] && [ -d "$DOLT_REMOTE" ]; then
+      (cd "$DOLT_DB" && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
+    fi
+
     # bd init generates AGENTS.md; restore workspace copy if it existed
     git checkout -- AGENTS.md 2>/dev/null || true
   fi
