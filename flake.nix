@@ -5,7 +5,7 @@
     nixpkgs.url = "git+ssh://git@github.com/NixOS/nixpkgs.git?ref=nixos-unstable&shallow=1";
 
     beads = {
-      url = "git+ssh://git@github.com/steveyegge/beads.git?ref=refs/tags/v0.49.1&shallow=1";
+      url = "git+ssh://git@github.com/steveyegge/beads.git?ref=refs/tags/v0.56.1&shallow=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -32,13 +32,26 @@
           ...
         }:
         let
+          # Fix stale vendorHash in upstream beads v0.56.1 for Go 1.25.x
+          beadsFor =
+            pkgs':
+            (pkgs'.callPackage "${inputs.beads}/default.nix" {
+              pkgs = pkgs';
+              self = inputs.beads;
+            }).overrideAttrs
+              (old: {
+                goModules = old.goModules.overrideAttrs {
+                  outputHash = "sha256-DlEnIVNLHWetwQxTmUNOAuDbHGZ9mmLdITwDdviphPs=";
+                };
+              });
+
           hostOverlay = final: prev: {
-            beads = inputs'.beads.packages.default;
+            beads = beadsFor final;
           };
 
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
           linuxOverlay = final: prev: {
-            beads = inputs.beads.packages.${linuxSystem}.default;
+            beads = beadsFor final;
           };
           linuxPkgs = import nixpkgs {
             system = linuxSystem;

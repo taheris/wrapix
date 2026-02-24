@@ -39,22 +39,16 @@ bd dep add <issue> <depends-on>   # Add dependency
 ### Start
 
 ```bash
-git -C .git/beads-worktrees/beads pull
-bd sync --import
+bd dolt pull
 ```
-
-Note: `bd sync --full` is buggy ([beads#812](https://github.com/steveyegge/beads/issues/812)).
 
 ### End ("land the plane")
 
 ```bash
 git add <files>
-bd sync
 git commit -m "..."   # Hooks run: nixfmt, shellcheck, flake check, tests
 git push
-git -C .git/beads-worktrees/beads add -A && \
-PREK_ALLOW_NO_CONFIG=1 git -C .git/beads-worktrees/beads commit -m "bd sync" && \
-git push origin beads
+bd dolt push
 ```
 
 Work is NOT complete until both pushes succeed.
