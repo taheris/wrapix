@@ -98,7 +98,7 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     if [ -n "$RUN_LABEL" ]; then
       # Find next ready issue and extract profile label
       BEAD_LABEL="spec-$RUN_LABEL"
-      NEXT_ISSUE_JSON=$(bd list --label "$BEAD_LABEL" --ready --sort priority --json 2>/dev/null || echo "[]")
+      NEXT_ISSUE_JSON=$(bd ready --label "$BEAD_LABEL" --sort priority --json 2>/dev/null || echo "[]")
 
       # Filter out epics and get first work item with profile label
       PROFILE_FROM_BEAD=$(echo "$NEXT_ISSUE_JSON" | jq -r '
@@ -325,9 +325,10 @@ check_all_complete() {
   local hidden="$3"
 
   # Check if any ready beads remain (excluding epics)
+  # Note: bd ready (not bd list --ready) applies blocker-aware semantics
   local remaining=0
   local json
-  json=$(bd_json list --label "$label" --ready --json) || {
+  json=$(bd_json ready --label "$label" --json) || {
     warn "Failed to check remaining issues"
     remaining=0
   }
@@ -362,9 +363,10 @@ run_step() {
   debug "Looking for issues with label: $bead_label"
 
   # Find next ready issue with this label (excluding epics - they're containers, not work items)
+  # Note: bd ready (not bd list --ready) applies blocker-aware semantics
   local bd_list_json
-  bd_list_json=$(bd_json list --label "$bead_label" --ready --sort priority --json) || {
-    warn "bd list command failed"
+  bd_list_json=$(bd_json ready --label "$bead_label" --sort priority --json) || {
+    warn "bd ready command failed"
     bd_list_json="[]"
   }
 
@@ -544,7 +546,7 @@ while true; do
       grep -oE '^[a-z]+-[a-zA-Z0-9.]+' | head -1 || true)
   elif [ -n "$FEATURE_NAME" ]; then
     # Fall back to label-based query for backward compatibility
-    current_issue_id=$(bd list --label "spec-$FEATURE_NAME" --ready --sort priority --json 2>/dev/null | \
+    current_issue_id=$(bd ready --label "spec-$FEATURE_NAME" --sort priority --json 2>/dev/null | \
       jq -r '[.[] | select(.issue_type == "epic" | not)][0].id // empty' 2>/dev/null || true)
   fi
 
