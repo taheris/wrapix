@@ -177,7 +177,7 @@ if [ -f /workspace/.beads/config.yaml ]; then
         cp -r "$DOLT_SNAPSHOT" "$DOLT_DB"
       elif git ls-tree beads -- .beads/dolt-snapshot/.dolt/repo_state.json &>/dev/null; then
         # Extract snapshot from beads branch (worktree gitdir broken in container)
-        while IFS=$'\t' read -r _mode _type _hash path; do
+        while IFS=$'\t' read -r _info path; do
           rel="${path#.beads/dolt-snapshot/}"
           mkdir -p "$DOLT_DB/$(dirname "$rel")"
           git show "beads:$path" > "$DOLT_DB/$rel"
