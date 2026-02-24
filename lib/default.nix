@@ -33,7 +33,14 @@ in
       shellHook ? "",
     }:
     pkgs.mkShell {
-      inherit packages;
+      packages =
+        with pkgs;
+        [
+          beads
+          dolt
+          prek
+        ]
+        ++ packages;
       shellHook = ''
         ${shellHook}
         # Configure Dolt origin remote for bd dolt pull/push (no-op if already set)
@@ -43,7 +50,7 @@ in
         fi
 
         # Ensure prek owns .git/hooks/ — bd hooks install can overwrite the shim
-        if [ -d .git ] && ! grep -q 'prek' .git/hooks/pre-commit 2>/dev/null; then
+        if [ -d .git ] && [ -f .pre-commit-config.yaml ] && ! grep -q 'prek' .git/hooks/pre-commit 2>/dev/null; then
           echo "Installing prek hooks (bd shim detected or hooks missing)..."
           prek install -f
           chmod 555 .git/hooks/
