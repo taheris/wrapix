@@ -8,16 +8,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1771817690,
-        "narHash": "sha256-hp+mKVCSzxxxUtOqspXuTbOJpeC8K9+UmmXSDr5Xa0k=",
-        "ref": "refs/tags/v0.56.1",
-        "rev": "48bfaaad388b580a8a753bcaa19455b297991a01",
+        "lastModified": 1771886437,
+        "narHash": "sha256-UbjdO8py6bkSRQlgRS74c62cls/l8AQB/uHFE9M3quE=",
+        "ref": "main",
+        "rev": "fd6f9bdf940dc79f8f85b6a4a0664c11b1e4bb7f",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
       },
       "original": {
-        "ref": "refs/tags/v0.56.1",
+        "ref": "main",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
