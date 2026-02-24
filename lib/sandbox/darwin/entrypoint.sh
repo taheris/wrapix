@@ -167,13 +167,12 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Dolt remote lives in beads branch worktree
     DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
     if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_REMOTE" ]; then
-      # Dolt mode: copy dolt-remote as working database, then init
+      # Dolt mode: copy dolt-remote as working database (already initialized and migrated)
       mkdir -p /workspace/.beads/dolt
       cp -r "$DOLT_REMOTE/." /workspace/.beads/dolt/beads/
-      bd init --prefix "$PREFIX" --backend dolt --quiet --skip-hooks --skip-merge-driver 2>/dev/null || true
       # Configure Dolt origin remote for bd dolt pull/push
       (cd /workspace/.beads/dolt/beads && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
-      # bd init overwrites .gitignore with its template (missing dolt/ rule)
+      # Defensive: restore .gitignore in case future changes overwrite it
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
       # Legacy fallback: init from JSONL (pre-Dolt repos)
