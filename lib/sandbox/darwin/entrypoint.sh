@@ -171,6 +171,8 @@ if [ -f /workspace/.beads/config.yaml ]; then
       mkdir -p /workspace/.beads/dolt
       cp -r "$DOLT_REMOTE/." /workspace/.beads/dolt/beads/
       bd init --prefix "$PREFIX" --backend dolt --quiet --skip-hooks --skip-merge-driver 2>/dev/null || true
+      # Configure Dolt origin remote for bd dolt pull/push
+      (cd /workspace/.beads/dolt/beads && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
       # bd init overwrites .gitignore with its template (missing dolt/ rule)
       git checkout -- .beads/.gitignore 2>/dev/null || true
     elif [ -f /workspace/.beads/issues.jsonl ]; then
