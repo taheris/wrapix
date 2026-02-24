@@ -8058,6 +8058,10 @@ main() {
     # Check prerequisites
     check_prerequisites "$MOCK_CLAUDE" "$SCENARIOS_DIR" || exit 1
 
+    # Start shared dolt server for test isolation
+    setup_shared_dolt_server
+    trap teardown_shared_dolt_server EXIT
+
     # Run single test in isolation
     local results_dir
     results_dir=$(mktemp -d -t "ralph-test-results-XXXXXX")
@@ -8088,6 +8092,10 @@ main() {
 
   # Check prerequisites
   check_prerequisites "$MOCK_CLAUDE" "$SCENARIOS_DIR" || exit 1
+
+  # Start shared dolt server for test isolation
+  setup_shared_dolt_server
+  trap teardown_shared_dolt_server EXIT
 
   # Run tests (uses library functions)
   run_tests ALL_TESTS "$filter"

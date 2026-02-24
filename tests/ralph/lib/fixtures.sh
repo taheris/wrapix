@@ -48,6 +48,86 @@ _ensure_ralph_metadata() {
 }
 
 #-----------------------------------------------------------------------------
+# Shared Dolt Server (one server for all tests)
+#-----------------------------------------------------------------------------
+
+# Start a single shared Dolt sql-server before all tests.
+# Each test gets its own database via a unique --prefix in bd init.
+# Usage: setup_shared_dolt_server (call once in main, before any tests)
+# Exports: SHARED_DOLT_DIR, SHARED_DOLT_PORT, SHARED_DOLT_PID
+setup_shared_dolt_server() {
+  SHARED_DOLT_DIR=$(mktemp -d -t "ralph-test-dolt-XXXXXX")
+
+  # Initialize dolt data directory
+  mkdir -p "$SHARED_DOLT_DIR/data"
+  (cd "$SHARED_DOLT_DIR/data" && dolt init >/dev/null 2>&1)
+
+  # Try up to 5 random ports to avoid collisions with existing services
+  local attempts=5
+  while [ $attempts -gt 0 ]; do
+    SHARED_DOLT_PORT=$((20000 + RANDOM % 40000))
+
+    # Skip port if already in use
+    if bash -c "echo > /dev/tcp/127.0.0.1/$SHARED_DOLT_PORT" 2>/dev/null; then
+      attempts=$((attempts - 1))
+      continue
+    fi
+
+    # Start server on this port
+    dolt sql-server -H 127.0.0.1 -P "$SHARED_DOLT_PORT" \
+      --data-dir="$SHARED_DOLT_DIR/data" \
+      &>"$SHARED_DOLT_DIR/server.log" &
+    SHARED_DOLT_PID=$!
+
+    # Wait for server readiness, checking PID is still alive
+    local retries=50
+    local started=false
+    while [ $retries -gt 0 ]; do
+      # If dolt exited (e.g. port race), stop polling
+      if ! kill -0 "$SHARED_DOLT_PID" 2>/dev/null; then
+        break
+      fi
+      if bash -c "echo > /dev/tcp/127.0.0.1/$SHARED_DOLT_PORT" 2>/dev/null; then
+        started=true
+        break
+      fi
+      sleep 0.1
+      retries=$((retries - 1))
+    done
+
+    if [ "$started" = true ]; then
+      break
+    fi
+
+    # Server failed on this port — clean up and retry
+    kill "$SHARED_DOLT_PID" 2>/dev/null || true
+    wait "$SHARED_DOLT_PID" 2>/dev/null || true
+    attempts=$((attempts - 1))
+  done
+
+  if [ $attempts -eq 0 ]; then
+    echo "ERROR: Shared dolt server failed to start after 5 port attempts" >&2
+    cat "$SHARED_DOLT_DIR/server.log" >&2
+    exit 1
+  fi
+
+  export SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
+}
+
+# Stop the shared Dolt server and clean up.
+# Usage: teardown_shared_dolt_server (call once after all tests, typically via EXIT trap)
+teardown_shared_dolt_server() {
+  if [ -n "${SHARED_DOLT_PID:-}" ]; then
+    kill "$SHARED_DOLT_PID" 2>/dev/null || true
+    wait "$SHARED_DOLT_PID" 2>/dev/null || true
+  fi
+  if [ -n "${SHARED_DOLT_DIR:-}" ] && [ -d "$SHARED_DOLT_DIR" ]; then
+    rm -rf "$SHARED_DOLT_DIR"
+  fi
+  unset SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
+}
+
+#-----------------------------------------------------------------------------
 # Test Environment Setup
 #-----------------------------------------------------------------------------
 
@@ -194,15 +274,17 @@ Output ONE of these at the end of your response:
 - `RALPH_CLARIFY: <question>` - Need clarification
 EOF
 
-  # Initialize isolated beads database with unique dolt server port per test.
-  # Parallel tests MUST each have their own server to avoid database contention.
+  # Initialize beads database using the shared dolt server with a unique prefix per test.
+  # Each test gets its own database (beads_<prefix>) on the shared server for full isolation.
   export BD_DB="$TEST_DIR/.beads/issues.db"
   mkdir -p "$(dirname "$BD_DB")"
-  TEST_BD_PORT=$((10000 + RANDOM % 50000))
-  export TEST_BD_PORT
 
-  # Initialize beads database with test prefix on isolated port
-  (cd "$TEST_DIR" && bd init --prefix test --server-port "$TEST_BD_PORT" >/dev/null 2>&1) || true
+  local test_prefix
+  test_prefix="t$(echo "$test_name" | tr -cd 'a-z0-9' | head -c 6)${RANDOM}"
+  (cd "$TEST_DIR" && bd init --prefix "$test_prefix" \
+    --server-port "$SHARED_DOLT_PORT" --skip-hooks --quiet >/dev/null 2>&1) || {
+    echo "WARNING: bd init failed for $test_name" >&2
+  }
 
   # Create bin directory with mock claude as 'claude'
   mkdir -p "$TEST_DIR/bin"
@@ -279,11 +361,6 @@ EOF
 # Clean up test environment
 # Usage: teardown_test_env
 teardown_test_env() {
-  # Stop the test's dolt server before cleanup
-  if [ -n "${TEST_DIR:-}" ]; then
-    (cd "$TEST_DIR" && bd dolt stop 2>/dev/null) || true
-  fi
-
   # Return to original directory and PATH
   cd "$ORIGINAL_DIR" 2>/dev/null || true
   export PATH="$ORIGINAL_PATH"
@@ -294,7 +371,7 @@ teardown_test_env() {
   fi
 
   # Unset test environment variables
-  unset TEST_DIR BD_DB TEST_BD_PORT MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
+  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
 }
 
 #-----------------------------------------------------------------------------
