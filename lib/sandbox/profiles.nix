@@ -10,6 +10,7 @@ let
     coreutils
     curl
     diffutils
+    dolt
     fd
     file
     findutils
