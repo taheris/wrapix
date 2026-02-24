@@ -28,7 +28,6 @@
         {
           pkgs,
           system,
-          inputs',
           ...
         }:
         let
@@ -120,6 +119,7 @@
             in
             mapAttrs (_: cfg: (wrapix.mkSandbox cfg).package) sandboxes
             // {
+              inherit (pkgs) beads;
               default = (wrapix.mkSandbox { profile = profiles.base; }).package;
               wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
               wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
