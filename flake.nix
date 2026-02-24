@@ -136,17 +136,6 @@
           devShells.default = wrapix.mkDevShell {
             shellHook = ''
               ${ralph.shellHook}
-              # Auto-start dolt sql-server for beads (bd v0.56+ requires it)
-              if [ -d .beads/dolt ]; then
-                if ! nc -z 127.0.0.1 3307 2>/dev/null; then
-                  dolt sql-server --data-dir=.beads/dolt --port=3307 --host=127.0.0.1 &>/dev/null &
-                  trap 'kill $! 2>/dev/null' EXIT
-                  while ! nc -z 127.0.0.1 3307 2>/dev/null; do sleep 0.1; done
-                fi
-                # Point dolt remote at $PWD (path differs between host and container)
-                _dolt_remote="file://$PWD/.git/beads-worktrees/beads/.beads/dolt-remote"
-                (cd .beads/dolt/beads && dolt remote remove host; dolt remote remove origin; dolt remote add origin "$_dolt_remote") &>/dev/null
-              fi
             '';
 
             packages =
