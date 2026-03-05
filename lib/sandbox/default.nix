@@ -42,6 +42,12 @@ let
   baseClaudeSettings = {
     "$schema" = "https://json.schemastore.org/claude-code-settings.json";
     autoUpdates = false;
+
+    attribution = {
+      commit = "";
+      pr = "";
+    };
+
     env = {
       ANTHROPIC_MODEL = "claude-opus-4-6";
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
@@ -50,6 +56,7 @@ let
       DISABLE_ERROR_REPORTING = "1";
       DISABLE_TELEMETRY = "1";
     };
+
     hooks = {
       Notification = [
         {
