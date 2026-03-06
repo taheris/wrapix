@@ -109,6 +109,7 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Configure dolt origin remote for bd dolt pull/push
     # Runs unconditionally: covers entrypoint-created and bd auto-created databases
     if [ -d "$DOLT_DB/.dolt" ] && [ -d "$DOLT_REMOTE" ]; then
+      (cd "$DOLT_DB" && dolt remote remove origin 2>/dev/null || true)
       (cd "$DOLT_DB" && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
     fi
 
