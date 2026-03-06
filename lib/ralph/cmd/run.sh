@@ -144,7 +144,9 @@ source "$(dirname "$0")/util.sh"
 
 # Pull latest beads state to ensure we have current data
 # This is critical - container may have stale data
+# Commit first so dolt pull can merge into a clean working set
 debug "Pulling beads database..."
+bd dolt commit >/dev/null 2>&1 || true
 bd dolt pull >/dev/null 2>&1 || warn "bd dolt pull failed, continuing with local state"
 
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
