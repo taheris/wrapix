@@ -70,70 +70,47 @@ if [ -n "${RUSTUP_HOME:-}" ] && command -v rustup &>/dev/null; then
 fi
 
 # Initialize container-local beads database
-# Detect backend from metadata.json and use appropriate init strategy
-# --skip-hooks: prek manages git hooks, bd must not touch them
-# --skip-merge-driver: prevents bd from creating .gitattributes
 if [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
-  if [ -n "$PREFIX" ]; then
-    # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
-    BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
+  BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
-    # Fix beads worktree git pointer for container environment
-    # The worktree's .git file contains the host-side absolute path which
-    # doesn't exist inside the container. Rewrite it to the container path.
-    WORKTREE_GIT="/workspace/.git/beads-worktrees/beads/.git"
-    if [ -f "$WORKTREE_GIT" ] && ! git -C /workspace/.git/beads-worktrees/beads rev-parse HEAD &>/dev/null; then
-      echo "gitdir: /workspace/.git/worktrees/beads" > "$WORKTREE_GIT"
+  if [ -n "$PREFIX" ] && [ "$BACKEND" = "dolt" ]; then
+    DOLT_DB_NAME=$(jq -r '.dolt_database // "beads"' /workspace/.beads/metadata.json 2>/dev/null || echo "beads")
+    DOLT_DB="/workspace/.beads/dolt/$DOLT_DB_NAME"
+    WORKTREE="/workspace/.git/beads-worktrees/beads"
+    DOLT_REMOTE="$WORKTREE/.beads/dolt-remote"
+
+    # Fix worktree git pointer (host absolute path → container path)
+    if [ -f "$WORKTREE/.git" ] && ! git -C "$WORKTREE" rev-parse HEAD &>/dev/null; then
+      echo "gitdir: /workspace/.git/worktrees/beads" > "$WORKTREE/.git"
       git worktree repair 2>/dev/null || true
     fi
 
-    # Dolt database setup: bd connects to the database directory under .beads/dolt/
-    # The beads branch stores a pre-cloned snapshot (dolt-snapshot/) and bare noms
-    # remote (dolt-remote/) via a git worktree.
-    DOLT_SNAPSHOT="/workspace/.git/beads-worktrees/beads/.beads/dolt-snapshot"
-    DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
-    DOLT_DB_NAME=$(jq -r '.dolt_database // "beads"' /workspace/.beads/metadata.json 2>/dev/null || echo "beads")
-    DOLT_DB="/workspace/.beads/dolt/$DOLT_DB_NAME"
-    if [ "$BACKEND" = "dolt" ] && [ ! -f "$DOLT_DB/.dolt/manifest" ]; then
-      # Clean up any empty/incomplete database directory (bd auto-start may
-      # have created the directory structure before data was cloned)
+    # Clone database from dolt-remote if missing or incomplete
+    if [ ! -f "$DOLT_DB/.dolt/manifest" ]; then
+      bd dolt stop 2>/dev/null || true
       rm -rf "$DOLT_DB"
       mkdir -p /workspace/.beads/dolt
-      if [ -d "$DOLT_SNAPSHOT/.dolt" ]; then
-        cp -r "$DOLT_SNAPSHOT" "$DOLT_DB"
-      elif git ls-tree beads -- .beads/dolt-snapshot/.dolt/repo_state.json 2>/dev/null | grep -q .; then
-        # Extract snapshot from beads branch (worktree gitdir broken in container)
-        while IFS=$'\t' read -r _info path; do
-          rel="${path#.beads/dolt-snapshot/}"
-          mkdir -p "$DOLT_DB/$(dirname "$rel")"
-          git show "beads:$path" > "$DOLT_DB/$rel"
-        done < <(git ls-tree -r beads -- .beads/dolt-snapshot/)
-      elif [ -d "$DOLT_REMOTE" ] && command -v dolt &>/dev/null; then
-        dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone from dolt-remote failed" >&2
+      if [ -d "$DOLT_REMOTE" ]; then
+        dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone failed" >&2
       fi
-      git checkout -- .beads/.gitignore 2>/dev/null || true
-      # Restart dolt server so it picks up the newly populated database
-      # (bd may have auto-started the server before the clone finished)
-      bd dolt stop 2>/dev/null || true
-    elif [ "$BACKEND" != "dolt" ] && [ -f /workspace/.beads/issues.jsonl ]; then
-      # Legacy fallback: init from JSONL (pre-Dolt repos)
-      bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
     fi
-    # Configure dolt origin remote for bd dolt pull/push
-    # Runs unconditionally: covers entrypoint-created and bd auto-created databases
+
+    # Configure remote and start server
     if [ -d "$DOLT_DB/.dolt" ] && [ -d "$DOLT_REMOTE" ]; then
       (cd "$DOLT_DB" && dolt remote remove origin 2>/dev/null || true)
       (cd "$DOLT_DB" && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
     fi
-    # Start dolt server after database and remote are fully configured
-    if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_DB/.dolt" ]; then
+    if [ -d "$DOLT_DB/.dolt" ]; then
       bd dolt start 2>/dev/null || true
     fi
 
-    # bd init generates AGENTS.md; restore workspace copy if it existed
-    git checkout -- AGENTS.md 2>/dev/null || true
+  elif [ -n "$PREFIX" ] && [ -f /workspace/.beads/issues.jsonl ]; then
+    # Legacy: init from JSONL (pre-Dolt repos)
+    bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
   fi
+
+  git checkout -- .beads/.gitignore AGENTS.md 2>/dev/null || true
 fi
 
 # Build system prompt with optional context pinning

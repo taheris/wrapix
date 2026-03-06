@@ -81,7 +81,7 @@ show_awaiting_items() {
 
     # Calculate age from updated_at
     local age_str=""
-    if [ -n "$updated_at" ]; then
+    if [ -n "$updated_at" ] && [ "$updated_at" != "null" ]; then
       local updated_epoch
       updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null) || true
       if [ -n "$updated_epoch" ]; then
