@@ -301,12 +301,16 @@ in
                 ''
             }
 
-            # Mount project's .claude as container's ~/.claude for session persistence
-            # This isolates container from host config while enabling /rename and /resume
+            # Ensure .claude directory exists on host for session persistence
             mkdir -p "$PROJECT_DIR/.claude"
 
             # Run container
             # Note: -w / because WorkingDir=/workspace fails before mounts are ready
+            # Note: ~/.claude is NOT mounted from host — the entrypoint selectively
+            # symlinks persistent items from /workspace/.claude instead. This keeps
+            # user-level settings.json separate from project-level settings.json,
+            # avoiding Claude Code writing user-only properties (like
+            # skipDangerousModePermissionPrompt) to the project settings path.
             TTY_ARGS=""
             [ -t 0 ] && TTY_ARGS="-t -i"
 
@@ -321,7 +325,6 @@ in
               --dns 100.100.100.100 \
               --dns 1.1.1.1 \
               -v "$PROJECT_DIR:/workspace" \
-              -v "$PROJECT_DIR/.claude:/home/wrapix/.claude" \
               $MOUNT_ARGS \
               "''${ENV_ARGS[@]}" \
               $DEPLOY_KEY_ARGS \
