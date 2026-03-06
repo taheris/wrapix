@@ -31,17 +31,24 @@ let
   # Claude config (~/.claude.json) - onboarding state and runtime flags
   claudeConfig = {
     bypassPermissionsModeAccepted = true;
+    effortCalloutDismissed = true;
     hasCompletedOnboarding = true;
     hasSeenTasksHint = true;
     numStartups = 1;
     officialMarketplaceAutoInstallAttempted = true;
+    projects = {
+      "/workspace" = {
+        allowedTools = [ ];
+        hasTrustDialogAccepted = true;
+        hasCompletedProjectOnboarding = true;
+      };
+    };
   };
 
   # Claude settings (~/.claude/settings.json) - user preferences
   # Base settings that can be extended with MCP servers
   baseClaudeSettings = {
     "$schema" = "https://json.schemastore.org/claude-code-settings.json";
-    autoUpdates = false;
 
     attribution = {
       commit = "";
@@ -156,10 +163,10 @@ let
         inherit mounts env;
       };
 
-      # Merge MCP servers into Claude settings
-      finalClaudeSettings = baseClaudeSettings // {
-        inherit (mcpConfig) mcpServers;
-      };
+      # Merge MCP servers into Claude settings (only when servers are configured)
+      finalClaudeSettings =
+        baseClaudeSettings
+        // (if mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { });
 
       # Compute comma-separated network allowlist for WRAPIX_NETWORK=limit mode
       networkAllowlist = concatStringsSep "," (finalProfile.networkAllowlist or [ ]);

@@ -143,6 +143,10 @@ mkdir -p "$HOME/.claude"
 cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
+# Also write settings through the /workspace mount — VirtioFS uses separate
+# caches per share, so a write to $HOME/.claude (share A) may not be visible
+# when Claude Code reads /workspace/.claude (share B) in the same session.
+cp /etc/wrapix/claude-settings.json /workspace/.claude/settings.json
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter
