@@ -186,7 +186,8 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # so we extract from the beads branch via git when the worktree isn't usable.
     DOLT_SNAPSHOT="/workspace/.git/beads-worktrees/beads/.beads/dolt-snapshot"
     DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
-    DOLT_DB="/workspace/.beads/dolt/beads"
+    DOLT_DB_NAME=$(jq -r '.dolt_database // "beads"' /workspace/.beads/metadata.json 2>/dev/null || echo "beads")
+    DOLT_DB="/workspace/.beads/dolt/$DOLT_DB_NAME"
     if [ "$BACKEND" = "dolt" ] && [ ! -d "$DOLT_DB" ]; then
       mkdir -p /workspace/.beads/dolt
       if [ -d "$DOLT_SNAPSHOT/.dolt" ]; then
