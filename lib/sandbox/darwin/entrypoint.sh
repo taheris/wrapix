@@ -180,15 +180,26 @@ if [ -f /workspace/.beads/config.yaml ]; then
     # Check for Dolt backend (metadata.json will have "backend": "dolt" after migration)
     BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
-    # Dolt database setup: bd connects to database "beads" (directory under .beads/dolt/)
+    # Fix beads worktree git pointer for container environment
+    # The worktree's .git file contains the host-side absolute path which
+    # doesn't exist inside the container. Rewrite it to the container path.
+    WORKTREE_GIT="/workspace/.git/beads-worktrees/beads/.git"
+    if [ -f "$WORKTREE_GIT" ] && ! git -C /workspace/.git/beads-worktrees/beads rev-parse HEAD &>/dev/null; then
+      echo "gitdir: /workspace/.git/worktrees/beads" > "$WORKTREE_GIT"
+      git worktree repair 2>/dev/null || true
+    fi
+
+    # Dolt database setup: bd connects to the database directory under .beads/dolt/
     # The beads branch stores a pre-cloned snapshot (dolt-snapshot/) and bare noms
-    # remote (dolt-remote/). The worktree may have a broken gitdir in containers,
-    # so we extract from the beads branch via git when the worktree isn't usable.
+    # remote (dolt-remote/) via a git worktree.
     DOLT_SNAPSHOT="/workspace/.git/beads-worktrees/beads/.beads/dolt-snapshot"
     DOLT_REMOTE="/workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
     DOLT_DB_NAME=$(jq -r '.dolt_database // "beads"' /workspace/.beads/metadata.json 2>/dev/null || echo "beads")
     DOLT_DB="/workspace/.beads/dolt/$DOLT_DB_NAME"
-    if [ "$BACKEND" = "dolt" ] && [ ! -d "$DOLT_DB" ]; then
+    if [ "$BACKEND" = "dolt" ] && [ ! -f "$DOLT_DB/.dolt/manifest" ]; then
+      # Clean up any empty/incomplete database directory (bd auto-start may
+      # have created the directory structure before data was cloned)
+      rm -rf "$DOLT_DB"
       mkdir -p /workspace/.beads/dolt
       if [ -d "$DOLT_SNAPSHOT/.dolt" ]; then
         cp -r "$DOLT_SNAPSHOT" "$DOLT_DB"
