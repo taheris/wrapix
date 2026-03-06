@@ -203,6 +203,9 @@ if [ -f /workspace/.beads/config.yaml ]; then
         dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone from dolt-remote failed" >&2
       fi
       git checkout -- .beads/.gitignore 2>/dev/null || true
+      # Restart dolt server so it picks up the newly populated database
+      # (bd may have auto-started the server before the clone finished)
+      bd dolt stop 2>/dev/null || true
     elif [ "$BACKEND" != "dolt" ] && [ -f /workspace/.beads/issues.jsonl ]; then
       # Legacy fallback: init from JSONL (pre-Dolt repos)
       bd init --prefix "$PREFIX" --from-jsonl --quiet --skip-hooks --skip-merge-driver
@@ -212,6 +215,10 @@ if [ -f /workspace/.beads/config.yaml ]; then
     if [ -d "$DOLT_DB/.dolt" ] && [ -d "$DOLT_REMOTE" ]; then
       (cd "$DOLT_DB" && dolt remote remove origin 2>/dev/null || true)
       (cd "$DOLT_DB" && dolt remote add origin "file://$DOLT_REMOTE" 2>/dev/null || true)
+    fi
+    # Start dolt server after database and remote are fully configured
+    if [ "$BACKEND" = "dolt" ] && [ -d "$DOLT_DB/.dolt" ]; then
+      bd dolt start 2>/dev/null || true
     fi
 
     # bd init generates AGENTS.md; restore workspace copy if it existed
