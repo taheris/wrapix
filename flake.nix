@@ -33,10 +33,15 @@
         let
           beadsFor =
             pkgs':
-            pkgs'.callPackage "${inputs.beads}/default.nix" {
+            (pkgs'.callPackage "${inputs.beads}/default.nix" {
               pkgs = pkgs';
               self = inputs.beads;
-            };
+            }).overrideAttrs
+              (old: {
+                goModules = old.goModules.overrideAttrs {
+                  outputHash = "sha256-ygZPi56fVEHaEShGVGpObFkrLs1DHrM8i2Y4BktMmpA=";
+                };
+              });
 
           hostOverlay = final: prev: {
             beads = beadsFor final;

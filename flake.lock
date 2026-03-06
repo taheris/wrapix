@@ -7,10 +7,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1772587450,
-        "narHash": "sha256-yJ38xi6nRnEZIV5CEgV8xZK1dky0dVMavfFg4J7gkqw=",
+        "lastModified": 1772774707,
+        "narHash": "sha256-wtMzh1BqGt7lLNVV3xEGo5PgEk2rksgOEkYOHMN3+as=",
         "ref": "main",
-        "rev": "7f41edd9c4350e5c68ebec6f9571e27833f27133",
+        "rev": "2df714ffcf02d378d56ad06314bc13c7c3f4a16a",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"

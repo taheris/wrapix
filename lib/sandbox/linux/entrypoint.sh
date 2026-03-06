@@ -37,11 +37,27 @@ if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
   fi
 fi
 
-# Initialize Claude config (always update to match container image)
+# Initialize Claude config and settings
+# ~/.claude is a container-local directory (tmpfs, not mounted from host) so that
+# user-level settings.json stays separate from project-level settings.json.
+# Persistent session data (history, projects, etc.) is symlinked from
+# /workspace/.claude which IS on the host via the /workspace bind mount.
 mkdir -p "$HOME/.claude"
 cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
+
+# Write clean project-level settings (separate file from user-level above)
+cp /etc/wrapix/claude-settings.json /workspace/.claude/settings.json
+
+# Symlink persistent session data from workspace for /resume and /rename
+for item in projects plans todos file-history paste-cache backups \
+            debug session-env plugins shell-snapshots \
+            history.jsonl settings.local.json stats-cache.json; do
+  if [ -e "/workspace/.claude/$item" ] && [ ! -e "$HOME/.claude/$item" ]; then
+    ln -s "/workspace/.claude/$item" "$HOME/.claude/$item"
+  fi
+done
 
 # Initialize rustup with stable toolchain and rust-analyzer if RUSTUP_HOME is set
 # Use "rustup which cargo" instead of "rustup show active-toolchain" because the latter

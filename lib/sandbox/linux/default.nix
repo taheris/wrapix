@@ -82,10 +82,9 @@ in
         # Build volume args
         VOLUME_ARGS="-v $PROJECT_DIR:/workspace:rw"
 
-        # Mount project's .claude as container's ~/.claude for session persistence
-        # This isolates container from host config while enabling /rename and /resume
+        # Ensure project .claude dir exists for session persistence (/resume, /rename)
+        # ~/.claude is container-local (tmpfs); entrypoint symlinks persistent items
         mkdir -p "$PROJECT_DIR/.claude"
-        VOLUME_ARGS="$VOLUME_ARGS -v $PROJECT_DIR/.claude:/home/wrapix/.claude:rw"
 
         dir_idx=0
 
