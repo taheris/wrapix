@@ -36,10 +36,11 @@
             (pkgs'.callPackage "${inputs.beads}/default.nix" {
               pkgs = pkgs';
               self = inputs.beads;
+              buildGoModule = pkgs'.buildGo126Module;
             }).overrideAttrs
               (old: {
                 goModules = old.goModules.overrideAttrs {
-                  outputHash = "sha256-ygZPi56fVEHaEShGVGpObFkrLs1DHrM8i2Y4BktMmpA=";
+                  outputHash = "sha256-1BJsEPP5SYZFGCWHLn532IUKlzcGDg5nhrqGWylEHgY=";
                 };
               });
 

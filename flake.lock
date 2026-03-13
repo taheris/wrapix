@@ -7,10 +7,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1772774707,
-        "narHash": "sha256-wtMzh1BqGt7lLNVV3xEGo5PgEk2rksgOEkYOHMN3+as=",
+        "lastModified": 1773351417,
+        "narHash": "sha256-WbbKFGBxu0CyQdECpXiiVU/O2vXS/b19GlAb8Ry3vvA=",
         "ref": "main",
-        "rev": "2df714ffcf02d378d56ad06314bc13c7c3f4a16a",
+        "rev": "ad0417af95e6cd597720b09fb400098bc4d7fce8",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
@@ -46,10 +46,10 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1772624091,
-        "narHash": "sha256-QKyJ0QGWBn6r0invrMAK8dmJoBYWoOWy7lN+UHzW1jc=",
+        "lastModified": 1773282481,
+        "narHash": "sha256-b/GV2ysM8mKHhinse2wz+uP37epUrSE+sAKXy/xvBY4=",
         "ref": "nixos-unstable",
-        "rev": "80bdc1e5ce51f56b19791b52b2901187931f5353",
+        "rev": "fe416aaedd397cacb33a610b33d60ff2b431b127",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/NixOS/nixpkgs.git"
