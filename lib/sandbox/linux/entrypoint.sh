@@ -47,8 +47,10 @@ cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
 
-# Write clean project-level settings (separate file from user-level above)
-cp /etc/wrapix/claude-settings.json /workspace/.claude/settings.json
+# Write project-level settings only if missing (preserve user customizations)
+if [ ! -f /workspace/.claude/settings.json ]; then
+  cp /etc/wrapix/claude-settings.json /workspace/.claude/settings.json
+fi
 
 # Symlink persistent session data from workspace for /resume and /rename
 for item in projects plans todos file-history paste-cache backups \
