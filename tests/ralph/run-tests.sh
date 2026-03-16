@@ -7916,27 +7916,11 @@ test_concurrent_multiple_plans_independent() {
 #-----------------------------------------------------------------------------
 
 # List of all test functions
-ALL_TESTS=(
-  test_mock_claude_exists
-  test_isolated_beads_db
-  test_render_template_basic
-  test_render_template_missing_required
-  test_render_template_multiline
-  test_render_template_env_vars
-  test_get_template_variables
-  test_get_variable_definitions
+# Tests that run ralph-run workflows (multi-step bd interactions).
+# These are flaky under parallel execution because dolt's MySQL server
+# drops connections under concurrent load. Run sequentially for reliability.
+SEQUENTIAL_TESTS=(
   test_run_marks_in_progress
-  test_status_mol_current_position
-  test_status_wrapper
-  test_status_awaiting_display
-  test_status_no_awaiting_when_empty
-  test_status_spec_flag
-  test_status_spec_short_flag
-  test_status_all_flag
-  test_status_all_empty
-  test_status_no_flag_uses_current
-  test_status_spec_equals_form
-  test_status_spec_missing_state
   test_run_closes_issue_on_complete
   test_run_no_close_without_signal
   test_run_exits_100_when_complete
@@ -7948,13 +7932,37 @@ ALL_TESTS=(
   test_parallel_agent_simulation
   test_run_skips_in_progress
   test_run_skips_blocked_by_in_progress
-  test_malformed_bd_output_parsing
   test_partial_epic_completion
+  test_discovered_work
+  test_config_data_driven
+  test_run_profile_selection
+  test_status_awaiting_display
+)
+
+# Tests safe for parallel execution (template logic, file state, simple bd calls).
+PARALLEL_TESTS=(
+  test_mock_claude_exists
+  test_isolated_beads_db
+  test_render_template_basic
+  test_render_template_missing_required
+  test_render_template_multiline
+  test_render_template_env_vars
+  test_get_template_variables
+  test_get_variable_definitions
+  test_status_mol_current_position
+  test_status_wrapper
+  test_status_no_awaiting_when_empty
+  test_status_spec_flag
+  test_status_spec_short_flag
+  test_status_all_flag
+  test_status_all_empty
+  test_status_no_flag_uses_current
+  test_status_spec_equals_form
+  test_status_spec_missing_state
+  test_malformed_bd_output_parsing
   test_plan_flag_validation
   test_plan_per_label_state_files
   test_plan_template_with_partials
-  test_discovered_work
-  test_config_data_driven
   test_logs_error_detection
   test_logs_all_flag
   test_logs_context_lines
@@ -7980,7 +7988,6 @@ ALL_TESTS=(
   test_check_invalid_nix_syntax
   test_check_exit_codes
   test_default_config_has_hooks
-  test_run_profile_selection
   test_parse_annotation_link
   test_parse_spec_annotations
   test_parse_spec_annotations_edge_cases
@@ -8042,6 +8049,9 @@ ALL_TESTS=(
   test_concurrent_multiple_plans_independent
 )
 
+# ALL_TESTS is the combined list for --sequential mode and single-test runs.
+ALL_TESTS=("${SEQUENTIAL_TESTS[@]}" "${PARALLEL_TESTS[@]}")
+
 #-----------------------------------------------------------------------------
 # Main Entry Point
 #-----------------------------------------------------------------------------
@@ -8095,8 +8105,28 @@ main() {
   setup_shared_dolt_server
   trap teardown_shared_dolt_server EXIT
 
-  # Run tests (uses library functions)
-  run_tests ALL_TESTS "$filter"
+  # In --sequential mode, run everything sequentially
+  if [ "$filter" = "--sequential" ] || [ "${RALPH_TEST_SEQUENTIAL:-}" = "1" ]; then
+    run_tests ALL_TESTS "--sequential"
+    return
+  fi
+
+  # Tiered execution: run dolt-heavy tests sequentially (they're flaky under
+  # concurrent load due to dolt MySQL server connection drops), then run
+  # parallel-safe tests concurrently for speed.
+  echo "Phase 1: Sequential tests (dolt-heavy workflows)..."
+  echo ""
+  run_tests_sequential SEQUENTIAL_TESTS
+  local seq_exit=$?
+
+  echo ""
+  echo "Phase 2: Parallel tests (template logic, file state)..."
+  echo ""
+  run_tests_parallel PARALLEL_TESTS
+  local par_exit=$?
+
+  # Fail if either phase failed
+  [ "$seq_exit" -eq 0 ] && [ "$par_exit" -eq 0 ]
 }
 
 # Run main (pass through args)

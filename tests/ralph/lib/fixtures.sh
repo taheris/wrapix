@@ -114,13 +114,33 @@ setup_shared_dolt_server() {
   export SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
 }
 
-# Stop the shared Dolt server and clean up.
+# Stop the shared Dolt server and clean up any orphaned dolt processes.
 # Usage: teardown_shared_dolt_server (call once after all tests, typically via EXIT trap)
 teardown_shared_dolt_server() {
   if [ -n "${SHARED_DOLT_PID:-}" ]; then
     kill "$SHARED_DOLT_PID" 2>/dev/null || true
     wait "$SHARED_DOLT_PID" 2>/dev/null || true
   fi
+
+  # Kill any orphaned dolt sql-server processes spawned by test subprocesses.
+  # These are detached processes that survive test subprocess exit because
+  # bd starts them with Setpgid: true for daemon-style lifecycle.
+  local orphan_pids killed=0
+  orphan_pids=$(pgrep -f 'dolt sql-server' 2>/dev/null || true)
+  if [ -n "$orphan_pids" ]; then
+    while read -r pid; do
+      # Don't kill the project's own dolt server (check CWD is under /tmp)
+      local cwd
+      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+      if [[ "$cwd" == /tmp/* ]]; then
+        kill "$pid" 2>/dev/null && killed=$((killed + 1)) || true
+      fi
+    done <<< "$orphan_pids"
+    if [ "$killed" -gt 0 ]; then
+      echo "Cleaned up $killed orphaned dolt sql-server process(es)"
+    fi
+  fi
+
   if [ -n "${SHARED_DOLT_DIR:-}" ] && [ -d "$SHARED_DOLT_DIR" ]; then
     rm -rf "$SHARED_DOLT_DIR"
   fi
@@ -279,12 +299,23 @@ EOF
   export BD_DB="$TEST_DIR/.beads/issues.db"
   mkdir -p "$(dirname "$BD_DB")"
 
+  # Suppress dolt sql-server auto-start in test subprocesses.
+  # Without this, any bd command that briefly fails to connect to the shared
+  # server (race condition, slow start) will spawn its own detached dolt
+  # sql-server — creating orphaned processes that are never cleaned up.
+  export BEADS_DOLT_AUTO_START=0
+  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
+    export BEADS_DOLT_SERVER_PORT="$SHARED_DOLT_PORT"
+  fi
+
   local test_prefix
   test_prefix="t$(echo "$test_name" | tr -cd 'a-z0-9' | head -c 6)${RANDOM}"
-  (cd "$TEST_DIR" && bd init --prefix "$test_prefix" \
-    --server-port "$SHARED_DOLT_PORT" --skip-hooks --quiet >/dev/null 2>&1) || {
-    echo "WARNING: bd init failed for $test_name" >&2
-  }
+  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
+    (cd "$TEST_DIR" && bd init --prefix "$test_prefix" \
+      --server-port "$SHARED_DOLT_PORT" --skip-hooks --quiet >/dev/null 2>&1) || {
+      echo "WARNING: bd init failed for $test_name" >&2
+    }
+  fi
 
   # Create bin directory with mock claude as 'claude'
   mkdir -p "$TEST_DIR/bin"
@@ -371,7 +402,7 @@ teardown_test_env() {
   fi
 
   # Unset test environment variables
-  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR
+  unset TEST_DIR BD_DB MOCK_SCENARIO RALPH_DIR RALPH_TEMPLATE_DIR BEADS_DOLT_AUTO_START BEADS_DOLT_SERVER_PORT
 }
 
 #-----------------------------------------------------------------------------
