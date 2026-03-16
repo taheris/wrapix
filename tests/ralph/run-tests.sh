@@ -8099,7 +8099,8 @@ main() {
 
   # Start shared dolt server for test isolation
   setup_shared_dolt_server
-  trap teardown_shared_dolt_server EXIT
+  # Trap EXIT, INT, and TERM to ensure cleanup on ^C or kill
+  trap teardown_shared_dolt_server EXIT INT TERM
 
   # In --sequential mode, run everything sequentially
   if [ "$filter" = "--sequential" ] || [ "${RALPH_TEST_SEQUENTIAL:-}" = "1" ]; then

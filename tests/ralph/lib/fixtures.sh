@@ -51,11 +51,47 @@ _ensure_ralph_metadata() {
 # Shared Dolt Server (one server for all tests)
 #-----------------------------------------------------------------------------
 
+# Kill orphaned dolt sql-server processes left over from previous test runs.
+# Each test run writes a runner.pid file into its SHARED_DOLT_DIR. At startup
+# we scan /tmp/ralph-test-dolt-*/runner.pid — if the recorded runner PID is no
+# longer alive, the dolt server in that directory is orphaned and safe to kill.
+# Usage: kill_stale_test_dolt_servers
+kill_stale_test_dolt_servers() {
+  local killed=0
+  for pidfile in /tmp/ralph-test-dolt-*/runner.pid; do
+    [ -f "$pidfile" ] || continue
+
+    local runner_pid dolt_pid dir
+    runner_pid=$(cat "$pidfile" 2>/dev/null || echo "")
+    [ -n "$runner_pid" ] || continue
+
+    # If the runner is still alive, this is an active test run — skip
+    if kill -0 "$runner_pid" 2>/dev/null; then
+      continue
+    fi
+
+    # Runner is dead — kill the dolt server and clean up
+    dir=$(dirname "$pidfile")
+    dolt_pid=$(cat "$dir/dolt.pid" 2>/dev/null || echo "")
+    if [ -n "$dolt_pid" ]; then
+      kill "$dolt_pid" 2>/dev/null && killed=$((killed + 1)) || true
+    fi
+    rm -rf "$dir"
+  done
+  if [ "$killed" -gt 0 ]; then
+    echo "Cleaned up $killed orphaned dolt sql-server process(es) from previous run"
+    sleep 0.2
+  fi
+}
+
 # Start a single shared Dolt sql-server before all tests.
 # Each test gets its own database via a unique --prefix in bd init.
 # Usage: setup_shared_dolt_server (call once in main, before any tests)
 # Exports: SHARED_DOLT_DIR, SHARED_DOLT_PORT, SHARED_DOLT_PID
 setup_shared_dolt_server() {
+  # Clean up stale dolt processes from interrupted previous runs
+  kill_stale_test_dolt_servers
+
   SHARED_DOLT_DIR=$(mktemp -d -t "ralph-test-dolt-XXXXXX")
 
   # Initialize dolt data directory
@@ -111,34 +147,19 @@ setup_shared_dolt_server() {
     exit 1
   fi
 
+  # Write PID files for stale process detection by concurrent/future runs
+  echo "$$" > "$SHARED_DOLT_DIR/runner.pid"
+  echo "$SHARED_DOLT_PID" > "$SHARED_DOLT_DIR/dolt.pid"
+
   export SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
 }
 
-# Stop the shared Dolt server and clean up any orphaned dolt processes.
+# Stop the shared Dolt server and clean up.
 # Usage: teardown_shared_dolt_server (call once after all tests, typically via EXIT trap)
 teardown_shared_dolt_server() {
   if [ -n "${SHARED_DOLT_PID:-}" ]; then
     kill "$SHARED_DOLT_PID" 2>/dev/null || true
     wait "$SHARED_DOLT_PID" 2>/dev/null || true
-  fi
-
-  # Kill any orphaned dolt sql-server processes spawned by test subprocesses.
-  # These are detached processes that survive test subprocess exit because
-  # bd starts them with Setpgid: true for daemon-style lifecycle.
-  local orphan_pids killed=0
-  orphan_pids=$(pgrep -f 'dolt sql-server' 2>/dev/null || true)
-  if [ -n "$orphan_pids" ]; then
-    while read -r pid; do
-      # Don't kill the project's own dolt server (check CWD is under /tmp)
-      local cwd
-      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
-      if [[ "$cwd" == /tmp/* ]]; then
-        kill "$pid" 2>/dev/null && killed=$((killed + 1)) || true
-      fi
-    done <<< "$orphan_pids"
-    if [ "$killed" -gt 0 ]; then
-      echo "Cleaned up $killed orphaned dolt sql-server process(es)"
-    fi
   fi
 
   if [ -n "${SHARED_DOLT_DIR:-}" ] && [ -d "$SHARED_DOLT_DIR" ]; then

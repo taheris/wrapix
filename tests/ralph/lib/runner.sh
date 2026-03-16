@@ -155,7 +155,8 @@ run_tests_parallel() {
     fi
 
     # Launch the test
-    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") &
+    # Redirect stdin from /dev/null so no command can block on interactive input
+    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") </dev/null &
     pids+=($!)
     test_names+=("$test_func")
   done
@@ -244,8 +245,9 @@ run_tests_sequential() {
 
     # Run test in subshell with set +e to prevent early exit from killing the subshell
     # The || exit_code=$? pattern captures the subshell's exit code without triggering set -e
+    # Redirect stdin from /dev/null so no command can block on interactive input
     local exit_code=0
-    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") || exit_code=$?
+    (set +e; run_test_isolated "$test_func" "$result_file" "$output_file") </dev/null || exit_code=$?
 
     # Show output immediately (sequential mode)
     if [ -f "$output_file" ]; then
