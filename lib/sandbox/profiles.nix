@@ -69,9 +69,10 @@ let
       env ? { },
       mounts ? [ ],
       networkAllowlist ? [ ],
+      enabledPlugins ? { },
     }:
     {
-      inherit name;
+      inherit name enabledPlugins;
       packages = basePackages ++ packages;
       env = baseEnv // env;
       mounts = baseMounts ++ mounts;
@@ -100,6 +101,10 @@ in
       postgresql.lib
       rustup
     ];
+
+    enabledPlugins = {
+      "rust-analyzer-lsp@claude-plugins-official" = true;
+    };
 
     env = {
       CARGO_HOME = "/workspace/.cargo";

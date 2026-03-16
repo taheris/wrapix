@@ -163,10 +163,16 @@ let
         inherit mounts env;
       };
 
-      # Merge MCP servers into Claude settings (only when servers are configured)
+      # Merge MCP servers and profile plugins into Claude settings
       finalClaudeSettings =
         baseClaudeSettings
-        // (if mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { });
+        // (if mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { })
+        // (
+          if (finalProfile.enabledPlugins or { }) != { } then
+            { enabledPlugins = finalProfile.enabledPlugins; }
+          else
+            { }
+        );
 
       # Compute comma-separated network allowlist for WRAPIX_NETWORK=limit mode
       networkAllowlist = concatStringsSep "," (finalProfile.networkAllowlist or [ ]);
