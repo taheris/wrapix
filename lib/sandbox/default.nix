@@ -169,7 +169,7 @@ let
         // (if mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { })
         // (
           if (finalProfile.enabledPlugins or { }) != { } then
-            { enabledPlugins = finalProfile.enabledPlugins; }
+            { inherit (finalProfile) enabledPlugins; }
           else
             { }
         );
