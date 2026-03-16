@@ -74,13 +74,15 @@ run_test_isolated() {
       FAILED=1
       FAILED_TESTS+=("$_RTI_TEST_FUNC: exited with code $exit_code")
     fi
-    echo "passed=$PASSED" > "$_RTI_RESULT_FILE"
-    echo "failed=$FAILED" >> "$_RTI_RESULT_FILE"
-    echo "skipped=$SKIPPED" >> "$_RTI_RESULT_FILE"
-    echo "not_implemented=$NOT_IMPLEMENTED" >> "$_RTI_RESULT_FILE"
-    for t in "${FAILED_TESTS[@]}"; do
-      echo "failed_test=$t" >> "$_RTI_RESULT_FILE"
-    done
+    {
+      echo "passed=$PASSED"
+      echo "failed=$FAILED"
+      echo "skipped=$SKIPPED"
+      echo "not_implemented=$NOT_IMPLEMENTED"
+      for t in "${FAILED_TESTS[@]}"; do
+        echo "failed_test=$t"
+      done
+    } > "$_RTI_RESULT_FILE"
   }
   trap _rti_write_results EXIT
 
@@ -376,14 +378,6 @@ check_prerequisites() {
 run_tests() {
   local test_array_name="$1"
   local mode="${2:-parallel}"
-
-  echo "=========================================="
-  echo "  Ralph Integration Tests"
-  echo "=========================================="
-  echo ""
-  echo "Test directory: ${SCRIPT_DIR:-$(pwd)}"
-  echo "Repo root: ${REPO_ROOT:-unknown}"
-  echo ""
 
   # Check for --sequential flag or RALPH_TEST_SEQUENTIAL env var
   if [ "$mode" = "--sequential" ] || [ "${RALPH_TEST_SEQUENTIAL:-}" = "1" ]; then

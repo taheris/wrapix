@@ -7937,12 +7937,13 @@ SEQUENTIAL_TESTS=(
   test_config_data_driven
   test_run_profile_selection
   test_status_awaiting_display
+  test_isolated_beads_db
+  test_logs_spec_flag
 )
 
 # Tests safe for parallel execution (template logic, file state, simple bd calls).
 PARALLEL_TESTS=(
   test_mock_claude_exists
-  test_isolated_beads_db
   test_render_template_basic
   test_render_template_missing_required
   test_render_template_multiline
@@ -7968,7 +7969,6 @@ PARALLEL_TESTS=(
   test_logs_context_lines
   test_logs_no_errors
   test_logs_exit_code_error
-  test_logs_spec_flag
   test_logs_spec_short_flag
   test_logs_no_spec_uses_current
   test_logs_spec_equals_form
@@ -8090,10 +8090,6 @@ main() {
     return
   fi
 
-  echo "=========================================="
-  echo "  Ralph Integration Tests"
-  echo "=========================================="
-  echo ""
   echo "Test directory: $SCRIPT_DIR"
   echo "Repo root: $REPO_ROOT"
   echo ""
