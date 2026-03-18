@@ -8497,6 +8497,38 @@ test_todo_new_mode_fallback() {
   teardown_test_env
 }
 
+# Helper: set up a mock bd that accepts show for a specific molecule
+# Usage: _setup_readme_mock_bd <molecule_id>
+_setup_readme_mock_bd() {
+  local mol_id="$1"
+  local bin_dir="${TEST_DIR}/bin"
+
+  # Remove existing symlink to real bd (nix store, can't overwrite)
+  rm -f "$bin_dir/bd"
+
+  cat > "$bin_dir/bd" << MOCK_EOF
+#!/usr/bin/env bash
+# Mock bd: only supports 'show' and 'list' for readme discovery tests
+case "\$1" in
+  show)
+    if [ "\$2" = "$mol_id" ]; then
+      echo '{"id":"$mol_id","title":"Mock","status":"open"}'
+      exit 0
+    fi
+    exit 1
+    ;;
+  list)
+    echo '[]'
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+MOCK_EOF
+  chmod +x "$bin_dir/bd"
+}
+
 # Test: compute_spec_diff tier 3 — README discovery when no state file
 test_todo_readme_discovery() {
   CURRENT_TEST="todo_readme_discovery"
@@ -8504,13 +8536,11 @@ test_todo_readme_discovery() {
 
   setup_test_env "spec-diff-readme"
   _setup_spec_diff_git "my-feature"
-  init_beads
 
-  # Create a real molecule via bd
-  local mol_id
-  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+  local mol_id="wx-mock-disc"
+  _setup_readme_mock_bd "$mol_id"
 
-  # Set up README with the molecule ID
+  # Set up README with the mock molecule ID
   cat > "$TEST_DIR/specs/README.md" << EOF
 # Project Specifications
 
@@ -8544,11 +8574,9 @@ test_todo_readme_state_reconstruction() {
 
   setup_test_env "spec-diff-reconstruct"
   _setup_spec_diff_git "my-feature"
-  init_beads
 
-  # Create a real molecule
-  local mol_id
-  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+  local mol_id="wx-mock-recon"
+  _setup_readme_mock_bd "$mol_id"
 
   cat > "$TEST_DIR/specs/README.md" << EOF
 # Project Specifications
@@ -8595,10 +8623,9 @@ test_todo_readme_reconstructed_state_schema() {
 
   setup_test_env "spec-diff-schema"
   _setup_spec_diff_git "my-feature"
-  init_beads
 
-  local mol_id
-  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+  local mol_id="wx-mock-schema"
+  _setup_readme_mock_bd "$mol_id"
 
   cat > "$TEST_DIR/specs/README.md" << EOF
 # Project Specifications
@@ -8688,7 +8715,16 @@ test_todo_readme_stale_molecule_fallthrough() {
 
   setup_test_env "spec-diff-stale"
   _setup_spec_diff_git "my-feature"
-  init_beads
+
+  # Set up a mock bd that rejects all show calls (simulates stale molecule)
+  local bin_dir="${TEST_DIR}/bin"
+  rm -f "$bin_dir/bd"
+  cat > "$bin_dir/bd" << 'MOCK_EOF'
+#!/usr/bin/env bash
+# Mock bd: rejects all show calls (stale molecule simulation)
+exit 1
+MOCK_EOF
+  chmod +x "$bin_dir/bd"
 
   # README has a molecule that doesn't exist in beads
   cat > "$TEST_DIR/specs/README.md" << 'EOF'
