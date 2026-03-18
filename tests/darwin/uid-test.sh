@@ -12,7 +12,7 @@ set -euo pipefail
 # inside a Linux container on a Darwin host, so uname returns "Linux" here.
 
 # Precondition: VirtioFS must be in use. VirtioFS maps all files to UID 0 inside
-# the container. When running outside an Apple Container VM (e.g., via wrapix-debug
+# the container. When running outside an Apple Container VM (e.g., via wrapix-mcp
 # on Linux), VirtioFS is not present and this test is not applicable.
 WORKSPACE_OWNER_CHECK=$(stat -c %u /workspace 2>/dev/null || echo "unknown")
 if [ "$WORKSPACE_OWNER_CHECK" != "0" ]; then

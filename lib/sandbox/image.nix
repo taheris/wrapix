@@ -16,10 +16,11 @@
   krunSupport ? false,
   claudeConfig,
   claudeSettings,
+  mcpServerConfigs ? { },
 }:
 
 let
-  inherit (pkgs.lib) mapAttrsToList;
+  inherit (pkgs.lib) concatStringsSep mapAttrsToList optionalString;
 
   notifyClient = import ../notify/client.nix { inherit pkgs; };
   ralph = import ../ralph { inherit pkgs; };
@@ -53,6 +54,11 @@ let
   # Generate Claude JSON files from Nix attribute sets
   claudeConfigJson = pkgs.writeText "claude-config.json" (builtins.toJSON claudeConfig);
   claudeSettingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON claudeSettings);
+
+  # Per-server MCP config files for runtime selection (mcpRuntime mode)
+  mcpConfigFiles = builtins.mapAttrs (
+    name: config: pkgs.writeText "mcp-${name}.json" (builtins.toJSON config)
+  ) mcpServerConfigs;
 
   # Base passwd/group with fixed wrapix user (UID remapped at runtime via --userns=keep-id or setpriv)
   passwdFile = pkgs.writeTextDir "etc/passwd" ''
@@ -127,6 +133,13 @@ pkgs.dockerTools.buildLayeredImage {
 
     cp ${claudeConfigJson} etc/wrapix/claude-config.json
     cp ${claudeSettingsJson} etc/wrapix/claude-settings.json
+
+    ${optionalString (mcpServerConfigs != { }) ''
+      mkdir -p etc/wrapix/mcp
+      ${concatStringsSep "\n" (
+        mapAttrsToList (name: file: "cp ${file} etc/wrapix/mcp/${name}.json") mcpConfigFiles
+      )}
+    ''}
 
     # Bundle ralph template for ralph-init
     cp -r ${ralph.templateDir} etc/wrapix/ralph-template

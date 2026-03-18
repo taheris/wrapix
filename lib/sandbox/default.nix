@@ -87,6 +87,7 @@ let
       entrypointSh,
       krunSupport ? false,
       claudeSettings ? baseClaudeSettings,
+      mcpServerConfigs ? { },
     }:
     import ./image.nix {
       pkgs = linuxPkgs;
@@ -96,6 +97,7 @@ let
         krunSupport
         claudeConfig
         claudeSettings
+        mcpServerConfigs
         ;
       entrypointPkg = linuxPkgs.claude-code;
     };
@@ -152,10 +154,19 @@ let
       mounts ? [ ],
       env ? { },
       mcp ? { },
+      mcpRuntime ? false,
     }:
     let
+      # mcpRuntime: include ALL MCP server packages, defer selection to runtime.
+      # Mutually exclusive with explicit mcp server config.
+      effectiveMcp = if mcpRuntime then mapAttrs (_: _: { }) mcpRegistry else mcp;
+
       # Build MCP configuration from enabled servers
-      mcpConfig = buildMcpConfig mcp;
+      mcpConfig = buildMcpConfig effectiveMcp;
+
+      # Per-server config files for runtime selection (mcpRuntime only)
+      mcpServerConfigs =
+        if mcpRuntime then mapAttrs (name: _: mcpRegistry.${name}.mkServerConfig { }) mcpRegistry else { };
 
       # Extend profile with user packages + MCP server packages
       finalProfile = extendProfile profile {
@@ -164,9 +175,10 @@ let
       };
 
       # Merge MCP servers and profile plugins into Claude settings
+      # When mcpRuntime is true, don't bake mcpServers — entrypoint handles it
       finalClaudeSettings =
         baseClaudeSettings
-        // (if mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { })
+        // (if !mcpRuntime && mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { })
         // (
           if (finalProfile.enabledPlugins or { }) != { } then
             { inherit (finalProfile) enabledPlugins; }
@@ -192,6 +204,7 @@ let
               entrypointSh = ./linux/entrypoint.sh;
               krunSupport = true;
               claudeSettings = finalClaudeSettings;
+              inherit mcpServerConfigs;
             };
           }
         else if isDarwin then
@@ -207,6 +220,7 @@ let
               profile = finalProfile;
               entrypointSh = ./darwin/entrypoint.sh;
               claudeSettings = finalClaudeSettings;
+              inherit mcpServerConfigs;
             };
           }
         else

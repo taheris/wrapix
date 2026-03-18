@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Test: Verify MCP audit configuration is properly passed to the container
+# Test: Verify MCP audit configuration via runtime env vars
 #
-# This test verifies that the audit configuration option in MCP opt-in
-# is properly handled:
+# This test verifies that the WRAPIX_MCP_TMUX_AUDIT env var is properly
+# merged into Claude settings at container startup:
 #
-# 1. Build sandbox with audit configuration:
-#    mkSandbox { profile = base; mcp = { tmux = { audit = "/path"; }; }; }
-# 2. Verify TMUX_DEBUG_AUDIT environment variable is set in container
-# 3. Verify the MCP server configuration includes the audit path
+# 1. Build wrapix-mcp sandbox (mcpRuntime=true, all servers included)
+# 2. Run with WRAPIX_MCP=tmux and WRAPIX_MCP_TMUX_AUDIT set
+# 3. Verify TMUX_DEBUG_AUDIT appears in the MCP server configuration
 #
 # Prerequisites:
 # - nix (with flakes enabled)
@@ -59,13 +58,12 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix image with MCP opt-in including audit configuration..."
+log_info "Building wrapix-mcp image (mcpRuntime=true)..."
 
-# Build the debug-audit profile image using MCP opt-in
-# The flake defines: mkSandbox { profile = base; mcp = { tmux = { audit = "/workspace/.debug-audit.log"; }; }; }
-IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug-audit" --print-out-paths 2>/dev/null) || {
-    log_error "Failed to build wrapix-debug-audit image"
-    log_warn "Check that the mcp parameter with audit option is properly configured"
+# Build the mcp image: all MCP server packages included, runtime selection via env vars
+IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-mcp" --print-out-paths 2>/dev/null) || {
+    log_error "Failed to build wrapix-mcp image"
+    log_warn "Check that mcpRuntime is properly configured in lib/sandbox/default.nix"
     exit 1
 }
 
@@ -85,19 +83,22 @@ FAILED=0
 log_info "=== Checking audit configuration ==="
 
 # Check that the Claude settings contain the MCP server configuration with audit
+# Uses the entrypoint with WRAPIX_MCP_TMUX_AUDIT to exercise runtime MCP selection
 log_info "Verifying Claude settings contain MCP server configuration..."
 
 CLAUDE_SETTINGS=$(podman run --rm \
     --network=pasta \
     --userns=keep-id \
-    --entrypoint /bin/bash \
+    -e WRAPIX_MCP=tmux \
+    -e WRAPIX_MCP_TMUX_AUDIT=/workspace/.debug-audit.log \
     -v "${WORKSPACE}:/workspace:rw" \
     -w /workspace \
     "docker-archive:${IMAGE_PATH}" \
-    -c "cat ~/.claude/settings.json 2>/dev/null || echo 'not-found'" 2>&1)
+    cat /home/wrapix/.claude/settings.json 2>&1) || true
 
-if [[ "${CLAUDE_SETTINGS}" == "not-found" ]]; then
-    log_error "FAIL: Claude settings file not found in container"
+if ! echo "${CLAUDE_SETTINGS}" | jq . &>/dev/null; then
+    log_error "FAIL: Claude settings not valid JSON"
+    echo "Output: ${CLAUDE_SETTINGS}"
     FAILED=1
 else
     log_info "Claude settings found"

@@ -47,6 +47,48 @@ cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
 cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
 chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
 
+# Runtime MCP server selection
+# Images built with mcpRuntime=true include per-server configs in /etc/wrapix/mcp/.
+# WRAPIX_MCP selects which servers to enable (comma-separated, default: all).
+if [ -d /etc/wrapix/mcp ]; then
+  mcp_enabled="${WRAPIX_MCP:-all}"
+  mcp_servers="{}"
+
+  for config_file in /etc/wrapix/mcp/*.json; do
+    [ -f "$config_file" ] || continue
+    server_name=$(basename "$config_file" .json)
+
+    # Filter by WRAPIX_MCP unless "all"
+    if [ "$mcp_enabled" != "all" ]; then
+      if ! echo ",$mcp_enabled," | grep -qF ",$server_name,"; then
+        continue
+      fi
+    fi
+
+    server_config=$(cat "$config_file")
+
+    # Apply runtime env var overrides
+    case "$server_name" in
+      tmux)
+        if [ -n "${WRAPIX_MCP_TMUX_AUDIT:-}" ]; then
+          server_config=$(echo "$server_config" | jq --arg v "$WRAPIX_MCP_TMUX_AUDIT" '.env.TMUX_DEBUG_AUDIT = $v')
+        fi
+        if [ -n "${WRAPIX_MCP_TMUX_AUDIT_FULL:-}" ]; then
+          server_config=$(echo "$server_config" | jq --arg v "$WRAPIX_MCP_TMUX_AUDIT_FULL" '.env.TMUX_DEBUG_AUDIT_FULL = $v')
+        fi
+        ;;
+    esac
+
+    mcp_servers=$(echo "$mcp_servers" | jq --arg name "$server_name" --argjson config "$server_config" '.[$name] = $config')
+  done
+
+  if [ "$mcp_servers" != "{}" ]; then
+    jq --argjson servers "$mcp_servers" '.mcpServers = $servers' \
+      "$HOME/.claude/settings.json" > "$HOME/.claude/settings.json.tmp"
+    mv "$HOME/.claude/settings.json.tmp" "$HOME/.claude/settings.json"
+  fi
+fi
+
 # Write project-level settings only if missing (preserve user customizations)
 if [ ! -f /workspace/.claude/settings.json ]; then
   cp /etc/wrapix/claude-settings.json /workspace/.claude/settings.json

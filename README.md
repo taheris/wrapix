@@ -145,61 +145,59 @@ ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
 
 ## MCP Servers
 
-MCP (Model Context Protocol) servers can be enabled per-sandbox via the `mcp` parameter. This avoids profile proliferation by adding capabilities to existing profiles.
+MCP (Model Context Protocol) servers are available in `-mcp` sandbox variants. These images include all MCP server packages; the `WRAPIX_MCP` env var selects which servers to enable at runtime (default: all).
+
+### Quick start
+
+```bash
+nix run github:taheris/wrapix#wrapix-mcp         # base + all MCP servers
+nix run github:taheris/wrapix#wrapix-rust-mcp    # rust + all MCP servers
+nix run github:taheris/wrapix#wrapix-python-mcp  # python + all MCP servers
+```
+
+### Selecting servers
+
+```bash
+# Only tmux
+WRAPIX_MCP=tmux nix run github:taheris/wrapix#wrapix-mcp
+
+# Only playwright
+WRAPIX_MCP=playwright nix run github:taheris/wrapix#wrapix-mcp
+
+# Both (same as default)
+WRAPIX_MCP=tmux,playwright nix run github:taheris/wrapix#wrapix-mcp
+
+# Tmux with audit logging
+WRAPIX_MCP=tmux WRAPIX_MCP_TMUX_AUDIT=/workspace/.debug-audit.log \
+  nix run github:taheris/wrapix#wrapix-mcp
+```
 
 ### tmux
 
-Provides tmux pane management for AI-assisted debugging. Run servers in one pane, send test requests from another, capture logs.
-
-```bash
-nix run github:taheris/wrapix#wrapix-debug       # base + tmux
-nix run github:taheris/wrapix#wrapix-rust-debug  # rust + tmux
-```
-
-See [specs/tmux-mcp.md](specs/tmux-mcp.md) for the full specification.
+Provides tmux pane management for AI-assisted debugging. Run servers in one pane, send test requests from another, capture logs. See [specs/tmux-mcp.md](specs/tmux-mcp.md).
 
 ### playwright
 
-Provides browser automation for AI-assisted frontend development. Take screenshots, navigate pages, fill forms, inspect accessibility trees.
-
-See [specs/playwright-mcp.md](specs/playwright-mcp.md) for the full specification.
+Provides browser automation for AI-assisted frontend development. Take screenshots, navigate pages, fill forms, inspect accessibility trees. See [specs/playwright-mcp.md](specs/playwright-mcp.md).
 
 ### Flake usage
 
+For downstream flakes, use `mcp` for baked-in configs or `mcpRuntime` for runtime selection:
+
 ```nix
-sandbox = wrapix.mkSandbox {
-  profile = wrapix.profiles.rust;
-  mcp = {
-    tmux = { };  # enable with defaults
-  };
-};
-
-# With audit logging
-sandbox = wrapix.mkSandbox {
-  profile = wrapix.profiles.rust;
-  mcp = {
-    tmux = {
-      audit = "/workspace/.debug-audit.log";
-      auditFull = "/workspace/.debug-audit/";  # full capture logs
-    };
-  };
-};
-
-# Browser automation
-sandbox = wrapix.mkSandbox {
-  profile = wrapix.profiles.rust;
-  mcp = {
-    playwright = { };
-  };
-};
-
-# Combined: tmux + playwright
+# Baked-in: specific servers with fixed config
 sandbox = wrapix.mkSandbox {
   profile = wrapix.profiles.rust;
   mcp = {
     tmux = { };
     playwright = { };
   };
+};
+
+# Runtime: all servers included, WRAPIX_MCP selects at startup
+sandbox = wrapix.mkSandbox {
+  profile = wrapix.profiles.rust;
+  mcpRuntime = true;
 };
 ```
 

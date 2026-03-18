@@ -62,12 +62,11 @@ if ! command -v podman &>/dev/null; then
     log_warn "podman not available — container runtime checks will be skipped"
 fi
 
-log_info "Building wrapix rust profile with MCP opt-in (tmux)..."
+log_info "Building wrapix-rust-mcp image (mcpRuntime=true)..."
 
-# Build the rust + debug image using MCP opt-in
-# The flake defines: mkSandbox { profile = rust; mcp = { tmux = {}; }; }
-PACKAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-rust-debug" --print-out-paths 2>/dev/null) || {
-    log_error "Failed to build wrapix-rust-debug image"
+# Build the rust + mcp image: all MCP server packages included, runtime selection via env vars
+PACKAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-rust-mcp" --print-out-paths 2>/dev/null) || {
+    log_error "Failed to build wrapix-rust-mcp image"
     log_warn "MCP opt-in composition may not be configured correctly"
     log_warn "Check that the mcp parameter is properly handled in lib/sandbox/default.nix"
     exit 1

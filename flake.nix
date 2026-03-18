@@ -103,17 +103,17 @@
                   profile = profiles.python;
                 };
 
-                wrapix-debug = {
+                wrapix-mcp = {
                   profile = profiles.base;
-                  mcp.tmux = { };
+                  mcpRuntime = true;
                 };
-                wrapix-rust-debug = {
+                wrapix-rust-mcp = {
                   profile = profiles.rust;
-                  mcp.tmux = { };
+                  mcpRuntime = true;
                 };
-                wrapix-debug-audit = {
-                  profile = profiles.base;
-                  mcp.tmux.audit = "/workspace/.debug-audit.log";
+                wrapix-python-mcp = {
+                  profile = profiles.python;
+                  mcpRuntime = true;
                 };
               };
             in
