@@ -66,7 +66,14 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   fi
   RALPH_ARGS="$RALPH_ARGS ${*:-}"
   export RALPH_ARGS
-  exec wrapix
+  wrapix
+  wrapix_exit=$?
+  # Safety net: pull beads created inside the container so they're visible on host
+  if [ $wrapix_exit -eq 0 ]; then
+    echo "Syncing beads from container..."
+    bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
+  fi
+  exit $wrapix_exit
 fi
 
 # Load shared helpers

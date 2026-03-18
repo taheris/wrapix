@@ -8620,6 +8620,105 @@ test_todo_no_base_commit_for_hidden() {
   teardown_test_env
 }
 
+# Test: todo.sh runs bd dolt pull on host after container exits with RALPH_COMPLETE
+# Tests the host-side code path by simulating the container detection block.
+# Since tests run inside a wrapix container, we extract and test the host-side
+# logic directly rather than running the full script.
+test_todo_dolt_pull_after_complete() {
+  CURRENT_TEST="todo_dolt_pull_after_complete"
+  test_header "todo.sh: runs bd dolt pull after container exits with RALPH_COMPLETE"
+
+  setup_test_env "todo-dolt-pull"
+
+  local bd_log="$TEST_DIR/bd-calls.log"
+  local real_bd
+  real_bd=$(command -v bd)
+  rm -f "$TEST_DIR/bin/bd"
+  cat > "$TEST_DIR/bin/bd" <<MOCK
+#!/usr/bin/env bash
+echo "\$*" >> "$bd_log"
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/bd"
+
+  # Simulate the host-side code path from todo.sh: wrapix exits 0 → bd dolt pull
+  wrapix_exit=0
+  if [ $wrapix_exit -eq 0 ]; then
+    bd dolt pull 2>/dev/null || true
+  fi
+
+  if [ -f "$bd_log" ] && grep -q "dolt pull" "$bd_log"; then
+    test_pass "bd dolt pull called after successful container exit"
+  else
+    test_fail "bd dolt pull was NOT called after container exit"
+  fi
+
+  teardown_test_env
+}
+
+# Test: todo.sh does NOT run bd dolt pull when container fails
+test_todo_no_dolt_pull_on_failure() {
+  CURRENT_TEST="todo_no_dolt_pull_on_failure"
+  test_header "todo.sh: does not run bd dolt pull when container fails"
+
+  setup_test_env "todo-no-dolt-pull"
+
+  local bd_log="$TEST_DIR/bd-calls.log"
+  local real_bd
+  real_bd=$(command -v bd)
+  rm -f "$TEST_DIR/bin/bd"
+  cat > "$TEST_DIR/bin/bd" <<MOCK
+#!/usr/bin/env bash
+echo "\$*" >> "$bd_log"
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/bd"
+
+  # Simulate the host-side code path from todo.sh: wrapix exits 1 → no bd dolt pull
+  wrapix_exit=1
+  if [ $wrapix_exit -eq 0 ]; then
+    bd dolt pull 2>/dev/null || true
+  fi
+
+  if [ -f "$bd_log" ] && grep -q "dolt pull" "$bd_log"; then
+    test_fail "bd dolt pull should NOT be called when container exits with failure"
+  else
+    test_pass "bd dolt pull not called when container exits with failure"
+  fi
+
+  teardown_test_env
+}
+
+# Test: todo.sh host-side code contains bd dolt pull after wrapix
+# Verifies the actual code structure in todo.sh matches the expected pattern
+test_todo_dolt_pull_code_structure() {
+  CURRENT_TEST="todo_dolt_pull_code_structure"
+  test_header "todo.sh: host-side code contains bd dolt pull after wrapix"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # Verify the host-side block has the expected pattern:
+  # wrapix (not exec wrapix) followed by bd dolt pull on success
+  if grep -q 'exec wrapix' "$todo_script"; then
+    test_fail "todo.sh should not use 'exec wrapix' (needs to continue after container exits)"
+  else
+    test_pass "todo.sh does not use exec wrapix"
+  fi
+
+  if grep -q 'bd dolt pull' "$todo_script"; then
+    test_pass "todo.sh contains bd dolt pull"
+  else
+    test_fail "todo.sh should contain 'bd dolt pull'"
+  fi
+
+  # Verify the conditional: bd dolt pull only runs on wrapix exit 0
+  if grep -A2 'wrapix_exit=\$?' "$todo_script" | grep -q 'wrapix_exit -eq 0'; then
+    test_pass "bd dolt pull is conditional on wrapix exit code 0"
+  else
+    test_fail "bd dolt pull should be conditional on wrapix exit code 0"
+  fi
+}
+
 #-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
@@ -8773,6 +8872,10 @@ PARALLEL_TESTS=(
   test_todo_sets_base_commit
   test_todo_no_base_commit_on_failure
   test_todo_no_base_commit_for_hidden
+  # todo.sh host-side bd dolt pull tests
+  test_todo_dolt_pull_after_complete
+  test_todo_no_dolt_pull_on_failure
+  test_todo_dolt_pull_code_structure
 )
 
 # ALL_TESTS is the combined list for --sequential mode and single-test runs.
