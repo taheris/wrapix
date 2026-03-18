@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph todo [--spec <name>|-s <name>]
-# Converts spec to beads with task breakdown
+# ralph todo [--spec <name>|-s <name>] [--since <commit>]
+# Converts spec to beads with task breakdown using three-tier detection:
+#   Tier 1 (diff):  base_commit in state JSON → git diff (fast, precise)
+#   Tier 2 (tasks): no base_commit but molecule exists → LLM compares spec vs tasks
+#   Tier 3 (new):   neither → full spec decomposition
+#
 # - Accepts --spec/-s flag to target a specific workflow
-# - Pins context by reading specs/README.md
-# - Reads spec from per-label state file (state/<label>.json)
-# - Analyzes spec and creates task breakdown
-# - Creates parent/epic bead, then child tasks
-# - Updates specs/README.md WIP table with parent bead ID
-# - Finalizes spec to specs/ (stripping Implementation Notes section)
+# - Accepts --since flag to force tier 1 from a specific commit
+# - Errors on uncommitted spec changes (git-tracked specs only)
+# - Stores HEAD as base_commit only on RALPH_COMPLETE
 
-# Parse --spec/-s flag early (before container detection, so it's included in RALPH_ARGS)
+# Parse --spec/-s and --since flags early (before container detection)
 SPEC_FLAG=""
+SINCE_FLAG=""
 TODO_ARGS=()
 
 for arg in "$@"; do
   if [ "${_next_is_spec:-}" = "1" ]; then
     SPEC_FLAG="$arg"
     unset _next_is_spec
+    continue
+  fi
+  if [ "${_next_is_since:-}" = "1" ]; then
+    SINCE_FLAG="$arg"
+    unset _next_is_since
     continue
   fi
   case "$arg" in
@@ -28,12 +35,18 @@ for arg in "$@"; do
     --spec=*)
       SPEC_FLAG="${arg#--spec=}"
       ;;
+    --since)
+      _next_is_since=1
+      ;;
+    --since=*)
+      SINCE_FLAG="${arg#--since=}"
+      ;;
     *)
       TODO_ARGS+=("$arg")
       ;;
   esac
 done
-unset _next_is_spec
+unset _next_is_spec _next_is_since
 
 # Replace positional params with filtered args
 set -- "${TODO_ARGS[@]+"${TODO_ARGS[@]}"}"
@@ -43,12 +56,16 @@ set -- "${TODO_ARGS[@]+"${TODO_ARGS[@]}"}"
 if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; then
   export RALPH_MODE=1
   export RALPH_CMD=todo
-  # Preserve --spec flag in args for container re-exec
+  # Preserve flags in args for container re-exec
+  RALPH_ARGS=""
   if [ -n "$SPEC_FLAG" ]; then
-    export RALPH_ARGS="--spec $SPEC_FLAG ${*:-}"
-  else
-    export RALPH_ARGS="${*:-}"
+    RALPH_ARGS="--spec $SPEC_FLAG"
   fi
+  if [ -n "$SINCE_FLAG" ]; then
+    RALPH_ARGS="$RALPH_ARGS --since $SINCE_FLAG"
+  fi
+  RALPH_ARGS="$RALPH_ARGS ${*:-}"
+  export RALPH_ARGS
   exec wrapix
 fi
 
@@ -73,18 +90,12 @@ LABEL=$(resolve_spec_label "$SPEC_FLAG")
 
 # Read state from per-label state file: state/<label>.json
 STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
+
 # Derive hidden from spec_path (no .hidden field in state JSON)
 if spec_is_hidden "$STATE_FILE"; then
   SPEC_HIDDEN="true"
 else
   SPEC_HIDDEN="false"
-fi
-# Derive update mode from molecule presence (no .update field in state JSON)
-# Full three-tier detection will be implemented in todo.sh refactoring (wx-1mcy.5)
-if [ -n "$(jq -r '.molecule // empty' "$STATE_FILE" 2>/dev/null)" ]; then
-  UPDATE_MODE="true"
-else
-  UPDATE_MODE="false"
 fi
 
 # Load config for stream filter
@@ -110,30 +121,63 @@ if [ ! -f "$SPEC_PATH" ]; then
   exit 1
 fi
 
-# Path for new requirements in update mode (written by ralph plan -u)
-NEW_REQUIREMENTS_PATH="$RALPH_DIR/state/$LABEL.md"
-NEW_REQUIREMENTS=""
-
-# In update mode, check for state/<label>.md with new requirements
-if [ "$UPDATE_MODE" = "true" ]; then
-  if [ ! -f "$NEW_REQUIREMENTS_PATH" ]; then
-    echo "No new requirements found at $NEW_REQUIREMENTS_PATH"
+# Check for uncommitted spec changes (git-tracked specs only)
+if [ "$SPEC_HIDDEN" = "false" ] && git ls-files --error-unmatch "$SPEC_PATH" >/dev/null 2>&1; then
+  if ! git diff --quiet -- "$SPEC_PATH" 2>/dev/null || ! git diff --cached --quiet -- "$SPEC_PATH" 2>/dev/null; then
+    echo "Error: Uncommitted changes detected in $SPEC_PATH"
     echo ""
-    echo "To add new requirements to this spec, run:"
-    echo "  ralph plan -u $LABEL"
-    echo ""
-    echo "This will gather new requirements and write them to $NEW_REQUIREMENTS_PATH,"
-    echo "which ralph todo will then process."
-    exit 0
+    echo "Spec changes must be committed before running ralph todo."
+    echo "  git add $SPEC_PATH && git commit -m 'Update $LABEL spec'"
+    exit 1
   fi
-  NEW_REQUIREMENTS=$(cat "$NEW_REQUIREMENTS_PATH")
 fi
 
-# Select template based on mode: todo-new for new specs, todo-update for updates
-if [ "$UPDATE_MODE" = "true" ]; then
-  TEMPLATE_NAME="todo-update"
-else
-  TEMPLATE_NAME="todo-new"
+# Use compute_spec_diff for three-tier detection
+DIFF_ARGS=()
+if [ -n "$SINCE_FLAG" ]; then
+  DIFF_ARGS+=(--since "$SINCE_FLAG")
+fi
+
+DIFF_OUTPUT=$(compute_spec_diff "$STATE_FILE" "${DIFF_ARGS[@]+"${DIFF_ARGS[@]}"}")
+DIFF_MODE=$(echo "$DIFF_OUTPUT" | head -1)
+DIFF_CONTENT=$(echo "$DIFF_OUTPUT" | tail -n +2)
+
+# Determine template and mode based on tier
+SPEC_DIFF=""
+EXISTING_TASKS=""
+
+case "$DIFF_MODE" in
+  diff)
+    # Tier 1: git-based diff
+    if [ -z "$(echo "$DIFF_CONTENT" | tr -d '[:space:]')" ]; then
+      echo "No spec changes since last task creation."
+      echo "  base_commit: $(jq -r '.base_commit // "unknown"' "$STATE_FILE")"
+      echo ""
+      echo "To force re-evaluation, run:"
+      echo "  ralph plan -u $LABEL  # then ralph todo"
+      exit 0
+    fi
+    TEMPLATE_NAME="todo-update"
+    SPEC_DIFF="$DIFF_CONTENT"
+    ;;
+  tasks)
+    # Tier 2: molecule-based comparison
+    TEMPLATE_NAME="todo-update"
+    EXISTING_TASKS="$DIFF_CONTENT"
+    ;;
+  new)
+    # Tier 3: full decomposition
+    TEMPLATE_NAME="todo-new"
+    ;;
+  *)
+    echo "Error: unexpected diff mode: $DIFF_MODE"
+    exit 1
+    ;;
+esac
+
+UPDATE_MODE="false"
+if [ "$TEMPLATE_NAME" = "todo-update" ]; then
+  UPDATE_MODE="true"
 fi
 
 mkdir -p "$RALPH_DIR/logs"
@@ -150,13 +194,6 @@ SPEC_TITLE=$(grep -m 1 '^#' "$SPEC_PATH" | sed 's/^#* *//' || echo "$LABEL")
 # Get molecule ID from per-label state file (for update mode)
 MOLECULE_ID=$(jq -r '.molecule // empty' "$STATE_FILE")
 
-# Count existing tasks (for status display in update mode)
-EXISTING_COUNT=0
-if [ "$UPDATE_MODE" = "true" ]; then
-  EXISTING_BEADS=$(bd list -l "spec-$LABEL" --json 2>/dev/null || echo "[]")
-  EXISTING_COUNT=$(echo "$EXISTING_BEADS" | jq 'length')
-fi
-
 echo "Ralph Todo: Converting spec to molecule..."
 echo "  Label: $LABEL"
 echo "  Spec: $SPEC_PATH"
@@ -165,6 +202,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
   if [ -n "$MOLECULE_ID" ]; then
     echo "  Mode: UPDATE (bonding new tasks to existing molecule)"
     echo "  Molecule: $MOLECULE_ID"
+    echo "  Detection: tier ${DIFF_MODE/#diff/1 (git diff)}${DIFF_MODE/#tasks/2 (molecule-based)}"
   else
     echo "  Mode: UPDATE (creating molecule for existing spec)"
     echo "  Creating epic..."
@@ -172,7 +210,6 @@ if [ "$UPDATE_MODE" = "true" ]; then
     jq --arg mol "$MOLECULE_ID" '.molecule = $mol' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
     echo "  Molecule: $MOLECULE_ID"
   fi
-  echo "  Existing tasks: $EXISTING_COUNT"
 else
   echo "  Mode: NEW (creating molecule from scratch)"
 fi
@@ -185,12 +222,10 @@ if [ -f "$SPEC_PATH" ]; then
 fi
 
 # Render template using centralized render_template function
-# Variables differ based on template type
 if [ "$UPDATE_MODE" = "true" ]; then
-  # Compute molecule progress (for ready-update template)
+  # Compute molecule progress
   MOLECULE_PROGRESS=""
   if [ -n "$MOLECULE_ID" ]; then
-    # Try to get progress from bd mol progress
     PROGRESS_OUTPUT=$(bd mol progress "$MOLECULE_ID" 2>/dev/null || true)
     if [ -n "$PROGRESS_OUTPUT" ]; then
       MOLECULE_PROGRESS="$PROGRESS_OUTPUT"
@@ -203,8 +238,8 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "EXISTING_SPEC=$SPEC_CONTENT" \
     "MOLECULE_ID=$MOLECULE_ID" \
     "MOLECULE_PROGRESS=$MOLECULE_PROGRESS" \
-    "NEW_REQUIREMENTS=$NEW_REQUIREMENTS" \
-    "NEW_REQUIREMENTS_PATH=$NEW_REQUIREMENTS_PATH" \
+    "SPEC_DIFF=$SPEC_DIFF" \
+    "EXISTING_TASKS=$EXISTING_TASKS" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
     "EXIT_SIGNALS=")
@@ -234,33 +269,7 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
 
   FINAL_SPEC_PATH="$SPECS_DIR/$LABEL.md"
 
-  # In update mode, merge new requirements into spec and cleanup state file
-  if [ "$UPDATE_MODE" = "true" ] && [ -f "$NEW_REQUIREMENTS_PATH" ]; then
-    echo ""
-    echo "Merging new requirements into $FINAL_SPEC_PATH..."
-
-    # Append new requirements to spec file (Claude should have already done this,
-    # but we ensure the state file content is captured if not)
-    if [ -f "$FINAL_SPEC_PATH" ]; then
-      # Check if new requirements are already in the spec (Claude may have merged)
-      # by looking for a unique marker from the new requirements
-      FIRST_REQ_LINE=$(head -5 "$NEW_REQUIREMENTS_PATH" | grep -v '^#' | grep -v '^$' | head -1 || true)
-      if [ -n "$FIRST_REQ_LINE" ] && ! grep -qF "$FIRST_REQ_LINE" "$FINAL_SPEC_PATH" 2>/dev/null; then
-        echo ""
-        echo "  (appending new requirements that weren't merged by Claude)"
-        {
-          echo ""
-          echo "## Updates"
-          echo ""
-          cat "$NEW_REQUIREMENTS_PATH"
-        } >> "$FINAL_SPEC_PATH"
-      fi
-    fi
-
-    # Delete the state file after successful processing
-    echo "  Cleaning up $NEW_REQUIREMENTS_PATH..."
-    rm -f "$NEW_REQUIREMENTS_PATH"
-  else
+  if [ "$UPDATE_MODE" != "true" ]; then
     # New spec mode: strip Implementation Notes section if present
     if [ -f "$SPEC_PATH" ]; then
       SPEC_CONTENT=$(cat "$SPEC_PATH")
@@ -288,6 +297,14 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
       fi
       git commit -m "$COMMIT_MSG" >/dev/null 2>&1 && echo "  Committed: $FINAL_SPEC_PATH" || echo "  (commit failed or nothing to commit)"
     fi
+  fi
+
+  # Store base_commit (HEAD) on successful completion
+  if [ "$SPEC_HIDDEN" = "false" ]; then
+    HEAD_COMMIT=$(git rev-parse HEAD)
+    jq --arg bc "$HEAD_COMMIT" '.base_commit = $bc' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+    echo ""
+    echo "Stored base_commit: $HEAD_COMMIT"
   fi
 
   # Display the molecule ID if available
