@@ -1102,6 +1102,55 @@ compute_spec_diff() {
 }
 
 #-----------------------------------------------------------------------------
+# Molecule Discovery from README
+#
+# Parses specs/README.md to find a molecule ID by spec label. Looks for a
+# table row whose Spec column contains <label>.md, then extracts the Beads
+# column value. Returns empty string when spec is not in README or when the
+# molecule ID is invalid/not found.
+#
+# Usage: discover_molecule_from_readme <label>
+# Output: molecule ID on stdout (empty string if not found or invalid)
+# Returns: 0 always (empty output signals "not found")
+#-----------------------------------------------------------------------------
+discover_molecule_from_readme() {
+  local label="$1"
+  local readme="specs/README.md"
+
+  if [ ! -f "$readme" ]; then
+    debug "discover_molecule_from_readme: $readme not found"
+    return 0
+  fi
+
+  # Find the row containing <label>.md in the Spec column and extract the Beads column (column 3)
+  local molecule
+  molecule=$(awk -F '|' -v pat="${label}.md" '
+    $2 ~ pat {
+      # Column 4 is the Beads column (1-indexed: empty, Spec, Code, Beads, Purpose, empty)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $4)
+      if ($4 != "" && $4 != "—" && $4 != "-") print $4
+    }
+  ' "$readme")
+
+  if [ -z "$molecule" ]; then
+    debug "discover_molecule_from_readme: no molecule found for label '$label'"
+    return 0
+  fi
+
+  debug "discover_molecule_from_readme: found molecule '$molecule' for label '$label'"
+
+  # Validate molecule exists via bd show
+  if ! bd show "$molecule" >/dev/null 2>&1; then
+    debug "discover_molecule_from_readme: molecule '$molecule' is invalid or not found"
+    echo ""
+    return 0
+  fi
+
+  echo "$molecule"
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Spec Label Resolution
 #
 # Resolves the target workflow label for commands that accept --spec/-s.

@@ -9411,6 +9411,87 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
+# discover_molecule_from_readme tests
+#-----------------------------------------------------------------------------
+
+test_discover_molecule_from_readme() {
+  CURRENT_TEST="discover_molecule_from_readme"
+  test_header "discover_molecule_from_readme parses Beads column from specs/README.md"
+
+  setup_test_env "discover-molecule"
+  init_beads
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create a realistic specs/README.md with the 4-column format
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [architecture.md](./architecture.md) | — | — | Design principles |
+| [my-feature.md](./my-feature.md) | [`lib/feat/`](../lib/feat/) | wx-abc1 | My feature |
+| [other.md](./other.md) | — | wx-def2 | Other feature |
+EOF
+
+  # Create a real molecule so bd show succeeds
+  local real_mol
+  real_mol=$(bd create --title="Test molecule" --type=epic --silent 2>/dev/null) || true
+
+  if [ -z "$real_mol" ]; then
+    test_fail "Could not create test molecule via bd"
+    teardown_test_env
+    return
+  fi
+
+  # Update README to use the real molecule ID
+  sed -i "s/wx-abc1/$real_mol/" "$TEST_DIR/specs/README.md"
+
+  local result
+  result=$(discover_molecule_from_readme "my-feature")
+
+  if [ "$result" = "$real_mol" ]; then
+    test_pass "Correctly parsed molecule '$real_mol' for label 'my-feature'"
+  else
+    test_fail "Expected '$real_mol', got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+test_discover_molecule_not_in_readme() {
+  CURRENT_TEST="discover_molecule_not_in_readme"
+  test_header "discover_molecule_from_readme returns empty when spec not in README"
+
+  setup_test_env "discover-molecule-missing"
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create a realistic specs/README.md without the target label
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [architecture.md](./architecture.md) | — | — | Design principles |
+| [other.md](./other.md) | — | wx-def2 | Other feature |
+EOF
+
+  local result
+  result=$(discover_molecule_from_readme "nonexistent-feature")
+
+  if [ -z "$result" ]; then
+    test_pass "Returns empty string for label not in README"
+  else
+    test_fail "Expected empty string, got '$result'"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -9586,6 +9667,9 @@ PARALLEL_TESTS=(
   test_read_manifests_format
   test_read_manifests_missing_directory
   test_read_manifests_missing_manifest
+  # discover_molecule_from_readme tests
+  test_discover_molecule_from_readme
+  test_discover_molecule_not_in_readme
 )
 
 # ALL_TESTS is the combined list for --sequential mode and single-test runs.
