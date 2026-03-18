@@ -1,8 +1,7 @@
 # Add Tasks to Existing Molecule
 
-You are adding new tasks to an existing molecule. New requirements have been
-gathered and stored separately - your job is to create tasks ONLY for those
-new requirements.
+You are adding new tasks to an existing molecule. Your job is to identify new or
+changed requirements and create tasks ONLY for those changes.
 
 {{> context-pinning}}
 
@@ -10,23 +9,26 @@ new requirements.
 
 ## Existing Specification
 
-The main spec file (`specs/{{LABEL}}.md`) contains the already-implemented requirements:
+The main spec file (`specs/{{LABEL}}.md`) contains the full current specification:
 
 ```markdown
 {{EXISTING_SPEC}}
 ```
 
-**Do NOT create tasks for requirements in this section** - they are already implemented or have existing tasks.
+## Spec Changes
 
-## New Requirements
+If SPEC_DIFF is provided, use that to identify new requirements. Otherwise, use
+EXISTING_TASKS to compare against the spec and identify gaps.
 
-The following NEW requirements were gathered during `ralph plan -u` and need tasks:
+### Spec Diff (git-based)
 
-```markdown
-{{NEW_REQUIREMENTS}}
+```diff
+{{SPEC_DIFF}}
 ```
 
-**Create tasks ONLY for the requirements above.** The existing spec is shown for context only.
+### Existing Tasks
+
+{{EXISTING_TASKS}}
 
 ## Existing Molecule
 
@@ -36,7 +38,9 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
 
 ## Instructions
 
-1. **Analyze new requirements** - Understand what work needs to be done
+1. **Identify changes** — If SPEC_DIFF is non-empty, focus on the added/changed lines
+   in the diff. If SPEC_DIFF is empty, compare the full spec against EXISTING_TASKS
+   to find requirements that lack corresponding tasks.
 2. **Create new tasks as children of the molecule**:
    ```bash
    TASK_ID=$(bd create --title="<task title>" --description="<detailed description>" \
@@ -50,7 +54,8 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
    ```bash
    bd dep add <new-task> <existing-task>  # new-task waits for existing-task
    ```
-5. **Merge new requirements into spec** - Integrate content from `{{NEW_REQUIREMENTS_PATH}}` into `specs/{{LABEL}}.md`
+5. **Do NOT create tasks** for requirements that already have corresponding tasks
+   in the molecule
 
 ### Key Concepts
 
@@ -68,22 +73,7 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
 - Include **test tasks** where appropriate
 - **Assign profile per-task** based on what that specific task needs
 
-## Spec Merge
-
-After creating tasks, **integrate** the new requirements into the main spec file:
-
-1. Read the current spec structure
-2. Determine where new content belongs:
-   - If it updates an existing section → **edit that section in place**
-   - If it adds a new capability → **add a new section in the appropriate location**
-   - If it supersedes existing content → **replace the old content**
-3. Keep the spec **concise** - it should remain a single source of truth, not a changelog
-
-Use the Edit tool to modify `specs/{{LABEL}}.md` directly. Do NOT append with `cat >>`.
-
-The `state/{{LABEL}}.md` file will be automatically deleted after successful completion.
-
 {{> exit-signals}}
 
-- `RALPH_COMPLETE` - New tasks created, dependencies set, spec updated with new requirements
+- `RALPH_COMPLETE` - New tasks created and dependencies set
 - `RALPH_BLOCKED: <reason>` - Cannot proceed (molecule not found, unclear requirements)

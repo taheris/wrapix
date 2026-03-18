@@ -41,6 +41,21 @@ test_todo_runs_in_container() {
   judge_criterion "ralph todo runs Claude in a wrapix container using the base profile"
 }
 
+test_todo_update_with_diff() {
+  judge_files "lib/ralph/template/todo-update.md" "lib/ralph/template/default.nix"
+  judge_criterion "todo-update.md template uses SPEC_DIFF variable to show git diff output, and instructs the LLM to create tasks only for added/changed lines in the diff"
+}
+
+test_todo_update_with_tasks() {
+  judge_files "lib/ralph/template/todo-update.md" "lib/ralph/template/default.nix"
+  judge_criterion "todo-update.md template uses EXISTING_TASKS variable to show current molecule tasks, and instructs the LLM to compare against the spec to identify gaps when SPEC_DIFF is empty"
+}
+
+test_run_already_implemented() {
+  judge_files "lib/ralph/template/run.md"
+  judge_criterion "run.md template includes guidance for already-implemented tasks: verify correctness, close the issue, and output RALPH_COMPLETE"
+}
+
 test_tune_interactive() {
   judge_files "lib/ralph/cmd/tune.sh"
   judge_criterion "ralph tune in interactive mode identifies the correct template to edit and allows making changes"

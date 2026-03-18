@@ -333,6 +333,86 @@ in
     mkdir $out
   '';
 
+  # Test: todo-update template has SPEC_DIFF and EXISTING_TASKS variables
+  template-todo-update-variables = runCommandLocal "template-todo-update-variables" { } ''
+    set -e
+
+    echo "Test: todo-update template variables..."
+
+    ${
+      let
+        t = templates."todo-update";
+        checks = assertAll [
+          (assertTrue "todo-update-has-SPEC_DIFF" (builtins.elem "SPEC_DIFF" t.variables))
+          (assertTrue "todo-update-has-EXISTING_TASKS" (builtins.elem "EXISTING_TASKS" t.variables))
+          (assertTrue "todo-update-has-MOLECULE_ID" (builtins.elem "MOLECULE_ID" t.variables))
+          (assertTrue "todo-update-no-NEW_REQUIREMENTS" (!(builtins.elem "NEW_REQUIREMENTS" t.variables)))
+          (assertTrue "todo-update-no-NEW_REQUIREMENTS_PATH" (
+            !(builtins.elem "NEW_REQUIREMENTS_PATH" t.variables)
+          ))
+        ];
+      in
+      if checks then "echo 'todo-update-variables: PASS'" else "false"
+    }
+
+    mkdir $out
+  '';
+
+  # Test: plan-update template does not have NEW_REQUIREMENTS_PATH
+  template-plan-update-variables = runCommandLocal "template-plan-update-variables" { } ''
+    set -e
+
+    echo "Test: plan-update template variables..."
+
+    ${
+      let
+        t = templates."plan-update";
+        checks = assertAll [
+          (assertTrue "plan-update-has-EXISTING_SPEC" (builtins.elem "EXISTING_SPEC" t.variables))
+          (assertTrue "plan-update-no-NEW_REQUIREMENTS_PATH" (
+            !(builtins.elem "NEW_REQUIREMENTS_PATH" t.variables)
+          ))
+        ];
+      in
+      if checks then "echo 'plan-update-variables: PASS'" else "false"
+    }
+
+    mkdir $out
+  '';
+
+  # Test: todo-update template renders with SPEC_DIFF and EXISTING_TASKS
+  template-render-todo-update = runCommandLocal "template-render-todo-update" { } ''
+    set -e
+
+    echo "Test: todo-update template renders..."
+
+    ${
+      let
+        t = templates."todo-update";
+        rendered = t.render {
+          PINNED_CONTEXT = "# Project Context";
+          LABEL = "test-feature";
+          SPEC_PATH = "specs/test-feature.md";
+          EXISTING_SPEC = "# Test Feature\n## Requirements\n1. Do something";
+          MOLECULE_ID = "wx-abc123";
+          MOLECULE_PROGRESS = "50% (5/10)";
+          SPEC_DIFF = "+## New Section\n+2. Do something else";
+          EXISTING_TASKS = "";
+          EXIT_SIGNALS = "- RALPH_COMPLETE\n- RALPH_BLOCKED";
+          README_INSTRUCTIONS = "";
+        };
+        checks = assertAll [
+          (assertTrue "todo-update-has-spec-diff" (builtins.match ".*Do something else.*" rendered != null))
+          (assertTrue "todo-update-has-molecule-id" (builtins.match ".*wx-abc123.*" rendered != null))
+          (assertTrue "todo-update-has-label" (builtins.match ".*test-feature.*" rendered != null))
+        ];
+      in
+      if checks then "echo 'todo-update-render: PASS'" else "false"
+    }
+
+    mkdir $out
+  '';
+
   # Test: templates render with valid variables
   template-render-plan-new = runCommandLocal "template-render-plan-new" { } ''
     set -e

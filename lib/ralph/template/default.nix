@@ -83,13 +83,6 @@ let
       description = "Path to current.json state file";
     };
 
-    NEW_REQUIREMENTS_PATH = {
-      source = "computed";
-      required = false;
-      derivedFrom = "LABEL";
-      description = "Path to new requirements file: .wrapix/ralph/state/{LABEL}.md";
-    };
-
     MOLECULE_PROGRESS = {
       source = "computed";
       required = false;
@@ -112,11 +105,16 @@ let
       description = "Existing spec content (alias for SPEC_CONTENT in update mode)";
     };
 
-    NEW_REQUIREMENTS = {
-      source = "file";
+    SPEC_DIFF = {
+      source = "computed";
       required = false;
-      filePath = "NEW_REQUIREMENTS_PATH";
-      description = "Content of the new requirements file";
+      description = "Output of git diff base_commit..HEAD for spec file (tier 1)";
+    };
+
+    EXISTING_TASKS = {
+      source = "computed";
+      required = false;
+      description = "Formatted list of existing molecule tasks with status (tier 2)";
     };
 
     PINNED_CONTEXT = {
@@ -330,7 +328,6 @@ let
         "LABEL"
         "SPEC_PATH"
         "EXISTING_SPEC"
-        "NEW_REQUIREMENTS_PATH"
         "EXIT_SIGNALS"
       ];
     };
@@ -359,8 +356,8 @@ let
         "EXISTING_SPEC"
         "MOLECULE_ID"
         "MOLECULE_PROGRESS"
-        "NEW_REQUIREMENTS"
-        "NEW_REQUIREMENTS_PATH"
+        "SPEC_DIFF"
+        "EXISTING_TASKS"
         "EXIT_SIGNALS"
         "README_INSTRUCTIONS"
       ];

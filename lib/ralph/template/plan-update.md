@@ -1,9 +1,9 @@
 # Specification Update Interview
 
 You are refining an existing specification. Your goal is to gather additional
-requirements that will be added to the existing spec.
+requirements and update the spec file directly.
 
-**IMPORTANT: This is a planning-only phase. Do NOT write or modify any code. Do NOT modify the original spec file at `specs/{{LABEL}}.md`. Your role is to discuss and capture NEW requirements only.**
+**IMPORTANT: This is a planning-only phase. Do NOT write or modify any code. Your role is to discuss and update the specification only.**
 
 {{> context-pinning}}
 
@@ -18,9 +18,8 @@ The current spec file (`specs/{{LABEL}}.md`) contains:
 ## Update Guidelines
 
 1. **Discuss NEW requirements only** - The existing spec has been implemented
-2. **Do NOT modify the original spec file** - Write new requirements to `{{NEW_REQUIREMENTS_PATH}}`
-3. **Ask clarifying questions** to understand the additional work needed
-4. **Capture scope clearly** - What new functionality is being added?
+2. **Ask clarifying questions** to understand the additional work needed
+3. **Capture scope clearly** - What new functionality is being added?
 
 ## Interview Flow
 
@@ -29,40 +28,29 @@ The current spec file (`specs/{{LABEL}}.md`) contains:
    - What problem does the new work solve?
    - How does it relate to existing functionality?
    - What are the success criteria for the new work?
-3. When complete, write the new requirements to `{{NEW_REQUIREMENTS_PATH}}`
-4. Output RALPH_COMPLETE when the user confirms
+3. When requirements are clear, edit `specs/{{LABEL}}.md` directly to integrate
+   the new requirements into the appropriate sections
+4. Commit the spec changes (for git-tracked specs)
+5. Output RALPH_COMPLETE when the user confirms
 
-## Output
+## Spec Editing
 
-When the conversation is complete:
+When updating the spec, use the Edit tool to modify `specs/{{LABEL}}.md` directly:
 
-1. **Write new requirements** to `{{NEW_REQUIREMENTS_PATH}}` in markdown format:
-   ```markdown
-   # New Requirements for {{LABEL}}
-
-   ## Requirements
-   - [List the new requirements gathered]
-
-   ## Success Criteria
-   - [Specific criteria for the new work]
-     [verify](tests/<label>-test.sh::test_function) or [judge](tests/judges/<label>.sh::test_function)
-
-   ## Affected Files
-   - [Files that will need changes]
-   ```
-
-2. Confirm with the user that the new requirements are correct.
-
-3. Output `RALPH_COMPLETE` when confirmed.
+1. Determine where new content belongs:
+   - If it updates an existing section → **edit that section in place**
+   - If it adds a new capability → **add a new section in the appropriate location**
+   - If it supersedes existing content → **replace the old content**
+2. Keep the spec **concise** - it should remain a single source of truth, not a changelog
+3. After editing, commit the changes so `ralph todo` can detect them via git diff
 
 `ralph todo` will then:
-1. Read new requirements from `{{NEW_REQUIREMENTS_PATH}}`
-2. Create tasks ONLY for those new requirements
-3. Merge the new requirements into `specs/{{LABEL}}.md`
-4. Delete `{{NEW_REQUIREMENTS_PATH}}` after successful merge
+1. Detect spec changes via `git diff` against the last task-creation commit
+2. Create tasks ONLY for new/changed requirements
+3. Store the new commit as `base_commit` for future diffs
 
 {{> exit-signals}}
 
-- `RALPH_COMPLETE` - New requirements written to state file and confirmed
+- `RALPH_COMPLETE` - Spec updated and committed
 - `RALPH_BLOCKED: <reason>` - Cannot proceed without additional information
 - `RALPH_CLARIFY: <question>` - Need clarification on something specific

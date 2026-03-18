@@ -40,6 +40,8 @@ Title: {{TITLE}}
 6. **Blocked vs Waiting**: Distinguish dependency blocks from true blocks:
    - Need user input? → `RALPH_BLOCKED: <reason>`
    - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
+7. **Already Implemented**: If the task's work is already done in the codebase,
+   verify correctness, close the issue, and move on with `RALPH_COMPLETE`
 
 ## Spec Verifications
 
