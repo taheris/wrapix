@@ -30,6 +30,9 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 9. **Template Sync** — `ralph sync` updates local templates (use `--diff` to preview changes)
 10. **Concurrent Workflows** — Per-label state files (`state/<label>.json`) replace singleton `state/current.json`, enabling multiple ralph workflows simultaneously
 11. **Spec Switching** — `ralph use <name>` sets the active workflow; `--spec <name>` flag on `todo`, `run`, `status`, `logs` targets a specific workflow
+12. **Companion Content** — Specs can declare companion directories whose `manifest.md` is injected into templates, giving the LLM awareness of related content it can read on demand
+13. **Git-Based Spec Diffing** — `ralph todo` uses `base_commit` in state JSON and `git diff` to detect spec changes, replacing `state/<label>.md` intermediary
+14. **Post-Container Bead Sync** — `ralph todo` runs `bd dolt pull` after container exits with `RALPH_COMPLETE`
 
 ### Non-Functional
 
@@ -69,7 +72,7 @@ ralph plan -u -h <label>        # Update existing spec in state/
 - Launches wrapix container with base profile
 - Runs spec interview using appropriate template
 - **New mode**: Writes spec to target location (`specs/` or `state/`)
-- **Update mode**: Writes NEW requirements only to `state/<label>.md` (not the original spec)
+- **Update mode**: LLM edits `specs/<label>.md` directly during the interview; commits changes at end of session (git-tracked specs only; hidden specs just save file)
 - Outputs `RALPH_COMPLETE` when done
 
 ### `ralph todo`
@@ -78,15 +81,27 @@ ralph plan -u -h <label>        # Update existing spec in state/
 ralph todo                  # Operate on current spec (from state/current)
 ralph todo --spec <name>    # Operate on named spec
 ralph todo -s <name>        # Short form
+ralph todo --since <commit> # Force git-diff mode from specific commit
 ```
 
-Launches wrapix container with base profile. Reads `state/<label>.json` (resolved via `--spec` flag or `state/current`) to determine mode:
-- **New spec**: Creates molecule (epic + child issues) from `specs/<label>.md`
-- **Update mode**: Reads NEW requirements from `state/<label>.md`, creates tasks only for those, then merges into `specs/<label>.md`
+Launches wrapix container with base profile. Reads `state/<label>.json` (resolved via `--spec` flag or `state/current`). Uses three-tier detection to determine mode:
+
+1. **Tier 1 (git diff)**: `base_commit` exists in state JSON → `git diff <base_commit> HEAD -- <spec_path>` (fast, precise)
+2. **Tier 2 (molecule-based)**: No `base_commit` but molecule exists → LLM compares spec against existing task descriptions
+3. **Tier 3 (new)**: Neither → full spec decomposition from `specs/<label>.md`
+
+**Flags:**
+- `--since <commit>` forces tier 1 with the given commit, skipping tier 2/3; errors if commit is invalid
+
+**Constraints:**
+- Requires spec changes to be committed — errors if uncommitted changes detected in spec file
+- If tier 1 finds no changes (empty diff), exits early: "No spec changes since last task creation"
+- When `base_commit` is orphaned (rebase/amend), detected via `git merge-base --is-ancestor`, falls back to tier 2
+- Hidden spec updates (`-u -h`) use tier 2 since hidden specs are not in git
 
 **Profile assignment:** The LLM analyzes each task's requirements and assigns appropriate `profile:X` labels based on implementation needs (e.g., tasks touching `.rs` files get `profile:rust`). This happens per-task, not per-spec.
 
-Stores molecule ID in `state/<label>.json`. In update mode, cleans up `state/<label>.md` after successful merge.
+Stores molecule ID in `state/<label>.json`. Stores `HEAD` as `base_commit` only after container exits with `RALPH_COMPLETE` — partial failures do not update `base_commit`. Runs `bd dolt pull` on host after container exits with `RALPH_COMPLETE` as a safety net for bead sync.
 
 ### `ralph run`
 
@@ -243,13 +258,14 @@ ralph sync --diff | ralph tune
 │   ├── partial/
 │   │   ├── context-pinning.md
 │   │   ├── exit-signals.md
+│   │   ├── companions-context.md
 │   │   └── spec-header.md
 │   ├── plan.md
 │   ├── plan-new.md
 │   ├── plan-update.md
 │   ├── todo-new.md
 │   ├── todo-update.md
-│   └── step.md
+│   └── run.md
 └── backup/              # User customizations (if any)
     └── ...
 ```
@@ -281,11 +297,11 @@ plan → todo → run → (done)
 Update cycle (for existing specs):
 plan --update → todo → run → (done)
       │            │
-      │            ├─ Read new reqs from state/<label>.md
-      │            ├─ Create tasks ONLY for new requirements
-      │            ├─ Merge state/<label>.md → specs/<label>.md
-      │            └─ Delete state/<label>.md
-      └─ Gather NEW requirements → writes state/<label>.md
+      │            ├─ git diff base_commit..HEAD -- spec (tier 1)
+      │            ├─ OR compare spec vs existing tasks (tier 2)
+      │            ├─ Create tasks ONLY for new/changed requirements
+      │            └─ Store HEAD as base_commit on success
+      └─ LLM edits spec directly → commits changes
 ```
 
 ## Container Execution
@@ -417,6 +433,7 @@ Resolved during template rendering.
 lib/ralph/template/
 ├── default.nix              # Template definitions + validation
 ├── partial/
+│   ├── companions-context.md # Companion manifest injection
 │   ├── context-pinning.md   # Project context loading
 │   ├── exit-signals.md      # Exit signal format
 │   └── spec-header.md       # Label, spec path block
@@ -424,7 +441,7 @@ lib/ralph/template/
 ├── plan-update.md           # Update existing spec
 ├── todo-new.md              # Create molecule
 ├── todo-update.md           # Bond new tasks
-└── step.md                  # Single-issue implementation
+└── run.md                   # Single-issue implementation
 ```
 
 ### Template Variables
@@ -434,13 +451,15 @@ lib/ralph/template/
 | `PINNED_CONTEXT` | Read from `pinnedContext` file | all |
 | `LABEL` | From command args | all |
 | `SPEC_PATH` | Computed from label + mode | all |
-| `SPEC_CONTENT` | Read from spec file | todo-new, step |
+| `SPEC_CONTENT` | Read from spec file | todo-new, run |
 | `EXISTING_SPEC` | Read from `specs/<label>.md` | plan-update, todo-update |
-| `NEW_REQUIREMENTS` | Read from `state/<label>.md` | todo-update |
-| `MOLECULE_ID` | From `state/<label>.json` | todo-update, step |
-| `ISSUE_ID` | From `bd ready` | step |
-| `TITLE` | From issue | step |
-| `DESCRIPTION` | From issue | step |
+| `SPEC_DIFF` | From `git diff base_commit..HEAD` (tier 1) | todo-update |
+| `EXISTING_TASKS` | From molecule task list (tier 2) | todo-update |
+| `COMPANIONS` | From `read_manifests` (companion directories) | plan-update, todo-new, todo-update, run |
+| `MOLECULE_ID` | From `state/<label>.json` | todo-update, run |
+| `ISSUE_ID` | From `bd ready` | run |
+| `TITLE` | From issue | run |
+| `DESCRIPTION` | From issue | run |
 | `EXIT_SIGNALS` | Template-specific list | all (via partial) |
 
 ### Flake Check Integration
@@ -519,6 +538,13 @@ Output ONE of these at the end of your response:
 {{EXIT_SIGNALS}}
 ```
 
+**`partial/companions-context.md`:**
+```markdown
+{{COMPANIONS}}
+```
+
+Ships with just `{{COMPANIONS}}`; overridable by local template overlay.
+
 **`partial/spec-header.md`:**
 ```markdown
 ## Current Feature
@@ -540,7 +566,7 @@ Spec file: {{SPEC_PATH}}
 6. Interview flow — Describe idea → clarify → write spec → RALPH_COMPLETE
 7. Spec file format — Title, problem, requirements, affected files, success criteria, out of scope
 8. Implementation notes section — Optional transient context, stripped on finalize
-9. `{{> exit-signals}}`
+10. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
 
@@ -550,18 +576,14 @@ Spec file: {{SPEC_PATH}}
 
 **Required sections:**
 1. Role statement — "You are refining an existing specification"
-2. Planning-only warning — No code, original spec not modified
+2. Planning-only warning — No code
 3. `{{> context-pinning}}`
 4. `{{> spec-header}}`
 5. Existing spec display — Show current spec from `specs/<label>.md` for reference
-6. Update guidelines — Discuss NEW requirements only
-7. Output — Write new requirements to `state/<label>.md` (ralph todo merges into spec)
-8. `{{> exit-signals}}`
-
-**Output file:** `state/<label>.md` contains only the NEW requirements gathered during the interview. This file is consumed by `ralph todo` which:
-1. Creates tasks for only these new requirements
-2. Merges the content into `specs/<label>.md`
-3. Deletes `state/<label>.md`
+6. `{{> companions-context}}` — after existing spec, before update guidelines
+7. Update guidelines — Discuss NEW requirements only
+8. Instructions — LLM edits `specs/<label>.md` directly during the interview; commits changes at end of session (git-tracked specs only; hidden specs just save file)
+10. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
 
@@ -574,14 +596,15 @@ Spec file: {{SPEC_PATH}}
 2. `{{> context-pinning}}`
 3. `{{> spec-header}}`
 4. Spec content — Full spec to decompose
-5. Task breakdown guidelines — Self-contained, ordered by deps, one objective per task
-6. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs:
+5. `{{> companions-context}}` — after spec content, before task breakdown guidelines
+6. Task breakdown guidelines — Self-contained, ordered by deps, one objective per task
+7. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs:
    - Tasks touching `.rs` files or using cargo → `profile:rust`
    - Tasks touching `.py` files or using pytest/pip → `profile:python`
    - Tasks touching only `.nix`, `.sh`, `.md` files → `profile:base`
 7. Molecule creation — Create epic, child tasks with profile labels, set dependencies
-8. README update — Add molecule ID to specs/README.md
-9. `{{> exit-signals}}`
+9. README update — Add molecule ID to specs/README.md
+10. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
 
@@ -594,27 +617,35 @@ Spec file: {{SPEC_PATH}}
 2. `{{> context-pinning}}`
 3. `{{> spec-header}}`
 4. Existing spec — Show `specs/<label>.md` for context (what's already implemented)
-5. Existing molecule info — ID, current tasks, progress
-6. New requirements — Show `state/<label>.md` content (what to create tasks for)
+5. `{{> companions-context}}` — after existing spec, before diff/tasks section
+6. Spec diff or existing tasks — Receives both `{{SPEC_DIFF}}` and `{{EXISTING_TASKS}}`; one is always empty depending on tier. Instructions: "if SPEC_DIFF is provided, use that to identify new requirements; otherwise use EXISTING_TASKS to compare against the spec and identify gaps."
 7. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs
-8. Task creation — Create tasks ONLY for new requirements, bond to molecule
-9. Spec merge — Append `state/<label>.md` content to `specs/<label>.md`
-10. Cleanup — Delete `state/<label>.md` after successful merge
-11. `{{> exit-signals}}`
+8. Task creation — Create tasks ONLY for new/changed requirements, bond to molecule
+9. `{{> exit-signals}}`
 
-**Key behavior:** Only create tasks for requirements in `state/<label>.md`. The existing spec is shown for context but should NOT generate new tasks.
+**`EXISTING_TASKS` format** (tier 2):
+```markdown
+### wx-abc1: Implement parser (done)
+Parse input files using the new grammar...
+
+### wx-abc2: Write tests (in_progress)
+Add unit tests for parser edge cases...
+```
+
+**Key behavior:** Only create tasks for changes identified via diff or gaps identified against existing tasks.
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
 
-### step.md
+### run.md
 
 **Purpose:** Implement single issue in fresh context
 
 **Required sections:**
 1. `{{> context-pinning}}`
 2. `{{> spec-header}}`
-3. Issue details — ID, title, description
-4. Instructions:
+3. `{{> companions-context}}` — after spec header, before issue details
+4. Issue details — ID, title, description
+5. Instructions:
    1. **Understand** — Read spec and issue before changes
    2. **Test strategy** — Property-based vs unit tests
    3. **Implement** — Write code following spec
@@ -623,8 +654,9 @@ Spec file: {{SPEC_PATH}}
    6. **Blocked vs waiting** — Distinguish dependency blocks from true blocks:
       - Need user input? → `RALPH_BLOCKED: <reason>`
       - Need other beads done? → Add dep with `bd dep add`, output `RALPH_COMPLETE`
-5. Land the plane — Follow session protocol
-6. `{{> exit-signals}}`
+   7. **Already implemented** — If the task's work is already done in the codebase, verify correctness, close the issue, and move on
+6. Land the plane — Follow session protocol
+7. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
 
@@ -638,20 +670,20 @@ Each workflow has its own state file at `state/<label>.json`:
 ```json
 {
   "label": "my-feature",
-  "update": false,
-  "hidden": false,
   "spec_path": "specs/my-feature.md",
-  "molecule": "bd-xyz123"
+  "molecule": "wx-9mvh",
+  "base_commit": "abc123def456...",
+  "companions": ["specs/e2e", "docs/api"]
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `label` | Feature identifier |
-| `update` | Whether this is an update to existing spec |
-| `hidden` | Whether spec is in `state/` (not committed) |
-| `spec_path` | Full path to spec file |
+| `label` | Feature identifier (required) |
+| `spec_path` | Full path to spec file (required) |
 | `molecule` | Beads molecule ID (set by `ralph todo`) |
+| `base_commit` | Git commit SHA at which spec was last fully tasked (set by `ralph todo` on success) |
+| `companions` | Array of repo-relative directory paths containing `manifest.md` files |
 
 ### Active Workflow Pointer
 
@@ -676,15 +708,42 @@ Commands without `--spec`: `ralph plan` (takes label as positional arg), `ralph 
 
 Serial workflow is unchanged: `ralph plan` sets `state/current`, subsequent commands pick it up automatically. The only structural difference is the state file location (`state/<label>.json` + `state/current` vs the old singleton `state/current.json`).
 
-**`state/<label>.md`** (update mode only):
+Existing specs without `base_commit` are handled via three-tier fallback:
+- If molecule exists → tier 2 (LLM compares spec against tasks)
+- If no molecule → tier 3 (treats as new, creates full molecule)
 
-When `ralph plan --update` runs, it writes NEW requirements to `state/<label>.md`. This file:
-- Contains only the requirements gathered during the update interview
-- Is separate from the original spec in `specs/<label>.md`
-- Gets merged into `specs/<label>.md` by `ralph todo`
-- Is deleted after successful merge
+After first successful `ralph todo`, `base_commit` is set and fast-path diffing works going forward.
 
-This separation ensures `ralph todo` knows exactly what's new and only creates tasks for those requirements.
+## Companion Content
+
+Specs can declare companion directories whose manifest is injected into templates, giving the LLM awareness of related content it can read on demand.
+
+- `state/<label>.json` gains an optional `companions` field: an array of directory paths relative to repo root
+- Each companion directory must exist and contain a `manifest.md` — error if directory does not exist, separate error if directory exists but `manifest.md` is missing
+- `read_manifests` in `util.sh` reads only `manifest.md` from each directory, wrapping each in XML-style tags:
+
+  ```xml
+  <companion path="specs/e2e">
+  (contents of specs/e2e/manifest.md)
+  </companion>
+  ```
+
+- Individual companion files are never bulk-injected; the LLM reads them on demand based on manifest guidance
+- No exclusion patterns, no individual file entries, no size limits
+- Any repo-relative path is valid (not restricted to `specs/`)
+- No CLI flags for managing companions — users edit `state/<label>.json` manually
+- Companions are not included in `plan-new` template (state JSON doesn't exist yet)
+
+## Git-Based Spec Diffing
+
+Replace the transient `state/<label>.md` intermediary with git-based diffing using a `base_commit` field in state JSON.
+
+- `ralph plan -u` edits `specs/<label>.md` directly (LLM commits the changes for git-tracked specs)
+- `ralph plan -u -h` edits the hidden spec directly but does NOT commit
+- `ralph todo` uses three-tier detection (see `ralph todo` command section)
+- `compute_spec_diff` helper in `util.sh` encapsulates the three-tier fallback
+- `--since <commit>` flag forces tier 1 with the given commit
+- No explicit migration required — existing specs handled via tier 2/3 fallback
 
 ## Spec File Format
 
@@ -736,9 +795,10 @@ Why this feature is needed.
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
 | `lib/ralph/cmd/sync.sh` | Template sync from packaged (includes --diff) |
 | `lib/ralph/cmd/use.sh` | Active workflow switching with validation |
-| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`) |
+| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`, `read_manifests`, `compute_spec_diff`) |
 | `lib/ralph/template/` | Prompt templates |
 | `lib/ralph/template/default.nix` | Nix template definitions |
+| `lib/ralph/template/partial/companions-context.md` | Companion manifest injection partial |
 
 ## Integration with Beads Molecules
 
@@ -771,28 +831,66 @@ Ralph uses `bd mol` for work tracking:
   [verify](../tests/ralph/run-tests.sh#test_plan_flag_validation)
 - [ ] `ralph plan -u <label>` validates spec exists before updating
   [verify](../tests/ralph/run-tests.sh#test_plan_flag_validation)
-- [ ] `ralph plan -u <label>` writes NEW requirements to `state/<label>.md`
-  [judge](../tests/judges/ralph-workflow.sh#test_plan_update_writes_new_requirements)
+- [ ] `ralph plan -u <label>` edits spec directly (no `state/<label>.md` created)
+  [verify](../tests/ralph/run-tests.sh#test_plan_update_direct_edit)
+- [ ] `ralph plan -u` creates `state/<label>.json` if it doesn't exist
+  [verify](../tests/ralph/run-tests.sh#test_plan_update_creates_state_json)
 - [ ] `ralph plan -u -h <label>` updates hidden spec
   [judge](../tests/judges/ralph-workflow.sh#test_plan_update_hidden)
 - [ ] `ralph plan` runs Claude in wrapix container with base profile
   [judge](../tests/judges/ralph-workflow.sh#test_plan_runs_in_container)
-- [ ] `ralph todo` creates molecule and stores ID in current.json
+- [ ] `ralph todo` creates molecule and stores ID in state JSON
   [verify](../tests/ralph/run-tests.sh#test_run_closes_issue_on_complete)
 - [ ] `ralph todo` (new mode) creates tasks from `specs/<label>.md`
   [verify](../tests/ralph/run-tests.sh#test_run_closes_issue_on_complete)
-- [ ] `ralph todo` (update mode) reads NEW requirements from `state/<label>.md`
-  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_reads_new_requirements)
-- [ ] `ralph todo` (update mode) creates tasks ONLY for new requirements
-  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_creates_only_new)
-- [ ] `ralph todo` (update mode) merges `state/<label>.md` into `specs/<label>.md`
-  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_merges_state)
-- [ ] `ralph todo` (update mode) deletes `state/<label>.md` after merge
-  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_deletes_state)
+- [ ] `ralph todo` detects update mode from `base_commit` presence
+  [verify](../tests/ralph/run-tests.sh#test_todo_update_detection)
+- [ ] `ralph todo` computes `git diff` between `base_commit` and HEAD for spec changes
+  [verify](../tests/ralph/run-tests.sh#test_todo_git_diff)
+- [ ] `ralph todo` errors on uncommitted spec changes
+  [verify](../tests/ralph/run-tests.sh#test_todo_uncommitted_error)
+- [ ] `ralph todo` stores `base_commit` only after container exits with `RALPH_COMPLETE`
+  [verify](../tests/ralph/run-tests.sh#test_todo_sets_base_commit)
+- [ ] `ralph todo` does not update `base_commit` on container failure
+  [verify](../tests/ralph/run-tests.sh#test_todo_no_base_commit_on_failure)
+- [ ] `ralph todo` exits early with message when tier 1 finds no spec changes
+  [verify](../tests/ralph/run-tests.sh#test_todo_no_changes_exit)
+- [ ] `ralph todo --since <commit>` overrides `base_commit` and forces git-diff mode
+  [verify](../tests/ralph/run-tests.sh#test_todo_since_flag)
+- [ ] `ralph todo --since <invalid>` errors with clear message
+  [verify](../tests/ralph/run-tests.sh#test_todo_since_invalid_commit)
+- [ ] `ralph todo` falls back to molecule-based diff when `base_commit` is orphaned
+  [verify](../tests/ralph/run-tests.sh#test_todo_orphaned_commit_fallback)
+- [ ] `ralph todo` falls back to molecule-based diff when no `base_commit` but molecule exists
+  [verify](../tests/ralph/run-tests.sh#test_todo_molecule_fallback)
+- [ ] `ralph todo` uses new mode when neither `base_commit` nor molecule exists
+  [verify](../tests/ralph/run-tests.sh#test_todo_new_mode_fallback)
+- [ ] `ralph todo` runs `bd dolt pull` on host after container exits with `RALPH_COMPLETE`
+  [verify](../tests/ralph/run-tests.sh#test_todo_dolt_pull_after_complete)
 - [ ] `ralph todo` runs Claude in wrapix container with base profile
   [judge](../tests/judges/ralph-workflow.sh#test_todo_runs_in_container)
 - [ ] `ralph todo` LLM assigns `profile:X` labels per-task based on implementation needs
   [verify](../tests/ralph/run-tests.sh#test_run_profile_selection)
+- [ ] `state/<label>.json` no longer contains `update` or `hidden` fields
+  [verify](../tests/ralph/run-tests.sh#test_state_json_schema)
+- [ ] `todo-update.md` works with `SPEC_DIFF` (tier 1) when diff is available
+  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_with_diff)
+- [ ] `todo-update.md` works with `EXISTING_TASKS` (tier 2) when no diff available
+  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_with_tasks)
+- [ ] `run.md` template handles already-implemented tasks (close and move on)
+  [judge](../tests/judges/ralph-workflow.sh#test_run_already_implemented)
+- [ ] `read_manifests` errors if a companion directory does not exist
+  [verify](../tests/ralph/run-tests.sh#test_read_manifests_missing_directory)
+- [ ] `read_manifests` errors if a companion directory lacks `manifest.md`
+  [verify](../tests/ralph/run-tests.sh#test_read_manifests_missing_manifest)
+- [ ] `read_manifests` returns empty string when no companions declared
+  [verify](../tests/ralph/run-tests.sh#test_read_manifests_empty)
+- [ ] `read_manifests` wraps each manifest in `<companion path="...">` tags
+  [verify](../tests/ralph/run-tests.sh#test_read_manifests_format)
+- [ ] `{{COMPANIONS}}` is available in plan-update, todo-new, todo-update, and run templates
+  [verify](../tests/ralph/run-tests.sh#test_companion_template_variable)
+- [ ] Local template overlay can override `partial/companions-context.md`
+  [verify](../tests/ralph/run-tests.sh#test_companion_partial_override)
 - [ ] `ralph run` reads `profile:X` label from bead and uses that profile
   [verify](../tests/ralph/run-tests.sh#test_run_profile_selection)
 - [ ] `ralph run --profile=X` overrides bead profile label
