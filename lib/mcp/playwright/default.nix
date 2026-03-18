@@ -1,0 +1,90 @@
+# Playwright MCP server definition
+#
+# Server providing browser automation for AI-assisted frontend development
+# and testing within wrapix sandboxes.
+#
+# Exports:
+#   - name: Server identifier ("playwright")
+#   - packages: Runtime packages (MCP server + Chromium)
+#   - mkServerConfig: Function to generate server config from user options
+#
+# Config options:
+#   - headless: Run browser in headless mode (default: true)
+#   - viewport: Default viewport size (default: { width = 1280; height = 720; })
+#   - config: Passthrough to @playwright/mcp JSON config (default: {})
+#
+# Spec: specs/playwright-mcp.md
+{ pkgs }:
+
+let
+  chromiumRevision = pkgs.playwright-driver.passthru.browsersJSON.chromium.revision;
+  chromiumPath = "${pkgs.playwright-driver.browsers}/chromium-${chromiumRevision}/chrome-linux64/chrome";
+
+  # Flags that are always applied — cannot be overridden by user config.
+  # See specs/playwright-mcp.md § Security Model for rationale.
+  mandatoryFlags = [
+    "--no-sandbox"
+    "--disable-dev-shm-usage"
+    "--disable-gpu"
+  ];
+
+  mkConfigFile =
+    {
+      headless,
+      viewport,
+      config,
+    }:
+    let
+      userLaunchOptions = builtins.removeAttrs (config.launchOptions or { }) [ "args" ];
+      userArgs = (config.launchOptions or { }).args or [ ];
+      userConfig = builtins.removeAttrs config [ "launchOptions" ];
+
+      configJSON = {
+        browser = {
+          launchOptions = {
+            args = mandatoryFlags ++ userArgs;
+            executablePath = chromiumPath;
+            headless = headless;
+          }
+          // userLaunchOptions;
+        };
+        contextOptions = {
+          viewport = viewport;
+        };
+      }
+      // userConfig;
+    in
+    pkgs.writeText "playwright-mcp-config.json" (builtins.toJSON configJSON);
+in
+{
+  name = "playwright";
+
+  packages = [
+    pkgs.playwright-mcp
+    pkgs.playwright-driver.browsers
+  ];
+
+  mkServerConfig =
+    {
+      headless ? true,
+      viewport ? {
+        width = 1280;
+        height = 720;
+      },
+      config ? { },
+    }:
+    let
+      configFile = mkConfigFile { inherit headless viewport config; };
+    in
+    {
+      command = "mcp-server-playwright";
+      args = [
+        "--config"
+        "${configFile}"
+      ];
+      env = {
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+        PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+      };
+    };
+}
