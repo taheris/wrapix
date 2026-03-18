@@ -8911,6 +8911,176 @@ EOF
 }
 
 #-----------------------------------------------------------------------------
+# read_manifests tests
+#-----------------------------------------------------------------------------
+
+test_read_manifests_empty() {
+  CURRENT_TEST="read_manifests_empty"
+  test_header "read_manifests returns empty string when no companions declared"
+
+  setup_test_env "manifests-empty"
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # State JSON with no companions field
+  local state_file="$RALPH_DIR/state/test-feature.json"
+  mkdir -p "$(dirname "$state_file")"
+  echo '{"label":"test-feature","spec_path":"specs/test-feature.md"}' > "$state_file"
+
+  local output
+  output=$(read_manifests "$state_file")
+  if [ -z "$output" ]; then
+    test_pass "Empty output when no companions field"
+  else
+    test_fail "Expected empty output, got: $output"
+  fi
+
+  # State JSON with empty companions array
+  echo '{"label":"test-feature","spec_path":"specs/test-feature.md","companions":[]}' > "$state_file"
+  output=$(read_manifests "$state_file")
+  if [ -z "$output" ]; then
+    test_pass "Empty output when companions array is empty"
+  else
+    test_fail "Expected empty output for empty array, got: $output"
+  fi
+
+  teardown_test_env
+}
+
+test_read_manifests_format() {
+  CURRENT_TEST="read_manifests_format"
+  test_header "read_manifests wraps each manifest in <companion> tags"
+
+  setup_test_env "manifests-format"
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create companion directories with manifests
+  local comp1="$TEST_DIR/specs/e2e"
+  local comp2="$TEST_DIR/docs/api"
+  mkdir -p "$comp1" "$comp2"
+  echo "E2E test manifest content" > "$comp1/manifest.md"
+  echo "API docs manifest content" > "$comp2/manifest.md"
+
+  local state_file="$RALPH_DIR/state/test-feature.json"
+  mkdir -p "$(dirname "$state_file")"
+  cat > "$state_file" << EOF
+{"label":"test-feature","spec_path":"specs/test-feature.md","companions":["$comp1","$comp2"]}
+EOF
+
+  local output
+  output=$(read_manifests "$state_file")
+
+  # Check opening tags
+  if echo "$output" | grep -qF "<companion path=\"$comp1\">"; then
+    test_pass "First companion has correct opening tag"
+  else
+    test_fail "Missing opening tag for first companion"
+  fi
+
+  if echo "$output" | grep -qF "<companion path=\"$comp2\">"; then
+    test_pass "Second companion has correct opening tag"
+  else
+    test_fail "Missing opening tag for second companion"
+  fi
+
+  # Check closing tags
+  local closing_count
+  closing_count=$(echo "$output" | grep -c '</companion>' || true)
+  if [ "$closing_count" = "2" ]; then
+    test_pass "Two closing companion tags present"
+  else
+    test_fail "Expected 2 closing tags, got: $closing_count"
+  fi
+
+  # Check manifest content is included
+  if echo "$output" | grep -q "E2E test manifest content"; then
+    test_pass "First manifest content included"
+  else
+    test_fail "First manifest content missing"
+  fi
+
+  if echo "$output" | grep -q "API docs manifest content"; then
+    test_pass "Second manifest content included"
+  else
+    test_fail "Second manifest content missing"
+  fi
+
+  teardown_test_env
+}
+
+test_read_manifests_missing_directory() {
+  CURRENT_TEST="read_manifests_missing_directory"
+  test_header "read_manifests errors if companion directory does not exist"
+
+  setup_test_env "manifests-missing-dir"
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  local state_file="$RALPH_DIR/state/test-feature.json"
+  mkdir -p "$(dirname "$state_file")"
+  echo '{"label":"test-feature","spec_path":"specs/test.md","companions":["/nonexistent/path"]}' > "$state_file"
+
+  local output exit_code
+  # read_manifests calls error() which exits — run in subshell
+  output=$(read_manifests "$state_file" 2>&1) && exit_code=0 || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Non-zero exit when companion directory missing"
+  else
+    test_fail "Should exit non-zero when companion directory missing"
+  fi
+
+  if echo "$output" | grep -q "does not exist"; then
+    test_pass "Error message mentions missing directory"
+  else
+    test_fail "Error message should mention missing directory, got: $output"
+  fi
+
+  teardown_test_env
+}
+
+test_read_manifests_missing_manifest() {
+  CURRENT_TEST="read_manifests_missing_manifest"
+  test_header "read_manifests errors if companion directory lacks manifest.md"
+
+  setup_test_env "manifests-missing-manifest"
+
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # Create directory but no manifest.md
+  local comp_dir="$TEST_DIR/specs/e2e"
+  mkdir -p "$comp_dir"
+
+  local state_file="$RALPH_DIR/state/test-feature.json"
+  mkdir -p "$(dirname "$state_file")"
+  cat > "$state_file" << EOF
+{"label":"test-feature","spec_path":"specs/test.md","companions":["$comp_dir"]}
+EOF
+
+  local output exit_code
+  output=$(read_manifests "$state_file" 2>&1) && exit_code=0 || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "Non-zero exit when manifest.md missing"
+  else
+    test_fail "Should exit non-zero when manifest.md missing"
+  fi
+
+  if echo "$output" | grep -q "lacks manifest.md"; then
+    test_pass "Error message mentions missing manifest.md"
+  else
+    test_fail "Error message should mention missing manifest.md, got: $output"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -9070,6 +9240,11 @@ PARALLEL_TESTS=(
   # Companion template tests
   test_companion_template_variable
   test_companion_partial_override
+  # read_manifests tests
+  test_read_manifests_empty
+  test_read_manifests_format
+  test_read_manifests_missing_directory
+  test_read_manifests_missing_manifest
 )
 
 # ALL_TESTS is the combined list for --sequential mode and single-test runs.

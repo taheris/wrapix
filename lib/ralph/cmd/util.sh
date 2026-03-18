@@ -901,6 +901,79 @@ parse_spec_annotations() {
 }
 
 #-----------------------------------------------------------------------------
+# Companion Manifest Reader
+#
+# Reads companion directories from state JSON and concatenates their
+# manifest.md files wrapped in XML-style <companion path="..."> tags.
+#
+# Usage: read_manifests <state_file>
+# Output: concatenated manifests on stdout (empty string if no companions)
+# Returns: 0 on success, 1 on error (missing directory or manifest)
+#-----------------------------------------------------------------------------
+read_manifests() {
+  local state_file="$1"
+
+  if [ ! -f "$state_file" ]; then
+    error "read_manifests: state file not found: $state_file"
+  fi
+
+  # Read companions array from state JSON
+  local companions_json
+  companions_json=$(jq -r '.companions // empty' "$state_file" 2>/dev/null || echo "")
+
+  # No companions field or null → return empty string
+  if [ -z "$companions_json" ] || [ "$companions_json" = "null" ]; then
+    debug "read_manifests: no companions declared"
+    return 0
+  fi
+
+  # Check it's an array
+  local count
+  count=$(echo "$companions_json" | jq -r 'if type == "array" then length else -1 end' 2>/dev/null || echo "-1")
+  if [ "$count" = "-1" ]; then
+    error "read_manifests: companions field is not an array"
+  fi
+
+  # Empty array → return empty string
+  if [ "$count" = "0" ]; then
+    debug "read_manifests: companions array is empty"
+    return 0
+  fi
+
+  local result=""
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local dir_path
+    dir_path=$(echo "$companions_json" | jq -r ".[$i]")
+
+    # Validate directory exists
+    if [ ! -d "$dir_path" ]; then
+      error "read_manifests: companion directory does not exist: $dir_path"
+    fi
+
+    # Validate manifest.md exists
+    local manifest_path="$dir_path/manifest.md"
+    if [ ! -f "$manifest_path" ]; then
+      error "read_manifests: companion directory lacks manifest.md: $dir_path"
+    fi
+
+    local manifest_content
+    manifest_content=$(<"$manifest_path")
+
+    if [ -n "$result" ]; then
+      result+=$'\n'
+    fi
+    result+="<companion path=\"$dir_path\">"
+    result+=$'\n'"$manifest_content"$'\n'
+    result+="</companion>"
+
+    i=$((i + 1))
+  done
+
+  echo "$result"
+}
+
+#-----------------------------------------------------------------------------
 # Spec Hidden Detection
 #
 # Derives whether a spec is hidden from its spec_path in state JSON.
