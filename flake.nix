@@ -105,15 +105,15 @@
 
                 wrapix-debug = {
                   profile = profiles.base;
-                  mcp.tmux-debug = { };
+                  mcp.tmux = { };
                 };
                 wrapix-rust-debug = {
                   profile = profiles.rust;
-                  mcp.tmux-debug = { };
+                  mcp.tmux = { };
                 };
                 wrapix-debug-audit = {
                   profile = profiles.base;
-                  mcp.tmux-debug.audit = "/workspace/.debug-audit.log";
+                  mcp.tmux.audit = "/workspace/.debug-audit.log";
                 };
               };
             in
@@ -123,7 +123,7 @@
               default = (wrapix.mkSandbox { profile = profiles.base; }).package;
               wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
               wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
-              tmux-debug-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
+              tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
             };
 
           apps = {

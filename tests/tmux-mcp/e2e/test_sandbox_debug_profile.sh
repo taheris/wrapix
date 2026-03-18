@@ -6,12 +6,12 @@
 #
 # 1. The image builds successfully with nix build
 # 2. tmux is present and executable inside the container
-# 3. tmux-debug-mcp is present and executable inside the container
+# 3. tmux-mcp is present and executable inside the container
 #
 # The flake output uses MCP opt-in:
 #   mkSandbox {
 #     profile = profiles.base;
-#     mcp = { tmux-debug = {}; };
+#     mcp = { tmux = {}; };
 #   }
 #
 # Prerequisites:
@@ -67,10 +67,10 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix image with MCP opt-in (tmux-debug)..."
+log_info "Building wrapix image with MCP opt-in (tmux)..."
 
 # Build the debug profile image using MCP opt-in
-# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+# The flake defines: mkSandbox { profile = base; mcp = { tmux = {}; }; }
 IMAGE_FILE=$(mktemp --suffix=.tar)
 if ! nix build "${REPO_ROOT}#wrapix-debug" --out-link "${IMAGE_FILE%.tar}" 2>&1; then
     log_error "Failed to build wrapix-debug image"
@@ -114,9 +114,9 @@ TMUX_VERSION=$(podman run --rm \
 }
 log_info "tmux version: ${TMUX_VERSION}"
 
-log_info "Verifying tmux-debug-mcp is present in the container..."
+log_info "Verifying tmux-mcp is present in the container..."
 
-# Test tmux-debug-mcp presence
+# Test tmux-mcp presence
 MCP_PRESENCE=$(podman run --rm \
     --network=pasta \
     --userns=keep-id \
@@ -124,12 +124,12 @@ MCP_PRESENCE=$(podman run --rm \
     -v "${WORKSPACE}:/workspace:rw" \
     -w /workspace \
     "docker-archive:${IMAGE_PATH}" \
-    -c "which tmux-debug-mcp && tmux-debug-mcp --version 2>/dev/null || tmux-debug-mcp --help 2>/dev/null || echo 'found'" 2>&1) || {
-    log_error "tmux-debug-mcp is not present or not executable in the container"
+    -c "which tmux-mcp && tmux-mcp --version 2>/dev/null || tmux-mcp --help 2>/dev/null || echo 'found'" 2>&1) || {
+    log_error "tmux-mcp is not present or not executable in the container"
     log_error "Output: ${MCP_PRESENCE}"
     exit 1
 }
-log_info "tmux-debug-mcp found in container"
+log_info "tmux-mcp found in container"
 
 # Verify the MCP server responds to basic input (if it supports --help or version)
 log_info "Verifying MCP server can start..."
@@ -140,7 +140,7 @@ MCP_START=$(timeout 5 podman run --rm \
     -v "${WORKSPACE}:/workspace:rw" \
     -w /workspace \
     "docker-archive:${IMAGE_PATH}" \
-    -c "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}' | timeout 2 tmux-debug-mcp 2>/dev/null || true; echo 'startup-test-complete'" 2>&1) || true
+    -c "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}' | timeout 2 tmux-mcp 2>/dev/null || true; echo 'startup-test-complete'" 2>&1) || true
 
 if [[ "${MCP_START}" != *"startup-test-complete"* ]]; then
     log_warn "MCP server may not be fully implemented yet"
@@ -151,6 +151,6 @@ echo ""
 echo "Summary:"
 echo "  - Image built successfully: ${IMAGE_NAME}"
 echo "  - tmux present: ${TMUX_VERSION}"
-echo "  - tmux-debug-mcp: present"
+echo "  - tmux-mcp: present"
 
 exit 0

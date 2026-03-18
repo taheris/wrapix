@@ -18,5 +18,5 @@ test_config_passthrough() {
 
 test_registry_pattern() {
   judge_files "lib/mcp/playwright/default.nix" "lib/mcp/tmux/default.nix"
-  judge_criterion "The playwright server definition follows the same MCP registry pattern as tmux-debug: exports name (string), packages (list of derivations), and mkServerConfig (function returning attrset with command, and optionally args and env)"
+  judge_criterion "The playwright server definition follows the same MCP registry pattern as tmux: exports name (string), packages (list of derivations), and mkServerConfig (function returning attrset with command, and optionally args and env)"
 }

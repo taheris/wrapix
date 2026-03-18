@@ -7,7 +7,7 @@
 #
 # Usage:
 #   mcpRegistry = import ./mcp { inherit pkgs; };
-#   serverDef = mcpRegistry.tmux-debug;
+#   serverDef = mcpRegistry.tmux;
 #   config = serverDef.mkServerConfig { audit = "/path/to/audit.log"; };
 #
 # This registry is used by mkSandbox to look up enabled MCP servers
@@ -17,9 +17,9 @@
 { pkgs }:
 
 {
-  # tmux-debug: MCP server for tmux pane management
+  # tmux: MCP server for tmux pane management
   # Provides tools for AI-assisted debugging (create_pane, send_keys, capture_pane, etc.)
-  tmux-debug = import ./tmux { inherit pkgs; };
+  tmux = import ./tmux { inherit pkgs; };
 
   # playwright: MCP server for browser automation
   # Provides tools for AI-assisted frontend development (screenshots, navigation, interaction, etc.)

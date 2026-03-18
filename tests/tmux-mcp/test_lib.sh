@@ -89,26 +89,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Find tmux-debug-mcp binary
+# Find tmux-mcp binary
 find_mcp_binary() {
-    if command -v tmux-debug-mcp &>/dev/null; then
-        echo "tmux-debug-mcp"
+    if command -v tmux-mcp &>/dev/null; then
+        echo "tmux-mcp"
         return 0
     fi
 
-    local cargo_bin="${REPO_ROOT}/lib/mcp/tmux/tmux-debug-mcp/target/debug/tmux-debug-mcp"
+    local cargo_bin="${REPO_ROOT}/lib/mcp/tmux/tmux-mcp/target/debug/tmux-mcp"
     if [[ -x "$cargo_bin" ]]; then
         echo "$cargo_bin"
         return 0
     fi
 
-    local release_bin="${REPO_ROOT}/lib/mcp/tmux/tmux-debug-mcp/target/release/tmux-debug-mcp"
+    local release_bin="${REPO_ROOT}/lib/mcp/tmux/tmux-mcp/target/release/tmux-mcp"
     if [[ -x "$release_bin" ]]; then
         echo "$release_bin"
         return 0
     fi
 
-    log_error "Cannot find tmux-debug-mcp binary"
+    log_error "Cannot find tmux-mcp binary"
     return 1
 }
 

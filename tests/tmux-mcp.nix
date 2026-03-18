@@ -18,17 +18,17 @@ let
   # This is impure - requires `nix flake check --impure`
   hasKvm = pathExists "/dev/kvm";
 
-  cratePath = ../lib/mcp/tmux/tmux-debug-mcp;
+  cratePath = ../lib/mcp/tmux/tmux-mcp;
 
-  # Build the tmux-debug-mcp package using rustPlatform
+  # Build the tmux-mcp package using rustPlatform
   # This properly handles cargo dependency fetching in the nix sandbox
   tmuxDebugMcp = rustPlatform.buildRustPackage {
-    pname = "tmux-debug-mcp";
+    pname = "tmux-mcp";
     version = "0.1.0";
     src = cratePath;
 
     cargoLock = {
-      lockFile = ../lib/mcp/tmux/tmux-debug-mcp/Cargo.lock;
+      lockFile = ../lib/mcp/tmux/tmux-mcp/Cargo.lock;
     };
 
     # Run tests as part of the build
@@ -231,18 +231,18 @@ let
               assert "tmux" in result, f"tmux not found in container: {result}"
               print(f"tmux version: {result.strip()}")
 
-              # Verify tmux-debug-mcp is present in the container
-              print("Verifying tmux-debug-mcp is present...")
+              # Verify tmux-mcp is present in the container
+              print("Verifying tmux-mcp is present...")
               result = machine.succeed(
                 "su - testuser -c 'podman run --rm --network=pasta --userns=keep-id "
                 "--entrypoint /bin/bash "
                 "-v /tmp/workspace:/workspace:rw "
                 "-w /workspace "
                 "docker-archive:${debugImage} "
-                "-c \"which tmux-debug-mcp\"'"
+                "-c \"which tmux-mcp\"'"
               )
-              assert "tmux-debug-mcp" in result, f"tmux-debug-mcp not found: {result}"
-              print("tmux-debug-mcp found in container")
+              assert "tmux-mcp" in result, f"tmux-mcp not found: {result}"
+              print("tmux-mcp found in container")
 
               # Test MCP server can start and respond to initialize
               print("Testing MCP server initialization...")
@@ -252,7 +252,7 @@ let
                 "-v /tmp/workspace:/workspace:rw "
                 "-w /workspace "
                 "docker-archive:${debugImage} "
-                "-c \"echo '\\'''{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}'\\''' | timeout 5 tmux-debug-mcp 2>/dev/null || echo timeout\"'"
+                "-c \"echo '\\'''{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}'\\''' | timeout 5 tmux-mcp 2>/dev/null || echo timeout\"'"
               )
               # Server should respond with JSON-RPC response containing serverInfo
               if "timeout" not in result and "serverInfo" in result:
@@ -269,13 +269,13 @@ let
 
 in
 {
-  # Build the tmux-debug-mcp Rust crate and run unit tests
+  # Build the tmux-mcp Rust crate and run unit tests
   # Uses rustPlatform.buildRustPackage for proper offline cargo builds
   tmux-mcp-unit-tests = runCommandLocal "tmux-mcp-unit-tests" { } ''
-    echo "Verifying tmux-debug-mcp builds and tests pass..."
+    echo "Verifying tmux-mcp builds and tests pass..."
     # The package build with doCheck=true already ran tests
-    test -x ${tmuxDebugMcp}/bin/tmux-debug-mcp
-    echo "tmux-debug-mcp binary exists and tests passed"
+    test -x ${tmuxDebugMcp}/bin/tmux-mcp
+    echo "tmux-mcp binary exists and tests passed"
     mkdir $out
   '';
 
@@ -331,9 +331,9 @@ in
 
   # Verify the Rust crate builds (this is the actual build artifact)
   tmux-mcp-builds = runCommandLocal "tmux-mcp-builds" { } ''
-    echo "Verifying tmux-debug-mcp builds..."
-    test -x ${tmuxDebugMcp}/bin/tmux-debug-mcp
-    echo "tmux-debug-mcp compiles successfully"
+    echo "Verifying tmux-mcp builds..."
+    test -x ${tmuxDebugMcp}/bin/tmux-mcp
+    echo "tmux-mcp compiles successfully"
     mkdir $out
   '';
 }

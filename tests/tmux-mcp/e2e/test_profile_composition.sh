@@ -2,10 +2,10 @@
 # Test: Build rust profile with MCP opt-in, verify both rust toolchain and debug tools available
 #
 # This test verifies MCP opt-in composition with language profiles:
-# 1. Build rust + tmux-debug using MCP opt-in:
-#    mkSandbox { profile = rust; mcp = { tmux-debug = {}; }; }
+# 1. Build rust + tmux using MCP opt-in:
+#    mkSandbox { profile = rust; mcp = { tmux = {}; }; }
 # 2. Verify rust toolchain is present (rustc, cargo, rustup)
-# 3. Verify debug tools are present (tmux, tmux-debug-mcp)
+# 3. Verify debug tools are present (tmux, tmux-mcp)
 # 4. Verify all base tools are still present
 #
 # This demonstrates that MCP servers can be added to any profile
@@ -62,10 +62,10 @@ if ! command -v podman &>/dev/null; then
     log_warn "podman not available — container runtime checks will be skipped"
 fi
 
-log_info "Building wrapix rust profile with MCP opt-in (tmux-debug)..."
+log_info "Building wrapix rust profile with MCP opt-in (tmux)..."
 
 # Build the rust + debug image using MCP opt-in
-# The flake defines: mkSandbox { profile = rust; mcp = { tmux-debug = {}; }; }
+# The flake defines: mkSandbox { profile = rust; mcp = { tmux = {}; }; }
 PACKAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-rust-debug" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-rust-debug image"
     log_warn "MCP opt-in composition may not be configured correctly"
@@ -90,7 +90,7 @@ if [[ ! -f "${IMAGE_PATH}" ]]; then
 fi
 
 log_info "Image built successfully: ${IMAGE_PATH}"
-log_info "PASS: Profile composition (rust + tmux-debug MCP) builds correctly"
+log_info "PASS: Profile composition (rust + tmux MCP) builds correctly"
 
 if [[ "$HAS_PODMAN" != "true" ]]; then
     log_info "SKIP: Container runtime checks skipped (podman not available)"
@@ -177,8 +177,8 @@ log_info "=== Checking debug tools ==="
 check_command "tmux" "tmux terminal multiplexer"
 check_command_output "tmux -V" "tmux" "tmux is executable"
 
-# Check tmux-debug-mcp
-check_command "tmux-debug-mcp" "tmux-debug-mcp MCP server"
+# Check tmux-mcp
+check_command "tmux-mcp" "tmux-mcp MCP server"
 
 echo ""
 log_info "=== Checking base profile tools ==="
@@ -222,7 +222,7 @@ echo ""
 echo "=== Tools availability ==="
 echo "rustup: $(which rustup 2>/dev/null || echo 'not found')"
 echo "tmux: $(which tmux 2>/dev/null || echo 'not found')"
-echo "tmux-debug-mcp: $(which tmux-debug-mcp 2>/dev/null || echo 'not found')"
+echo "tmux-mcp: $(which tmux-mcp 2>/dev/null || echo 'not found')"
 echo "git: $(which git 2>/dev/null || echo 'not found')"
 SCRIPT
 chmod +x "${WORKSPACE}/check_env.sh"
@@ -246,9 +246,9 @@ if [[ $FAILED -eq 0 ]]; then
     log_info "SUCCESS: All MCP opt-in composition checks passed!"
     echo ""
     echo "Summary:"
-    echo "  - rust + tmux-debug MCP opt-in builds successfully"
+    echo "  - rust + tmux MCP opt-in builds successfully"
     echo "  - Rust toolchain (rustup, cargo) available"
-    echo "  - MCP server (tmux, tmux-debug-mcp) available"
+    echo "  - MCP server (tmux, tmux-mcp) available"
     echo "  - Base profile tools (git, jq, curl, etc.) available"
     echo "  - Rust environment and MCP packages merged correctly"
     exit 0

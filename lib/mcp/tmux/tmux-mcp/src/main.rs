@@ -1,6 +1,6 @@
 //! MCP server for tmux pane management
 //!
-//! This is the main entry point for the tmux-debug-mcp server.
+//! This is the main entry point for the tmux-mcp server.
 //! It implements the MCP protocol over stdio and wires MCP tool calls
 //! to the underlying tmux and pane management systems.
 

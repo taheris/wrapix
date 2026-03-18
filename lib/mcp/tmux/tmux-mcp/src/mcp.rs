@@ -365,7 +365,7 @@ impl McpHandler {
                 tools: Some(ToolsCapability {}),
             },
             server_info: ServerInfo {
-                name: "tmux-debug-mcp".to_string(),
+                name: "tmux-mcp".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         }
@@ -645,7 +645,7 @@ mod tests {
         let result = handler.handle_initialize();
 
         assert_eq!(result.protocol_version, "2024-11-05");
-        assert_eq!(result.server_info.name, "tmux-debug-mcp");
+        assert_eq!(result.server_info.name, "tmux-mcp");
         assert!(result.capabilities.tools.is_some());
     }
 
@@ -731,7 +731,7 @@ mod tests {
                 let response_json = serialize_response(&response);
 
                 assert!(response_json.contains("protocolVersion"));
-                assert!(response_json.contains("tmux-debug-mcp"));
+                assert!(response_json.contains("tmux-mcp"));
             }
             _ => panic!("Expected Initialize"),
         }

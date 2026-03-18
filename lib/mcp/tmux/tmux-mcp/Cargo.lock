@@ -273,7 +273,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tmux-debug-mcp"
+name = "tmux-mcp"
 version = "0.1.0"
 dependencies = [
  "serde",

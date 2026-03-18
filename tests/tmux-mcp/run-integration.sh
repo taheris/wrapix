@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Integration Test Runner for tmux-mcp
 #
-# This script runs all integration tests for the tmux-debug-mcp MCP server.
+# This script runs all integration tests for the tmux-mcp MCP server.
 # Tests exercise the MCP server directly (not inside containers) and require tmux.
 #
 # Prerequisites (provided by the NixOS VM in tests/tmux-mcp.nix):
 # - tmux
-# - tmux-debug-mcp binary
+# - tmux-mcp binary
 # - jq (for JSON parsing)
 #
 # Usage:

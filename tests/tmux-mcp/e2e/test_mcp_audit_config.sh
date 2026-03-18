@@ -5,7 +5,7 @@
 # is properly handled:
 #
 # 1. Build sandbox with audit configuration:
-#    mkSandbox { profile = base; mcp = { tmux-debug = { audit = "/path"; }; }; }
+#    mkSandbox { profile = base; mcp = { tmux = { audit = "/path"; }; }; }
 # 2. Verify TMUX_DEBUG_AUDIT environment variable is set in container
 # 3. Verify the MCP server configuration includes the audit path
 #
@@ -62,7 +62,7 @@ fi
 log_info "Building wrapix image with MCP opt-in including audit configuration..."
 
 # Build the debug-audit profile image using MCP opt-in
-# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = { audit = "/workspace/.debug-audit.log"; }; }; }
+# The flake defines: mkSandbox { profile = base; mcp = { tmux = { audit = "/workspace/.debug-audit.log"; }; }; }
 IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug-audit" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-debug-audit image"
     log_warn "Check that the mcp parameter with audit option is properly configured"
@@ -102,11 +102,11 @@ if [[ "${CLAUDE_SETTINGS}" == "not-found" ]]; then
 else
     log_info "Claude settings found"
 
-    # Check if mcpServers contains tmux-debug with audit env
-    if echo "${CLAUDE_SETTINGS}" | grep -q '"tmux-debug"'; then
-        log_info "PASS: tmux-debug MCP server found in settings"
+    # Check if mcpServers contains tmux with audit env
+    if echo "${CLAUDE_SETTINGS}" | grep -q '"tmux"'; then
+        log_info "PASS: tmux MCP server found in settings"
     else
-        log_error "FAIL: tmux-debug MCP server not found in settings"
+        log_error "FAIL: tmux MCP server not found in settings"
         echo "Settings: ${CLAUDE_SETTINGS}"
         FAILED=1
     fi
@@ -131,9 +131,9 @@ else
 fi
 
 echo ""
-log_info "=== Checking tmux-debug-mcp is present ==="
+log_info "=== Checking tmux-mcp is present ==="
 
-# Verify tmux-debug-mcp is in PATH
+# Verify tmux-mcp is in PATH
 MCP_PATH=$(podman run --rm \
     --network=pasta \
     --userns=keep-id \
@@ -141,13 +141,13 @@ MCP_PATH=$(podman run --rm \
     -v "${WORKSPACE}:/workspace:rw" \
     -w /workspace \
     "docker-archive:${IMAGE_PATH}" \
-    -c "which tmux-debug-mcp 2>/dev/null || echo 'not-found'" 2>&1)
+    -c "which tmux-mcp 2>/dev/null || echo 'not-found'" 2>&1)
 
 if [[ "${MCP_PATH}" == "not-found" ]]; then
-    log_error "FAIL: tmux-debug-mcp not found in PATH"
+    log_error "FAIL: tmux-mcp not found in PATH"
     FAILED=1
 else
-    log_info "PASS: tmux-debug-mcp found at ${MCP_PATH}"
+    log_info "PASS: tmux-mcp found at ${MCP_PATH}"
 fi
 
 # Verify tmux is also present
@@ -174,7 +174,7 @@ if [[ $FAILED -eq 0 ]]; then
     echo ""
     echo "Summary:"
     echo "  - Audited MCP opt-in builds successfully"
-    echo "  - tmux-debug MCP server configured in Claude settings"
+    echo "  - tmux MCP server configured in Claude settings"
     echo "  - TMUX_DEBUG_AUDIT environment variable set"
     echo "  - Audit path correctly configured"
     echo "  - MCP server binary present in container"

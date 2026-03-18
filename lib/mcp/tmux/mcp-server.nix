@@ -1,4 +1,4 @@
-# tmux-debug-mcp: MCP server for tmux pane management
+# tmux-mcp: MCP server for tmux pane management
 #
 # Provides tools for AI-assisted debugging within wrapix sandboxes:
 # - tmux_create_pane: Spawn panes running commands
@@ -7,16 +7,16 @@
 # - tmux_kill_pane: Terminate panes
 # - tmux_list_panes: List active panes
 #
-# Usage: nix build .#tmux-debug-mcp
+# Usage: nix build .#tmux-mcp
 { pkgs }:
 
 pkgs.rustPlatform.buildRustPackage {
-  pname = "tmux-debug-mcp";
+  pname = "tmux-mcp";
   version = "0.1.0";
-  src = ./tmux-debug-mcp;
+  src = ./tmux-mcp;
 
   cargoLock = {
-    lockFile = ./tmux-debug-mcp/Cargo.lock;
+    lockFile = ./tmux-mcp/Cargo.lock;
   };
 
   # Prevent cargo from creating /homeless-shelter/.cargo/ when building
@@ -34,6 +34,6 @@ pkgs.rustPlatform.buildRustPackage {
 
   meta = {
     description = "MCP server providing tmux pane management for AI-assisted debugging";
-    mainProgram = "tmux-debug-mcp";
+    mainProgram = "tmux-mcp";
   };
 }

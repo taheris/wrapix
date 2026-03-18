@@ -9,7 +9,7 @@
 # 4. Verify pane cannot escape the sandbox
 #
 # Uses MCP opt-in:
-#   mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+#   mkSandbox { profile = base; mcp = { tmux = {}; }; }
 #
 # Prerequisites:
 # - nix (with flakes enabled)
@@ -61,10 +61,10 @@ if ! command -v podman &>/dev/null; then
     exit 0
 fi
 
-log_info "Building wrapix image with MCP opt-in (tmux-debug)..."
+log_info "Building wrapix image with MCP opt-in (tmux)..."
 
 # Build the debug profile image using MCP opt-in
-# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+# The flake defines: mkSandbox { profile = base; mcp = { tmux = {}; }; }
 IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-debug image"
     log_warn "Check that the mcp parameter is properly configured in lib/sandbox/default.nix"

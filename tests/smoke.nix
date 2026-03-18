@@ -239,7 +239,7 @@ in
       sandboxWithMcp = sandboxLib.mkSandbox {
         profile = sandboxLib.profiles.base;
         mcp = {
-          tmux-debug = { };
+          tmux = { };
         };
       };
 
@@ -247,7 +247,7 @@ in
       sandboxWithMcpAudit = sandboxLib.mkSandbox {
         profile = sandboxLib.profiles.base;
         mcp = {
-          tmux-debug = {
+          tmux = {
             audit = "/workspace/.debug-audit.log";
           };
         };
@@ -281,7 +281,7 @@ in
         echo "PASS: Sandbox without MCP builds"
 
         # Test 4: Verify MCP server package is in profile packages
-        # Check if tmux-debug-mcp binary would be available in the profile
+        # Check if tmux-mcp binary would be available in the profile
         echo "Test 4: MCP server package included in profile"
         # The profile with MCP should have more packages than without
         # We verify the package attribute exists and is a list

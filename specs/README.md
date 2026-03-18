@@ -32,5 +32,5 @@ An ordered list of specs and project terminology.
 | **Profile** | Pre-configured set of packages and environment variables |
 | **Ralph** | Workflow orchestrator for spec-to-implementation |
 | **Sandbox** | Isolated container environment for running Claude Code |
-| **tmux-debug-mcp** | MCP server for AI-assisted debugging via tmux panes |
+| **tmux-mcp** | MCP server for AI-assisted debugging via tmux panes |
 | **virtio-fs** | Shared filesystem for macOS container VMs |

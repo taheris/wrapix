@@ -158,11 +158,11 @@ This matches human debugging workflow: you want to see what a process printed be
 MCP servers are enabled per-sandbox via the `mcp` parameter. When enabled, tools are registered in the main Claude session — the agent decides when to delegate to a subagent based on the task, but this is not architecturally prescribed.
 
 ```nix
-# Enable tmux-debug with defaults
+# Enable tmux with defaults
 mkSandbox {
   profile = profiles.rust;
   mcp = {
-    tmux-debug = { };
+    tmux = { };
   };
 }
 
@@ -170,7 +170,7 @@ mkSandbox {
 mkSandbox {
   profile = profiles.rust;
   mcp = {
-    tmux-debug = { audit = "/workspace/.debug-audit.log"; };
+    tmux = { audit = "/workspace/.debug-audit.log"; };
   };
 }
 
@@ -178,7 +178,7 @@ mkSandbox {
 mkSandbox {
   profile = profiles.rust;
   mcp = {
-    tmux-debug = {
+    tmux = {
       audit = "/workspace/.debug-audit.log";
       auditFull = "/workspace/.debug-audit/";
     };
@@ -261,7 +261,7 @@ TMUX_DEBUG_AUDIT_FULL=/workspace/.debug-audit/
 ```
 lib/
   mcp/
-    default.nix              # MCP registry: { tmux-debug = import ./tmux; }
+    default.nix              # MCP registry: { tmux = import ./tmux; }
     tmux/
       default.nix            # Server definition: { name, package, mkServerConfig }
       mcp-server.nix         # MCP server Rust package
@@ -275,7 +275,7 @@ lib/
 A Rust binary implementing the MCP protocol:
 
 ```
-tmux-debug-mcp/
+tmux-mcp/
   Cargo.toml
   src/
     main.rs          # MCP server entry point
@@ -328,7 +328,7 @@ Projects consuming wrapix debugging enable MCP servers via the `mcp` parameter:
   devShells.debug = wrapix.mkSandbox {
     profile = wrapix.profiles.rust;
     mcp = {
-      tmux-debug = {
+      tmux = {
         audit = "/workspace/.debug-audit.log";
       };
     };
@@ -348,7 +348,7 @@ Located in `lib/mcp/tmux/src/` as standard Rust `#[test]` modules:
 | `panes.rs` | Pane state tracking, ID generation, status transitions (running → exited) |
 | `audit.rs` | Log entry formatting, byte counting, file rotation |
 
-Run with `cargo test` in the `tmux-debug-mcp` crate.
+Run with `cargo test` in the `tmux-mcp` crate.
 
 ### Integration Tests
 
@@ -385,7 +385,7 @@ These tests use `nix build` to create sandbox images and `podman run` to execute
 
 ```bash
 # Unit tests
-nix develop -c cargo test -p tmux-debug-mcp
+nix develop -c cargo test -p tmux-mcp
 
 # Integration tests (requires tmux)
 nix develop -c ./tests/tmux-mcp/run-integration.sh

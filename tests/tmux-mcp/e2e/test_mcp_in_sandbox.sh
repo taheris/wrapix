@@ -2,14 +2,14 @@
 # Test: Run MCP server inside sandbox, create pane, send keys, capture output
 #
 # This test exercises the full MCP workflow inside a sandbox container:
-# 1. Start the tmux-debug-mcp server inside the container
+# 1. Start the tmux-mcp server inside the container
 # 2. Send JSON-RPC requests to create a pane
 # 3. Send keys to the pane
 # 4. Capture output from the pane
 # 5. Kill the pane
 #
 # Uses MCP opt-in:
-#   mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+#   mkSandbox { profile = base; mcp = { tmux = {}; }; }
 #
 # Prerequisites:
 # - nix (with flakes enabled)
@@ -61,10 +61,10 @@ if ! command -v podman &>/dev/null; then
     exit 1
 fi
 
-log_info "Building wrapix image with MCP opt-in (tmux-debug)..."
+log_info "Building wrapix image with MCP opt-in (tmux)..."
 
 # Build the debug profile image using MCP opt-in
-# The flake defines: mkSandbox { profile = base; mcp = { tmux-debug = {}; }; }
+# The flake defines: mkSandbox { profile = base; mcp = { tmux = {}; }; }
 IMAGE_PATH=$(nix build "${REPO_ROOT}#wrapix-debug" --print-out-paths 2>/dev/null) || {
     log_error "Failed to build wrapix-debug image"
     log_warn "Check that the mcp parameter is properly configured in lib/sandbox/default.nix"
@@ -84,7 +84,7 @@ log_info "Using workspace: ${WORKSPACE}"
 
 # Create a test script that will run inside the container
 # This script:
-# 1. Starts tmux-debug-mcp in background
+# 1. Starts tmux-mcp in background
 # 2. Sends JSON-RPC requests via stdin/stdout
 # 3. Validates responses
 cat > "${WORKSPACE}/mcp_test.sh" << 'INNER_SCRIPT'
@@ -94,7 +94,7 @@ set -euo pipefail
 # Helper to send JSON-RPC request and get response
 send_request() {
     local request="$1"
-    echo "$request" | tmux-debug-mcp 2>/dev/null
+    echo "$request" | tmux-mcp 2>/dev/null
 }
 
 # MCP JSON-RPC helper functions
@@ -161,7 +161,7 @@ FIFO_OUT=$(mktemp -u)
 mkfifo "$FIFO_IN" "$FIFO_OUT"
 
 # Start MCP server with pipes
-tmux-debug-mcp < "$FIFO_IN" > "$FIFO_OUT" 2>/dev/null &
+tmux-mcp < "$FIFO_IN" > "$FIFO_OUT" 2>/dev/null &
 MCP_PID=$!
 
 # Give server time to start

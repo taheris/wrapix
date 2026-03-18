@@ -30,8 +30,8 @@ lib/
 │   ├── linux/           # Podman implementation + krun microVM support
 │   └── darwin/          # Apple container implementation
 ├── mcp/                 # MCP server registry (see tmux-mcp.md)
-│   ├── default.nix      # Server registry: { tmux-debug = ...; }
-│   └── tmux/            # tmux-debug MCP server
+│   ├── default.nix      # Server registry: { tmux = ...; }
+│   └── tmux/            # tmux MCP server
 │       ├── default.nix  # Server definition: { name, package, mkServerConfig }
 │       └── mcp-server.nix
 ├── builder/             # Linux builder for macOS (see linux-builder.md)
@@ -56,7 +56,7 @@ On Linux with KVM, containers can optionally run inside a [libkrun](https://gith
 |-----------|---------|-------------|
 | Sandbox | Container creation and lifecycle | `mkSandbox` |
 | Profiles | Pre-configured dev environments | `profiles.{base,rust,python}` |
-| MCP Servers | Optional capabilities via `mcp` parameter | `mcp.tmux-debug` |
+| MCP Servers | Optional capabilities via `mcp` parameter | `mcp.tmux` |
 | Image Builder | OCI image generation via Nix | `lib/sandbox/image.nix` |
 | Notifications | Desktop alerts when Claude waits | `wrapix-notify`, `wrapix-notifyd` |
 | Linux Builder | Remote Nix builds on macOS | `wrapix-builder` |
@@ -70,13 +70,13 @@ MCP (Model Context Protocol) servers extend sandbox capabilities without profile
 # Enable with defaults
 mkSandbox {
   profile = profiles.rust;
-  mcp.tmux-debug = { };
+  mcp.tmux = { };
 }
 
 # Enable with audit logging
 mkSandbox {
   profile = profiles.rust;
-  mcp.tmux-debug.audit = "/workspace/audit.log";
+  mcp.tmux.audit = "/workspace/audit.log";
 }
 ```
 
@@ -85,6 +85,6 @@ The registry at `lib/mcp/default.nix` maps server names to definitions. Each def
 - `package`: Nix package for the MCP binary
 - `mkServerConfig`: Function generating Claude settings from user options
 
-See [tmux-mcp.md](./tmux-mcp.md) for the tmux-debug server specification.
+See [tmux-mcp.md](./tmux-mcp.md) for the tmux server specification.
 
 See individual spec files for detailed requirements and implementation notes. Security tradeoffs and mitigations are documented in [security-review.md](./security-review.md).

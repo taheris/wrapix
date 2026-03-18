@@ -1,10 +1,10 @@
-# tmux-debug MCP server definition
+# tmux MCP server definition
 #
 # Server providing tmux pane management for AI-assisted debugging
 # within wrapix sandboxes.
 #
 # Exports:
-#   - name: Server identifier ("tmux-debug")
+#   - name: Server identifier ("tmux")
 #   - packages: Runtime packages (MCP server binary + tmux)
 #   - mkServerConfig: Function to generate server config from user options
 #
@@ -16,7 +16,7 @@
 { pkgs }:
 
 {
-  name = "tmux-debug";
+  name = "tmux";
 
   # tmux must be listed explicitly: buildEnv doesn't follow propagatedBuildInputs
   packages = [
@@ -30,7 +30,7 @@
       auditFull ? null,
     }:
     {
-      command = "tmux-debug-mcp";
+      command = "tmux-mcp";
       env =
         { }
         // (if audit != null then { TMUX_DEBUG_AUDIT = audit; } else { })

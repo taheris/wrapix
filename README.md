@@ -147,14 +147,22 @@ ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
 
 MCP (Model Context Protocol) servers can be enabled per-sandbox via the `mcp` parameter. This avoids profile proliferation by adding capabilities to existing profiles.
 
-### tmux-debug
+### tmux
 
 Provides tmux pane management for AI-assisted debugging. Run servers in one pane, send test requests from another, capture logs.
 
 ```bash
-nix run github:taheris/wrapix#wrapix-debug       # base + tmux-debug
-nix run github:taheris/wrapix#wrapix-rust-debug  # rust + tmux-debug
+nix run github:taheris/wrapix#wrapix-debug       # base + tmux
+nix run github:taheris/wrapix#wrapix-rust-debug  # rust + tmux
 ```
+
+See [specs/tmux-mcp.md](specs/tmux-mcp.md) for the full specification.
+
+### playwright
+
+Provides browser automation for AI-assisted frontend development. Take screenshots, navigate pages, fill forms, inspect accessibility trees.
+
+See [specs/playwright-mcp.md](specs/playwright-mcp.md) for the full specification.
 
 ### Flake usage
 
@@ -162,7 +170,7 @@ nix run github:taheris/wrapix#wrapix-rust-debug  # rust + tmux-debug
 sandbox = wrapix.mkSandbox {
   profile = wrapix.profiles.rust;
   mcp = {
-    tmux-debug = { };  # enable with defaults
+    tmux = { };  # enable with defaults
   };
 };
 
@@ -170,15 +178,30 @@ sandbox = wrapix.mkSandbox {
 sandbox = wrapix.mkSandbox {
   profile = wrapix.profiles.rust;
   mcp = {
-    tmux-debug = {
+    tmux = {
       audit = "/workspace/.debug-audit.log";
       auditFull = "/workspace/.debug-audit/";  # full capture logs
     };
   };
 };
-```
 
-See [specs/tmux-mcp.md](specs/tmux-mcp.md) for the full specification.
+# Browser automation
+sandbox = wrapix.mkSandbox {
+  profile = wrapix.profiles.rust;
+  mcp = {
+    playwright = { };
+  };
+};
+
+# Combined: tmux + playwright
+sandbox = wrapix.mkSandbox {
+  profile = wrapix.profiles.rust;
+  mcp = {
+    tmux = { };
+    playwright = { };
+  };
+};
+```
 
 ## Notifications
 
