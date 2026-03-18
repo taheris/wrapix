@@ -901,6 +901,23 @@ parse_spec_annotations() {
 }
 
 #-----------------------------------------------------------------------------
+# Spec Hidden Detection
+#
+# Derives whether a spec is hidden from its spec_path in state JSON.
+# Hidden specs have spec_path pointing into the ralph state directory.
+# This replaces the old .hidden field in state JSON.
+#
+# Usage: spec_is_hidden "$state_file"
+# Returns: 0 (true) if hidden, 1 (false) if not hidden
+#-----------------------------------------------------------------------------
+spec_is_hidden() {
+  local state_file="$1"
+  local spec_path
+  spec_path=$(jq -r '.spec_path // ""' "$state_file" 2>/dev/null || echo "")
+  [[ "$spec_path" == *"/state/"* ]]
+}
+
+#-----------------------------------------------------------------------------
 # Spec Label Resolution
 #
 # Resolves the target workflow label for commands that accept --spec/-s.

@@ -666,23 +666,28 @@ scan_file_for_deps() {
 
 # Show required nix packages for current spec's verify/judge tests
 show_deps() {
-  # Find current spec
-  local current_file="$RALPH_DIR/state/current.json"
-  if [ ! -f "$current_file" ]; then
+  # Find current spec via state/current pointer + per-label state JSON
+  local current_pointer="$RALPH_DIR/state/current"
+  if [ ! -f "$current_pointer" ]; then
     error "No active feature. Run 'ralph plan <label>' first."
   fi
 
-  local label hidden spec_file
-  label=$(jq -r '.label // empty' "$current_file")
-  hidden=$(jq -r '.hidden // false' "$current_file")
+  local label spec_file
+  label=$(<"$current_pointer")
+  label="${label#"${label%%[![:space:]]*}"}"
+  label="${label%"${label##*[![:space:]]}"}"
 
   if [ -z "$label" ]; then
-    error "No label in current.json. Run 'ralph plan <label>' first."
+    error "No label in state/current. Run 'ralph plan <label>' first."
   fi
 
-  if [ "$hidden" = "true" ]; then
-    spec_file="$RALPH_DIR/state/$label.md"
-  else
+  local state_file="$RALPH_DIR/state/${label}.json"
+  if [ ! -f "$state_file" ]; then
+    error "No state file for '$label'. Run 'ralph plan $label' first."
+  fi
+
+  spec_file=$(jq -r '.spec_path // empty' "$state_file")
+  if [ -z "$spec_file" ]; then
     spec_file="specs/$label.md"
   fi
 

@@ -73,8 +73,19 @@ LABEL=$(resolve_spec_label "$SPEC_FLAG")
 
 # Read state from per-label state file: state/<label>.json
 STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
-SPEC_HIDDEN=$(jq -r '.hidden // false' "$STATE_FILE")
-UPDATE_MODE=$(jq -r '.update // false' "$STATE_FILE")
+# Derive hidden from spec_path (no .hidden field in state JSON)
+if spec_is_hidden "$STATE_FILE"; then
+  SPEC_HIDDEN="true"
+else
+  SPEC_HIDDEN="false"
+fi
+# Derive update mode from molecule presence (no .update field in state JSON)
+# Full three-tier detection will be implemented in todo.sh refactoring (wx-1mcy.5)
+if [ -n "$(jq -r '.molecule // empty' "$STATE_FILE" 2>/dev/null)" ]; then
+  UPDATE_MODE="true"
+else
+  UPDATE_MODE="false"
+fi
 
 # Load config for stream filter
 CONFIG=$(nix eval --json --file "$CONFIG_FILE")

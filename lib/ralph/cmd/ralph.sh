@@ -18,27 +18,28 @@ case "$COMMAND" in
   use)    exec ralph-use    "$@" ;;
 
   edit)
-      # Get current label and hidden flag from current.json
-      CURRENT_FILE="$RALPH_DIR/state/current.json"
-      if [ ! -f "$CURRENT_FILE" ]; then
+      # Get current label from state/current, then spec_path from state/<label>.json
+      CURRENT_POINTER="$RALPH_DIR/state/current"
+      if [ ! -f "$CURRENT_POINTER" ]; then
           echo "No active feature. Run 'ralph plan <label>' first."
           exit 1
       fi
-      LABEL=$(jq -r '.label // empty' "$CURRENT_FILE")
-      SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE")
+      LABEL=$(<"$CURRENT_POINTER")
+      LABEL="${LABEL#"${LABEL%%[![:space:]]*}"}"
+      LABEL="${LABEL%"${LABEL##*[![:space:]]}"}"
       if [ -z "$LABEL" ]; then
-          echo "No label in current.json. Run 'ralph plan <label>' first."
+          echo "No label in state/current. Run 'ralph plan <label>' first."
           exit 1
       fi
 
-      if [ "$SPEC_HIDDEN" = "true" ]; then
-          SPEC_FILE="$RALPH_DIR/state/$LABEL.md"
-      else
-          SPEC_FILE="specs/$LABEL.md"
+      STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
+      if [ ! -f "$STATE_FILE" ]; then
+          echo "No state file for '$LABEL'. Run 'ralph plan $LABEL' first."
+          exit 1
       fi
-
-      if [ ! -f "$SPEC_FILE" ]; then
-          echo "Spec file not found: $SPEC_FILE"
+      SPEC_FILE=$(jq -r '.spec_path // empty' "$STATE_FILE")
+      if [ -z "$SPEC_FILE" ] || [ ! -f "$SPEC_FILE" ]; then
+          echo "Spec file not found: ${SPEC_FILE:-<not set>}"
           echo "Run 'ralph plan $LABEL' to create it."
           exit 1
       fi

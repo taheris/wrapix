@@ -156,12 +156,10 @@ get_workflow_phase() {
 
   if [ -z "$molecule" ]; then
     # No molecule yet — check if spec exists
-    local spec_hidden
-    spec_hidden=$(jq -r '.hidden // false' "$state_file" 2>/dev/null || echo "false")
     local spec_path
-    if [ "$spec_hidden" = "true" ]; then
-      spec_path="$RALPH_DIR/state/$label.md"
-    else
+    spec_path=$(jq -r '.spec_path // ""' "$state_file" 2>/dev/null || echo "")
+    if [ -z "$spec_path" ]; then
+      # Fallback: derive from label
       spec_path="$SPECS_DIR/$label.md"
     fi
     if [ -f "$spec_path" ]; then
@@ -224,11 +222,9 @@ show_single_status() {
   local label="$1"
   local state_file="$RALPH_DIR/state/${label}.json"
   local molecule=""
-  local spec_hidden="false"
 
   if [ -f "$state_file" ]; then
     molecule=$(jq -r '.molecule // empty' "$state_file" 2>/dev/null || true)
-    spec_hidden=$(jq -r '.hidden // false' "$state_file" 2>/dev/null || echo "false")
   fi
 
   # Header
@@ -242,12 +238,15 @@ show_single_status() {
     echo "Molecule: (not set)"
   fi
 
-  # Spec location
-  if [ "$spec_hidden" = "true" ]; then
-    local spec_path="$RALPH_DIR/state/$label.md"
+  # Spec location (derive from spec_path in state JSON)
+  local spec_path
+  spec_path=$(jq -r '.spec_path // ""' "$state_file" 2>/dev/null || echo "")
+  if [ -z "$spec_path" ]; then
+    spec_path="$SPECS_DIR/$label.md"
+  fi
+  if [[ "$spec_path" == *"/state/"* ]]; then
     echo "Spec: $spec_path (hidden)"
   else
-    local spec_path="$SPECS_DIR/$label.md"
     echo "Spec: $spec_path"
   fi
 

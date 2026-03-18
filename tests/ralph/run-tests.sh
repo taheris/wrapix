@@ -2832,13 +2832,13 @@ test_plan_per_label_state_files() {
     test_fail "state/current should be created by ralph plan"
   fi
 
-  # Verify JSON structure contains expected fields
+  # Verify JSON structure contains expected fields (no hidden/update fields)
   if [ -f "$RALPH_DIR/state/my-feature.json" ]; then
-    local label hidden update spec_path
+    local label spec_path has_hidden has_update
     label=$(jq -r '.label' "$RALPH_DIR/state/my-feature.json")
-    hidden=$(jq -r '.hidden' "$RALPH_DIR/state/my-feature.json")
-    update=$(jq -r '.update' "$RALPH_DIR/state/my-feature.json")
     spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/my-feature.json")
+    has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/my-feature.json")
+    has_update=$(jq 'has("update")' "$RALPH_DIR/state/my-feature.json")
 
     if [ "$label" = "my-feature" ]; then
       test_pass "JSON .label = 'my-feature'"
@@ -2846,16 +2846,16 @@ test_plan_per_label_state_files() {
       test_fail "JSON .label should be 'my-feature', got '$label'"
     fi
 
-    if [ "$hidden" = "false" ]; then
-      test_pass "JSON .hidden = false (new spec)"
+    if [ "$has_hidden" = "false" ]; then
+      test_pass "JSON has no .hidden field (derived from spec_path)"
     else
-      test_fail "JSON .hidden should be false for -n mode, got '$hidden'"
+      test_fail "JSON should not contain .hidden field"
     fi
 
-    if [ "$update" = "false" ]; then
-      test_pass "JSON .update = false (new spec)"
+    if [ "$has_update" = "false" ]; then
+      test_pass "JSON has no .update field (derived from flags/state)"
     else
-      test_fail "JSON .update should be false for -n mode, got '$update'"
+      test_fail "JSON should not contain .update field"
     fi
 
     if [ "$spec_path" = "specs/my-feature.md" ]; then
@@ -2871,14 +2871,14 @@ test_plan_per_label_state_files() {
   set -e
 
   if [ -f "$RALPH_DIR/state/hidden-feat.json" ]; then
-    local h_hidden h_spec_path
-    h_hidden=$(jq -r '.hidden' "$RALPH_DIR/state/hidden-feat.json")
+    local h_spec_path h_has_hidden
     h_spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/hidden-feat.json")
+    h_has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/hidden-feat.json")
 
-    if [ "$h_hidden" = "true" ]; then
-      test_pass "Hidden mode: .hidden = true"
+    if [ "$h_has_hidden" = "false" ]; then
+      test_pass "Hidden mode: no .hidden field (derived from spec_path)"
     else
-      test_fail "Hidden mode: .hidden should be true, got '$h_hidden'"
+      test_fail "Hidden mode: should not have .hidden field"
     fi
 
     if echo "$h_spec_path" | grep -q "state/hidden-feat.md"; then
@@ -2908,8 +2908,8 @@ test_plan_per_label_state_files() {
     test_fail "Both state files should coexist after two ralph plan calls"
   fi
 
-  # Test 3: -u mode writes update=true and preserves molecule
-  # Create a spec to update and a pre-existing state file with molecule
+  # Test 3: -u mode preserves molecule and removes hidden/update fields
+  # Create a spec to update and a pre-existing state file with molecule (legacy fields)
   echo "# Existing Spec" > "$TEST_DIR/specs/existing-spec.md"
   jq -n '{label:"existing-spec",update:false,hidden:false,spec_path:"specs/existing-spec.md",molecule:"epic-123"}' \
     > "$RALPH_DIR/state/existing-spec.json"
@@ -2919,14 +2919,21 @@ test_plan_per_label_state_files() {
   set -e
 
   if [ -f "$RALPH_DIR/state/existing-spec.json" ]; then
-    local u_update u_molecule
-    u_update=$(jq -r '.update' "$RALPH_DIR/state/existing-spec.json")
+    local u_molecule u_has_update u_has_hidden
     u_molecule=$(jq -r '.molecule' "$RALPH_DIR/state/existing-spec.json")
+    u_has_update=$(jq 'has("update")' "$RALPH_DIR/state/existing-spec.json")
+    u_has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/existing-spec.json")
 
-    if [ "$u_update" = "true" ]; then
-      test_pass "Update mode: .update = true"
+    if [ "$u_has_update" = "false" ]; then
+      test_pass "Update mode: no .update field (removed from schema)"
     else
-      test_fail "Update mode: .update should be true, got '$u_update'"
+      test_fail "Update mode: should not have .update field"
+    fi
+
+    if [ "$u_has_hidden" = "false" ]; then
+      test_pass "Update mode: no .hidden field (removed from schema)"
+    else
+      test_fail "Update mode: should not have .hidden field"
     fi
 
     if [ "$u_molecule" = "epic-123" ]; then
@@ -2936,6 +2943,250 @@ test_plan_per_label_state_files() {
     fi
   else
     test_fail "state/existing-spec.json should exist after update"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph plan -u edits spec directly (no state/<label>.md created)
+# Verifies that plan -u does NOT write state/<label>.md intermediary.
+# The LLM edits specs/<label>.md directly during the interview.
+test_plan_update_direct_edit() {
+  CURRENT_TEST="plan_update_direct_edit"
+  test_header "Plan Update Direct Edit (no state/<label>.md)"
+
+  setup_test_env "plan-direct-edit"
+
+  # Create a spec to update
+  echo "# My Feature Spec" > "$TEST_DIR/specs/my-feature.md"
+
+  # Create plan-update.md template (needed for render_template)
+  mkdir -p "$RALPH_DIR/template/partial"
+  cat > "$RALPH_DIR/template/plan-update.md" << 'TMPL'
+# Update Interview
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+Existing: {{EXISTING_SPEC}}
+{{EXIT_SIGNALS}}
+TMPL
+  cat > "$RALPH_DIR/template/partial/spec-header.md" << 'TMPL'
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+TMPL
+
+  # Run ralph plan -u (will fail at claude invocation, but state files are created before that)
+  set +e
+  local output
+  output=$(ralph-plan -u my-feature 2>&1)
+  set -e
+
+  # state/<label>.md should NOT exist (no intermediary file)
+  if [ -f "$RALPH_DIR/state/my-feature.md" ]; then
+    test_fail "state/my-feature.md should NOT be created (LLM edits spec directly)"
+  else
+    test_pass "No state/my-feature.md created (direct spec editing)"
+  fi
+
+  # state/<label>.json SHOULD exist
+  if [ -f "$RALPH_DIR/state/my-feature.json" ]; then
+    test_pass "state/my-feature.json exists"
+  else
+    test_fail "state/my-feature.json should be created by plan -u"
+  fi
+
+  # Verify spec_path points to specs/ (not state/)
+  if [ -f "$RALPH_DIR/state/my-feature.json" ]; then
+    local sp
+    sp=$(jq -r '.spec_path' "$RALPH_DIR/state/my-feature.json")
+    if [ "$sp" = "specs/my-feature.md" ]; then
+      test_pass "spec_path = specs/my-feature.md (direct editing location)"
+    else
+      test_fail "spec_path should be 'specs/my-feature.md', got '$sp'"
+    fi
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph plan -u creates state/<label>.json if it doesn't exist
+# Verifies that -u mode initializes state when no prior ralph plan was run.
+test_plan_update_creates_state_json() {
+  CURRENT_TEST="plan_update_creates_state_json"
+  test_header "Plan Update Creates State JSON"
+
+  setup_test_env "plan-create-state"
+
+  # Create a spec file but NO state/<label>.json
+  echo "# Existing Feature" > "$TEST_DIR/specs/existing-feature.md"
+
+  # Verify no state file exists yet
+  if [ -f "$RALPH_DIR/state/existing-feature.json" ]; then
+    test_fail "Precondition: state file should not exist before test"
+    teardown_test_env
+    return
+  fi
+
+  # Create plan-update.md template
+  mkdir -p "$RALPH_DIR/template/partial"
+  cat > "$RALPH_DIR/template/plan-update.md" << 'TMPL'
+# Update Interview
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+Existing: {{EXISTING_SPEC}}
+{{EXIT_SIGNALS}}
+TMPL
+  cat > "$RALPH_DIR/template/partial/spec-header.md" << 'TMPL'
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+TMPL
+
+  # Run ralph plan -u (will fail at claude, but state creation happens first)
+  set +e
+  local output
+  output=$(ralph-plan -u existing-feature 2>&1)
+  set -e
+
+  # state/<label>.json should now exist
+  if [ -f "$RALPH_DIR/state/existing-feature.json" ]; then
+    test_pass "state/existing-feature.json created by plan -u"
+
+    local label sp
+    label=$(jq -r '.label' "$RALPH_DIR/state/existing-feature.json")
+    sp=$(jq -r '.spec_path' "$RALPH_DIR/state/existing-feature.json")
+
+    if [ "$label" = "existing-feature" ]; then
+      test_pass "State JSON .label = 'existing-feature'"
+    else
+      test_fail "State JSON .label should be 'existing-feature', got '$label'"
+    fi
+
+    if [ "$sp" = "specs/existing-feature.md" ]; then
+      test_pass "State JSON .spec_path = 'specs/existing-feature.md'"
+    else
+      test_fail "State JSON .spec_path should be 'specs/existing-feature.md', got '$sp'"
+    fi
+  else
+    test_fail "state/existing-feature.json should be created by plan -u"
+  fi
+
+  # state/current should point to this label
+  if [ -f "$RALPH_DIR/state/current" ]; then
+    local cur
+    cur=$(<"$RALPH_DIR/state/current")
+    if [ "$cur" = "existing-feature" ]; then
+      test_pass "state/current = 'existing-feature'"
+    else
+      test_fail "state/current should be 'existing-feature', got '$cur'"
+    fi
+  else
+    test_fail "state/current should be created"
+  fi
+
+  teardown_test_env
+}
+
+# Test: state/<label>.json no longer contains update or hidden fields
+# Validates the new state JSON schema across all plan modes.
+test_state_json_schema() {
+  CURRENT_TEST="state_json_schema"
+  test_header "State JSON Schema (no update/hidden fields)"
+
+  setup_test_env "state-schema"
+
+  # Create required templates
+  mkdir -p "$RALPH_DIR/template/partial"
+  cat > "$RALPH_DIR/template/plan-new.md" << 'TMPL'
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+{{README_INSTRUCTIONS}}
+{{PINNED_CONTEXT}}
+{{EXIT_SIGNALS}}
+TMPL
+  cat > "$RALPH_DIR/template/plan-update.md" << 'TMPL'
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+Existing: {{EXISTING_SPEC}}
+{{EXIT_SIGNALS}}
+TMPL
+  cat > "$RALPH_DIR/template/partial/spec-header.md" << 'TMPL'
+Label: {{LABEL}}
+Spec: {{SPEC_PATH}}
+TMPL
+
+  # Test 1: -n mode creates clean state JSON
+  set +e
+  ralph-plan -n schema-test 2>&1
+  set -e
+
+  if [ -f "$RALPH_DIR/state/schema-test.json" ]; then
+    local has_update has_hidden
+    has_update=$(jq 'has("update")' "$RALPH_DIR/state/schema-test.json")
+    has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/schema-test.json")
+
+    if [ "$has_update" = "false" ] && [ "$has_hidden" = "false" ]; then
+      test_pass "-n mode: no update/hidden fields"
+    else
+      test_fail "-n mode: state JSON should not have update ($has_update) or hidden ($has_hidden)"
+    fi
+  else
+    test_fail "state/schema-test.json should exist"
+  fi
+
+  # Test 2: -h mode creates clean state JSON
+  set +e
+  ralph-plan -h hidden-schema 2>&1
+  set -e
+
+  if [ -f "$RALPH_DIR/state/hidden-schema.json" ]; then
+    has_update=$(jq 'has("update")' "$RALPH_DIR/state/hidden-schema.json")
+    has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/hidden-schema.json")
+
+    if [ "$has_update" = "false" ] && [ "$has_hidden" = "false" ]; then
+      test_pass "-h mode: no update/hidden fields"
+    else
+      test_fail "-h mode: state JSON should not have update ($has_update) or hidden ($has_hidden)"
+    fi
+
+    # Verify hidden is derived from spec_path
+    local sp
+    sp=$(jq -r '.spec_path' "$RALPH_DIR/state/hidden-schema.json")
+    if [[ "$sp" == *"/state/"* ]]; then
+      test_pass "-h mode: spec_path points to state/ (hidden derivable)"
+    else
+      test_fail "-h mode: spec_path should contain '/state/', got '$sp'"
+    fi
+  else
+    test_fail "state/hidden-schema.json should exist"
+  fi
+
+  # Test 3: -u mode cleans up legacy fields from existing state JSON
+  echo "# Test Spec" > "$TEST_DIR/specs/legacy-spec.md"
+  jq -n '{label:"legacy-spec",update:true,hidden:false,spec_path:"specs/legacy-spec.md",molecule:"mol-123"}' \
+    > "$RALPH_DIR/state/legacy-spec.json"
+
+  set +e
+  ralph-plan -u legacy-spec 2>&1
+  set -e
+
+  if [ -f "$RALPH_DIR/state/legacy-spec.json" ]; then
+    has_update=$(jq 'has("update")' "$RALPH_DIR/state/legacy-spec.json")
+    has_hidden=$(jq 'has("hidden")' "$RALPH_DIR/state/legacy-spec.json")
+    local mol
+    mol=$(jq -r '.molecule' "$RALPH_DIR/state/legacy-spec.json")
+
+    if [ "$has_update" = "false" ] && [ "$has_hidden" = "false" ]; then
+      test_pass "-u mode: legacy update/hidden fields removed"
+    else
+      test_fail "-u mode: should remove update ($has_update) and hidden ($has_hidden)"
+    fi
+
+    if [ "$mol" = "mol-123" ]; then
+      test_pass "-u mode: molecule preserved after field cleanup"
+    else
+      test_fail "-u mode: molecule should be preserved, got '$mol'"
+    fi
+  else
+    test_fail "state/legacy-spec.json should exist after update"
   fi
 
   teardown_test_env
@@ -5266,9 +5517,10 @@ test_sync_deps_basic() {
 - [ ] Works on both platforms
 SPEC
 
-  # Set up current.json to point to this spec
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
+  # Set up state/current pointer and per-label state JSON
+  echo "test-feature" > "$TEST_DIR/.wrapix/ralph/state/current"
+  cat > "$TEST_DIR/.wrapix/ralph/state/test-feature.json" << 'JSON'
+{"label":"test-feature","spec_path":"specs/test-feature.md"}
 JSON
 
   # Create the test files that the annotations reference
@@ -5368,8 +5620,9 @@ test_sync_deps_missing_files() {
   [verify](tests/nonexistent.sh::test_something)
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
+  echo "test-feature" > "$TEST_DIR/.wrapix/ralph/state/current"
+  cat > "$TEST_DIR/.wrapix/ralph/state/test-feature.json" << 'JSON'
+{"label":"test-feature","spec_path":"specs/test-feature.md"}
 JSON
 
   local exit_code=0
@@ -5403,8 +5656,9 @@ test_sync_deps_dedup() {
   [verify](tests/check2.sh::test_second)
 SPEC
 
-  cat > "$TEST_DIR/.wrapix/ralph/state/current.json" << 'JSON'
-{"label":"test-feature","hidden":false}
+  echo "test-feature" > "$TEST_DIR/.wrapix/ralph/state/current"
+  cat > "$TEST_DIR/.wrapix/ralph/state/test-feature.json" << 'JSON'
+{"label":"test-feature","spec_path":"specs/test-feature.md"}
 JSON
 
   mkdir -p "$TEST_DIR/tests"
@@ -7963,6 +8217,9 @@ PARALLEL_TESTS=(
   test_malformed_bd_output_parsing
   test_plan_flag_validation
   test_plan_per_label_state_files
+  test_plan_update_direct_edit
+  test_plan_update_creates_state_json
+  test_state_json_schema
   test_plan_template_with_partials
   test_logs_error_detection
   test_logs_all_flag

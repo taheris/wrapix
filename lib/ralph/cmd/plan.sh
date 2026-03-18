@@ -143,11 +143,21 @@ if [ "$SPEC_NEW" = "false" ] && [ "$SPEC_HIDDEN" = "false" ] && [ -z "$UPDATE_SP
     if [ -n "$LABEL" ]; then
       LABEL_STATE_RESUME="$RALPH_DIR/state/${LABEL}.json"
       if [ -f "$LABEL_STATE_RESUME" ]; then
-        # Resuming from per-label state file
-        SPEC_HIDDEN=$(jq -r '.hidden // false' "$LABEL_STATE_RESUME" 2>/dev/null || echo "false")
-        UPDATE_MODE=$(jq -r '.update // false' "$LABEL_STATE_RESUME" 2>/dev/null || echo "false")
-        if [ "$UPDATE_MODE" = "true" ]; then
+        # Derive hidden from spec_path in state JSON
+        resume_spec_path=$(jq -r '.spec_path // ""' "$LABEL_STATE_RESUME" 2>/dev/null || echo "")
+        if [[ "$resume_spec_path" == *"/state/"* ]]; then
+          SPEC_HIDDEN="true"
+        fi
+        # Derive update mode: if spec file already exists, treat as update
+        if [ -n "$resume_spec_path" ] && [ -f "$resume_spec_path" ]; then
           UPDATE_SPEC="$LABEL"
+        else
+          # Spec doesn't exist yet — treat as new. Determine location from spec_path.
+          if [ "$SPEC_HIDDEN" = "true" ]; then
+            : # hidden flag already set
+          else
+            SPEC_NEW="true"
+          fi
         fi
       fi
     fi
@@ -258,19 +268,12 @@ EOF
 fi
 
 # Set/update state in per-label state file: state/<label>.json
-# Track whether this is an update to an existing spec (vs new spec)
 UPDATE_MODE="false"
 if [ -n "$UPDATE_SPEC" ]; then
   UPDATE_MODE="true"
 fi
 
 LABEL_STATE_FILE="$RALPH_DIR/state/${LABEL}.json"
-
-# In update mode, preserve existing molecule ID from per-label state file
-EXISTING_MOLECULE=""
-if [ "$UPDATE_MODE" = "true" ] && [ -f "$LABEL_STATE_FILE" ]; then
-  EXISTING_MOLECULE=$(jq -r '.molecule // empty' "$LABEL_STATE_FILE" 2>/dev/null || true)
-fi
 
 # Compute spec_path for JSON state
 if [ "$SPEC_HIDDEN" = "true" ]; then
@@ -279,15 +282,18 @@ else
   STATE_SPEC_PATH="$SPECS_DIR/$LABEL.md"
 fi
 
-# Build the new state JSON, preserving molecule if it exists
-if [ -n "$EXISTING_MOLECULE" ]; then
-  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
-    --arg spec_path "$STATE_SPEC_PATH" --arg molecule "$EXISTING_MOLECULE" \
-    '{label: $label, update: $update, hidden: $hidden, spec_path: $spec_path, molecule: $molecule}' > "$LABEL_STATE_FILE"
+# Create or update state JSON, preserving existing fields (molecule, base_commit, companions)
+# State JSON schema: label, spec_path, molecule?, base_commit?, companions?
+# No update/hidden fields — hidden is derived from spec_path, update from flags
+if [ -f "$LABEL_STATE_FILE" ]; then
+  # Update label and spec_path, preserve everything else
+  jq --arg label "$LABEL" --arg spec_path "$STATE_SPEC_PATH" \
+    '.label = $label | .spec_path = $spec_path | del(.update, .hidden)' \
+    "$LABEL_STATE_FILE" > "$LABEL_STATE_FILE.tmp" && mv "$LABEL_STATE_FILE.tmp" "$LABEL_STATE_FILE"
 else
-  jq -n --arg label "$LABEL" --argjson hidden "$SPEC_HIDDEN" --argjson update "$UPDATE_MODE" \
-    --arg spec_path "$STATE_SPEC_PATH" \
-    '{label: $label, update: $update, hidden: $hidden, spec_path: $spec_path}' > "$LABEL_STATE_FILE"
+  # Create new state file
+  jq -n --arg label "$LABEL" --arg spec_path "$STATE_SPEC_PATH" \
+    '{label: $label, spec_path: $spec_path}' > "$LABEL_STATE_FILE"
 fi
 
 # Write label to state/current (plain text pointer to active workflow)
@@ -301,9 +307,6 @@ else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
   README_INSTRUCTIONS="5. **Update specs/README.md** with the epic bead ID"
 fi
-
-# Path for new requirements in update mode (separate from main spec)
-NEW_REQUIREMENTS_PATH="$RALPH_DIR/state/$LABEL.md"
 
 # Select template based on mode: plan-new for new specs, plan-update for updates
 if [ "$UPDATE_MODE" = "true" ]; then
@@ -361,7 +364,6 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "LABEL=$LABEL" \
     "SPEC_PATH=$SPEC_PATH" \
     "EXISTING_SPEC=$EXISTING_SPEC" \
-    "NEW_REQUIREMENTS_PATH=$NEW_REQUIREMENTS_PATH" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "EXIT_SIGNALS=")
 else

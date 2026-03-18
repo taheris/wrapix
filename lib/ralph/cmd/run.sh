@@ -181,13 +181,22 @@ fi
 STATE_FILE="$RALPH_DIR/state/${FEATURE_NAME}.json"
 if [ -f "$STATE_FILE" ]; then
   MOLECULE_ID=$(jq -r '.molecule // empty' "$STATE_FILE" 2>/dev/null || true)
-  SPEC_HIDDEN=$(jq -r '.hidden // false' "$STATE_FILE" 2>/dev/null || true)
+  # Derive hidden from spec_path (no .hidden field in state JSON)
+  if spec_is_hidden "$STATE_FILE"; then
+    SPEC_HIDDEN="true"
+  else
+    SPEC_HIDDEN="false"
+  fi
 else
   # Legacy fallback: try reading from current.json if per-label state file doesn't exist
   CURRENT_FILE="$RALPH_DIR/state/current.json"
   if [ -f "$CURRENT_FILE" ]; then
     MOLECULE_ID=$(jq -r '.molecule // empty' "$CURRENT_FILE" 2>/dev/null || true)
-    SPEC_HIDDEN=$(jq -r '.hidden // false' "$CURRENT_FILE" 2>/dev/null || true)
+    if spec_is_hidden "$CURRENT_FILE"; then
+      SPEC_HIDDEN="true"
+    else
+      SPEC_HIDDEN="false"
+    fi
   fi
 fi
 
