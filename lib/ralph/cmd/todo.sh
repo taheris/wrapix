@@ -157,7 +157,7 @@ if [ "$SPEC_HIDDEN" = "true" ]; then
   README_INSTRUCTIONS=""
 else
   SPEC_PATH="$SPECS_DIR/$LABEL.md"
-  README_INSTRUCTIONS="## README Update
+  README_INSTRUCTIONS="## README Update (required for cross-machine state recovery)
 
 After creating the molecule, update \`specs/README.md\`:
 - Find the row for this spec

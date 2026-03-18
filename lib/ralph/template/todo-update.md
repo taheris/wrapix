@@ -75,6 +75,11 @@ Use `bd mol show {{MOLECULE_ID}}` to see the current tasks in this molecule.
 - Include **test tasks** where appropriate
 - **Assign profile per-task** based on what that specific task needs
 
+## README Backfill
+
+After creating tasks, check if `specs/README.md` has an empty Beads column for this spec (`{{LABEL}}`).
+If the Beads column is empty, fill in the molecule ID (`{{MOLECULE_ID}}`).
+
 {{> exit-signals}}
 
 - `RALPH_COMPLETE` - New tasks created and dependencies set

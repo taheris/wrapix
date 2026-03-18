@@ -56,6 +56,16 @@ test_run_already_implemented() {
   judge_criterion "run.md template includes guidance for already-implemented tasks: verify correctness, close the issue, and output RALPH_COMPLETE"
 }
 
+test_todo_new_writes_readme_beads() {
+  judge_files "lib/ralph/template/todo-new.md" "lib/ralph/cmd/todo.sh"
+  judge_criterion "todo-new.md template instructs the LLM to write the molecule ID to the specs/README.md Beads column, and the instruction emphasizes this is required for cross-machine state recovery"
+}
+
+test_todo_update_fills_readme_beads() {
+  judge_files "lib/ralph/template/todo-update.md"
+  judge_criterion "todo-update.md template instructs the LLM to check if specs/README.md Beads column is empty for this spec, and if so, fill in the molecule ID"
+}
+
 test_tune_interactive() {
   judge_files "lib/ralph/cmd/tune.sh"
   judge_criterion "ralph tune in interactive mode identifies the correct template to edit and allows making changes"

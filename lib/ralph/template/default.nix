@@ -114,7 +114,7 @@ let
     EXISTING_TASKS = {
       source = "computed";
       required = false;
-      description = "Formatted list of existing molecule tasks with status (tier 2)";
+      description = "Formatted list of existing molecule tasks with status (tier 2/3)";
     };
 
     PINNED_CONTEXT = {
