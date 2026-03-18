@@ -8166,6 +8166,323 @@ test_concurrent_multiple_plans_independent() {
 }
 
 #-----------------------------------------------------------------------------
+# compute_spec_diff Tests
+#-----------------------------------------------------------------------------
+
+# Helper: create an isolated git repo with a spec and state file for compute_spec_diff tests
+# Usage: setup_spec_diff_env <test_name>
+# Sets up: git repo, spec file, state JSON
+_setup_spec_diff_git() {
+  local label="$1"
+
+  # Initialize git repo (needed for git diff / merge-base)
+  git init -q "$TEST_DIR"
+  git -C "$TEST_DIR" config user.email "test@test.com"
+  git -C "$TEST_DIR" config user.name "Test"
+
+  # Create and commit initial spec
+  create_test_spec "$label" "# Initial Spec
+
+## Requirements
+- Requirement one
+"
+  git -C "$TEST_DIR" add specs/"$label".md
+  git -C "$TEST_DIR" commit -q -m "initial spec"
+}
+
+# Test: tier 1 — base_commit valid → returns diff mode with git diff content
+test_todo_git_diff() {
+  CURRENT_TEST="todo_git_diff"
+  test_header "compute_spec_diff: tier 1 — git diff from base_commit"
+
+  setup_test_env "spec-diff-t1"
+  _setup_spec_diff_git "my-feature"
+
+  # Record base_commit
+  local base_commit
+  base_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+
+  # Modify spec and commit
+  cat >> "$TEST_DIR/specs/my-feature.md" << 'EOF'
+- Requirement two
+EOF
+  git -C "$TEST_DIR" add specs/my-feature.md
+  git -C "$TEST_DIR" commit -q -m "add requirement two"
+
+  # Set up state JSON with base_commit
+  setup_label_state "my-feature" "false" ""
+  jq --arg bc "$base_commit" '.base_commit = $bc' "$RALPH_DIR/state/my-feature.json" > "$RALPH_DIR/state/my-feature.json.tmp"
+  mv "$RALPH_DIR/state/my-feature.json.tmp" "$RALPH_DIR/state/my-feature.json"
+
+  # Source util.sh and call compute_spec_diff
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "diff" ]; then
+    test_pass "tier 1 returns 'diff' mode"
+  else
+    test_fail "tier 1 should return 'diff' mode, got '$mode'"
+  fi
+
+  # Check that diff content contains the change
+  if echo "$output" | grep -q "Requirement two"; then
+    test_pass "diff output contains spec change"
+  else
+    test_fail "diff output should contain 'Requirement two'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: tier 1 with no changes → returns diff mode with empty content
+test_todo_no_changes_exit() {
+  CURRENT_TEST="todo_no_changes_exit"
+  test_header "compute_spec_diff: tier 1 — no changes returns empty diff"
+
+  setup_test_env "spec-diff-nochange"
+  _setup_spec_diff_git "my-feature"
+
+  # base_commit = HEAD (no changes since)
+  local base_commit
+  base_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+
+  setup_label_state "my-feature" "false" ""
+  jq --arg bc "$base_commit" '.base_commit = $bc' "$RALPH_DIR/state/my-feature.json" > "$RALPH_DIR/state/my-feature.json.tmp"
+  mv "$RALPH_DIR/state/my-feature.json.tmp" "$RALPH_DIR/state/my-feature.json"
+
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode content
+  mode=$(echo "$output" | head -1)
+  content=$(echo "$output" | tail -n +2)
+
+  if [ "$mode" = "diff" ]; then
+    test_pass "returns 'diff' mode even when no changes"
+  else
+    test_fail "should return 'diff' mode, got '$mode'"
+  fi
+
+  # Content should be empty (no diff)
+  if [ -z "$(echo "$content" | tr -d '[:space:]')" ]; then
+    test_pass "diff content is empty when no spec changes"
+  else
+    test_fail "diff content should be empty when no spec changes"
+  fi
+
+  teardown_test_env
+}
+
+# Test: --since flag overrides base_commit and forces tier 1
+test_todo_since_flag() {
+  CURRENT_TEST="todo_since_flag"
+  test_header "compute_spec_diff: --since forces tier 1"
+
+  setup_test_env "spec-diff-since"
+  _setup_spec_diff_git "my-feature"
+
+  local since_commit
+  since_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+
+  # Add a change
+  echo "- New req" >> "$TEST_DIR/specs/my-feature.md"
+  git -C "$TEST_DIR" add specs/my-feature.md
+  git -C "$TEST_DIR" commit -q -m "add new req"
+
+  # State has no base_commit (normally would fall to tier 2/3)
+  setup_label_state "my-feature" "false" ""
+
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json" --since "$since_commit")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "diff" ]; then
+    test_pass "--since forces diff mode"
+  else
+    test_fail "--since should force diff mode, got '$mode'"
+  fi
+
+  if echo "$output" | grep -q "New req"; then
+    test_pass "--since diff contains the change"
+  else
+    test_fail "--since diff should contain 'New req'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: --since with invalid commit errors
+test_todo_since_invalid_commit() {
+  CURRENT_TEST="todo_since_invalid_commit"
+  test_header "compute_spec_diff: --since with invalid commit errors"
+
+  setup_test_env "spec-diff-since-bad"
+  _setup_spec_diff_git "my-feature"
+  setup_label_state "my-feature" "false" ""
+
+  local exit_code=0
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+  # Override error() to not exit the subshell
+  (
+    compute_spec_diff "$RALPH_DIR/state/my-feature.json" --since "deadbeef1234" 2>/dev/null
+  ) && exit_code=0 || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "--since with invalid commit exits non-zero"
+  else
+    test_fail "--since with invalid commit should error"
+  fi
+
+  teardown_test_env
+}
+
+# Test: orphaned base_commit (rebased) falls back to tier 2
+test_todo_orphaned_commit_fallback() {
+  CURRENT_TEST="todo_orphaned_commit_fallback"
+  test_header "compute_spec_diff: orphaned base_commit falls back to tier 2"
+
+  setup_test_env "spec-diff-orphan"
+  _setup_spec_diff_git "my-feature"
+
+  # Create a commit, then amend it to orphan the original
+  local original_commit
+  original_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+
+  echo "- Change" >> "$TEST_DIR/specs/my-feature.md"
+  git -C "$TEST_DIR" add specs/my-feature.md
+  git -C "$TEST_DIR" commit -q -m "change spec"
+
+  # Record the commit that will be orphaned
+  local orphan_commit
+  orphan_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+
+  # Amend to create a new commit (orphaning the old one)
+  echo "- Amended" >> "$TEST_DIR/specs/my-feature.md"
+  git -C "$TEST_DIR" add specs/my-feature.md
+  git -C "$TEST_DIR" commit -q --amend -m "amended change"
+
+  # State points to the orphaned commit, with a molecule
+  local mol_id
+  mol_id=$(cd "$TEST_DIR" && bd create --type=epic --title="Test Molecule" --labels="spec-my-feature" --silent 2>/dev/null || echo "wx-test")
+
+  setup_label_state "my-feature" "false" "$mol_id"
+  jq --arg bc "$orphan_commit" '.base_commit = $bc' "$RALPH_DIR/state/my-feature.json" > "$RALPH_DIR/state/my-feature.json.tmp"
+  mv "$RALPH_DIR/state/my-feature.json.tmp" "$RALPH_DIR/state/my-feature.json"
+
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "tasks" ]; then
+    test_pass "orphaned base_commit falls back to tier 2 (tasks)"
+  else
+    test_fail "orphaned base_commit should fall back to 'tasks', got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: tier 2 — no base_commit but molecule exists → returns tasks mode
+test_todo_molecule_fallback() {
+  CURRENT_TEST="todo_molecule_fallback"
+  test_header "compute_spec_diff: tier 2 — molecule exists, no base_commit"
+
+  setup_test_env "spec-diff-t2"
+  _setup_spec_diff_git "my-feature"
+
+  # Create a molecule with tasks
+  local mol_id
+  mol_id=$(cd "$TEST_DIR" && bd create --type=epic --title="Test Epic" --labels="spec-my-feature" --silent 2>/dev/null || echo "wx-test")
+
+  # State: molecule but no base_commit
+  setup_label_state "my-feature" "false" "$mol_id"
+
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "tasks" ]; then
+    test_pass "tier 2 returns 'tasks' mode"
+  else
+    test_fail "tier 2 should return 'tasks' mode, got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: tier 3 — neither base_commit nor molecule → returns new mode
+test_todo_new_mode_fallback() {
+  CURRENT_TEST="todo_new_mode_fallback"
+  test_header "compute_spec_diff: tier 3 — no base_commit, no molecule"
+
+  setup_test_env "spec-diff-t3"
+  _setup_spec_diff_git "my-feature"
+
+  # State: no molecule, no base_commit
+  setup_label_state "my-feature" "false" ""
+
+  local output
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "new" ]; then
+    test_pass "tier 3 returns 'new' mode"
+  else
+    test_fail "tier 3 should return 'new' mode, got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff detects update mode from base_commit presence
+test_todo_update_detection() {
+  CURRENT_TEST="todo_update_detection"
+  test_header "compute_spec_diff: detects update vs new from state JSON"
+
+  setup_test_env "spec-diff-detect"
+  _setup_spec_diff_git "my-feature"
+
+  # State with base_commit → should be tier 1 (update via diff)
+  local base_commit
+  base_commit=$(git -C "$TEST_DIR" rev-parse HEAD)
+  setup_label_state "my-feature" "false" ""
+  jq --arg bc "$base_commit" '.base_commit = $bc' "$RALPH_DIR/state/my-feature.json" > "$RALPH_DIR/state/my-feature.json.tmp"
+  mv "$RALPH_DIR/state/my-feature.json.tmp" "$RALPH_DIR/state/my-feature.json"
+
+  local output mode
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+  mode=$(echo "$output" | head -1)
+  if [ "$mode" = "diff" ]; then
+    test_pass "base_commit present → diff mode (update detected)"
+  else
+    test_fail "base_commit present should → diff mode, got '$mode'"
+  fi
+
+  # State without base_commit, without molecule → should be tier 3 (new)
+  setup_label_state "my-feature" "false" ""
+  output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+  mode=$(echo "$output" | head -1)
+  if [ "$mode" = "new" ]; then
+    test_pass "no base_commit, no molecule → new mode"
+  else
+    test_fail "no base_commit, no molecule should → new mode, got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -8304,6 +8621,15 @@ PARALLEL_TESTS=(
   test_concurrent_missing_current_clear_error
   test_concurrent_plan_creates_state_and_current
   test_concurrent_multiple_plans_independent
+  # compute_spec_diff tests
+  test_todo_git_diff
+  test_todo_no_changes_exit
+  test_todo_since_flag
+  test_todo_since_invalid_commit
+  test_todo_orphaned_commit_fallback
+  test_todo_molecule_fallback
+  test_todo_new_mode_fallback
+  test_todo_update_detection
 )
 
 # ALL_TESTS is the combined list for --sequential mode and single-test runs.

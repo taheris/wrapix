@@ -918,6 +918,117 @@ spec_is_hidden() {
 }
 
 #-----------------------------------------------------------------------------
+# Spec Diff Computation (Three-Tier Fallback)
+#
+# Determines how to detect spec changes for `ralph todo`:
+#   Tier 1 (diff):  base_commit exists and is valid → git diff
+#   Tier 2 (tasks): no base_commit but molecule exists → fetch task list
+#   Tier 3 (new):   neither → full spec decomposition
+#
+# Usage: compute_spec_diff <state_file> [--since <commit>]
+# Output: Two lines on stdout:
+#   Line 1: mode indicator — "diff", "tasks", or "new"
+#   Line 2+: content (diff output, task list, or empty)
+# Returns: 0 on success, 1 on error
+#
+# --since <commit> forces tier 1 with the given commit (errors if invalid)
+#
+# Environment:
+#   GIT_DIR — optional, for non-standard git repos
+#-----------------------------------------------------------------------------
+compute_spec_diff() {
+  local state_file="$1"
+  shift
+  local since_commit=""
+
+  # Parse optional --since flag
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --since)
+        if [ -z "${2:-}" ]; then
+          error "compute_spec_diff: --since requires a commit argument"
+        fi
+        since_commit="$2"
+        shift 2
+        ;;
+      *)
+        warn "compute_spec_diff: unknown argument: $1"
+        shift
+        ;;
+    esac
+  done
+
+  if [ ! -f "$state_file" ]; then
+    error "compute_spec_diff: state file not found: $state_file"
+  fi
+
+  local spec_path molecule base_commit
+  spec_path=$(jq -r '.spec_path // ""' "$state_file")
+  molecule=$(jq -r '.molecule // ""' "$state_file")
+  base_commit=$(jq -r '.base_commit // ""' "$state_file")
+
+  # --since overrides base_commit
+  if [ -n "$since_commit" ]; then
+    # Validate that the commit exists
+    if ! git rev-parse --verify "$since_commit^{commit}" >/dev/null 2>&1; then
+      error "compute_spec_diff: invalid commit: $since_commit"
+    fi
+    base_commit="$since_commit"
+    debug "compute_spec_diff: --since override: $base_commit"
+  fi
+
+  # Tier 1: base_commit exists → git diff
+  if [ -n "$base_commit" ]; then
+    # Validate the commit is still reachable (not orphaned by rebase/amend)
+    if git rev-parse --verify "$base_commit^{commit}" >/dev/null 2>&1; then
+      # Check ancestry — if not an ancestor of HEAD, it was rebased
+      if git merge-base --is-ancestor "$base_commit" HEAD 2>/dev/null; then
+        debug "compute_spec_diff: tier 1 — git diff from $base_commit"
+        local diff_output
+        diff_output=$(git diff "$base_commit" HEAD -- "$spec_path" 2>/dev/null || true)
+        echo "diff"
+        echo "$diff_output"
+        return 0
+      else
+        debug "compute_spec_diff: base_commit $base_commit is orphaned (not ancestor of HEAD)"
+        # Fall through to tier 2
+      fi
+    else
+      debug "compute_spec_diff: base_commit $base_commit no longer exists"
+      # Fall through to tier 2
+    fi
+
+    # If --since was used and we get here, the commit was orphaned — that's an error
+    if [ -n "$since_commit" ]; then
+      error "compute_spec_diff: commit $since_commit is not an ancestor of HEAD"
+    fi
+  fi
+
+  # Tier 2: molecule exists → fetch existing task list
+  if [ -n "$molecule" ]; then
+    debug "compute_spec_diff: tier 2 — molecule-based ($molecule)"
+    local tasks_output=""
+    local tasks_json
+    tasks_json=$(bd_json list --parent "$molecule" --json 2>/dev/null || echo "[]")
+
+    if echo "$tasks_json" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      # Format tasks as markdown for LLM comparison
+      tasks_output=$(echo "$tasks_json" | jq -r '.[] | "### \(.id): \(.title) (\(.status))\n\(.description // "")\n"')
+    fi
+
+    echo "tasks"
+    echo "$tasks_output"
+    return 0
+  fi
+
+  # Tier 3: neither → new mode
+  debug "compute_spec_diff: tier 3 — new mode"
+  echo "new"
+  echo ""
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Spec Label Resolution
 #
 # Resolves the target workflow label for commands that accept --spec/-s.

@@ -359,7 +359,7 @@ EOF
 
   # Symlink other required commands from installed location
   # Include core utilities that may be in the wrapix profile
-  for cmd in bd jq nix grep cat sed awk mkdir rm cp mv ls chmod touch date script echo diff; do
+  for cmd in bd jq nix grep cat sed awk mkdir rm cp mv ls chmod touch date script echo diff git; do
     if cmd_path=$(command -v "$cmd" 2>/dev/null); then
       ln -sf "$cmd_path" "$TEST_DIR/bin/$cmd"
     fi
