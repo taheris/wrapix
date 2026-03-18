@@ -144,6 +144,14 @@ let
       description = "Issue description from beads";
     };
 
+    # --- Companions (from state JSON) ---
+    COMPANIONS = {
+      source = "computed";
+      required = false;
+      default = "";
+      description = "Rendered companion manifests from read_manifests";
+    };
+
     # --- Config (from ralph config) ---
     EXIT_SIGNALS = {
       source = "config";
@@ -301,6 +309,7 @@ let
   # Partial files
   partialDir = ./partial;
   partialFiles = [
+    (partialDir + "/companions-context.md")
     (partialDir + "/context-pinning.md")
     (partialDir + "/exit-signals.md")
     (partialDir + "/spec-header.md")
@@ -324,6 +333,7 @@ let
       body = ./plan-update.md;
       partials = partialFiles;
       variables = [
+        "COMPANIONS"
         "PINNED_CONTEXT"
         "LABEL"
         "SPEC_PATH"
@@ -336,6 +346,7 @@ let
       body = ./todo-new.md;
       partials = partialFiles;
       variables = [
+        "COMPANIONS"
         "PINNED_CONTEXT"
         "LABEL"
         "SPEC_PATH"
@@ -350,6 +361,7 @@ let
       body = ./todo-update.md;
       partials = partialFiles;
       variables = [
+        "COMPANIONS"
         "PINNED_CONTEXT"
         "LABEL"
         "SPEC_PATH"
@@ -367,6 +379,7 @@ let
       body = ./run.md;
       partials = partialFiles;
       variables = [
+        "COMPANIONS"
         "PINNED_CONTEXT"
         "SPEC_PATH"
         "LABEL"

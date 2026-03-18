@@ -15,6 +15,8 @@ The current spec file (`specs/{{LABEL}}.md`) contains:
 
 {{EXISTING_SPEC}}
 
+{{> companions-context}}
+
 ## Update Guidelines
 
 1. **Discuss NEW requirements only** - The existing spec has been implemented

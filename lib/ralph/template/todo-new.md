@@ -11,6 +11,8 @@ create a beads molecule (epic + child issues) that breaks down the work.
 
 {{SPEC_CONTENT}}
 
+{{> companions-context}}
+
 ## Task Breakdown Guidelines
 
 - Each task should be **self-contained** with enough context for a fresh agent

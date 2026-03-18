@@ -15,6 +15,8 @@ The main spec file (`specs/{{LABEL}}.md`) contains the full current specificatio
 {{EXISTING_SPEC}}
 ```
 
+{{> companions-context}}
+
 ## Spec Changes
 
 If SPEC_DIFF is provided, use that to identify new requirements. Otherwise, use

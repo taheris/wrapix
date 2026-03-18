@@ -4,6 +4,8 @@
 
 {{> spec-header}}
 
+{{> companions-context}}
+
 ## Current Spec
 
 Read: {{SPEC_PATH}}

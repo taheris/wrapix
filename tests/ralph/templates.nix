@@ -390,6 +390,7 @@ in
       let
         t = templates."todo-update";
         rendered = t.render {
+          COMPANIONS = "";
           PINNED_CONTEXT = "# Project Context";
           LABEL = "test-feature";
           SPEC_PATH = "specs/test-feature.md";

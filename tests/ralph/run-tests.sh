@@ -8720,6 +8720,197 @@ test_todo_dolt_pull_code_structure() {
 }
 
 #-----------------------------------------------------------------------------
+# Companion Template Tests
+#-----------------------------------------------------------------------------
+
+# Test: COMPANIONS variable is available in plan-update, todo-new, todo-update, and run templates
+test_companion_template_variable() {
+  CURRENT_TEST="companion_template_variable"
+  test_header "COMPANIONS variable in plan-update, todo-new, todo-update, run templates"
+
+  setup_test_env "companion-template-var"
+
+  # Source util.sh to get render_template function
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  export RALPH_TEMPLATE_DIR="$REPO_ROOT/lib/ralph/template"
+
+  # Remove local run.md so render_template uses RALPH_TEMPLATE_DIR
+  # (setup_test_env creates a local run.md without companions-context)
+  rm -f "$RALPH_DIR/template/run.md"
+
+  local companion_text="<companion path=\"specs/e2e\">E2E manifest content</companion>"
+
+  # Test plan-update template renders COMPANIONS
+  local output
+  output=$(render_template plan-update \
+    COMPANIONS="$companion_text" \
+    PINNED_CONTEXT="# Context" \
+    LABEL="test-feature" \
+    SPEC_PATH="specs/test-feature.md" \
+    EXISTING_SPEC="# Existing spec" \
+    EXIT_SIGNALS="" 2>&1)
+
+  if echo "$output" | grep -qF "$companion_text"; then
+    test_pass "plan-update template renders COMPANIONS"
+  else
+    test_fail "plan-update template should render COMPANIONS"
+  fi
+
+  # Test todo-new template renders COMPANIONS
+  output=$(render_template todo-new \
+    COMPANIONS="$companion_text" \
+    PINNED_CONTEXT="# Context" \
+    LABEL="test-feature" \
+    SPEC_PATH="specs/test-feature.md" \
+    SPEC_CONTENT="# Spec content" \
+    CURRENT_FILE="state/test-feature.json" \
+    EXIT_SIGNALS="" \
+    README_INSTRUCTIONS="" 2>&1)
+
+  if echo "$output" | grep -qF "$companion_text"; then
+    test_pass "todo-new template renders COMPANIONS"
+  else
+    test_fail "todo-new template should render COMPANIONS"
+  fi
+
+  # Test todo-update template renders COMPANIONS
+  output=$(render_template todo-update \
+    COMPANIONS="$companion_text" \
+    PINNED_CONTEXT="# Context" \
+    LABEL="test-feature" \
+    SPEC_PATH="specs/test-feature.md" \
+    EXISTING_SPEC="# Existing spec" \
+    MOLECULE_ID="wx-abc" \
+    MOLECULE_PROGRESS="50% (5/10)" \
+    SPEC_DIFF="" \
+    EXISTING_TASKS="" \
+    EXIT_SIGNALS="" \
+    README_INSTRUCTIONS="" 2>&1)
+
+  if echo "$output" | grep -qF "$companion_text"; then
+    test_pass "todo-update template renders COMPANIONS"
+  else
+    test_fail "todo-update template should render COMPANIONS"
+  fi
+
+  # Test run template renders COMPANIONS
+  output=$(render_template run \
+    COMPANIONS="$companion_text" \
+    PINNED_CONTEXT="# Context" \
+    SPEC_PATH="specs/test-feature.md" \
+    LABEL="test-feature" \
+    MOLECULE_ID="wx-abc" \
+    ISSUE_ID="wx-abc.1" \
+    TITLE="Test Issue" \
+    DESCRIPTION="Test description" \
+    EXIT_SIGNALS="" 2>&1)
+
+  if echo "$output" | grep -qF "$companion_text"; then
+    test_pass "run template renders COMPANIONS"
+  else
+    test_fail "run template should render COMPANIONS"
+  fi
+
+  # Test that COMPANIONS defaults to empty string when not provided
+  output=$(render_template run \
+    PINNED_CONTEXT="# Context" \
+    SPEC_PATH="specs/test-feature.md" \
+    LABEL="test-feature" \
+    MOLECULE_ID="wx-abc" \
+    ISSUE_ID="wx-abc.1" \
+    TITLE="Test Issue" \
+    DESCRIPTION="Test description" \
+    EXIT_SIGNALS="" 2>&1)
+
+  if echo "$output" | grep -qF "{{COMPANIONS}}"; then
+    test_fail "COMPANIONS placeholder should be substituted even when empty"
+  else
+    test_pass "COMPANIONS defaults to empty when not provided"
+  fi
+
+  teardown_test_env
+}
+
+# Test: local template overlay can override partial/companions-context.md
+test_companion_partial_override() {
+  CURRENT_TEST="companion_partial_override"
+  test_header "Local template overlay overrides companions-context partial"
+
+  setup_test_env "companion-partial-override"
+
+  # Save and unset RALPH_TEMPLATE_DIR to test local overlay
+  local original_template_dir="$RALPH_TEMPLATE_DIR"
+  unset RALPH_TEMPLATE_DIR
+
+  # Set up local .wrapix/ralph/template with overridden companions-context partial
+  mkdir -p "$RALPH_DIR/template/partial"
+
+  # Copy run.md template from packaged
+  cp "$original_template_dir/run.md" "$RALPH_DIR/template/run.md"
+
+  # Create custom companions-context partial with extra framing
+  cat > "$RALPH_DIR/template/partial/companions-context.md" << 'EOF'
+## Companion Resources
+
+The following companion content is available for reference:
+
+{{COMPANIONS}}
+
+Use the Read tool to explore individual files mentioned in the manifests above.
+EOF
+
+  # Copy other required partials
+  cp "$original_template_dir/partial/context-pinning.md" "$RALPH_DIR/template/partial/context-pinning.md"
+  cp "$original_template_dir/partial/exit-signals.md" "$RALPH_DIR/template/partial/exit-signals.md"
+  cp "$original_template_dir/partial/spec-header.md" "$RALPH_DIR/template/partial/spec-header.md"
+
+  # Source util.sh
+  # shellcheck source=../../lib/ralph/cmd/util.sh
+  source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  local companion_text="<companion path=\"docs/api\">API docs manifest</companion>"
+  local output
+  output=$(render_template run \
+    COMPANIONS="$companion_text" \
+    PINNED_CONTEXT="# Context" \
+    SPEC_PATH="specs/test.md" \
+    LABEL="test-feature" \
+    MOLECULE_ID="wx-abc" \
+    ISSUE_ID="wx-abc.1" \
+    TITLE="Test" \
+    DESCRIPTION="Test" \
+    EXIT_SIGNALS="" 2>&1)
+
+  # Should contain the custom framing from the overridden partial
+  if echo "$output" | grep -q "Companion Resources"; then
+    test_pass "Custom companions-context partial framing is rendered"
+  else
+    test_fail "Should render custom companions-context partial framing"
+  fi
+
+  # Should contain the actual companion content
+  if echo "$output" | grep -qF "$companion_text"; then
+    test_pass "COMPANIONS variable substituted in overridden partial"
+  else
+    test_fail "COMPANIONS variable should be substituted in overridden partial"
+  fi
+
+  # Should contain the extra instruction text
+  if echo "$output" | grep -q "Use the Read tool"; then
+    test_pass "Custom partial includes extra guidance text"
+  else
+    test_fail "Custom partial should include extra guidance text"
+  fi
+
+  # Restore
+  export RALPH_TEMPLATE_DIR="$original_template_dir"
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Main Test Runner
 #-----------------------------------------------------------------------------
 
@@ -8876,6 +9067,9 @@ PARALLEL_TESTS=(
   test_todo_dolt_pull_after_complete
   test_todo_no_dolt_pull_on_failure
   test_todo_dolt_pull_code_structure
+  # Companion template tests
+  test_companion_template_variable
+  test_companion_partial_override
 )
 
 # ALL_TESTS is the combined list for --sequential mode and single-test runs.
