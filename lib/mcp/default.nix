@@ -20,4 +20,8 @@
   # tmux-debug: MCP server for tmux pane management
   # Provides tools for AI-assisted debugging (create_pane, send_keys, capture_pane, etc.)
   tmux-debug = import ./tmux { inherit pkgs; };
+
+  # playwright: MCP server for browser automation
+  # Provides tools for AI-assisted frontend development (screenshots, navigation, interaction, etc.)
+  playwright = import ./playwright { inherit pkgs; };
 }
