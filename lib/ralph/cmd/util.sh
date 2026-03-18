@@ -991,12 +991,13 @@ spec_is_hidden() {
 }
 
 #-----------------------------------------------------------------------------
-# Spec Diff Computation (Three-Tier Fallback)
+# Spec Diff Computation (Four-Tier Fallback)
 #
 # Determines how to detect spec changes for `ralph todo`:
-#   Tier 1 (diff):  base_commit exists and is valid → git diff
-#   Tier 2 (tasks): no base_commit but molecule exists → fetch task list
-#   Tier 3 (new):   neither → full spec decomposition
+#   Tier 1 (diff):     base_commit exists and is valid → git diff
+#   Tier 2 (tasks):    no base_commit but molecule exists → fetch task list
+#   Tier 3 (README):   no state file → discover molecule from README, reconstruct state, proceed as tier 2
+#   Tier 4 (new):      no state file AND no molecule in README → full spec decomposition
 #
 # Usage: compute_spec_diff <state_file> [--since <commit>]
 # Output: Two lines on stdout:
@@ -1031,8 +1032,36 @@ compute_spec_diff() {
     esac
   done
 
+  # Tier 3/4: state file doesn't exist → try README discovery
   if [ ! -f "$state_file" ]; then
-    error "compute_spec_diff: state file not found: $state_file"
+    # Derive label from state file path: state/<label>.json → <label>
+    local label
+    label=$(basename "$state_file" .json)
+    debug "compute_spec_diff: state file not found, trying README discovery for label '$label'"
+
+    local readme_molecule
+    readme_molecule=$(discover_molecule_from_readme "$label")
+
+    if [ -n "$readme_molecule" ]; then
+      # Tier 3: reconstruct state file and proceed as tier 2
+      debug "compute_spec_diff: tier 3 — README discovery found molecule '$readme_molecule'"
+      local state_dir
+      state_dir=$(dirname "$state_file")
+      mkdir -p "$state_dir"
+      jq -n \
+        --arg label "$label" \
+        --arg spec_path "specs/${label}.md" \
+        --arg molecule "$readme_molecule" \
+        '{label: $label, spec_path: $spec_path, molecule: $molecule, companions: []}' \
+        > "$state_file"
+      # Fall through to read state file and proceed (tier 2 path)
+    else
+      # Tier 4: no molecule in README → new mode
+      debug "compute_spec_diff: tier 4 — no state file, no README molecule"
+      echo "new"
+      echo ""
+      return 0
+    fi
   fi
 
   local spec_path molecule base_commit
@@ -1094,8 +1123,8 @@ compute_spec_diff() {
     return 0
   fi
 
-  # Tier 3: neither → new mode
-  debug "compute_spec_diff: tier 3 — new mode"
+  # Tier 4: neither → new mode
+  debug "compute_spec_diff: tier 4 — new mode"
   echo "new"
   echo ""
   return 0

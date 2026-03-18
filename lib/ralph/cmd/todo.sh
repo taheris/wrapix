@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # ralph todo [--spec <name>|-s <name>] [--since <commit>]
-# Converts spec to beads with task breakdown using three-tier detection:
-#   Tier 1 (diff):  base_commit in state JSON → git diff (fast, precise)
-#   Tier 2 (tasks): no base_commit but molecule exists → LLM compares spec vs tasks
-#   Tier 3 (new):   neither → full spec decomposition
+# Converts spec to beads with task breakdown using four-tier detection:
+#   Tier 1 (diff):   base_commit in state JSON → git diff (fast, precise)
+#   Tier 2 (tasks):  no base_commit but molecule exists → LLM compares spec vs tasks
+#   Tier 3 (README): no state file → discover molecule from README, reconstruct state, proceed as tier 2
+#   Tier 4 (new):    no state file AND no molecule in README → full spec decomposition
 #
 # - Accepts --spec/-s flag to target a specific workflow
 # - Accepts --since flag to force tier 1 from a specific commit
@@ -182,7 +183,7 @@ if [ "$SPEC_HIDDEN" = "false" ] && git ls-files --error-unmatch "$SPEC_PATH" >/d
   fi
 fi
 
-# Use compute_spec_diff for three-tier detection
+# Use compute_spec_diff for four-tier detection
 DIFF_ARGS=()
 if [ -n "$SINCE_FLAG" ]; then
   DIFF_ARGS+=(--since "$SINCE_FLAG")
@@ -216,7 +217,7 @@ case "$DIFF_MODE" in
     EXISTING_TASKS="$DIFF_CONTENT"
     ;;
   new)
-    # Tier 3: full decomposition
+    # Tier 4: full decomposition
     TEMPLATE_NAME="todo-new"
     ;;
   *)

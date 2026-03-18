@@ -8474,7 +8474,7 @@ test_todo_molecule_fallback() {
 # Test: tier 3 — neither base_commit nor molecule → returns new mode
 test_todo_new_mode_fallback() {
   CURRENT_TEST="todo_new_mode_fallback"
-  test_header "compute_spec_diff: tier 3 — no base_commit, no molecule"
+  test_header "compute_spec_diff: tier 4 — no base_commit, no molecule"
 
   setup_test_env "spec-diff-t3"
   _setup_spec_diff_git "my-feature"
@@ -8489,9 +8489,228 @@ test_todo_new_mode_fallback() {
   mode=$(echo "$output" | head -1)
 
   if [ "$mode" = "new" ]; then
-    test_pass "tier 3 returns 'new' mode"
+    test_pass "tier 4 returns 'new' mode"
   else
-    test_fail "tier 3 should return 'new' mode, got '$mode'"
+    test_fail "tier 4 should return 'new' mode, got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff tier 3 — README discovery when no state file
+test_todo_readme_discovery() {
+  CURRENT_TEST="todo_readme_discovery"
+  test_header "compute_spec_diff: tier 3 — discovers molecule from README"
+
+  setup_test_env "spec-diff-readme"
+  _setup_spec_diff_git "my-feature"
+  init_beads
+
+  # Create a real molecule via bd
+  local mol_id
+  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+
+  # Set up README with the molecule ID
+  cat > "$TEST_DIR/specs/README.md" << EOF
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [my-feature.md](./my-feature.md) | — | $mol_id | Test feature |
+EOF
+
+  # Remove the state file so tier 3 triggers
+  rm -f "$RALPH_DIR/state/my-feature.json"
+
+  local output
+  output=$(cd "$TEST_DIR" && source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "tasks" ]; then
+    test_pass "tier 3 discovers molecule from README and returns 'tasks' mode"
+  else
+    test_fail "tier 3 should return 'tasks' mode, got '$mode'"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff tier 3 — reconstructed state file has correct schema
+test_todo_readme_state_reconstruction() {
+  CURRENT_TEST="todo_readme_state_reconstruction"
+  test_header "compute_spec_diff: tier 3 — reconstructs state/<label>.json"
+
+  setup_test_env "spec-diff-reconstruct"
+  _setup_spec_diff_git "my-feature"
+  init_beads
+
+  # Create a real molecule
+  local mol_id
+  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+
+  cat > "$TEST_DIR/specs/README.md" << EOF
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [my-feature.md](./my-feature.md) | — | $mol_id | Test feature |
+EOF
+
+  rm -f "$RALPH_DIR/state/my-feature.json"
+
+  # Run compute_spec_diff — should reconstruct state file
+  (cd "$TEST_DIR" && source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json" >/dev/null)
+
+  # Verify reconstructed state file
+  if [ ! -f "$RALPH_DIR/state/my-feature.json" ]; then
+    test_fail "state file was not reconstructed"
+    teardown_test_env
+    return
+  fi
+
+  local label spec_path molecule base_commit companions
+  label=$(jq -r '.label' "$RALPH_DIR/state/my-feature.json")
+  spec_path=$(jq -r '.spec_path' "$RALPH_DIR/state/my-feature.json")
+  molecule=$(jq -r '.molecule' "$RALPH_DIR/state/my-feature.json")
+  base_commit=$(jq -r '.base_commit // "null"' "$RALPH_DIR/state/my-feature.json")
+  companions=$(jq -r '.companions | length' "$RALPH_DIR/state/my-feature.json")
+
+  if [ "$label" = "my-feature" ] && [ "$spec_path" = "specs/my-feature.md" ] \
+    && [ "$molecule" = "$mol_id" ] && [ "$base_commit" = "null" ] \
+    && [ "$companions" = "0" ]; then
+    test_pass "reconstructed state has correct label, spec_path, molecule, no base_commit, empty companions"
+  else
+    test_fail "reconstructed state has wrong fields: label=$label spec_path=$spec_path molecule=$molecule base_commit=$base_commit companions=$companions"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff tier 3 — reconstructed state file schema validation
+test_todo_readme_reconstructed_state_schema() {
+  CURRENT_TEST="todo_readme_reconstructed_state_schema"
+  test_header "compute_spec_diff: tier 3 — reconstructed state file schema"
+
+  setup_test_env "spec-diff-schema"
+  _setup_spec_diff_git "my-feature"
+  init_beads
+
+  local mol_id
+  mol_id=$(cd "$TEST_DIR" && bd create --title="My Feature" --type=epic --silent 2>/dev/null)
+
+  cat > "$TEST_DIR/specs/README.md" << EOF
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [my-feature.md](./my-feature.md) | — | $mol_id | Test feature |
+EOF
+
+  rm -f "$RALPH_DIR/state/my-feature.json"
+
+  (cd "$TEST_DIR" && source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json" >/dev/null)
+
+  # Validate JSON is well-formed and has expected keys
+  if ! jq empty "$RALPH_DIR/state/my-feature.json" 2>/dev/null; then
+    test_fail "reconstructed state is not valid JSON"
+    teardown_test_env
+    return
+  fi
+
+  local has_label has_spec has_mol has_companions
+  has_label=$(jq 'has("label")' "$RALPH_DIR/state/my-feature.json")
+  has_spec=$(jq 'has("spec_path")' "$RALPH_DIR/state/my-feature.json")
+  has_mol=$(jq 'has("molecule")' "$RALPH_DIR/state/my-feature.json")
+  has_companions=$(jq 'has("companions")' "$RALPH_DIR/state/my-feature.json")
+
+  # base_commit should NOT be present (omitted, not null)
+  local has_base
+  has_base=$(jq 'has("base_commit")' "$RALPH_DIR/state/my-feature.json")
+
+  if [ "$has_label" = "true" ] && [ "$has_spec" = "true" ] \
+    && [ "$has_mol" = "true" ] && [ "$has_companions" = "true" ] \
+    && [ "$has_base" = "false" ]; then
+    test_pass "reconstructed state has correct keys (no base_commit)"
+  else
+    test_fail "schema mismatch: label=$has_label spec=$has_spec mol=$has_mol companions=$has_companions base=$has_base"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff falls through to tier 4 when README has no molecule
+test_todo_readme_no_molecule_fallthrough() {
+  CURRENT_TEST="todo_readme_no_molecule_fallthrough"
+  test_header "compute_spec_diff: tier 4 — README has no molecule for spec"
+
+  setup_test_env "spec-diff-no-mol"
+  _setup_spec_diff_git "my-feature"
+
+  # README exists but has no row for my-feature
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [other.md](./other.md) | — | wx-abc | Other feature |
+EOF
+
+  rm -f "$RALPH_DIR/state/my-feature.json"
+
+  local output
+  output=$(cd "$TEST_DIR" && source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "new" ]; then
+    test_pass "falls through to tier 4 (new) when README has no molecule"
+  else
+    test_fail "should fall through to tier 4 (new), got '$mode'"
+  fi
+
+  # State file should NOT have been created
+  if [ ! -f "$RALPH_DIR/state/my-feature.json" ]; then
+    test_pass "no state file created when README has no molecule"
+  else
+    test_fail "state file should not exist when README has no molecule"
+  fi
+
+  teardown_test_env
+}
+
+# Test: compute_spec_diff falls through to tier 4 when README molecule is stale/invalid
+test_todo_readme_stale_molecule_fallthrough() {
+  CURRENT_TEST="todo_readme_stale_molecule_fallthrough"
+  test_header "compute_spec_diff: tier 4 — README molecule is stale/invalid"
+
+  setup_test_env "spec-diff-stale"
+  _setup_spec_diff_git "my-feature"
+  init_beads
+
+  # README has a molecule that doesn't exist in beads
+  cat > "$TEST_DIR/specs/README.md" << 'EOF'
+# Project Specifications
+
+| Spec | Code | Beads | Purpose |
+|------|------|-------|---------|
+| [my-feature.md](./my-feature.md) | — | wx-nonexistent | Test feature |
+EOF
+
+  rm -f "$RALPH_DIR/state/my-feature.json"
+
+  local output
+  output=$(cd "$TEST_DIR" && source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
+
+  local mode
+  mode=$(echo "$output" | head -1)
+
+  if [ "$mode" = "new" ]; then
+    test_pass "falls through to tier 4 (new) when README molecule is stale"
+  else
+    test_fail "should fall through to tier 4 (new), got '$mode'"
   fi
 
   teardown_test_env
@@ -8521,7 +8740,7 @@ test_todo_update_detection() {
     test_fail "base_commit present should → diff mode, got '$mode'"
   fi
 
-  # State without base_commit, without molecule → should be tier 3 (new)
+  # State without base_commit, without molecule → should be tier 4 (new)
   setup_label_state "my-feature" "false" ""
   output=$(source "$REPO_ROOT/lib/ralph/cmd/util.sh" && compute_spec_diff "$RALPH_DIR/state/my-feature.json")
   mode=$(echo "$output" | head -1)
@@ -9639,6 +9858,12 @@ PARALLEL_TESTS=(
   test_todo_molecule_fallback
   test_todo_new_mode_fallback
   test_todo_update_detection
+  # compute_spec_diff tier 3 (README discovery) tests
+  test_todo_readme_discovery
+  test_todo_readme_state_reconstruction
+  test_todo_readme_reconstructed_state_schema
+  test_todo_readme_no_molecule_fallthrough
+  test_todo_readme_stale_molecule_fallthrough
   # todo.sh integration tests (git-based spec diffing)
   test_todo_uncommitted_error
   test_todo_sets_base_commit
