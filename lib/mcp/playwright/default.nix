@@ -44,12 +44,12 @@ let
           launchOptions = {
             args = mandatoryFlags ++ userArgs;
             executablePath = chromiumPath;
-            headless = headless;
+            inherit headless;
           }
           // userLaunchOptions;
         };
         contextOptions = {
-          viewport = viewport;
+          inherit viewport;
         };
       }
       // userConfig;
