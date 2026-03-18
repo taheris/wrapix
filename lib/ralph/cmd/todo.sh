@@ -66,12 +66,55 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   fi
   RALPH_ARGS="$RALPH_ARGS ${*:-}"
   export RALPH_ARGS
+
+  # Resolve label and molecule ID for host-side verification
+  _HOST_RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
+  _HOST_LABEL="$SPEC_FLAG"
+  if [ -z "$_HOST_LABEL" ] && [ -f "$_HOST_RALPH_DIR/state/current" ]; then
+    _HOST_LABEL=$(<"$_HOST_RALPH_DIR/state/current")
+    _HOST_LABEL="${_HOST_LABEL#"${_HOST_LABEL%%[![:space:]]*}"}"
+    _HOST_LABEL="${_HOST_LABEL%"${_HOST_LABEL##*[![:space:]]}"}"
+  fi
+  _HOST_STATE_FILE="$_HOST_RALPH_DIR/state/${_HOST_LABEL}.json"
+  _HOST_MOLECULE_ID=""
+  _HOST_PRE_COUNT=0
+  if [ -f "$_HOST_STATE_FILE" ]; then
+    _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
+  fi
+  if [ -n "$_HOST_MOLECULE_ID" ]; then
+    _HOST_PRE_COUNT=$(bd show "$_HOST_MOLECULE_ID" --json 2>/dev/null \
+      | jq '[.[] | select(.issue_type != "epic")] | length' 2>/dev/null || echo 0)
+  fi
+
   wrapix
   wrapix_exit=$?
-  # Safety net: pull beads created inside the container so they're visible on host
+
   if [ $wrapix_exit -eq 0 ]; then
+    # Pull beads synced by container's bd dolt push
     echo "Syncing beads from container..."
     bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
+
+    # Re-read molecule ID (may have been created inside the container)
+    if [ -z "$_HOST_MOLECULE_ID" ] && [ -f "$_HOST_STATE_FILE" ]; then
+      _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
+    fi
+
+    # Host-side verification: did task count actually increase?
+    _HOST_POST_COUNT=0
+    if [ -n "$_HOST_MOLECULE_ID" ]; then
+      _HOST_POST_COUNT=$(bd show "$_HOST_MOLECULE_ID" --json 2>/dev/null \
+        | jq '[.[] | select(.issue_type != "epic")] | length' 2>/dev/null || echo 0)
+    fi
+
+    if [ "$_HOST_POST_COUNT" -le "$_HOST_PRE_COUNT" ] && [ -n "$_HOST_MOLECULE_ID" ]; then
+      echo "Error: Verification failed: RALPH_COMPLETE but no new tasks created. base_commit not advanced."
+      # Roll back base_commit in state JSON (container already wrote it via bind mount)
+      if [ -f "$_HOST_STATE_FILE" ]; then
+        jq 'del(.base_commit)' "$_HOST_STATE_FILE" > "$_HOST_STATE_FILE.tmp" \
+          && mv "$_HOST_STATE_FILE.tmp" "$_HOST_STATE_FILE"
+      fi
+      exit 1
+    fi
   fi
   exit $wrapix_exit
 fi
@@ -310,6 +353,10 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
       git commit -m "$COMMIT_MSG" >/dev/null 2>&1 && echo "  Committed: $FINAL_SPEC_PATH" || echo "  (commit failed or nothing to commit)"
     fi
   fi
+
+  # Push beads to Dolt remote so host can pull them
+  echo "Pushing beads to Dolt remote..."
+  bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
   # Store base_commit (HEAD) on successful completion
   if [ "$SPEC_HIDDEN" = "false" ]; then

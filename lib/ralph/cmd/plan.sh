@@ -16,7 +16,13 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   export RALPH_MODE=1
   export RALPH_CMD=plan
   export RALPH_ARGS="${*:-}"
-  exec wrapix
+  wrapix
+  wrapix_exit=$?
+  if [ $wrapix_exit -eq 0 ]; then
+    echo "Syncing beads from container..."
+    bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
+  fi
+  exit $wrapix_exit
 fi
 
 # Load shared helpers
@@ -388,6 +394,10 @@ fi
 # Open interactive Claude console with the plan prompt
 export PROMPT_CONTENT
 run_claude_interactive "PROMPT_CONTENT"
+
+# Push beads to Dolt remote so host can pull them
+echo "Pushing beads to Dolt remote..."
+bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
 echo ""
 echo "Next steps:"

@@ -8774,6 +8774,233 @@ test_todo_dolt_pull_code_structure() {
 }
 
 #-----------------------------------------------------------------------------
+# Container Bead Sync Tests (bd dolt push / pull / verification)
+#-----------------------------------------------------------------------------
+
+# Test: todo.sh contains bd dolt push in container-side code after RALPH_COMPLETE
+test_todo_dolt_push_in_container() {
+  CURRENT_TEST="todo_dolt_push_in_container"
+  test_header "todo.sh: contains bd dolt push in container-side after RALPH_COMPLETE"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # Verify bd dolt push exists in the script
+  if grep -q 'bd dolt push' "$todo_script"; then
+    test_pass "todo.sh contains bd dolt push"
+  else
+    test_fail "todo.sh should contain 'bd dolt push'"
+  fi
+
+  # Verify it appears after the RALPH_COMPLETE check (container-side)
+  # The RALPH_COMPLETE check is: jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")'
+  # bd dolt push should come after that block (match actual command, not comments)
+  local complete_line push_line
+  complete_line=$(grep -n 'contains("RALPH_COMPLETE")' "$todo_script" | head -1 | cut -d: -f1)
+  push_line=$(grep -n '^\s*bd dolt push' "$todo_script" | head -1 | cut -d: -f1)
+
+  if [ -n "$complete_line" ] && [ -n "$push_line" ] && [ "$push_line" -gt "$complete_line" ]; then
+    test_pass "bd dolt push appears after RALPH_COMPLETE check"
+  else
+    test_fail "bd dolt push should appear after RALPH_COMPLETE check (complete:$complete_line push:$push_line)"
+  fi
+}
+
+# Test: todo.sh host-side verifies task count after bd dolt pull
+test_todo_post_completion_verification() {
+  CURRENT_TEST="todo_post_completion_verification"
+  test_header "todo.sh: host-side post-completion verification"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # Verify the host-side block contains pre-count and post-count logic
+  if grep -q '_HOST_PRE_COUNT' "$todo_script"; then
+    test_pass "todo.sh contains pre-count variable for verification"
+  else
+    test_fail "todo.sh should contain _HOST_PRE_COUNT for host-side verification"
+  fi
+
+  if grep -q '_HOST_POST_COUNT' "$todo_script"; then
+    test_pass "todo.sh contains post-count variable for verification"
+  else
+    test_fail "todo.sh should contain _HOST_POST_COUNT for host-side verification"
+  fi
+
+  # Verify the comparison logic exists
+  if grep -q 'POST_COUNT.*-le.*PRE_COUNT' "$todo_script"; then
+    test_pass "todo.sh compares post-count with pre-count"
+  else
+    test_fail "todo.sh should compare _HOST_POST_COUNT with _HOST_PRE_COUNT"
+  fi
+}
+
+# Test: todo.sh rolls back base_commit when host-side verification finds no new tasks
+test_todo_no_base_commit_on_empty_verification() {
+  CURRENT_TEST="todo_no_base_commit_on_empty_verification"
+  test_header "todo.sh: rolls back base_commit on empty verification"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # Verify the host-side block contains base_commit rollback
+  if grep -q 'del(.base_commit)' "$todo_script"; then
+    test_pass "todo.sh contains base_commit rollback (del(.base_commit))"
+  else
+    test_fail "todo.sh should contain jq del(.base_commit) for rollback"
+  fi
+
+  # Verify error message
+  if grep -q 'Verification failed.*no new tasks created' "$todo_script"; then
+    test_pass "todo.sh contains verification failure error message"
+  else
+    test_fail "todo.sh should contain verification failure error message"
+  fi
+}
+
+# Test: todo.sh exits with code 1 on verification failure
+test_todo_verification_exit_code() {
+  CURRENT_TEST="todo_verification_exit_code"
+  test_header "todo.sh: exits with code 1 on verification failure"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # Verify the host-side block exits 1 after verification failure
+  # Check that 'exit 1' appears after the verification failure message
+  local verif_line exit_line
+  verif_line=$(grep -n 'Verification failed' "$todo_script" | head -1 | cut -d: -f1)
+  # Find the next 'exit 1' after the verification message within the host block
+  exit_line=$(tail -n "+${verif_line}" "$todo_script" | grep -n 'exit 1' | head -1 | cut -d: -f1)
+
+  if [ -n "$verif_line" ] && [ -n "$exit_line" ]; then
+    test_pass "todo.sh exits with code 1 after verification failure"
+  else
+    test_fail "todo.sh should exit 1 after verification failure (verif:$verif_line exit:$exit_line)"
+  fi
+}
+
+# Test: todo.sh does not commit spec/README changes on verification failure
+test_todo_no_commit_on_verification_failure() {
+  CURRENT_TEST="todo_no_commit_on_verification_failure"
+  test_header "todo.sh: does not commit spec/README on verification failure"
+
+  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+
+  # The verification failure happens in the HOST-SIDE block (before container-side
+  # spec commit code runs). The host-side block exits 1 on failure, so the
+  # container-side commit code never executes. Verify the exit happens before
+  # any git commit in the host block.
+  #
+  # Host block structure: if not container → wrapix → pull → verify → exit 1 on fail
+  # Container block: (after host block) → spec commit → base_commit → etc.
+  local host_block_end
+  host_block_end=$(grep -n '^fi$' "$todo_script" | head -1 | cut -d: -f1)
+  local verif_exit
+  verif_exit=$(grep -n 'Verification failed' "$todo_script" | head -1 | cut -d: -f1)
+
+  if [ -n "$host_block_end" ] && [ -n "$verif_exit" ] && [ "$verif_exit" -lt "$host_block_end" ]; then
+    test_pass "verification failure exits in host block before container-side commits"
+  else
+    test_fail "verification failure should exit in host block (verif:$verif_exit host_end:$host_block_end)"
+  fi
+}
+
+# Test: plan.sh contains bd dolt push in container-side code
+test_plan_dolt_push_in_container() {
+  CURRENT_TEST="plan_dolt_push_in_container"
+  test_header "plan.sh: contains bd dolt push in container-side code"
+
+  local plan_script="$REPO_ROOT/lib/ralph/cmd/plan.sh"
+
+  if grep -q 'bd dolt push' "$plan_script"; then
+    test_pass "plan.sh contains bd dolt push"
+  else
+    test_fail "plan.sh should contain 'bd dolt push'"
+  fi
+
+  # Verify host-side has bd dolt pull (not exec wrapix)
+  if grep -q 'exec wrapix' "$plan_script"; then
+    test_fail "plan.sh should not use 'exec wrapix' (needs bd dolt pull after)"
+  else
+    test_pass "plan.sh does not use exec wrapix"
+  fi
+
+  if grep -q 'bd dolt pull' "$plan_script"; then
+    test_pass "plan.sh contains bd dolt pull on host side"
+  else
+    test_fail "plan.sh should contain 'bd dolt pull' on host side"
+  fi
+}
+
+# Test: run.sh --once contains bd dolt push in container-side code
+test_run_once_dolt_push_in_container() {
+  CURRENT_TEST="run_once_dolt_push_in_container"
+  test_header "run.sh: contains bd dolt push after bd close (--once mode)"
+
+  local run_script="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # bd dolt push should appear after bd close in run_step()
+  local close_line push_line
+  close_line=$(grep -n 'bd close' "$run_script" | head -1 | cut -d: -f1)
+  push_line=$(grep -n 'bd dolt push' "$run_script" | head -1 | cut -d: -f1)
+
+  if [ -n "$close_line" ] && [ -n "$push_line" ] && [ "$push_line" -gt "$close_line" ]; then
+    test_pass "bd dolt push appears after bd close in run_step()"
+  else
+    test_fail "bd dolt push should appear after bd close (close:$close_line push:$push_line)"
+  fi
+}
+
+# Test: run.sh continuous mode pushes after each close AND at loop exit
+test_run_continuous_dolt_push() {
+  CURRENT_TEST="run_continuous_dolt_push"
+  test_header "run.sh: bd dolt push after each close and at loop exit"
+
+  local run_script="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # Count occurrences of bd dolt push — should be at least 2
+  # (one after bd close in run_step, one at loop exit before post-loop hook)
+  local push_count
+  push_count=$(grep -c 'bd dolt push' "$run_script" || echo 0)
+
+  if [ "$push_count" -ge 2 ]; then
+    test_pass "run.sh has $push_count bd dolt push calls (after close + loop exit)"
+  else
+    test_fail "run.sh should have at least 2 bd dolt push calls, found $push_count"
+  fi
+
+  # Verify one push appears before post-loop hook
+  local postloop_line final_push_line
+  postloop_line=$(grep -n 'run_hook "post-loop"' "$run_script" | head -1 | cut -d: -f1)
+  final_push_line=$(grep -n 'bd dolt push' "$run_script" | tail -1 | cut -d: -f1)
+
+  if [ -n "$postloop_line" ] && [ -n "$final_push_line" ] && [ "$final_push_line" -lt "$postloop_line" ]; then
+    test_pass "final bd dolt push appears before post-loop hook"
+  else
+    test_fail "final bd dolt push should appear before post-loop hook (push:$final_push_line hook:$postloop_line)"
+  fi
+}
+
+# Test: run.sh host-side block runs bd dolt pull after container exits
+test_run_dolt_pull_after_complete() {
+  CURRENT_TEST="run_dolt_pull_after_complete"
+  test_header "run.sh: host-side block runs bd dolt pull after container exits"
+
+  local run_script="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # Verify run.sh does NOT use exec wrapix (needs to continue after container)
+  if grep -q 'exec wrapix' "$run_script"; then
+    test_fail "run.sh should not use 'exec wrapix' (needs bd dolt pull after)"
+  else
+    test_pass "run.sh does not use exec wrapix"
+  fi
+
+  # Verify bd dolt pull exists in the host-side block
+  if grep -q 'bd dolt pull' "$run_script"; then
+    test_pass "run.sh contains bd dolt pull on host side"
+  else
+    test_fail "run.sh should contain 'bd dolt pull' on host side"
+  fi
+}
+
+#-----------------------------------------------------------------------------
 # Companion Template Tests
 #-----------------------------------------------------------------------------
 
@@ -9340,6 +9567,16 @@ PARALLEL_TESTS=(
   test_todo_dolt_pull_after_complete
   test_todo_no_dolt_pull_on_failure
   test_todo_dolt_pull_code_structure
+  # Container bead sync tests (bd dolt push / pull / verification)
+  test_todo_dolt_push_in_container
+  test_todo_post_completion_verification
+  test_todo_no_base_commit_on_empty_verification
+  test_todo_verification_exit_code
+  test_todo_no_commit_on_verification_failure
+  test_plan_dolt_push_in_container
+  test_run_once_dolt_push_in_container
+  test_run_continuous_dolt_push
+  test_run_dolt_pull_after_complete
   # Companion template tests
   test_companion_template_variable
   test_companion_partial_override

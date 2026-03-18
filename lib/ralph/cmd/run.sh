@@ -80,7 +80,11 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     echo "Warning: WRAPIX_PROFILE not set, defaulting to base" >&2
   fi
 
-  exec wrapix
+  wrapix
+  wrapix_exit=$?
+  echo "Syncing beads from container..."
+  bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
+  exit $wrapix_exit
 fi
 
 # Load shared helpers
@@ -431,6 +435,9 @@ run_step() {
     echo "Work complete. Closing issue: $next_issue"
     bd close "$next_issue"
 
+    # Push beads to Dolt remote (incremental sync for progress visibility and crash safety)
+    bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
+
     # Check if all beads with this label are complete
     check_all_complete "$bead_label" "$label" "$hidden"
     return 0
@@ -558,6 +565,10 @@ while true; do
     echo ""
   fi
 done
+
+# Final bead sync: push all state to Dolt remote before exiting
+echo "Pushing beads to Dolt remote..."
+bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
 # Run post-loop hook (even in --once mode, for consistency)
 run_hook "post-loop" "$HOOK_POST_LOOP"
