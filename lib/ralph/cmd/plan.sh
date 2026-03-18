@@ -357,6 +357,12 @@ else
 fi
 echo ""
 
+# Read companion manifests for update mode
+COMPANIONS=""
+if [ "$UPDATE_MODE" = "true" ]; then
+  COMPANIONS=$(read_manifests "$LABEL_STATE_FILE")
+fi
+
 # Render template using centralized render_template function
 # Variables differ based on template type
 if [ "$UPDATE_MODE" = "true" ]; then
@@ -364,6 +370,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "LABEL=$LABEL" \
     "SPEC_PATH=$SPEC_PATH" \
     "EXISTING_SPEC=$EXISTING_SPEC" \
+    "COMPANIONS=$COMPANIONS" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "EXIT_SIGNALS=")
 else

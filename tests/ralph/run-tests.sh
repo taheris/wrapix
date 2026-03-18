@@ -8910,6 +8910,55 @@ EOF
   teardown_test_env
 }
 
+# Test: plan.sh, todo.sh, and run.sh call read_manifests and pass COMPANIONS
+test_companions_wiring() {
+  CURRENT_TEST="companions_wiring"
+  test_header "plan.sh, todo.sh, run.sh call read_manifests and pass COMPANIONS"
+
+  local plan_sh="$REPO_ROOT/lib/ralph/cmd/plan.sh"
+  local todo_sh="$REPO_ROOT/lib/ralph/cmd/todo.sh"
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # plan.sh: calls read_manifests and passes COMPANIONS in update mode
+  if grep -q 'read_manifests' "$plan_sh"; then
+    test_pass "plan.sh calls read_manifests"
+  else
+    test_fail "plan.sh should call read_manifests"
+  fi
+  # shellcheck disable=SC2016
+  if grep -q 'COMPANIONS=\$COMPANIONS' "$plan_sh"; then
+    test_pass "plan.sh passes COMPANIONS to render_template"
+  else
+    test_fail "plan.sh should pass COMPANIONS to render_template"
+  fi
+
+  # todo.sh: calls read_manifests and passes COMPANIONS
+  if grep -q 'read_manifests' "$todo_sh"; then
+    test_pass "todo.sh calls read_manifests"
+  else
+    test_fail "todo.sh should call read_manifests"
+  fi
+  # shellcheck disable=SC2016
+  if grep -c 'COMPANIONS=\$COMPANIONS' "$todo_sh" | grep -q '2'; then
+    test_pass "todo.sh passes COMPANIONS in both update and new mode"
+  else
+    test_fail "todo.sh should pass COMPANIONS in both render_template calls"
+  fi
+
+  # run.sh: calls read_manifests and passes COMPANIONS in run_step
+  if grep -q 'read_manifests' "$run_sh"; then
+    test_pass "run.sh calls read_manifests"
+  else
+    test_fail "run.sh should call read_manifests"
+  fi
+  # shellcheck disable=SC2016
+  if grep -q 'COMPANIONS=\$companions' "$run_sh"; then
+    test_pass "run.sh passes COMPANIONS to render_template"
+  else
+    test_fail "run.sh should pass COMPANIONS to render_template"
+  fi
+}
+
 #-----------------------------------------------------------------------------
 # read_manifests tests
 #-----------------------------------------------------------------------------
@@ -9240,6 +9289,7 @@ PARALLEL_TESTS=(
   # Companion template tests
   test_companion_template_variable
   test_companion_partial_override
+  test_companions_wiring
   # read_manifests tests
   test_read_manifests_empty
   test_read_manifests_format

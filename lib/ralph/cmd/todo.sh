@@ -228,6 +228,9 @@ if [ -f "$SPEC_PATH" ]; then
   SPEC_CONTENT=$(cat "$SPEC_PATH")
 fi
 
+# Read companion manifests
+COMPANIONS=$(read_manifests "$STATE_FILE")
+
 # Render template using centralized render_template function
 if [ "$UPDATE_MODE" = "true" ]; then
   # Compute molecule progress
@@ -247,6 +250,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "MOLECULE_PROGRESS=$MOLECULE_PROGRESS" \
     "SPEC_DIFF=$SPEC_DIFF" \
     "EXISTING_TASKS=$EXISTING_TASKS" \
+    "COMPANIONS=$COMPANIONS" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
     "EXIT_SIGNALS=")
@@ -255,6 +259,7 @@ else
     "LABEL=$LABEL" \
     "SPEC_PATH=$SPEC_PATH" \
     "SPEC_CONTENT=$SPEC_CONTENT" \
+    "COMPANIONS=$COMPANIONS" \
     "CURRENT_FILE=$STATE_FILE" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \

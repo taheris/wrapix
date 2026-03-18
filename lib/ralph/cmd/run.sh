@@ -448,6 +448,13 @@ run_step() {
     spec_path="$SPECS_DIR/$label.md"
   fi
 
+  # Read companion manifests
+  local companions=""
+  local state_file="$RALPH_DIR/state/${label}.json"
+  if [ -f "$state_file" ]; then
+    companions=$(read_manifests "$state_file")
+  fi
+
   # Render template using centralized render_template function
   local work_prompt
   work_prompt=$(render_template run \
@@ -456,6 +463,7 @@ run_step() {
     "TITLE=$issue_title" \
     "LABEL=$label" \
     "MOLECULE_ID=$MOLECULE_ID" \
+    "COMPANIONS=$companions" \
     "DESCRIPTION=$issue_desc" \
     "PINNED_CONTEXT=$pinned_context" \
     "EXIT_SIGNALS=")
