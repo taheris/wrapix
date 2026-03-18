@@ -110,6 +110,7 @@ in
         export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
         export RALPH_TEMPLATE_DIR="${templateDir}"
         export RALPH_METADATA_DIR="${scripts}/share/ralph"
+        export WRAPIX_PROFILE="${effectiveSandbox.profile.name}"
       '';
 
       # Nix app definition for `nix run .#ralph`
@@ -118,6 +119,7 @@ in
         type = "app";
         program = "${pkgs.writeShellScriptBin "ralph-runner" ''
           export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
+          export WRAPIX_PROFILE="${effectiveSandbox.profile.name}"
           exec ralph "$@"
         ''}/bin/ralph-runner";
       };

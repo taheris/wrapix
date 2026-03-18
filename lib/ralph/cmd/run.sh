@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph run [--once|-1] [--profile=X] [--spec <name>|-s <name>]
+# ralph run [--once|-1] [--spec <name>|-s <name>]
 # Execute work items for a feature
 #
 # Modes:
@@ -9,7 +9,6 @@ set -euo pipefail
 #   --once/-1: Execute single issue then exit (replaces step.sh)
 #
 # Options:
-#   --profile=X: Override container profile (rust, python, base)
 #   --spec/-s <name>: Operate on named spec (default: current spec from state/current)
 #
 # Spec resolution: reads the spec label ONCE at startup (from --spec flag or
@@ -70,72 +69,18 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   fi
   export RALPH_ARGS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }${*:-}"
 
-  # Determine profile to use:
-  # 1. --profile=X flag takes precedence
-  # 2. Otherwise, read profile:X label from the next ready bead
-  # 3. Fall back to 'base' if neither
-  SELECTED_PROFILE="${PROFILE_OVERRIDE:-}"
-
-  if [ -z "$SELECTED_PROFILE" ]; then
-    # Resolve label from --spec flag or state/current (read once)
-    RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
-    RUN_LABEL=""
-
-    if [ -n "$SPEC_FLAG" ]; then
-      RUN_LABEL="$SPEC_FLAG"
-    elif [ -n "${1:-}" ]; then
-      RUN_LABEL="$1"
-    else
-      # Read from state/current (plain text file)
-      local_current="$RALPH_DIR/state/current"
-      if [ -f "$local_current" ]; then
-        RUN_LABEL=$(<"$local_current")
-        RUN_LABEL="${RUN_LABEL#"${RUN_LABEL%%[![:space:]]*}"}"
-        RUN_LABEL="${RUN_LABEL%"${RUN_LABEL##*[![:space:]]}"}"
-      fi
-    fi
-
-    if [ -n "$RUN_LABEL" ]; then
-      # Find next ready issue and extract profile label
-      BEAD_LABEL="spec-$RUN_LABEL"
-      NEXT_ISSUE_JSON=$(bd ready --label "$BEAD_LABEL" --sort priority --json 2>/dev/null || echo "[]")
-
-      # Filter out epics and get first work item with profile label
-      PROFILE_FROM_BEAD=$(echo "$NEXT_ISSUE_JSON" | jq -r '
-        [.[] | select(.issue_type == "epic" | not)][0].labels // []
-        | map(select(startswith("profile:")))
-        | .[0]
-        | if . then split(":")[1] else empty end
-      ' 2>/dev/null || true)
-
-      SELECTED_PROFILE="${PROFILE_FROM_BEAD:-base}"
-    else
-      SELECTED_PROFILE="base"
-    fi
+  if [[ -n "$PROFILE_OVERRIDE" ]]; then
+    echo "Warning: --profile flag is deprecated; profile is set at build time via WRAPIX_PROFILE" >&2
   fi
 
-  # Select wrapix command based on profile
-  # Available: wrapix (base), wrapix-rust, wrapix-python
-  case "$SELECTED_PROFILE" in
-    base)
-      WRAPIX_CMD="wrapix"
-      ;;
-    rust|python)
-      WRAPIX_CMD="wrapix-${SELECTED_PROFILE}"
-      ;;
-    *)
-      echo "Warning: Unknown profile '$SELECTED_PROFILE', falling back to base" >&2
-      WRAPIX_CMD="wrapix"
-      ;;
-  esac
-
-  # Check if the profile-specific wrapix command exists
-  if ! command -v "$WRAPIX_CMD" &>/dev/null; then
-    echo "Warning: $WRAPIX_CMD not found, falling back to wrapix" >&2
-    WRAPIX_CMD="wrapix"
+  # WRAPIX_PROFILE is set by mkRalph's shellHook/app definition.
+  # The profile is baked into the sandbox image, not the binary name —
+  # wrapix is always the correct command.
+  if [[ -z "${WRAPIX_PROFILE:-}" ]]; then
+    echo "Warning: WRAPIX_PROFILE not set, defaulting to base" >&2
   fi
 
-  exec "$WRAPIX_CMD"
+  exec wrapix
 fi
 
 # Load shared helpers

@@ -57,7 +57,6 @@ case "$COMMAND" in
     echo "  todo            Convert spec to beads issues"
     echo "  run [feature]   Execute work items for a feature"
     echo "    --once/-1       Execute single issue then exit"
-    echo "    --profile=X     Override container profile (rust, python, base)"
     echo "  spec            Query spec annotations"
     echo "    --verbose       Show per-criterion detail"
     echo "    --verify        Run [verify] shell tests"
