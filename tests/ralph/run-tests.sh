@@ -76,6 +76,7 @@ test_run_closes_issue_on_complete() {
   test_header "Step Closes Issue on RALPH_COMPLETE"
 
   setup_test_env "run-complete"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -120,6 +121,7 @@ test_run_no_close_without_signal() {
   test_header "Step Does Not Close Issue Without RALPH_COMPLETE"
 
   setup_test_env "run-no-signal"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -158,6 +160,7 @@ test_run_marks_in_progress() {
   test_header "Step Marks Issue In-Progress"
 
   setup_test_env "run-in-progress"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -201,6 +204,7 @@ test_status_mol_current_position() {
   test_header "Status Shows bd mol current Position Markers"
 
   setup_test_env "status-mol-current"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -539,6 +543,7 @@ test_status_awaiting_display() {
   test_header "Status Displays Awaiting Input Items"
 
   setup_test_env "status-awaiting"
+  init_beads
 
   local label="test-feature"
 
@@ -654,6 +659,7 @@ test_status_no_awaiting_when_empty() {
   test_header "Status Omits Awaiting Section When Empty"
 
   setup_test_env "status-no-awaiting"
+  init_beads
 
   local label="test-feature"
 
@@ -1058,6 +1064,7 @@ test_run_exits_100_when_complete() {
   test_header "Step Exits 100 When All Work Complete"
 
   setup_test_env "run-all-complete"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1087,6 +1094,7 @@ test_run_handles_blocked_signal() {
   test_header "Step Handles RALPH_BLOCKED Signal"
 
   setup_test_env "run-blocked"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1131,6 +1139,7 @@ test_run_handles_clarify_signal() {
   test_header "Step Handles RALPH_CLARIFY Signal"
 
   setup_test_env "run-clarify"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1194,6 +1203,7 @@ test_run_skips_awaiting_input() {
   test_header "Step Skips Beads with awaiting:input Label"
 
   setup_test_env "skip-awaiting"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1252,6 +1262,7 @@ test_run_respects_dependencies() {
   test_header "Step Respects Dependencies"
 
   setup_test_env "run-deps"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1320,6 +1331,7 @@ test_run_loop_processes_all() {
   test_header "Loop Processes All Issues"
 
   setup_test_env "run-loop-all"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1372,6 +1384,7 @@ test_parallel_agent_simulation() {
   test_header "Parallel Agent Simulation"
 
   setup_test_env "parallel-sim"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1495,6 +1508,7 @@ test_run_skips_in_progress() {
   test_header "Step Skips In-Progress Items"
 
   setup_test_env "skip-in-progress"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1554,6 +1568,7 @@ test_run_skips_blocked_by_in_progress() {
   test_header "Step Skips Items Blocked by In-Progress Dependencies"
 
   setup_test_env "skip-blocked"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1708,6 +1723,7 @@ test_partial_epic_completion() {
   test_header "Partial Epic Completion (2/3 tasks closed, epic stays open)"
 
   setup_test_env "partial-epic"
+  init_beads
 
   # Create a spec file
   cat > "$TEST_DIR/specs/test-feature.md" << 'EOF'
@@ -1845,6 +1861,7 @@ test_isolated_beads_db() {
   test_header "Isolated Beads Database"
 
   setup_test_env "isolated-db"
+  init_beads
 
   # Create a bead in the test environment
   TEST_BEAD_ID=$(bd create --title="Isolated test" --type=task --json 2>/dev/null | jq -r '.id')
@@ -1999,6 +2016,7 @@ run_config_test() {
   echo -e "  ${CYAN}--- $description ---${NC}"
 
   setup_test_env "config-$test_name"
+  init_beads
 
   # Run setup, execution, and assertion phases
   "$setup_fn"
@@ -2689,6 +2707,7 @@ test_plan_flag_validation() {
   test_header "Plan Flag Validation"
 
   setup_test_env "plan-flags"
+  init_beads
 
   # Test 1: No flags should error
   set +e
@@ -2798,6 +2817,7 @@ test_plan_per_label_state_files() {
   test_header "Plan Per-Label State Files"
 
   setup_test_env "plan-state"
+  init_beads
 
   # Test 1: -n flag writes state/<label>.json (not state/current.json)
   set +e
@@ -2956,6 +2976,7 @@ test_plan_update_direct_edit() {
   test_header "Plan Update Direct Edit (no state/<label>.md)"
 
   setup_test_env "plan-direct-edit"
+  init_beads
 
   # Create a spec to update
   echo "# My Feature Spec" > "$TEST_DIR/specs/my-feature.md"
@@ -3015,6 +3036,7 @@ test_plan_update_creates_state_json() {
   test_header "Plan Update Creates State JSON"
 
   setup_test_env "plan-create-state"
+  init_beads
 
   # Create a spec file but NO state/<label>.json
   echo "# Existing Feature" > "$TEST_DIR/specs/existing-feature.md"
@@ -3092,6 +3114,7 @@ test_state_json_schema() {
   test_header "State JSON Schema (no update/hidden fields)"
 
   setup_test_env "state-schema"
+  init_beads
 
   # Create required templates
   mkdir -p "$RALPH_DIR/template/partial"
@@ -3201,6 +3224,7 @@ test_plan_template_with_partials() {
   test_header "Plan Template With Mustache Partials"
 
   setup_test_env "plan-partials"
+  init_beads
 
   # Save and unset RALPH_TEMPLATE_DIR to simulate user not in nix develop
   local original_template_dir="$RALPH_TEMPLATE_DIR"
@@ -3273,6 +3297,7 @@ test_discovered_work() {
   test_header "Discovered Work - bd mol bond During Step"
 
   setup_test_env "discovered-work"
+  init_beads
 
   # Set up the label for this test
   local label="discovered-work-test"
@@ -3750,6 +3775,7 @@ test_logs_spec_flag() {
   test_header "ralph logs --spec: filters logs to named spec"
 
   setup_test_env "logs-spec-flag"
+  init_beads
 
   # Create two specs with state files
   create_test_spec "feature-a"
@@ -3810,6 +3836,7 @@ test_logs_spec_short_flag() {
   test_header "ralph logs -s: short form of --spec"
 
   setup_test_env "logs-spec-short"
+  init_beads
 
   create_test_spec "my-feature"
   setup_label_state "my-feature"
@@ -3846,6 +3873,7 @@ test_logs_no_spec_uses_current() {
   test_header "ralph logs: uses state/current when no --spec"
 
   setup_test_env "logs-no-spec"
+  init_beads
 
   create_test_spec "current-feat"
   setup_label_state "current-feat"
@@ -3882,6 +3910,7 @@ test_logs_spec_equals_form() {
   test_header "ralph logs --spec=<name>: equals form"
 
   setup_test_env "logs-spec-equals"
+  init_beads
 
   create_test_spec "eq-feature"
   echo '{"label":"eq-feature","update":false,"hidden":false,"spec_path":"specs/eq-feature.md"}' \
@@ -4693,6 +4722,7 @@ test_default_config_has_hooks() {
   test_header "Default config template has hooks configured"
 
   setup_test_env "default-config-hooks"
+  init_beads
 
   # This test verifies that the packaged config.nix template includes
   # the hooks section with pre-loop and post-run hooks that run prek.
@@ -4769,6 +4799,7 @@ test_run_profile_selection() {
   test_header "Profile-Based Container Selection in ralph run"
 
   setup_test_env "run-profile"
+  init_beads
 
   local label="profile-test-feature"
 
@@ -7113,6 +7144,7 @@ test_todo_spec_flag_reads_named_state() {
   test_header "ralph todo --spec: reads named state/<label>.json"
 
   setup_test_env "todo-spec-flag"
+  init_beads
 
   # Create two workflows: "active" is current, "target" is what --spec points at
   create_test_spec "active-feature"
@@ -7157,6 +7189,7 @@ test_todo_spec_short_flag() {
   test_header "ralph todo -s: short form of --spec"
 
   setup_test_env "todo-spec-short"
+  init_beads
 
   create_test_spec "short-test"
   echo '{"label":"short-test","update":false,"hidden":false,"spec_path":"specs/short-test.md"}' \
@@ -7183,6 +7216,7 @@ test_todo_no_spec_uses_current() {
   test_header "ralph todo: falls back to state/current when no --spec"
 
   setup_test_env "todo-no-spec"
+  init_beads
 
   create_test_spec "current-feature"
   setup_label_state "current-feature"
@@ -7207,6 +7241,7 @@ test_todo_spec_flag_missing_state_json() {
   test_header "ralph todo --spec: error when state/<label>.json missing"
 
   setup_test_env "todo-spec-missing-json"
+  init_beads
 
   # Create spec but no state JSON
   create_test_spec "orphan-spec"
@@ -7235,6 +7270,7 @@ test_todo_no_spec_no_current_errors() {
   test_header "ralph todo: error when no --spec and no state/current"
 
   setup_test_env "todo-no-current"
+  init_beads
 
   # Remove state/current if it exists
   rm -f "$RALPH_DIR/state/current"
@@ -7263,6 +7299,7 @@ test_todo_spec_equals_form() {
   test_header "ralph todo --spec=value: equals form"
 
   setup_test_env "todo-spec-equals"
+  init_beads
 
   create_test_spec "equals-test"
   echo '{"label":"equals-test","update":false,"hidden":false,"spec_path":"specs/equals-test.md"}' \
@@ -7293,6 +7330,7 @@ test_run_spec_flag_reads_named_state() {
   test_header "ralph run --spec: reads named state/<label>.json"
 
   setup_test_env "run-spec-flag"
+  init_beads
 
   # Create two workflows: "active" is current, "target" is what --spec points at
   create_test_spec "active-feature"
@@ -7341,6 +7379,7 @@ test_run_spec_short_flag() {
   test_header "ralph run -s: short form of --spec"
 
   setup_test_env "run-spec-short"
+  init_beads
 
   create_test_spec "short-test"
   echo '{"label":"short-test","update":false,"hidden":false,"spec_path":"specs/short-test.md"}' \
@@ -7372,6 +7411,7 @@ test_run_no_spec_uses_current() {
   test_header "ralph run: falls back to state/current when no --spec"
 
   setup_test_env "run-no-spec"
+  init_beads
 
   create_test_spec "current-feature"
   setup_label_state "current-feature"
@@ -7401,6 +7441,7 @@ test_run_spec_flag_missing_state_json() {
   test_header "ralph run --spec: error when state/<label>.json missing"
 
   setup_test_env "run-spec-missing-json"
+  init_beads
 
   # Create spec but no state JSON
   create_test_spec "orphan-spec"
@@ -7429,6 +7470,7 @@ test_run_spec_equals_form() {
   test_header "ralph run --spec=value: equals form"
 
   setup_test_env "run-spec-equals"
+  init_beads
 
   create_test_spec "equals-test"
   echo '{"label":"equals-test","update":false,"hidden":false,"spec_path":"specs/equals-test.md"}' \
@@ -7459,6 +7501,7 @@ test_run_spec_read_once_semantics() {
   test_header "ralph run: reads spec label once at startup"
 
   setup_test_env "run-read-once"
+  init_beads
 
   create_test_spec "initial-feature"
   setup_label_state "initial-feature"
@@ -7491,6 +7534,7 @@ test_run_spec_no_current_update() {
   test_header "ralph run --spec: does not update state/current"
 
   setup_test_env "run-no-current-update"
+  init_beads
 
   create_test_spec "active-feature"
   setup_label_state "active-feature"
@@ -7659,6 +7703,7 @@ test_concurrent_status_spec_isolation() {
   test_header "Concurrent: status --spec reads correct workflow"
 
   setup_test_env "concurrent-status-spec"
+  init_beads
 
   # Create two workflows with different molecules
   create_test_spec "feat-one"
@@ -7797,6 +7842,7 @@ test_concurrent_serial_backwards_compat() {
   test_header "Concurrent: serial workflow without --spec works"
 
   setup_test_env "concurrent-serial"
+  init_beads
 
   # Simulate a typical serial workflow: plan sets state/current, then
   # todo and run use it automatically without --spec
@@ -7867,6 +7913,7 @@ test_concurrent_run_read_once_mid_switch() {
   test_header "Concurrent: run reads spec once, mid-switch ignored"
 
   setup_test_env "concurrent-read-once"
+  init_beads
 
   # Create two workflows
   create_test_spec "initial-workflow"
@@ -7936,6 +7983,7 @@ test_concurrent_spec_flag_overrides_current() {
   test_header "Concurrent: --spec overrides state/current for all commands"
 
   setup_test_env "concurrent-spec-override"
+  init_beads
 
   # Source util.sh for resolve_spec_label
   # shellcheck source=../../lib/ralph/cmd/util.sh
@@ -8056,6 +8104,7 @@ test_concurrent_plan_creates_state_and_current() {
   test_header "Concurrent: plan creates state/<label>.json and state/current"
 
   setup_test_env "concurrent-plan-state"
+  init_beads
 
   # Remove any pre-existing state files
   rm -f "$RALPH_DIR/state/current" "$RALPH_DIR/state/"*.json 2>/dev/null || true
@@ -8121,6 +8170,7 @@ test_concurrent_multiple_plans_independent() {
   test_header "Concurrent: multiple plans create independent state files"
 
   setup_test_env "concurrent-multi-plan"
+  init_beads
 
   # Plan three features in sequence
   for label in feat-1 feat-2 feat-3; do
@@ -8347,6 +8397,7 @@ test_todo_orphaned_commit_fallback() {
   test_header "compute_spec_diff: orphaned base_commit falls back to tier 2"
 
   setup_test_env "spec-diff-orphan"
+  init_beads
   _setup_spec_diff_git "my-feature"
 
   # Create a commit, then amend it to orphan the original
@@ -8395,6 +8446,7 @@ test_todo_molecule_fallback() {
   test_header "compute_spec_diff: tier 2 — molecule exists, no base_commit"
 
   setup_test_env "spec-diff-t2"
+  init_beads
   _setup_spec_diff_git "my-feature"
 
   # Create a molecule with tasks
@@ -8629,6 +8681,7 @@ test_todo_dolt_pull_after_complete() {
   test_header "todo.sh: runs bd dolt pull after container exits with RALPH_COMPLETE"
 
   setup_test_env "todo-dolt-pull"
+  init_beads
 
   local bd_log="$TEST_DIR/bd-calls.log"
   local real_bd
@@ -8662,6 +8715,7 @@ test_todo_no_dolt_pull_on_failure() {
   test_header "todo.sh: does not run bd dolt pull when container fails"
 
   setup_test_env "todo-no-dolt-pull"
+  init_beads
 
   local bd_log="$TEST_DIR/bd-calls.log"
   local real_bd

@@ -315,29 +315,6 @@ Output ONE of these at the end of your response:
 - `RALPH_CLARIFY: <question>` - Need clarification
 EOF
 
-  # Initialize beads database using the shared dolt server with a unique prefix per test.
-  # Each test gets its own database (beads_<prefix>) on the shared server for full isolation.
-  export BD_DB="$TEST_DIR/.beads/issues.db"
-  mkdir -p "$(dirname "$BD_DB")"
-
-  # Suppress dolt sql-server auto-start in test subprocesses.
-  # Without this, any bd command that briefly fails to connect to the shared
-  # server (race condition, slow start) will spawn its own detached dolt
-  # sql-server — creating orphaned processes that are never cleaned up.
-  export BEADS_DOLT_AUTO_START=0
-  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
-    export BEADS_DOLT_SERVER_PORT="$SHARED_DOLT_PORT"
-  fi
-
-  local test_prefix
-  test_prefix="t$(echo "$test_name" | tr -cd 'a-z0-9' | head -c 6)${RANDOM}"
-  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
-    (cd "$TEST_DIR" && bd init --prefix "$test_prefix" \
-      --server-port "$SHARED_DOLT_PORT" --skip-hooks --quiet >/dev/null 2>&1) || {
-      echo "WARNING: bd init failed for $test_name" >&2
-    }
-  fi
-
   # Create bin directory with mock claude as 'claude'
   mkdir -p "$TEST_DIR/bin"
   ln -sf "$MOCK_CLAUDE" "$TEST_DIR/bin/claude"
@@ -408,6 +385,33 @@ EOF
   export RALPH_METADATA_DIR
 
   echo "  Test environment: $TEST_DIR"
+}
+
+# Initialize beads database for tests that need it.
+# Must be called AFTER setup_test_env. Creates a unique database on the shared
+# dolt server so tests get full isolation without affecting pure tests.
+# Usage: init_beads
+init_beads() {
+  export BD_DB="$TEST_DIR/.beads/issues.db"
+  mkdir -p "$(dirname "$BD_DB")"
+
+  # Suppress dolt sql-server auto-start in test subprocesses.
+  # Without this, any bd command that briefly fails to connect to the shared
+  # server (race condition, slow start) will spawn its own detached dolt
+  # sql-server — creating orphaned processes that are never cleaned up.
+  export BEADS_DOLT_AUTO_START=0
+  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
+    export BEADS_DOLT_SERVER_PORT="$SHARED_DOLT_PORT"
+  fi
+
+  local test_prefix
+  test_prefix="t$(echo "${CURRENT_TEST:-unknown}" | tr -cd 'a-z0-9' | head -c 6)${RANDOM}"
+  if [ -n "${SHARED_DOLT_PORT:-}" ]; then
+    (cd "$TEST_DIR" && bd init --prefix "$test_prefix" \
+      --server-port "$SHARED_DOLT_PORT" --skip-hooks --quiet >/dev/null 2>&1) || {
+      echo "WARNING: bd init failed for ${CURRENT_TEST:-unknown}" >&2
+    }
+  fi
 }
 
 # Clean up test environment
