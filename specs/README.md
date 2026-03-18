@@ -17,6 +17,7 @@ An ordered list of specs and project terminology.
 | [security-review.md](./security-review.md) | — | wx-eok | Security tradeoffs and mitigations |
 | [live-specs.md](./live-specs.md) | [`lib/ralph/cmd/spec.sh`](../lib/ralph/cmd/spec.sh) | wx-a13n | Queryable, verifiable, observable specifications |
 | [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
+| [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | — | Browser automation for frontend development |
 
 ## Terminology Index
 
@@ -26,6 +27,7 @@ An ordered list of specs and project terminology.
 | **Deploy Key** | SSH key for git push operations from container |
 | **Focus-aware** | Notification suppression when terminal is focused |
 | **pasta** | Linux userspace networking for Podman containers |
+| **playwright-mcp** | MCP server wrapping @playwright/mcp for browser automation in sandboxes |
 | **prek** | Rust-based pre-commit framework (drop-in replacement for pre-commit) |
 | **Profile** | Pre-configured set of packages and environment variables |
 | **Ralph** | Workflow orchestrator for spec-to-implementation |

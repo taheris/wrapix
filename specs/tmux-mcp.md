@@ -153,20 +153,9 @@ This matches human debugging workflow: you want to see what a process printed be
 
 ## Invocation Model
 
-### Subagent Isolation
-
-The debug MCP is **not** registered in the main session. Instead:
-
-1. Main session identifies need for debugging
-2. Main session spawns a Task subagent with the debug profile
-3. Debug subagent has tmux tools in context (~1.5k tokens)
-4. Subagent performs debugging, captures findings
-5. Subagent returns summary to main session
-6. Main session continues with lean context
-
 ### MCP Opt-in
 
-Debugging is enabled per-sandbox via the `mcp` parameter, not via dedicated profiles:
+MCP servers are enabled per-sandbox via the `mcp` parameter. When enabled, tools are registered in the main Claude session — the agent decides when to delegate to a subagent based on the task, but this is not architecturally prescribed.
 
 ```nix
 # Enable tmux-debug with defaults
@@ -204,24 +193,17 @@ This eliminates profile proliferation — consumers add MCP servers to existing 
 ```
 User: "Debug why POST /api/users returns 500"
 
-Main session:
-  -> Spawns debug subagent: "Investigate 500 error on POST /api/users"
-
-Debug subagent:
+Agent:
   -> tmux_create_pane("RUST_LOG=debug cargo run", name="server")
   -> tmux_create_pane("bash", name="client")
   -> [waits for server startup]
   -> tmux_send_keys(client, "curl -X POST localhost:3000/api/users -d '{...}'")
   -> tmux_capture_pane(server, lines=200)
-  -> [analyzes stack trace, reads relevant code]
+  -> [analyzes stack trace, reads relevant code, applies fix]
   -> tmux_kill_pane(server)
   -> tmux_kill_pane(client)
-  -> Returns: "The 500 is caused by a missing database migration.
-              The users table lacks the 'email' column.
-              Fix: Run the pending migration."
-
-Main session:
-  -> Receives findings, proceeds with fix
+  -> "The 500 was caused by a missing database migration.
+     I've added the 'email' column to the users table migration."
 ```
 
 ## Auditing
@@ -423,8 +405,6 @@ nix flake check
   [verify:wrapix](../tests/tmux-mcp/test_send_keys.sh)
 - [ ] Exited pane visibility: Exited panes show status and allow final output capture
   [verify:wrapix](../tests/tmux-mcp/test_exited_pane.sh)
-- [ ] Context isolation: Main session has 0 token overhead; debug subagent ~1.5k
-  [judge](../tests/judges/tmux-mcp.sh#test_context_isolation)
 - [ ] Sandbox contained: All pane commands run within wrapix isolation
   [verify:wrapix](../tests/tmux-mcp/e2e/test_filesystem_isolation.sh)
 - [ ] Audit works: When enabled, all operations logged correctly
