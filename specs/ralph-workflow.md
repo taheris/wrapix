@@ -34,7 +34,7 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 13. **Git-Based Spec Diffing** — `ralph todo` uses `base_commit` in state JSON and `git diff` to detect spec changes, replacing `state/<label>.md` intermediary
 14. **Container Bead Sync** — Container-executed commands (`plan`, `todo`, `run --once`) run `bd dolt push` inside the container after `RALPH_COMPLETE` before exit, then `bd dolt pull` on the host after container exits
 15. **Cross-Machine State Recovery** — `ralph todo` discovers molecule IDs from `specs/README.md` when no local state file exists, reconstructing `state/<label>.json` to avoid duplicate molecule creation
-16. **Post-Completion Verification** — After `bd dolt pull` on the host, `ralph todo` verifies tasks were actually created before advancing `base_commit`, preventing silent data loss when container sync or LLM tool calls fail
+16. **Post-Sync Verification (informational)** — After `bd dolt pull` on the host, `ralph todo` checks whether task count increased and emits a warning with recovery hints if not; `base_commit` always advances on `RALPH_COMPLETE`
 
 ### Non-Functional
 
@@ -107,17 +107,24 @@ Launches wrapix container with base profile. Reads `state/<label>.json` (resolve
 
 **Profile assignment:** The LLM analyzes each task's requirements and assigns appropriate `profile:X` labels based on implementation needs (e.g., tasks touching `.rs` files get `profile:rust`). This happens per-task, not per-spec.
 
-Stores molecule ID in `state/<label>.json`. Stores `HEAD` as `base_commit` only after host-side post-completion verification confirms tasks were synced — partial failures, sync failures, or verification failures do not update `base_commit`.
+Stores molecule ID in `state/<label>.json`. Stores `HEAD` as `base_commit` on `RALPH_COMPLETE`. Host-side verification checks that tasks synced correctly but is informational only — it does not block `base_commit` advancement or workflow progression.
 
-**Container bead sync:** After RALPH_COMPLETE inside the container, `todo.sh` runs `bd dolt push` before the container exits. On the host side, `todo.sh` then runs `bd dolt pull` to receive the synced beads. This two-step sync (push inside container → pull on host) ensures beads created in the container's isolated `.beads/` database reach the host. If `bd dolt push` fails inside the container, `todo.sh` emits a warning but still exits the container — the host-side verification will catch the missing data.
+**Container bead sync:** After RALPH_COMPLETE inside the container, `todo.sh` runs `bd dolt push` before the container exits. On the host side, `todo.sh` then runs `bd dolt pull` to receive the synced beads. This two-step sync (push inside container → pull on host) ensures beads created in the container's isolated `.beads/` database reach the host.
 
-**Post-completion verification (host-side):** Before launching the container, the host-side `todo.sh` records the molecule's current task count (0 if new mode). After the container exits with RALPH_COMPLETE and `bd dolt pull` completes, the host re-counts tasks. If the count did not increase, it treats this as a verification failure:
-- `base_commit` is NOT updated
-- Spec/README changes from the session are NOT committed (left in working tree for inspection)
-- An error is emitted: `"Verification failed: RALPH_COMPLETE but no new tasks created. base_commit not advanced."`
-- Exit code 1
+**Post-completion verification (host-side, informational):** Before launching the container, the host-side `todo.sh` records the molecule's current task count (0 if new mode). After the container exits with RALPH_COMPLETE and `bd dolt pull` completes, the host re-counts tasks. If the count did not increase, it emits a warning:
+```
+Warning: RALPH_COMPLETE but no new tasks detected after sync.
+  If bd dolt push failed above, tasks may not have synced.
+  Check: bd list -l spec-<label>
+  To re-run: ralph todo --since <previous_base_commit>
+```
 
-This prevents silent data loss when beads are created inside the container but never synced (e.g., `bd dolt push` failed, closed molecule, tool call errors). For cosmetic spec updates that genuinely need no new tasks, advance `base_commit` manually in `state/<label>.json`.
+This warning is informational — it does **not** block the workflow:
+- `base_commit` is still updated (RALPH_COMPLETE is authoritative)
+- Spec/README changes are still committed
+- Exit code 0
+
+If sync genuinely failed, the user will notice when `ralph run` finds no tasks. Recovery is straightforward: edit `base_commit` in `state/<label>.json` or re-run with `ralph todo --since <commit>`.
 
 ### `ralph run`
 
@@ -349,7 +356,7 @@ Ralph runs Claude-calling commands inside wrapix containers for isolation and re
 3. Container exits
 4. Host-side `<cmd>.sh` runs `bd dolt pull` (syncs Dolt remote → host `.beads/`)
 
-This is necessary because the container has its own `.beads/` database (not bind-mounted). Without the push/pull handoff, beads created inside the container are lost when the container exits. The host-side pull is the final step; if `bd dolt push` failed inside the container, the pull gets stale data and downstream verification catches the gap.
+This is necessary because the container has its own `.beads/` database (not bind-mounted). Without the push/pull handoff, beads created inside the container are lost when the container exits. The host-side pull is the final step; if `bd dolt push` failed inside the container, the pull gets stale data and the host emits an informational warning with recovery hints.
 
 ## Profile Selection
 
@@ -927,14 +934,12 @@ Ralph uses `bd mol` for work tracking:
   [verify](../tests/ralph/run-tests.sh#test_todo_dolt_push_in_container)
 - [ ] `ralph todo` runs `bd dolt pull` on host after container exits with `RALPH_COMPLETE`
   [verify](../tests/ralph/run-tests.sh#test_todo_dolt_pull_after_complete)
-- [ ] `ralph todo` verifies tasks on host after `bd dolt pull` before setting `base_commit`
-  [verify](../tests/ralph/run-tests.sh#test_todo_post_completion_verification)
-- [ ] `ralph todo` does not update `base_commit` when host-side verification finds no new tasks
-  [verify](../tests/ralph/run-tests.sh#test_todo_no_base_commit_on_empty_verification)
-- [ ] `ralph todo` exits with code 1 on verification failure
-  [verify](../tests/ralph/run-tests.sh#test_todo_verification_exit_code)
-- [ ] `ralph todo` does not commit spec/README changes on verification failure
-  [verify](../tests/ralph/run-tests.sh#test_todo_no_commit_on_verification_failure)
+- [ ] `ralph todo` emits informational warning on host when post-sync task count did not increase
+  [verify](../tests/ralph/run-tests.sh#test_todo_post_sync_warning)
+- [ ] `ralph todo` still advances `base_commit` and commits spec/README despite sync warning
+  [verify](../tests/ralph/run-tests.sh#test_todo_advances_base_commit_on_warning)
+- [ ] `ralph todo` warning message includes `bd list` check command and `--since` recovery hint
+  [verify](../tests/ralph/run-tests.sh#test_todo_warning_includes_recovery_hints)
 - [ ] `ralph plan` runs `bd dolt push` inside container after `RALPH_COMPLETE`
   [verify](../tests/ralph/run-tests.sh#test_plan_dolt_push_in_container)
 - [ ] `ralph run --once` runs `bd dolt push` inside container after `RALPH_COMPLETE`
