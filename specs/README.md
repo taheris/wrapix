@@ -17,7 +17,7 @@ An ordered list of specs and project terminology.
 | [security-review.md](./security-review.md) | — | wx-eok | Security tradeoffs and mitigations |
 | [live-specs.md](./live-specs.md) | [`lib/ralph/cmd/spec.sh`](../lib/ralph/cmd/spec.sh) | wx-a13n | Queryable, verifiable, observable specifications |
 | [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
-| [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-50eb | Browser automation for frontend development |
+| [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-p8wv | Browser automation for frontend development |
 
 ## Terminology Index
 
