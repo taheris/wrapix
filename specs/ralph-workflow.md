@@ -33,6 +33,7 @@ Ralph provides a structured workflow that guides AI through spec creation, issue
 12. **Companion Content** — Specs can declare companion directories whose `manifest.md` is injected into templates, giving the LLM awareness of related content it can read on demand
 13. **Git-Based Spec Diffing** — `ralph todo` uses `base_commit` in state JSON and `git diff` to detect spec changes, replacing `state/<label>.md` intermediary
 14. **Post-Container Bead Sync** — `ralph todo` runs `bd dolt pull` after container exits with `RALPH_COMPLETE`
+15. **Cross-Machine State Recovery** — `ralph todo` discovers molecule IDs from `specs/README.md` when no local state file exists, reconstructing `state/<label>.json` to avoid duplicate molecule creation
 
 ### Non-Functional
 
@@ -84,20 +85,22 @@ ralph todo -s <name>        # Short form
 ralph todo --since <commit> # Force git-diff mode from specific commit
 ```
 
-Launches wrapix container with base profile. Reads `state/<label>.json` (resolved via `--spec` flag or `state/current`). Uses three-tier detection to determine mode:
+Launches wrapix container with base profile. Reads `state/<label>.json` (resolved via `--spec` flag or `state/current`). Uses four-tier detection to determine mode:
 
 1. **Tier 1 (git diff)**: `base_commit` exists in state JSON → `git diff <base_commit> HEAD -- <spec_path>` (fast, precise)
-2. **Tier 2 (molecule-based)**: No `base_commit` but molecule exists → LLM compares spec against existing task descriptions
-3. **Tier 3 (new)**: Neither → full spec decomposition from `specs/<label>.md`
+2. **Tier 2 (molecule-based)**: No `base_commit` but molecule in state JSON → LLM compares spec against existing task descriptions
+3. **Tier 3 (README discovery)**: No `state/<label>.json` exists → look up molecule ID from `specs/README.md` Beads column, validate with `bd show`, reconstruct state file, then proceed as tier 2
+4. **Tier 4 (new)**: No state file AND no molecule in README (or README molecule is stale/invalid) → full spec decomposition from `specs/<label>.md`
 
 **Flags:**
-- `--since <commit>` forces tier 1 with the given commit, skipping tier 2/3; errors if commit is invalid
+- `--since <commit>` forces tier 1 with the given commit, skipping tier 2/3/4; errors if commit is invalid
 
 **Constraints:**
 - Requires spec changes to be committed — errors if uncommitted changes detected in spec file
 - If tier 1 finds no changes (empty diff), exits early: "No spec changes since last task creation"
 - When `base_commit` is orphaned (rebase/amend), detected via `git merge-base --is-ancestor`, falls back to tier 2
 - Hidden spec updates (`-u -h`) use tier 2 since hidden specs are not in git
+- Tier 3 reconstructs `state/<label>.json` with: label, spec_path (`specs/<label>.md`), molecule (from README), no base_commit, empty companions array
 
 **Profile assignment:** The LLM analyzes each task's requirements and assigns appropriate `profile:X` labels based on implementation needs (e.g., tasks touching `.rs` files get `profile:rust`). This happens per-task, not per-spec.
 
@@ -603,7 +606,7 @@ Spec file: {{SPEC_PATH}}
    - Tasks touching `.py` files or using pytest/pip → `profile:python`
    - Tasks touching only `.nix`, `.sh`, `.md` files → `profile:base`
 7. Molecule creation — Create epic, child tasks with profile labels, set dependencies
-9. README update — Add molecule ID to specs/README.md
+9. README update — Write molecule ID to the Beads column of `specs/README.md` (required for cross-machine state recovery)
 10. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED
@@ -621,9 +624,10 @@ Spec file: {{SPEC_PATH}}
 6. Spec diff or existing tasks — Receives both `{{SPEC_DIFF}}` and `{{EXISTING_TASKS}}`; one is always empty depending on tier. Instructions: "if SPEC_DIFF is provided, use that to identify new requirements; otherwise use EXISTING_TASKS to compare against the spec and identify gaps."
 7. Profile assignment guidance — Assign `profile:X` per-task based on implementation needs
 8. Task creation — Create tasks ONLY for new/changed requirements, bond to molecule
-9. `{{> exit-signals}}`
+9. README backfill — If `specs/README.md` Beads column is empty for this spec, fill in the molecule ID
+10. `{{> exit-signals}}`
 
-**`EXISTING_TASKS` format** (tier 2):
+**`EXISTING_TASKS` format** (tier 2/3):
 ```markdown
 ### wx-abc1: Implement parser (done)
 Parse input files using the new grammar...
@@ -708,9 +712,10 @@ Commands without `--spec`: `ralph plan` (takes label as positional arg), `ralph 
 
 Serial workflow is unchanged: `ralph plan` sets `state/current`, subsequent commands pick it up automatically. The only structural difference is the state file location (`state/<label>.json` + `state/current` vs the old singleton `state/current.json`).
 
-Existing specs without `base_commit` are handled via three-tier fallback:
-- If molecule exists → tier 2 (LLM compares spec against tasks)
-- If no molecule → tier 3 (treats as new, creates full molecule)
+Existing specs without `base_commit` are handled via four-tier fallback:
+- If molecule in state JSON → tier 2 (LLM compares spec against tasks)
+- If no state file but molecule in README → tier 3 (reconstruct state, then tier 2)
+- If no molecule anywhere → tier 4 (treats as new, creates full molecule)
 
 After first successful `ralph todo`, `base_commit` is set and fast-path diffing works going forward.
 
@@ -740,10 +745,28 @@ Replace the transient `state/<label>.md` intermediary with git-based diffing usi
 
 - `ralph plan -u` edits `specs/<label>.md` directly (LLM commits the changes for git-tracked specs)
 - `ralph plan -u -h` edits the hidden spec directly but does NOT commit
-- `ralph todo` uses three-tier detection (see `ralph todo` command section)
-- `compute_spec_diff` helper in `util.sh` encapsulates the three-tier fallback
+- `ralph todo` uses four-tier detection (see `ralph todo` command section)
+- `compute_spec_diff` helper in `util.sh` encapsulates the four-tier fallback
+- `discover_molecule_from_readme` helper in `util.sh` parses `specs/README.md` to find molecule IDs by spec label
 - `--since <commit>` flag forces tier 1 with the given commit
-- No explicit migration required — existing specs handled via tier 2/3 fallback
+- No explicit migration required — existing specs handled via tier 2/3/4 fallback
+
+### Cross-Machine State Recovery (Tier 3)
+
+When `state/<label>.json` does not exist (e.g., working from a different machine), `ralph todo`:
+
+1. Parses `specs/README.md` to find the row whose spec filename matches `<label>.md`
+2. Extracts the Beads column value (the molecule ID) from that row
+3. Validates the molecule exists via `bd show <id>` — if invalid/not found, falls through to tier 4
+4. Reconstructs `state/<label>.json` with:
+   - `label`: the spec label
+   - `spec_path`: `specs/<label>.md`
+   - `molecule`: the discovered molecule ID
+   - `base_commit`: omitted (not recoverable)
+   - `companions`: empty array (not recoverable; user can add manually)
+5. Proceeds as tier 2 (molecule-based comparison against existing tasks)
+
+**README parsing**: Simple grep/awk to find the row matching the spec filename and extract the Beads column. The table format is stable and controlled by the project.
 
 ## Spec File Format
 
@@ -795,7 +818,7 @@ Why this feature is needed.
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
 | `lib/ralph/cmd/sync.sh` | Template sync from packaged (includes --diff) |
 | `lib/ralph/cmd/use.sh` | Active workflow switching with validation |
-| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`, `read_manifests`, `compute_spec_diff`) |
+| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`, `read_manifests`, `compute_spec_diff`, `discover_molecule_from_readme`) |
 | `lib/ralph/template/` | Prompt templates |
 | `lib/ralph/template/default.nix` | Nix template definitions |
 | `lib/ralph/template/partial/companions-context.md` | Companion manifest injection partial |
@@ -863,7 +886,21 @@ Ralph uses `bd mol` for work tracking:
   [verify](../tests/ralph/run-tests.sh#test_todo_orphaned_commit_fallback)
 - [ ] `ralph todo` falls back to molecule-based diff when no `base_commit` but molecule exists
   [verify](../tests/ralph/run-tests.sh#test_todo_molecule_fallback)
-- [ ] `ralph todo` uses new mode when neither `base_commit` nor molecule exists
+- [ ] `ralph todo` discovers molecule from `specs/README.md` when no state file exists (tier 3)
+  [verify](../tests/ralph/run-tests.sh#test_todo_readme_discovery)
+- [ ] `ralph todo` reconstructs `state/<label>.json` after README discovery
+  [verify](../tests/ralph/run-tests.sh#test_todo_readme_state_reconstruction)
+- [ ] `ralph todo` falls through to tier 4 when README has no molecule for the spec
+  [verify](../tests/ralph/run-tests.sh#test_todo_readme_no_molecule_fallthrough)
+- [ ] `ralph todo` falls through to tier 4 when README molecule ID is stale/invalid
+  [verify](../tests/ralph/run-tests.sh#test_todo_readme_stale_molecule_fallthrough)
+- [ ] `discover_molecule_from_readme` correctly parses the Beads column from `specs/README.md`
+  [verify](../tests/ralph/run-tests.sh#test_discover_molecule_from_readme)
+- [ ] `discover_molecule_from_readme` returns empty string when spec not in README
+  [verify](../tests/ralph/run-tests.sh#test_discover_molecule_not_in_readme)
+- [ ] Reconstructed state file has correct label, spec_path, molecule; no base_commit; empty companions
+  [verify](../tests/ralph/run-tests.sh#test_todo_readme_reconstructed_state_schema)
+- [ ] `ralph todo` uses new mode when no state file and no molecule in README (tier 4)
   [verify](../tests/ralph/run-tests.sh#test_todo_new_mode_fallback)
 - [ ] `ralph todo` runs `bd dolt pull` on host after container exits with `RALPH_COMPLETE`
   [verify](../tests/ralph/run-tests.sh#test_todo_dolt_pull_after_complete)
@@ -871,6 +908,10 @@ Ralph uses `bd mol` for work tracking:
   [judge](../tests/judges/ralph-workflow.sh#test_todo_runs_in_container)
 - [ ] `ralph todo` LLM assigns `profile:X` labels per-task based on implementation needs
   [verify](../tests/ralph/run-tests.sh#test_run_profile_selection)
+- [ ] `todo-new.md` instructs LLM to write molecule ID to `specs/README.md` Beads column
+  [judge](../tests/judges/ralph-workflow.sh#test_todo_new_writes_readme_beads)
+- [ ] `todo-update.md` instructs LLM to fill in README Beads column if empty
+  [judge](../tests/judges/ralph-workflow.sh#test_todo_update_fills_readme_beads)
 - [ ] `state/<label>.json` no longer contains `update` or `hidden` fields
   [verify](../tests/ralph/run-tests.sh#test_state_json_schema)
 - [ ] `todo-update.md` works with `SPEC_DIFF` (tier 1) when diff is available
