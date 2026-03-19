@@ -395,8 +395,11 @@ fi
 export PROMPT_CONTENT
 run_claude_interactive "PROMPT_CONTENT"
 
-# Push beads to Dolt remote so host can pull them
+# Commit working set then push to Dolt remote so host can pull them
+# bd dolt push only pushes committed data; without commit, working set
+# changes are lost to subsequent dolt clone (e.g., ralph run container)
 echo "Pushing beads to Dolt remote..."
+bd dolt commit >/dev/null 2>&1 || true
 bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
 echo ""

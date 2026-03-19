@@ -83,8 +83,8 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
   fi
   if [ -n "$_HOST_MOLECULE_ID" ]; then
-    _HOST_PRE_COUNT=$(bd show "$_HOST_MOLECULE_ID" --json 2>/dev/null \
-      | jq '[.[] | select(.issue_type != "epic")] | length' 2>/dev/null || echo 0)
+    _HOST_PRE_COUNT=$(bd show "$_HOST_MOLECULE_ID" --children --json 2>/dev/null \
+      | jq 'length' 2>/dev/null || echo 0)
   fi
 
   wrapix
@@ -100,21 +100,21 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
       _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
     fi
 
-    # Host-side verification: did task count actually increase?
+    # Host-side verification (informational): did task count increase?
     _HOST_POST_COUNT=0
     if [ -n "$_HOST_MOLECULE_ID" ]; then
-      _HOST_POST_COUNT=$(bd show "$_HOST_MOLECULE_ID" --json 2>/dev/null \
-        | jq '[.[] | select(.issue_type != "epic")] | length' 2>/dev/null || echo 0)
+      _HOST_POST_COUNT=$(bd show "$_HOST_MOLECULE_ID" --children --json 2>/dev/null \
+        | jq 'length' 2>/dev/null || echo 0)
     fi
 
     if [ "$_HOST_POST_COUNT" -le "$_HOST_PRE_COUNT" ] && [ -n "$_HOST_MOLECULE_ID" ]; then
-      echo "Error: Verification failed: RALPH_COMPLETE but no new tasks created. base_commit not advanced."
-      # Roll back base_commit in state JSON (container already wrote it via bind mount)
-      if [ -f "$_HOST_STATE_FILE" ]; then
-        jq 'del(.base_commit)' "$_HOST_STATE_FILE" > "$_HOST_STATE_FILE.tmp" \
-          && mv "$_HOST_STATE_FILE.tmp" "$_HOST_STATE_FILE"
-      fi
-      exit 1
+      _PREV_BASE_COMMIT=$(jq -r '.base_commit // "HEAD~1"' "$_HOST_STATE_FILE" 2>/dev/null || echo "HEAD~1")
+      echo ""
+      echo "Warning: RALPH_COMPLETE but no new tasks detected after sync."
+      echo "  If bd dolt push failed above, tasks may not have synced."
+      echo "  Check: bd list -l spec-${_HOST_LABEL}"
+      echo "  To re-run: ralph todo --since ${_PREV_BASE_COMMIT}"
+      echo ""
     fi
   fi
   exit $wrapix_exit
@@ -355,8 +355,11 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
     fi
   fi
 
-  # Push beads to Dolt remote so host can pull them
+  # Commit working set then push to Dolt remote so host can pull them
+  # bd dolt push only pushes committed data; without commit, working set
+  # changes are lost to subsequent dolt clone (e.g., ralph run container)
   echo "Pushing beads to Dolt remote..."
+  bd dolt commit >/dev/null 2>&1 || true
   bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
   # Store base_commit (HEAD) on successful completion

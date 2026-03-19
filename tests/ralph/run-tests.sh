@@ -9061,9 +9061,10 @@ test_todo_dolt_push_in_container() {
 }
 
 # Test: todo.sh host-side verifies task count after bd dolt pull
-test_todo_post_completion_verification() {
-  CURRENT_TEST="todo_post_completion_verification"
-  test_header "todo.sh: host-side post-completion verification"
+# Test: todo.sh emits informational warning when post-sync task count did not increase
+test_todo_post_sync_warning() {
+  CURRENT_TEST="todo_post_sync_warning"
+  test_header "todo.sh: host-side post-sync verification (informational)"
 
   local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
 
@@ -9080,80 +9081,72 @@ test_todo_post_completion_verification() {
     test_fail "todo.sh should contain _HOST_POST_COUNT for host-side verification"
   fi
 
-  # Verify the comparison logic exists
-  if grep -q 'POST_COUNT.*-le.*PRE_COUNT' "$todo_script"; then
-    test_pass "todo.sh compares post-count with pre-count"
+  # Verify it uses --children flag for accurate counting
+  if grep -q 'bd show.*--children.*--json' "$todo_script"; then
+    test_pass "todo.sh uses --children flag for task counting"
   else
-    test_fail "todo.sh should compare _HOST_POST_COUNT with _HOST_PRE_COUNT"
+    test_fail "todo.sh should use bd show --children --json for accurate task count"
+  fi
+
+  # Verify it emits a warning, NOT an error with exit 1
+  if grep -q 'Warning: RALPH_COMPLETE but no new tasks detected' "$todo_script"; then
+    test_pass "todo.sh emits informational warning (not error)"
+  else
+    test_fail "todo.sh should emit Warning message for sync verification"
   fi
 }
 
-# Test: todo.sh rolls back base_commit when host-side verification finds no new tasks
-test_todo_no_base_commit_on_empty_verification() {
-  CURRENT_TEST="todo_no_base_commit_on_empty_verification"
-  test_header "todo.sh: rolls back base_commit on empty verification"
+# Test: todo.sh still advances base_commit and commits spec/README despite sync warning
+test_todo_advances_base_commit_on_warning() {
+  CURRENT_TEST="todo_advances_base_commit_on_warning"
+  test_header "todo.sh: advances base_commit despite sync warning"
 
   local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
 
-  # Verify the host-side block contains base_commit rollback
+  # Verify the host-side block does NOT contain base_commit rollback
   if grep -q 'del(.base_commit)' "$todo_script"; then
-    test_pass "todo.sh contains base_commit rollback (del(.base_commit))"
+    test_fail "todo.sh should not roll back base_commit (verification is informational)"
   else
-    test_fail "todo.sh should contain jq del(.base_commit) for rollback"
+    test_pass "todo.sh does not contain base_commit rollback"
   fi
 
-  # Verify error message
-  if grep -q 'Verification failed.*no new tasks created' "$todo_script"; then
-    test_pass "todo.sh contains verification failure error message"
+  # Verify the host-side block does NOT exit 1 on verification warning
+  # The only exit in the host block should be 'exit $wrapix_exit'
+  local warning_line
+  warning_line=$(grep -n 'no new tasks detected' "$todo_script" | head -1 | cut -d: -f1)
+  if [ -n "$warning_line" ]; then
+    # Check that no 'exit 1' follows the warning within 5 lines
+    local after_warning
+    after_warning=$(tail -n "+${warning_line}" "$todo_script" | head -5)
+    if echo "$after_warning" | grep -q 'exit 1'; then
+      test_fail "todo.sh should not exit 1 after sync warning"
+    else
+      test_pass "todo.sh does not exit 1 after sync warning"
+    fi
   else
-    test_fail "todo.sh should contain verification failure error message"
-  fi
-}
-
-# Test: todo.sh exits with code 1 on verification failure
-test_todo_verification_exit_code() {
-  CURRENT_TEST="todo_verification_exit_code"
-  test_header "todo.sh: exits with code 1 on verification failure"
-
-  local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
-
-  # Verify the host-side block exits 1 after verification failure
-  # Check that 'exit 1' appears after the verification failure message
-  local verif_line exit_line
-  verif_line=$(grep -n 'Verification failed' "$todo_script" | head -1 | cut -d: -f1)
-  # Find the next 'exit 1' after the verification message within the host block
-  exit_line=$(tail -n "+${verif_line}" "$todo_script" | grep -n 'exit 1' | head -1 | cut -d: -f1)
-
-  if [ -n "$verif_line" ] && [ -n "$exit_line" ]; then
-    test_pass "todo.sh exits with code 1 after verification failure"
-  else
-    test_fail "todo.sh should exit 1 after verification failure (verif:$verif_line exit:$exit_line)"
+    test_fail "could not find warning line in todo.sh"
   fi
 }
 
-# Test: todo.sh does not commit spec/README changes on verification failure
-test_todo_no_commit_on_verification_failure() {
-  CURRENT_TEST="todo_no_commit_on_verification_failure"
-  test_header "todo.sh: does not commit spec/README on verification failure"
+# Test: todo.sh warning message includes recovery hints
+test_todo_warning_includes_recovery_hints() {
+  CURRENT_TEST="todo_warning_includes_recovery_hints"
+  test_header "todo.sh: sync warning includes recovery hints"
 
   local todo_script="$REPO_ROOT/lib/ralph/cmd/todo.sh"
 
-  # The verification failure happens in the HOST-SIDE block (before container-side
-  # spec commit code runs). The host-side block exits 1 on failure, so the
-  # container-side commit code never executes. Verify the exit happens before
-  # any git commit in the host block.
-  #
-  # Host block structure: if not container → wrapix → pull → verify → exit 1 on fail
-  # Container block: (after host block) → spec commit → base_commit → etc.
-  local host_block_end
-  host_block_end=$(grep -n '^fi$' "$todo_script" | head -1 | cut -d: -f1)
-  local verif_exit
-  verif_exit=$(grep -n 'Verification failed' "$todo_script" | head -1 | cut -d: -f1)
-
-  if [ -n "$host_block_end" ] && [ -n "$verif_exit" ] && [ "$verif_exit" -lt "$host_block_end" ]; then
-    test_pass "verification failure exits in host block before container-side commits"
+  # Verify warning includes bd list check command
+  if grep -q 'bd list -l spec-' "$todo_script"; then
+    test_pass "todo.sh warning includes bd list check command"
   else
-    test_fail "verification failure should exit in host block (verif:$verif_exit host_end:$host_block_end)"
+    test_fail "todo.sh warning should include 'bd list -l spec-<label>' hint"
+  fi
+
+  # Verify warning includes --since recovery hint
+  if grep -q 'ralph todo --since' "$todo_script"; then
+    test_pass "todo.sh warning includes --since recovery hint"
+  else
+    test_fail "todo.sh warning should include 'ralph todo --since' recovery hint"
   fi
 }
 
@@ -9911,10 +9904,9 @@ PARALLEL_TESTS=(
   test_todo_dolt_pull_code_structure
   # Container bead sync tests (bd dolt push / pull / verification)
   test_todo_dolt_push_in_container
-  test_todo_post_completion_verification
-  test_todo_no_base_commit_on_empty_verification
-  test_todo_verification_exit_code
-  test_todo_no_commit_on_verification_failure
+  test_todo_post_sync_warning
+  test_todo_advances_base_commit_on_warning
+  test_todo_warning_includes_recovery_hints
   test_plan_dolt_push_in_container
   test_run_once_dolt_push_in_container
   test_run_continuous_dolt_push

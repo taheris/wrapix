@@ -436,6 +436,7 @@ run_step() {
     bd close "$next_issue"
 
     # Push beads to Dolt remote (incremental sync for progress visibility and crash safety)
+    bd dolt commit >/dev/null 2>&1 || true
     bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
     # Check if all beads with this label are complete
@@ -568,6 +569,7 @@ done
 
 # Final bead sync: push all state to Dolt remote before exiting
 echo "Pushing beads to Dolt remote..."
+bd dolt commit >/dev/null 2>&1 || true
 bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
 
 # Run post-loop hook (even in --once mode, for consistency)
