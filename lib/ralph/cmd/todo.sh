@@ -68,7 +68,7 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   RALPH_ARGS="$RALPH_ARGS ${*:-}"
   export RALPH_ARGS
 
-  # Resolve label and molecule ID for host-side verification
+  # Resolve label for host-side verification
   _HOST_RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
   _HOST_LABEL="$SPEC_FLAG"
   if [ -z "$_HOST_LABEL" ] && [ -f "$_HOST_RALPH_DIR/state/current" ]; then
@@ -77,15 +77,9 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     _HOST_LABEL="${_HOST_LABEL%"${_HOST_LABEL##*[![:space:]]}"}"
   fi
   _HOST_STATE_FILE="$_HOST_RALPH_DIR/state/${_HOST_LABEL}.json"
-  _HOST_MOLECULE_ID=""
-  _HOST_PRE_COUNT=0
-  if [ -f "$_HOST_STATE_FILE" ]; then
-    _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
-  fi
-  if [ -n "$_HOST_MOLECULE_ID" ]; then
-    _HOST_PRE_COUNT=$(bd show "$_HOST_MOLECULE_ID" --children --json 2>/dev/null \
-      | jq 'length' 2>/dev/null || echo 0)
-  fi
+  # Count beads by label (works reliably after dolt pull, unlike --children)
+  _HOST_PRE_COUNT=$(bd list -l "spec-${_HOST_LABEL}" --json 2>/dev/null \
+    | jq 'length' 2>/dev/null || echo 0)
 
   wrapix
   wrapix_exit=$?
@@ -95,19 +89,11 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     echo "Syncing beads from container..."
     bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
 
-    # Re-read molecule ID (may have been created inside the container)
-    if [ -z "$_HOST_MOLECULE_ID" ] && [ -f "$_HOST_STATE_FILE" ]; then
-      _HOST_MOLECULE_ID=$(jq -r '.molecule // empty' "$_HOST_STATE_FILE" 2>/dev/null || true)
-    fi
-
     # Host-side verification (informational): did task count increase?
-    _HOST_POST_COUNT=0
-    if [ -n "$_HOST_MOLECULE_ID" ]; then
-      _HOST_POST_COUNT=$(bd show "$_HOST_MOLECULE_ID" --children --json 2>/dev/null \
-        | jq 'length' 2>/dev/null || echo 0)
-    fi
+    _HOST_POST_COUNT=$(bd list -l "spec-${_HOST_LABEL}" --json 2>/dev/null \
+      | jq 'length' 2>/dev/null || echo 0)
 
-    if [ "$_HOST_POST_COUNT" -le "$_HOST_PRE_COUNT" ] && [ -n "$_HOST_MOLECULE_ID" ]; then
+    if [ "$_HOST_POST_COUNT" -le "$_HOST_PRE_COUNT" ]; then
       _PREV_BASE_COMMIT=$(jq -r '.base_commit // "HEAD~1"' "$_HOST_STATE_FILE" 2>/dev/null || echo "HEAD~1")
       echo ""
       echo "Warning: RALPH_COMPLETE but no new tasks detected after sync."

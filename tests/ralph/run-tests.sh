@@ -9081,11 +9081,11 @@ test_todo_post_sync_warning() {
     test_fail "todo.sh should contain _HOST_POST_COUNT for host-side verification"
   fi
 
-  # Verify it uses --children flag for accurate counting
-  if grep -q 'bd show.*--children.*--json' "$todo_script"; then
-    test_pass "todo.sh uses --children flag for task counting"
+  # Verify it uses label-based listing for reliable counting after dolt pull
+  if grep -q 'bd list -l spec-' "$todo_script"; then
+    test_pass "todo.sh uses bd list -l spec-<label> for task counting"
   else
-    test_fail "todo.sh should use bd show --children --json for accurate task count"
+    test_fail "todo.sh should use bd list -l spec-<label> for reliable post-sync task count"
   fi
 
   # Verify it emits a warning, NOT an error with exit 1

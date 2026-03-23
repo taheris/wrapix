@@ -111,7 +111,7 @@ Stores molecule ID in `state/<label>.json`. Stores `HEAD` as `base_commit` on `R
 
 **Container bead sync:** After RALPH_COMPLETE inside the container, `todo.sh` runs `bd dolt push` before the container exits. On the host side, `todo.sh` then runs `bd dolt pull` to receive the synced beads. This two-step sync (push inside container → pull on host) ensures beads created in the container's isolated `.beads/` database reach the host.
 
-**Post-completion verification (host-side, informational):** Before launching the container, the host-side `todo.sh` records the molecule's current task count (0 if new mode). After the container exits with RALPH_COMPLETE and `bd dolt pull` completes, the host re-counts tasks. If the count did not increase, it emits a warning:
+**Post-completion verification (host-side, informational):** Before launching the container, the host-side `todo.sh` counts beads with the `spec-<label>` label via `bd list -l spec-<label>` (0 if none exist yet). After the container exits with RALPH_COMPLETE and `bd dolt pull` completes, the host re-counts using the same label query. If the count did not increase, it emits a warning:
 ```
 Warning: RALPH_COMPLETE but no new tasks detected after sync.
   If bd dolt push failed above, tasks may not have synced.
