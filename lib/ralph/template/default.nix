@@ -166,6 +166,13 @@ let
       default = "";
       description = "Conditional README update instructions";
     };
+
+    IMPLEMENTATION_NOTES = {
+      source = "state";
+      required = false;
+      default = "";
+      description = "Implementation hints from state file, formatted as markdown bullet list";
+    };
   };
 
   # Get list of all variable names
@@ -354,6 +361,7 @@ let
         "CURRENT_FILE"
         "EXIT_SIGNALS"
         "README_INSTRUCTIONS"
+        "IMPLEMENTATION_NOTES"
       ];
     };
 
@@ -372,6 +380,7 @@ let
         "EXISTING_TASKS"
         "EXIT_SIGNALS"
         "README_INSTRUCTIONS"
+        "IMPLEMENTATION_NOTES"
       ];
     };
 

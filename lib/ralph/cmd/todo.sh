@@ -261,6 +261,27 @@ fi
 # Read companion manifests
 COMPANIONS=$(read_manifests "$STATE_FILE")
 
+# Read implementation notes from state file and format as markdown bullet list
+IMPLEMENTATION_NOTES=""
+if [ -f "$STATE_FILE" ]; then
+  _notes_json=$(jq -r '.implementation_notes // empty' "$STATE_FILE" 2>/dev/null || true)
+  if [ -n "$_notes_json" ] && [ "$_notes_json" != "null" ]; then
+    _notes_list=$(echo "$_notes_json" | jq -r '.[] // empty' 2>/dev/null || true)
+    if [ -n "$_notes_list" ]; then
+      IMPLEMENTATION_NOTES="## Implementation Notes
+
+The following implementation hints were gathered during planning. Use them as guidance:
+
+"
+      while IFS= read -r _note; do
+        IMPLEMENTATION_NOTES="${IMPLEMENTATION_NOTES}- ${_note}
+"
+      done <<< "$_notes_list"
+    fi
+  fi
+  unset _notes_json _notes_list _note
+fi
+
 # Render template using centralized render_template function
 if [ "$UPDATE_MODE" = "true" ]; then
   # Compute molecule progress
@@ -283,6 +304,7 @@ if [ "$UPDATE_MODE" = "true" ]; then
     "COMPANIONS=$COMPANIONS" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
+    "IMPLEMENTATION_NOTES=$IMPLEMENTATION_NOTES" \
     "EXIT_SIGNALS=")
 else
   PROMPT_CONTENT=$(render_template "$TEMPLATE_NAME" \
@@ -293,6 +315,7 @@ else
     "CURRENT_FILE=$STATE_FILE" \
     "PINNED_CONTEXT=$PINNED_CONTEXT" \
     "README_INSTRUCTIONS=$README_INSTRUCTIONS" \
+    "IMPLEMENTATION_NOTES=$IMPLEMENTATION_NOTES" \
     "EXIT_SIGNALS=")
 fi
 

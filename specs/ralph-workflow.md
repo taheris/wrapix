@@ -487,6 +487,7 @@ lib/ralph/template/
 | `SPEC_DIFF` | From `git diff base_commit..HEAD` (tier 1) | todo-update |
 | `EXISTING_TASKS` | From molecule task list (tier 2) | todo-update |
 | `COMPANIONS` | From `read_manifests` (companion directories) | plan-update, todo-new, todo-update, run |
+| `IMPLEMENTATION_NOTES` | From `implementation_notes` in `state/<label>.json` | todo-new, todo-update |
 | `MOLECULE_ID` | From `state/<label>.json` | todo-update, run |
 | `ISSUE_ID` | From `bd ready` | run |
 | `TITLE` | From issue | run |
@@ -613,7 +614,8 @@ Spec file: {{SPEC_PATH}}
 5. Existing spec display — Show current spec from `specs/<label>.md` for reference
 6. `{{> companions-context}}` — after existing spec, before update guidelines
 7. Update guidelines — Discuss NEW requirements only
-8. Instructions — LLM edits `specs/<label>.md` directly during the interview; commits changes at end of session (git-tracked specs only; hidden specs just save file)
+8. Implementation notes guidance — Store transient implementation hints in state file `implementation_notes` array, not in the spec
+9. Instructions — LLM edits `specs/<label>.md` directly during the interview; commits changes at end of session (git-tracked specs only; hidden specs just save file)
 10. `{{> exit-signals}}`
 
 **Exit signals:** RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY
@@ -716,6 +718,7 @@ Each workflow has its own state file at `state/<label>.json`:
 | `molecule` | Beads molecule ID (set by `ralph todo`) |
 | `base_commit` | Git commit SHA at which spec was last fully tasked (set by `ralph todo` on success) |
 | `companions` | Array of repo-relative directory paths containing `manifest.md` files |
+| `implementation_notes` | Array of strings — transient implementation hints for task creation (optional) |
 
 ### Active Workflow Pointer
 
@@ -766,6 +769,17 @@ Specs can declare companion directories whose manifest is injected into template
 - Any repo-relative path is valid (not restricted to `specs/`)
 - No CLI flags for managing companions — users edit `state/<label>.json` manually
 - Companions are not included in `plan-new` template (state JSON doesn't exist yet)
+
+## Implementation Notes
+
+State files can contain an optional `implementation_notes` field: an array of strings providing transient implementation hints gathered during `ralph plan -u` spec update interviews. These are details that help the implementer but don't belong in the permanent spec (e.g., "remove the rustup bootstrap block", "use rust-overlay's fromRustupToolchainFile").
+
+- Populated during `ralph plan -u` interviews — the interviewer stores notes in the state file rather than adding an "Implementation Notes" section to the spec markdown
+- Read by `ralph todo` from `state/<label>.json` and formatted as a markdown bullet list
+- Passed to both `todo-new.md` and `todo-update.md` templates as the `IMPLEMENTATION_NOTES` variable
+- Provide additional context to the LLM during task creation without polluting the permanent spec
+
+The `strip_implementation_notes` function in `util.sh` remains as a backward-compatibility safety net for specs that manually include a `## Implementation Notes` section.
 
 ## Git-Based Spec Diffing
 
