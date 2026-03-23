@@ -20,6 +20,7 @@ Different projects require different toolchains. Users need:
 4. **Package Bundling** - Profiles specify packages to include in container image
 5. **Environment Configuration** - Profiles set required environment variables
 6. **Mount Specifications** - Profiles can define default mounts (e.g., cargo cache)
+7. **Toolchain Configuration** - Rust profile supports `withToolchain` for project-specific versions via `rust-toolchain.toml`
 
 ### Non-Functional
 
@@ -44,17 +45,44 @@ Core tools for any development environment:
 
 ### Rust Profile
 
-Extends base with Rust toolchain:
+Extends base with Rust toolchain via `oxalica/rust-overlay`. The overlay provides
+Rust toolchains as proper Nix derivations — no dynamic linker breakage across rebuilds.
+
+**Toolchain:** `rust-bin.stable.latest.default` with extensions `rust-src`, `rust-analyzer`
 
 | Package | Purpose |
 |---------|---------|
-| rustup | Rust toolchain manager |
+| rust-overlay toolchain | cargo, rustc, clippy, rustfmt, rust-analyzer, rust-src |
 | gcc | C compiler for linking |
 | openssl | TLS library |
 | pkg-config | Library discovery |
 | postgresql.lib | Database client libs |
 
-Environment: `RUSTUP_HOME`, `CARGO_HOME`, `OPENSSL_DIR`
+Environment:
+
+- `CARGO_HOME=/workspace/.cargo` — persists registry cache on workspace volume
+- `RUST_SRC_PATH=${toolchain}/lib/rustlib/src/rust/library` — rust-analyzer standard library resolution
+- `LIBRARY_PATH=${pkgs.postgresql.lib}/lib` — PostgreSQL library discovery at link time
+- `OPENSSL_INCLUDE_DIR=${pkgs.openssl.dev}/include` — OpenSSL headers
+- `OPENSSL_LIB_DIR=${pkgs.openssl.out}/lib` — OpenSSL libraries
+
+Mounts:
+
+- `~/.cargo/registry` (ro, optional) — pre-warm crate cache from host
+- `~/.cargo/git` (ro, optional) — pre-warm git dependency cache from host
+
+Network allowlist: `crates.io`, `static.crates.io`, `index.crates.io`
+
+> **Why not rustup?** Rustup downloads pre-built binaries dynamically linked against
+> a specific glibc in the nix store. When nixpkgs is updated and the container is
+> rebuilt, the old glibc path disappears and all toolchain binaries silently break
+> ("No such file or directory" — the dynamic linker is missing). rust-overlay provides
+> the same toolchains as proper Nix derivations with correct dynamic linkers.
+>
+> **Why rust-overlay over plain nixpkgs packages?** rust-overlay supports arbitrary
+> version selection and can read `rust-toolchain.toml` files via
+> `rust-bin.fromRustupToolchainFile`. The `withToolchain` function exposes this.
+> The default profile uses `stable.latest`.
 
 ### Python Profile
 
@@ -70,14 +98,19 @@ Extends base with Python toolchain:
 
 | File | Role |
 |------|------|
-| `lib/sandbox/profiles.nix` | Profile definitions |
-| `lib/default.nix` | Exports `profiles` and `deriveProfile` |
+| `flake.nix` | Add `rust-overlay` flake input, apply overlay to `linuxPkgs` and host `pkgs` |
+| `lib/sandbox/profiles.nix` | Replace `rustup` with `rust-bin.stable.latest.default` toolchain from overlay |
+| `lib/sandbox/linux/entrypoint.sh` | Remove rustup bootstrap logic (`rustup default stable`, `rustup component add`) |
+| `lib/sandbox/darwin/entrypoint.sh` | Remove rustup bootstrap logic |
 
 ## API
 
 ```nix
-# Use built-in profile
+# Use built-in profile (stable.latest)
 mkSandbox { profile = profiles.rust; }
+
+# Use project's rust-toolchain.toml
+mkSandbox { profile = profiles.rust.withToolchain ./rust-toolchain.toml; }
 
 # Extend profile with additional packages
 mkSandbox {
@@ -86,7 +119,27 @@ mkSandbox {
     env = { DATABASE_URL = "postgres://localhost/db"; };
   };
 }
+
+# Combine: custom toolchain + extra packages
+mkSandbox {
+  profile = deriveProfile (profiles.rust.withToolchain ./rust-toolchain.toml) {
+    packages = [ pkgs.sqlx-cli ];
+  };
+}
 ```
+
+### Profile-Specific Configuration
+
+Profiles may expose functions for configuration specific to their toolchain.
+These live on the profile attrset itself, not on `deriveProfile`.
+
+- `profiles.rust.withToolchain` — accepts a `rust-toolchain.toml` path, returns a
+  new profile attrset (without `withToolchain`) using `rust-bin.fromRustupToolchainFile`.
+  Extensions `rust-src` and `rust-analyzer` are merged with any components specified
+  in the toolchain file.
+
+Only the Rust profile has `withToolchain`. Other profiles (base, python) do not
+expose profile-specific configuration functions.
 
 ## Success Criteria
 
@@ -94,6 +147,12 @@ mkSandbox {
   [judge](../tests/judges/profiles.sh#test_base_profile_functional)
 - [ ] Rust profile can compile and run Rust projects
   [judge](../tests/judges/profiles.sh#test_rust_profile)
+- [ ] Rust profile toolchain survives nixpkgs updates (no dynamic linker breakage)
+  [judge](../tests/judges/profiles.sh#test_rust_profile_rebuild_stable)
+- [ ] rust-analyzer can resolve the standard library (RUST_SRC_PATH is set correctly)
+  [judge](../tests/judges/profiles.sh#test_rust_analyzer_sysroot)
+- [ ] `profiles.rust.withToolchain ./rust-toolchain.toml` produces a working profile
+  [judge](../tests/judges/profiles.sh#test_rust_with_toolchain)
 - [ ] Python profile can run Python scripts with dependencies
   [judge](../tests/judges/profiles.sh#test_python_profile)
 - [ ] deriveProfile correctly merges packages and environment
@@ -105,4 +164,4 @@ mkSandbox {
 
 - Language-specific project scaffolding
 - IDE configuration beyond Claude Code
-- Version pinning for language toolchains
+- Auto-detection of `rust-toolchain.toml` at runtime (must be passed explicitly via `withToolchain`)
