@@ -401,6 +401,7 @@ in
           EXISTING_TASKS = "";
           EXIT_SIGNALS = "- RALPH_COMPLETE\n- RALPH_BLOCKED";
           README_INSTRUCTIONS = "";
+          IMPLEMENTATION_NOTES = "";
         };
         checks = assertAll [
           (assertTrue "todo-update-has-spec-diff" (builtins.match ".*Do something else.*" rendered != null))
