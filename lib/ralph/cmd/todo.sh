@@ -89,18 +89,26 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
     echo "Syncing beads from container..."
     bd dolt pull 2>/dev/null || echo "Warning: bd dolt pull failed (beads may not be synced)"
 
-    # Host-side verification (informational): did task count increase?
+    # Host-side verification: did task count increase?
     _HOST_POST_COUNT=$(bd list -l "spec-${_HOST_LABEL}" --json 2>/dev/null \
       | jq 'length' 2>/dev/null || echo 0)
 
     if [ "$_HOST_POST_COUNT" -le "$_HOST_PRE_COUNT" ]; then
       _PREV_BASE_COMMIT=$(jq -r '.base_commit // "HEAD~1"' "$_HOST_STATE_FILE" 2>/dev/null || echo "HEAD~1")
       echo ""
-      echo "Warning: RALPH_COMPLETE but no new tasks detected after sync."
-      echo "  If bd dolt push failed above, tasks may not have synced."
+      echo "ERROR: RALPH_COMPLETE but no new tasks detected after sync."
+      echo "  Container dolt push likely failed — beads are lost."
       echo "  Check: bd list -l spec-${_HOST_LABEL}"
       echo "  To re-run: ralph todo --since ${_PREV_BASE_COMMIT}"
       echo ""
+      echo "Resetting state file to allow re-run..."
+      # Remove molecule and base_commit so tier 4 (new) can run again
+      if [ -f "$_HOST_STATE_FILE" ]; then
+        jq 'del(.molecule, .base_commit)' "$_HOST_STATE_FILE" > "$_HOST_STATE_FILE.tmp" \
+          && mv "$_HOST_STATE_FILE.tmp" "$_HOST_STATE_FILE"
+        echo "  Reset: $_HOST_STATE_FILE"
+      fi
+      exit 1
     fi
   fi
   exit $wrapix_exit
@@ -371,9 +379,20 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
   # Commit working set then push to Dolt remote so host can pull them
   # bd dolt push only pushes committed data; without commit, working set
   # changes are lost to subsequent dolt clone (e.g., ralph run container)
+  echo ""
   echo "Pushing beads to Dolt remote..."
-  bd dolt commit >/dev/null 2>&1 || true
-  bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
+  if ! bd dolt commit 2>&1; then
+    echo "ERROR: bd dolt commit failed — beads will NOT sync to host"
+    echo "  Tasks were created locally but cannot be pushed."
+    echo "  Re-run: ralph todo -s $LABEL"
+    exit 1
+  fi
+  if ! bd dolt push 2>&1; then
+    echo "ERROR: bd dolt push failed — beads will NOT sync to host"
+    echo "  Tasks were committed locally but push to remote failed."
+    echo "  Re-run: ralph todo -s $LABEL"
+    exit 1
+  fi
 
   # Store base_commit (HEAD) on successful completion
   if [ "$SPEC_HIDDEN" = "false" ]; then

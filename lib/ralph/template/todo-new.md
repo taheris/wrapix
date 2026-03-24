@@ -39,20 +39,21 @@ Different tasks in the same molecule can have different profiles. Assign based o
 ## Instructions
 
 1. **Analyze the spec** - Understand all requirements and affected files
-2. **Create the epic** (molecule root):
+2. **Create the epic** (molecule root) and **store its ID** in the state file:
    ```bash
    MOLECULE_ID=$(bd create --type=epic --title="<feature name>" --labels="spec-{{LABEL}}" --silent)
-   ```
-3. **Store the molecule ID** in current.json:
-   ```bash
+   echo "Created molecule: $MOLECULE_ID"
    jq --arg mol "$MOLECULE_ID" '.molecule = $mol' {{CURRENT_FILE}} > {{CURRENT_FILE}}.tmp && mv {{CURRENT_FILE}}.tmp {{CURRENT_FILE}}
    ```
-4. **Create child tasks** with `--parent` and appropriate `profile:X` label:
+   **CRITICAL:** Use the exact ID returned by `bd create --silent`. Do NOT substitute
+   a molecule ID from specs/README.md or any other source — `bd create` generates a
+   unique ID and that is the only valid value.
+3. **Create child tasks** with `--parent` and appropriate `profile:X` label:
    ```bash
    TASK_ID=$(bd create --title="<task title>" --description="<detailed description>" \
      --type=task --labels="spec-{{LABEL}},profile:rust" --parent="$MOLECULE_ID" --silent)
    ```
-5. **Set execution order** with `bd dep add` for tasks that must run sequentially:
+4. **Set execution order** with `bd dep add` for tasks that must run sequentially:
    ```bash
    bd dep add <later-task> <earlier-task>  # later-task waits for earlier-task
    ```
