@@ -3,6 +3,80 @@
 let
   ralph = import ../ralph { inherit pkgs; };
 
+  # Build a Rust toolchain from rust-overlay with required extensions
+  mkRustToolchain =
+    base:
+    base.override {
+      extensions = [
+        "rust-src"
+        "rust-analyzer"
+      ];
+    };
+
+  # Default stable toolchain with extensions
+  defaultRustToolchain = mkRustToolchain pkgs.rust-bin.stable.latest.default;
+
+  # Build a Rust profile attrset from a given toolchain
+  mkRustProfile =
+    toolchain:
+    let
+      profile = mkProfile {
+        name = "rust";
+
+        packages = [
+          toolchain
+          pkgs.gcc
+          pkgs.openssl
+          pkgs.openssl.dev
+          pkgs.pkg-config
+          pkgs.postgresql.lib
+        ];
+
+        enabledPlugins = {
+          "rust-analyzer-lsp@claude-plugins-official" = true;
+        };
+
+        env = {
+          CARGO_HOME = "/workspace/.cargo";
+          RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
+          LIBRARY_PATH = "${pkgs.postgresql.lib}/lib";
+          OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+        };
+
+        mounts = [
+          {
+            source = "~/.cargo/registry";
+            dest = "~/.cargo/registry";
+            mode = "ro";
+            optional = true;
+          }
+          {
+            source = "~/.cargo/git";
+            dest = "~/.cargo/git";
+            mode = "ro";
+            optional = true;
+          }
+        ];
+
+        networkAllowlist = [
+          "crates.io"
+          "static.crates.io"
+          "index.crates.io"
+        ];
+      };
+    in
+    profile;
+
+  # Build a toolchain from a rust-toolchain.toml file, ensuring rust-src and rust-analyzer
+  withToolchainFromFile =
+    toolchainFile:
+    let
+      base = pkgs.rust-bin.fromRustupToolchainFile toolchainFile;
+      toolchain = mkRustToolchain base;
+    in
+    mkRustProfile toolchain;
+
   # Base packages included in all profiles
   basePackages = with pkgs; [
     bash
@@ -90,50 +164,8 @@ in
     name = "base";
   };
 
-  rust = mkProfile {
-    name = "rust";
-
-    packages = with pkgs; [
-      gcc
-      openssl
-      openssl.dev
-      pkg-config
-      postgresql.lib
-      rustup
-    ];
-
-    enabledPlugins = {
-      "rust-analyzer-lsp@claude-plugins-official" = true;
-    };
-
-    env = {
-      CARGO_HOME = "/workspace/.cargo";
-      LIBRARY_PATH = "${pkgs.postgresql.lib}/lib";
-      OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
-      OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-      RUSTUP_HOME = "/workspace/.rustup";
-    };
-
-    mounts = [
-      {
-        source = "~/.cargo/registry";
-        dest = "~/.cargo/registry";
-        mode = "ro";
-        optional = true;
-      }
-      {
-        source = "~/.cargo/git";
-        dest = "~/.cargo/git";
-        mode = "ro";
-        optional = true;
-      }
-    ];
-
-    networkAllowlist = [
-      "crates.io"
-      "static.crates.io"
-      "index.crates.io"
-    ];
+  rust = mkRustProfile defaultRustToolchain // {
+    withToolchain = withToolchainFromFile;
   };
 
   python = mkProfile {

@@ -8,7 +8,7 @@ test_base_profile_functional() {
 
 test_rust_profile() {
   judge_files "lib/sandbox/profiles.nix"
-  judge_criterion "Rust profile includes rustup (which provides rustc and cargo proxies), gcc for linking, openssl, pkg-config, and postgresql libs for building Rust projects. RUSTUP_HOME, CARGO_HOME, and OPENSSL environment variables are configured."
+  judge_criterion "Rust profile uses rust-overlay (rust-bin.stable.latest.default) with extensions rust-src and rust-analyzer, gcc for linking, openssl, pkg-config, and postgresql libs. CARGO_HOME, RUST_SRC_PATH, and OPENSSL environment variables are configured. No rustup or RUSTUP_HOME."
 }
 
 test_python_profile() {
@@ -19,4 +19,9 @@ test_python_profile() {
 test_derive_profile_merge() {
   judge_files "lib/sandbox/profiles.nix"
   judge_criterion "deriveProfile correctly merges packages and environment variables from base and extension profiles"
+}
+
+test_rust_with_toolchain() {
+  judge_files "lib/sandbox/profiles.nix"
+  judge_criterion "profiles.rust.withToolchain accepts a rust-toolchain.toml path and returns a profile attrset (without withToolchain) using rust-bin.fromRustupToolchainFile. Extensions rust-src and rust-analyzer are merged. The returned profile is compatible with deriveProfile."
 }
