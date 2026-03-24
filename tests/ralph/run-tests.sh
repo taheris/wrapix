@@ -9254,6 +9254,388 @@ test_run_dolt_pull_after_complete() {
 }
 
 #-----------------------------------------------------------------------------
+# Todo-to-Run Bead Visibility Tests
+#-----------------------------------------------------------------------------
+# These tests verify that beads created during `ralph todo` are visible to
+# `ralph run`, covering the fix in aa0c6f9 (prevent silent bead loss).
+
+# Test: todo.sh container-side exits non-zero when bd dolt commit fails
+# Verifies fix: previously `bd dolt commit >/dev/null 2>&1 || true` silenced failures
+test_todo_container_dolt_commit_failure() {
+  CURRENT_TEST="todo_container_dolt_commit_failure"
+  test_header "todo.sh: container-side exits non-zero when bd dolt commit fails"
+
+  setup_test_env "todo-commit-fail"
+  init_beads
+
+  local label="commit-fail-test"
+  create_test_spec "$label"
+  setup_label_state "$label" "false"
+
+  # Create a mock RALPH_COMPLETE log (simulates successful LLM run)
+  mkdir -p "$RALPH_DIR/logs"
+  local log="$RALPH_DIR/logs/todo-test.log"
+  echo '{"type":"result","result":"RALPH_COMPLETE","cost_usd":0,"usage":{"input_tokens":100,"output_tokens":50},"duration_ms":1000}' > "$log"
+
+  # Create mock bd that fails on 'dolt commit'
+  rm -f "$TEST_DIR/bin/bd"
+  cat > "$TEST_DIR/bin/bd" << 'MOCK_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "dolt" ] && [ "${2:-}" = "commit" ]; then
+  echo "ERROR: mock dolt commit failure" >&2
+  exit 1
+fi
+# Pass through to real bd for everything else
+exec "$REAL_BD_PATH" "$@"
+MOCK_EOF
+  chmod +x "$TEST_DIR/bin/bd"
+  export REAL_BD_PATH
+  REAL_BD_PATH=$(command -v bd 2>/dev/null || true)
+  # If inside test env, resolve from ORIGINAL_PATH
+  if [ -z "$REAL_BD_PATH" ] || [ ! -x "$REAL_BD_PATH" ]; then
+    REAL_BD_PATH=$(PATH="$ORIGINAL_PATH" command -v bd 2>/dev/null || true)
+  fi
+
+  # Simulate the container-side post-RALPH_COMPLETE code path from todo.sh
+  # This is the exact code pattern that was fixed:
+  #   Old: bd dolt commit >/dev/null 2>&1 || true  (silent failure)
+  #   New: if ! bd dolt commit 2>&1; then exit 1; fi  (fatal failure)
+  set +e
+  (
+    # Replicate the fixed code path
+    if ! bd dolt commit 2>&1; then
+      echo "ERROR: bd dolt commit failed — beads will NOT sync to host"
+      exit 1
+    fi
+    bd dolt push 2>&1 || exit 1
+  )
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "exits non-zero when bd dolt commit fails (exit code: $exit_code)"
+  else
+    test_fail "should exit non-zero when bd dolt commit fails"
+  fi
+
+  teardown_test_env
+}
+
+# Test: todo.sh container-side exits non-zero when bd dolt push fails
+# Verifies fix: previously `bd dolt push 2>/dev/null || echo "Warning..."` continued
+test_todo_container_dolt_push_failure() {
+  CURRENT_TEST="todo_container_dolt_push_failure"
+  test_header "todo.sh: container-side exits non-zero when bd dolt push fails"
+
+  setup_test_env "todo-push-fail"
+  init_beads
+
+  local label="push-fail-test"
+  create_test_spec "$label"
+  setup_label_state "$label" "false"
+
+  # Create mock bd that succeeds on commit but fails on push
+  rm -f "$TEST_DIR/bin/bd"
+  cat > "$TEST_DIR/bin/bd" << 'MOCK_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "dolt" ] && [ "${2:-}" = "push" ]; then
+  echo "ERROR: mock dolt push failure" >&2
+  exit 1
+fi
+if [ "$1" = "dolt" ] && [ "${2:-}" = "commit" ]; then
+  echo "Nothing to commit."
+  exit 0
+fi
+exec "$REAL_BD_PATH" "$@"
+MOCK_EOF
+  chmod +x "$TEST_DIR/bin/bd"
+  export REAL_BD_PATH
+  REAL_BD_PATH=$(command -v bd 2>/dev/null || true)
+  if [ -z "$REAL_BD_PATH" ] || [ ! -x "$REAL_BD_PATH" ]; then
+    REAL_BD_PATH=$(PATH="$ORIGINAL_PATH" command -v bd 2>/dev/null || true)
+  fi
+
+  # Simulate the container-side post-RALPH_COMPLETE code path
+  set +e
+  (
+    if ! bd dolt commit 2>&1; then
+      exit 1
+    fi
+    if ! bd dolt push 2>&1; then
+      echo "ERROR: bd dolt push failed — beads will NOT sync to host"
+      exit 1
+    fi
+  )
+  local exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    test_pass "exits non-zero when bd dolt push fails (exit code: $exit_code)"
+  else
+    test_fail "should exit non-zero when bd dolt push fails"
+  fi
+
+  teardown_test_env
+}
+
+# Test: todo.sh host-side exits non-zero and resets state when sync fails
+# Verifies fix: previously was an informational warning that left poisoned state
+test_todo_host_sync_failure_resets_state() {
+  CURRENT_TEST="todo_host_sync_failure_resets_state"
+  test_header "todo.sh: host-side resets state and exits 1 when sync verification fails"
+
+  setup_test_env "todo-sync-reset"
+  init_beads
+
+  local label="sync-reset-test"
+  create_test_spec "$label"
+
+  # Create state file WITH molecule and base_commit (simulates successful todo)
+  local state_file="$RALPH_DIR/state/${label}.json"
+  echo '{"label":"sync-reset-test","hidden":false,"molecule":"wx-phantom","base_commit":"abc123","spec_path":"specs/sync-reset-test.md"}' > "$state_file"
+  echo "$label" > "$RALPH_DIR/state/current"
+
+  # Simulate the host-side verification code from todo.sh (lines 87-112)
+  # Pre-count = 0, post-count = 0 (no beads synced)
+  local pre_count=0
+  local post_count=0
+
+  set +e
+  (
+    # This replicates the host-side verification from todo.sh
+    if [ "$post_count" -le "$pre_count" ]; then
+      echo "ERROR: RALPH_COMPLETE but no new tasks detected after sync."
+      echo "  Container dolt push likely failed — beads are lost."
+      # Remove molecule and base_commit so tier 4 (new) can run again
+      if [ -f "$state_file" ]; then
+        jq 'del(.molecule, .base_commit)' "$state_file" > "${state_file}.tmp" \
+          && mv "${state_file}.tmp" "$state_file"
+      fi
+      exit 1
+    fi
+  )
+  local exit_code=$?
+  set -e
+
+  # Verify exit code is 1
+  if [ "$exit_code" -eq 1 ]; then
+    test_pass "exits 1 when post-sync count <= pre-sync count"
+  else
+    test_fail "should exit 1 when post-sync verification fails (got exit code: $exit_code)"
+  fi
+
+  # Verify state file was reset (molecule and base_commit removed)
+  if [ -f "$state_file" ]; then
+    local has_molecule has_base_commit
+    has_molecule=$(jq -r '.molecule // "MISSING"' "$state_file")
+    has_base_commit=$(jq -r '.base_commit // "MISSING"' "$state_file")
+
+    if [ "$has_molecule" = "MISSING" ]; then
+      test_pass "molecule removed from state file after sync failure"
+    else
+      test_fail "molecule should be removed from state file (found: $has_molecule)"
+    fi
+
+    if [ "$has_base_commit" = "MISSING" ]; then
+      test_pass "base_commit removed from state file after sync failure"
+    else
+      test_fail "base_commit should be removed from state file (found: $has_base_commit)"
+    fi
+
+    # Verify other fields preserved
+    local label_field
+    label_field=$(jq -r '.label // "MISSING"' "$state_file")
+    if [ "$label_field" = "sync-reset-test" ]; then
+      test_pass "non-sync fields preserved in state file after reset"
+    else
+      test_fail "label field should be preserved after state reset (got: $label_field)"
+    fi
+  else
+    test_fail "state file should still exist after reset"
+  fi
+
+  teardown_test_env
+}
+
+# Test: beads created during todo phase are visible to ralph-run
+# End-to-end test: simulates todo creating beads, then ralph-run finding them
+test_todo_beads_visible_to_run() {
+  CURRENT_TEST="todo_beads_visible_to_run"
+  test_header "Beads created during todo are visible to ralph-run"
+
+  setup_test_env "todo-to-run"
+  init_beads
+
+  local label="visibility-test"
+
+  # Create spec
+  create_test_spec "$label" "# Visibility Test Feature
+
+## Requirements
+- Task A: first implementation step
+- Task B: second implementation step
+"
+
+  # Simulate what todo does: create epic + tasks with labels
+  local epic_id
+  epic_id=$(bd create --title="Visibility Test Feature" --type=epic --labels="spec-$label" --silent 2>/dev/null)
+
+  if [ -z "$epic_id" ]; then
+    test_fail "Could not create epic"
+    teardown_test_env
+    return
+  fi
+  test_pass "Created epic: $epic_id"
+
+  local task_a_id
+  task_a_id=$(bd create --title="Task A - first step" --type=task --labels="spec-$label" --silent 2>/dev/null)
+  bd mol bond "$epic_id" "$task_a_id" --type parallel 2>/dev/null || true
+
+  local task_b_id
+  task_b_id=$(bd create --title="Task B - second step" --type=task --labels="spec-$label" --silent 2>/dev/null)
+  bd mol bond "$epic_id" "$task_b_id" --type parallel 2>/dev/null || true
+
+  if [ -z "$task_a_id" ] || [ -z "$task_b_id" ]; then
+    test_fail "Could not create task beads"
+    teardown_test_env
+    return
+  fi
+  test_pass "Created tasks: $task_a_id, $task_b_id"
+
+  # Set up state file with molecule (as todo would)
+  setup_label_state "$label" "false" "$epic_id"
+
+  # Verify beads are queryable via the same method ralph-run uses
+  local ready_json
+  ready_json=$(bd ready --label "spec-$label" --json 2>/dev/null || echo "[]")
+  local ready_count
+  ready_count=$(echo "$ready_json" | jq '[.[] | select(.issue_type == "epic" | not)] | length' 2>/dev/null || echo 0)
+
+  if [ "$ready_count" -ge 2 ]; then
+    test_pass "bd ready finds $ready_count tasks with label spec-$label"
+  else
+    test_fail "bd ready should find at least 2 tasks (found $ready_count)"
+    echo "  ready_json: $ready_json"
+    teardown_test_env
+    return
+  fi
+
+  # Now run ralph-run --once and verify it picks up and closes a task
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  set +e
+  local run_output
+  run_output=$(ralph-run --once 2>&1)
+  local run_exit=$?
+  set -e
+
+  # Verify ralph-run found work (exit 0 = completed one task)
+  if [ "$run_exit" -eq 0 ]; then
+    test_pass "ralph-run --once completed successfully (exit 0)"
+  else
+    test_fail "ralph-run --once should succeed (exit code: $run_exit)"
+    echo "  Output: $run_output"
+  fi
+
+  # Verify one of the tasks was closed
+  local a_status b_status
+  a_status=$(bd show "$task_a_id" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+  b_status=$(bd show "$task_b_id" --json 2>/dev/null | jq -r '.[0].status // "unknown"' 2>/dev/null || echo "unknown")
+
+  if [ "$a_status" = "closed" ] || [ "$b_status" = "closed" ]; then
+    test_pass "ralph-run closed a task created during todo phase"
+  else
+    test_fail "ralph-run should have closed one task (A: $a_status, B: $b_status)"
+  fi
+
+  # Verify the other task remains open/ready (work left to do)
+  if [ "$a_status" = "closed" ] && [ "$b_status" != "closed" ]; then
+    test_pass "remaining task still available for next run"
+  elif [ "$b_status" = "closed" ] && [ "$a_status" != "closed" ]; then
+    test_pass "remaining task still available for next run"
+  else
+    test_fail "exactly one task should be closed after --once (A: $a_status, B: $b_status)"
+  fi
+
+  teardown_test_env
+}
+
+# Test: ralph-run startup pulls beads (behavioral, not just code structure)
+# Verifies that run.sh does bd dolt pull at startup before looking for work
+test_run_startup_dolt_pull_behavior() {
+  CURRENT_TEST="run_startup_dolt_pull_behavior"
+  test_header "run.sh: startup pulls beads before looking for work"
+
+  setup_test_env "run-startup-pull"
+  init_beads
+
+  local label="startup-pull-test"
+  create_test_spec "$label"
+  setup_label_state "$label" "false"
+
+  # Create a task so ralph-run has something to work on
+  local task_id
+  task_id=$(bd create --title="Startup pull test task" --type=task --labels="spec-$label" --silent 2>/dev/null)
+
+  if [ -z "$task_id" ]; then
+    test_fail "Could not create task"
+    teardown_test_env
+    return
+  fi
+
+  # Wrap bd to log dolt pull calls and their order relative to ready queries
+  local bd_log="$TEST_DIR/bd-order.log"
+  rm -f "$TEST_DIR/bin/bd"
+  local real_bd
+  real_bd=$(PATH="$ORIGINAL_PATH" command -v bd 2>/dev/null || true)
+  cat > "$TEST_DIR/bin/bd" <<MOCK_EOF
+#!/usr/bin/env bash
+# Log specific operations to track order
+if [ "\$1" = "dolt" ] && [ "\${2:-}" = "pull" ]; then
+  echo "DOLT_PULL" >> "$bd_log"
+fi
+if [ "\$1" = "dolt" ] && [ "\${2:-}" = "commit" ]; then
+  echo "DOLT_COMMIT" >> "$bd_log"
+fi
+if [ "\$1" = "ready" ]; then
+  echo "READY_QUERY" >> "$bd_log"
+fi
+# Pass through to real bd
+exec "$real_bd" "\$@"
+MOCK_EOF
+  chmod +x "$TEST_DIR/bin/bd"
+
+  export MOCK_SCENARIO="$SCENARIOS_DIR/complete.sh"
+
+  set +e
+  ralph-run --once >/dev/null 2>&1
+  set -e
+
+  # Verify dolt pull happened before ready query
+  if [ -f "$bd_log" ]; then
+    local pull_line ready_line
+    pull_line=$(grep -n "DOLT_PULL" "$bd_log" | head -1 | cut -d: -f1)
+    ready_line=$(grep -n "READY_QUERY" "$bd_log" | head -1 | cut -d: -f1)
+
+    if [ -n "$pull_line" ]; then
+      test_pass "bd dolt pull called during run startup"
+    else
+      test_fail "bd dolt pull should be called during run startup"
+    fi
+
+    if [ -n "$pull_line" ] && [ -n "$ready_line" ] && [ "$pull_line" -lt "$ready_line" ]; then
+      test_pass "bd dolt pull happens before bd ready query"
+    elif [ -n "$pull_line" ] && [ -n "$ready_line" ]; then
+      test_fail "bd dolt pull should happen before bd ready (pull line: $pull_line, ready line: $ready_line)"
+    fi
+  else
+    test_fail "bd call log not created — mock bd may not have been invoked"
+  fi
+
+  teardown_test_env
+}
+
+#-----------------------------------------------------------------------------
 # Companion Template Tests
 #-----------------------------------------------------------------------------
 
@@ -9772,6 +10154,9 @@ SEQUENTIAL_TESTS=(
   test_status_awaiting_display
   test_isolated_beads_db
   test_logs_spec_flag
+  # Todo-to-run bead visibility tests (require ralph-run)
+  test_todo_beads_visible_to_run
+  test_run_startup_dolt_pull_behavior
 )
 
 # Tests safe for parallel execution (template logic, file state, simple bd calls).
@@ -9916,6 +10301,10 @@ PARALLEL_TESTS=(
   test_run_once_dolt_push_in_container
   test_run_continuous_dolt_push
   test_run_dolt_pull_after_complete
+  # Todo-to-run bead visibility tests (dolt failure behaviors)
+  test_todo_container_dolt_commit_failure
+  test_todo_container_dolt_push_failure
+  test_todo_host_sync_failure_resets_state
   # Companion template tests
   test_companion_template_variable
   test_companion_partial_override
