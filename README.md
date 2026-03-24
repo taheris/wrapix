@@ -140,7 +140,7 @@ ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
 | Profile | Packages |
 |---------|----------|
 | `base` | git, ripgrep, fd, jq, vim |
-| `rust` | base + rustup, gcc, openssl, pkg-config |
+| `rust` | base + rust-overlay toolchain, gcc, openssl, pkg-config |
 | `python` | base + python3, uv, ty, ruff |
 
 ## MCP Servers
