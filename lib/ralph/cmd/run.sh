@@ -91,6 +91,9 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
+# Warn early if scripts or templates are stale
+check_ralph_staleness
+
 # Pull latest beads state to ensure we have current data
 # This is critical - container may have stale data
 # Commit first so dolt pull can merge into a clean working set

@@ -118,6 +118,9 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
+# Warn early if scripts or templates are stale
+check_ralph_staleness
+
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 
 CONFIG_FILE="$RALPH_DIR/config.nix"

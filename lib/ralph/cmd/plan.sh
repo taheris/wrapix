@@ -29,6 +29,9 @@ fi
 # shellcheck source=util.sh
 source "$(dirname "$0")/util.sh"
 
+# Warn early if scripts or templates are stale
+check_ralph_staleness
+
 RALPH_DIR="${RALPH_DIR:-.wrapix/ralph}"
 
 # Template directory: use RALPH_TEMPLATE_DIR if set and exists

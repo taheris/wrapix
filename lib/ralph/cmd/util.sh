@@ -36,6 +36,53 @@ error() {
   exit 1
 }
 
+# Check for stale ralph scripts or templates and warn the user.
+# Compares build-time hashes (embedded in the Nix derivation) against the
+# current source files in the workspace. Call early in todo.sh / run.sh.
+#
+# Checks:
+#   1. Scripts: RALPH_METADATA_DIR/scripts-hash vs lib/ralph/cmd/*.sh
+#   2. Templates: local .wrapix/ralph/template/ vs RALPH_TEMPLATE_DIR
+#
+# Usage: check_ralph_staleness
+check_ralph_staleness() {
+  local metadata_dir="${RALPH_METADATA_DIR:-}"
+  local source_cmd_dir="lib/ralph/cmd"
+
+  # --- Script staleness (Nix store vs workspace source) ---
+  if [ -n "$metadata_dir" ] && [ -f "$metadata_dir/scripts-hash" ] && [ -d "$source_cmd_dir" ]; then
+    local built_hash live_hash
+    built_hash=$(<"$metadata_dir/scripts-hash")
+    live_hash=$(cat "$source_cmd_dir"/*.sh 2>/dev/null | sha256sum | cut -d' ' -f1)
+    if [ "$built_hash" != "$live_hash" ]; then
+      warn "ralph scripts are stale — source has changed since last build"
+      warn "  run: direnv reload   (or re-enter nix develop)"
+      echo "" >&2
+    fi
+  fi
+
+  # --- Template staleness (local copies vs packaged) ---
+  local template_dir="${RALPH_TEMPLATE_DIR:-}"
+  local local_dir="${RALPH_DIR:-.wrapix/ralph}/template"
+  if [ -n "$template_dir" ] && [ -d "$template_dir" ] && [ -d "$local_dir" ]; then
+    local stale_templates=()
+    for f in "$local_dir"/*.md; do
+      [ -f "$f" ] || continue
+      local name
+      name=$(basename "$f")
+      local packaged="$template_dir/$name"
+      if [ -f "$packaged" ] && ! diff -q "$packaged" "$f" >/dev/null 2>&1; then
+        stale_templates+=("$name")
+      fi
+    done
+    if [ ${#stale_templates[@]} -gt 0 ]; then
+      warn "local templates are out-of-date: ${stale_templates[*]}"
+      warn "  run: ralph sync"
+      echo "" >&2
+    fi
+  fi
+}
+
 # Validate JSON string is valid
 # Usage: validate_json "$json_string" "description"
 validate_json() {

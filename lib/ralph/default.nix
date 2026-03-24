@@ -27,7 +27,7 @@ let
   );
 
   # All ralph scripts bundled in a single derivation
-  scripts = runCommand "ralph-scripts" { } ''
+  scripts = runCommand "ralph-scripts" { nativeBuildInputs = [ pkgs.coreutils ]; } ''
     mkdir -p $out/bin $out/share/ralph
     for script in ${./cmd}/*.sh; do
       name=$(basename "$script" .sh)
@@ -44,6 +44,11 @@ let
         chmod +x $out/bin/ralph-$name
       fi
     done
+
+    # Compute source hash for staleness detection at runtime
+    # Scripts and templates are hashed separately so each can warn independently
+    cat ${./cmd}/*.sh | sha256sum | cut -d' ' -f1 > $out/share/ralph/scripts-hash
+    find ${./template} -type f | sort | xargs cat | sha256sum | cut -d' ' -f1 > $out/share/ralph/templates-hash
 
     # Copy pre-computed metadata
     cp ${variablesJson} $out/share/ralph/variables.json
