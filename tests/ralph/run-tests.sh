@@ -8229,6 +8229,7 @@ _setup_spec_diff_git() {
   git init -q "$TEST_DIR"
   git -C "$TEST_DIR" config user.email "test@test.com"
   git -C "$TEST_DIR" config user.name "Test"
+  git -C "$TEST_DIR" config commit.gpgsign false
 
   # Create and commit initial spec
   create_test_spec "$label" "# Initial Spec
