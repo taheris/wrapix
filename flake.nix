@@ -13,6 +13,11 @@
       url = "git+ssh://git@github.com/hercules-ci/flake-parts.git?ref=main&shallow=1";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
+
+    rust-overlay = {
+      url = "git+ssh://git@github.com/oxalica/rust-overlay.git?ref=master&shallow=1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -54,7 +59,10 @@
           };
           linuxPkgs = import nixpkgs {
             system = linuxSystem;
-            overlays = [ linuxOverlay ];
+            overlays = [
+              inputs.rust-overlay.overlays.default
+              linuxOverlay
+            ];
             config.allowUnfree = true;
           };
 
@@ -73,7 +81,10 @@
 
           _module.args.pkgs = import nixpkgs {
             inherit system;
-            overlays = [ hostOverlay ];
+            overlays = [
+              inputs.rust-overlay.overlays.default
+              hostOverlay
+            ];
             config.allowUnfree = true;
           };
 

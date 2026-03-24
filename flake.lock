@@ -65,7 +65,30 @@
       "inputs": {
         "beads": "beads",
         "flake-parts": "flake-parts",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "rust-overlay": "rust-overlay"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1774321696,
+        "narHash": "sha256-g18xMjMNla/nsF5XyQCNyWmtb2UlZpkY0XE8KinIXAA=",
+        "ref": "master",
+        "rev": "49a67e6894d4cb782842ee6faa466aa90c92812d",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/oxalica/rust-overlay.git"
+      },
+      "original": {
+        "ref": "master",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/oxalica/rust-overlay.git"
       }
     }
   },
