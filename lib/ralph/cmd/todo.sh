@@ -339,7 +339,7 @@ export PROMPT_CONTENT
 run_claude_stream "PROMPT_CONTENT" "$LOG" "$CONFIG"
 
 # Check for completion by examining the result in the JSON log
-if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LOG" >/dev/null 2>&1; then
+if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$LOG" >/dev/null 2>&1; then
   echo ""
   echo "Molecule creation complete!"
 

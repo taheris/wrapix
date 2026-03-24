@@ -433,7 +433,7 @@ run_step() {
   run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
 
   # Check for completion by examining the result in the JSON log
-  if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$log" >/dev/null 2>&1; then
+  if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
     echo ""
     echo "Work complete. Closing issue: $next_issue"
     bd close "$next_issue"
@@ -445,7 +445,7 @@ run_step() {
     # Check if all beads with this label are complete
     check_all_complete "$bead_label" "$label" "$hidden"
     return 0
-  elif jq -e 'select(.type == "result") | .result | contains("RALPH_CLARIFY")' "$log" >/dev/null 2>&1; then
+  elif jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$log" >/dev/null 2>&1; then
     # Agent needs clarification — add awaiting:input label and store question
     local clarify_text
     clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
