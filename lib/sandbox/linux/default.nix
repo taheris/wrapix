@@ -53,10 +53,14 @@ in
         pkgs.podman
       ];
       text = ''
+        # Verbose mode for debugging startup
+        WRAPIX_VERBOSE="''${WRAPIX_VERBOSE:-}"
+        verbose() { [ -n "$WRAPIX_VERBOSE" ] && echo "[wrapix] $*" >&2 || true; }
+
         # Ensure USER is set (may be unset in some environments)
         USER="''${USER:-$(id -un)}"
 
-        # XDG-compliant directories for staging
+        # XDG-compliant directories for staging and image cache
         XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
         WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
         PROJECT_DIR="''${1:-$(pwd)}"
@@ -73,6 +77,8 @@ in
 
         ${expandPathFn}
 
+        verbose "Project dir: $PROJECT_DIR"
+
         # Read git author from host config (overrideable via env vars)
         GIT_AUTHOR_NAME="''${GIT_AUTHOR_NAME:-$(git config --global user.name 2>/dev/null || echo 'Wrapix Sandbox')}"
         GIT_AUTHOR_EMAIL="''${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>/dev/null || echo 'sandbox@wrapix.dev')}"
@@ -88,6 +94,7 @@ in
 
         dir_idx=0
 
+        verbose "Staging profile mounts..."
         # Process profile mounts - stage directories to dereference symlinks
         while IFS=: read -r src dest mode optional; do
           [ -z "$src" ] && continue
@@ -219,8 +226,28 @@ in
             ''
         }
 
-        # Pre-load image quietly to avoid "Copying blob" noise during podman run
-        IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
+        # Load image with caching: only reload when the Nix store path changes
+        IMAGE_VERSION_FILE="$WRAPIX_CACHE/images/wrapix-${profile.name}.version"
+        CURRENT_IMAGE_HASH="${profileImage}"
+        mkdir -p "$WRAPIX_CACHE/images"
+        if [ -f "$IMAGE_VERSION_FILE" ] && [ "$(cat "$IMAGE_VERSION_FILE")" = "$CURRENT_IMAGE_HASH" ]; then
+          IMAGE_ID="localhost/wrapix-${profile.name}:latest"
+          # Verify the image still exists in podman store
+          if ! podman image exists "$IMAGE_ID" 2>/dev/null; then
+            verbose "Image missing from podman store, reloading..."
+            rm -f "$IMAGE_VERSION_FILE"
+          else
+            verbose "Using cached image $IMAGE_ID"
+          fi
+        fi
+        if [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
+          verbose "Loading image from ${profileImage}..."
+          IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
+          echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
+          verbose "Loaded image $IMAGE_ID"
+        fi
+
+        verbose "Starting container (cpus=$CPUS, memory=${toString memoryMb}m)..."
 
         # Detect krun availability for microVM boundary (see specs/security-review.md)
         # Default: container boundary (krun microVM currently disabled)
@@ -301,6 +328,7 @@ in
           -e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME" \
           -e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL" \
           -e "WRAPIX_SESSION_ID=$WRAPIX_SESSION_ID" \
+          -e "WRAPIX_VERBOSE=''${WRAPIX_VERBOSE:-}" \
           -e "WRAPIX_NETWORK=$WRAPIX_NETWORK" \
           -e "WRAPIX_NETWORK_ALLOWLIST=${networkAllowlist}" \
           ''${WRAPIX_GIT_SIGN:+-e "WRAPIX_GIT_SIGN=$WRAPIX_GIT_SIGN"} \

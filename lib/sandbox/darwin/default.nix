@@ -37,13 +37,15 @@ in
     writeShellScriptBin "wrapix" ''
             set -euo pipefail
 
+            # Verbose mode for debugging startup
+            WRAPIX_VERBOSE="''${WRAPIX_VERBOSE:-}"
+            verbose() { [ -n "$WRAPIX_VERBOSE" ] && echo "[wrapix] $*" >&2 || true; }
+
             # Ensure USER is set (may be unset in some environments)
             USER="''${USER:-$(id -un)}"
 
-            # XDG-compliant directories
-            XDG_DATA_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}"
+            # XDG-compliant directories for staging and image cache
             XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
-            WRAPIX_DATA="$XDG_DATA_HOME/wrapix"
             WRAPIX_CACHE="$XDG_CACHE_HOME/wrapix"
             PROJECT_DIR="''${1:-$(pwd)}"
             shift || true
@@ -68,11 +70,12 @@ in
 
             # Load profile image if needed (reload if image hash changed)
             PROFILE_IMAGE="wrapix-${profile.name}:latest"
-            IMAGE_VERSION_FILE="$WRAPIX_DATA/images/wrapix-${profile.name}.version"
+            IMAGE_VERSION_FILE="$WRAPIX_CACHE/images/wrapix-${profile.name}.version"
             CURRENT_IMAGE_HASH="${profileImage}"
-            mkdir -p "$WRAPIX_DATA/images"
+            mkdir -p "$WRAPIX_CACHE/images"
             if ! container image inspect "$PROFILE_IMAGE" >/dev/null 2>&1 || \
                [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
+              verbose "Image hash changed or missing, reloading..."
               echo "Loading profile image..."
               # Delete old image if exists
               container image delete "$PROFILE_IMAGE" 2>/dev/null || true
@@ -91,7 +94,12 @@ in
               fi
               rm -f "$OCI_TAR"
               echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
+              verbose "Loaded image $PROFILE_IMAGE"
+            else
+              verbose "Using cached image $PROFILE_IMAGE"
             fi
+
+            verbose "Project dir: $PROJECT_DIR"
 
             # Build mount arguments at runtime
             # VirtioFS quirks we handle:
@@ -261,6 +269,7 @@ in
 
             # Build environment arguments (use array to handle spaces in values)
             ENV_ARGS=()
+            ENV_ARGS+=(-e "WRAPIX_VERBOSE=''${WRAPIX_VERBOSE:-}")
             ENV_ARGS+=(-e "BD_NO_DAEMON=1")
             ENV_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}")
             ENV_ARGS+=(-e "RALPH_MODE=''${RALPH_MODE:-}")
@@ -303,6 +312,8 @@ in
 
             # Ensure .claude directory exists on host for session persistence
             mkdir -p "$PROJECT_DIR/.claude"
+
+            verbose "Starting container (cpus=$CPUS, memory=${toString memoryMb}M)..."
 
             # Run container
             # Note: -w / because WorkingDir=/workspace fails before mounts are ready
