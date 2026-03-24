@@ -21,6 +21,16 @@ test_derive_profile_merge() {
   judge_criterion "deriveProfile correctly merges packages and environment variables from base and extension profiles"
 }
 
+test_rust_profile_rebuild_stable() {
+  judge_files "lib/sandbox/linux/entrypoint.sh" "lib/sandbox/darwin/entrypoint.sh"
+  judge_criterion "Entrypoint scripts contain no rustup bootstrap logic (no rustup default, rustup component add, RUSTUP_HOME checks). Rust toolchain is provided entirely by rust-overlay at image build time."
+}
+
+test_rust_analyzer_sysroot() {
+  judge_files "lib/sandbox/profiles.nix"
+  judge_criterion "RUST_SRC_PATH is set correctly so rust-analyzer can resolve the standard library sysroot."
+}
+
 test_rust_with_toolchain() {
   judge_files "lib/sandbox/profiles.nix"
   judge_criterion "profiles.rust.withToolchain accepts a rust-toolchain.toml path and returns a profile attrset (without withToolchain) using rust-bin.fromRustupToolchainFile. Extensions rust-src and rust-analyzer are merged. The returned profile is compatible with deriveProfile."
