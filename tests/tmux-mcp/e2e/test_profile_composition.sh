@@ -4,7 +4,7 @@
 # This test verifies MCP opt-in composition with language profiles:
 # 1. Build rust + tmux using MCP opt-in:
 #    mkSandbox { profile = rust; mcp = { tmux = {}; }; }
-# 2. Verify rust toolchain is present (rustc, cargo, rustup)
+# 2. Verify rust toolchain is present (rustc, cargo)
 # 3. Verify debug tools are present (tmux, tmux-mcp)
 # 4. Verify all base tools are still present
 #
@@ -156,18 +156,16 @@ check_command_output() {
 echo ""
 log_info "=== Checking Rust toolchain ==="
 
-# Check rustup (Rust toolchain manager)
-check_command "rustup" "rustup (Rust toolchain manager)"
-
-# Check rustc (Rust compiler) - may need rustup to install it first
-check_command_output "rustup show 2>/dev/null || rustup --version" "rustup" "rustup is functional"
+# Check rustc (Rust compiler) - provided by rust-overlay
+check_command "rustc" "rustc (Rust compiler)"
+check_command_output "rustc --version" "rustc" "rustc is functional"
 
 # Check cargo (Rust package manager)
-check_command "cargo" "cargo (Rust package manager)" || true
+check_command "cargo" "cargo (Rust package manager)"
 
-# Verify CARGO_HOME and RUSTUP_HOME environment variables are set
+# Verify CARGO_HOME and RUST_SRC_PATH environment variables are set
 check_command_output "echo \$CARGO_HOME" "/workspace/.cargo" "CARGO_HOME is set correctly"
-check_command_output "echo \$RUSTUP_HOME" "/workspace/.rustup" "RUSTUP_HOME is set correctly"
+check_command_output "echo \$RUST_SRC_PATH" "rustlib/src/rust/library" "RUST_SRC_PATH is set correctly"
 
 echo ""
 log_info "=== Checking debug tools ==="
@@ -213,13 +211,13 @@ cat > "${WORKSPACE}/check_env.sh" << 'SCRIPT'
 #!/usr/bin/env bash
 echo "=== Environment Variables ==="
 echo "CARGO_HOME=$CARGO_HOME"
-echo "RUSTUP_HOME=$RUSTUP_HOME"
+echo "RUST_SRC_PATH=$RUST_SRC_PATH"
 echo "OPENSSL_LIB_DIR=$OPENSSL_LIB_DIR"
 echo "OPENSSL_INCLUDE_DIR=$OPENSSL_INCLUDE_DIR"
 echo "PATH=$PATH"
 echo ""
 echo "=== Tools availability ==="
-echo "rustup: $(which rustup 2>/dev/null || echo 'not found')"
+echo "rustc: $(which rustc 2>/dev/null || echo 'not found')"
 echo "tmux: $(which tmux 2>/dev/null || echo 'not found')"
 echo "tmux-mcp: $(which tmux-mcp 2>/dev/null || echo 'not found')"
 echo "git: $(which git 2>/dev/null || echo 'not found')"
@@ -246,7 +244,7 @@ if [[ $FAILED -eq 0 ]]; then
     echo ""
     echo "Summary:"
     echo "  - rust + tmux MCP opt-in builds successfully"
-    echo "  - Rust toolchain (rustup, cargo) available"
+    echo "  - Rust toolchain (rustc, cargo) available"
     echo "  - MCP server (tmux, tmux-mcp) available"
     echo "  - Base profile tools (git, jq, curl, etc.) available"
     echo "  - Rust environment and MCP packages merged correctly"
