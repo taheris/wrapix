@@ -334,18 +334,22 @@ if jq -e 'select(.type == "result") | .result | contains("RALPH_COMPLETE")' "$LO
 
   FINAL_SPEC_PATH="$SPECS_DIR/$LABEL.md"
 
-  if [ "$UPDATE_MODE" != "true" ]; then
-    # New spec mode: strip Implementation Notes section if present
-    if [ -f "$SPEC_PATH" ]; then
-      SPEC_CONTENT=$(cat "$SPEC_PATH")
-      FINAL_CONTENT=$(strip_implementation_notes "$SPEC_CONTENT")
+  # Strip Implementation Notes section from spec if present
+  if [ -f "$SPEC_PATH" ]; then
+    SPEC_CONTENT=$(cat "$SPEC_PATH")
+    FINAL_CONTENT=$(strip_implementation_notes "$SPEC_CONTENT")
 
-      if [ "$SPEC_CONTENT" != "$FINAL_CONTENT" ]; then
-        echo ""
-        echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
-        echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
-      fi
+    if [ "$SPEC_CONTENT" != "$FINAL_CONTENT" ]; then
+      echo ""
+      echo "Stripping Implementation Notes from $FINAL_SPEC_PATH..."
+      echo "$FINAL_CONTENT" > "$FINAL_SPEC_PATH"
     fi
+  fi
+
+  # Clear implementation_notes from state file — they've been consumed
+  if [ -f "$STATE_FILE" ] && jq -e '.implementation_notes' "$STATE_FILE" >/dev/null 2>&1; then
+    jq 'del(.implementation_notes)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+    echo "Cleared implementation_notes from state file"
   fi
 
   # Commit the spec file
