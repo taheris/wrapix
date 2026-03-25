@@ -1069,6 +1069,81 @@ remove_clarify_label() {
 }
 
 #-----------------------------------------------------------------------------
+# Worktree Management for Parallel Dispatch
+#
+# Helpers for creating, merging, and cleaning up git worktrees used by
+# parallel ralph run workers. Each worker gets an isolated worktree on
+# a branch named ralph/<label>/<bead-id>.
+#-----------------------------------------------------------------------------
+
+# Create a git worktree for a parallel worker
+# Usage: create_worktree <label> <bead_id>
+# Output: worktree path on stdout
+# Returns: 0 on success, 1 on failure
+create_worktree() {
+  local label="$1"
+  local bead_id="$2"
+  local branch_name="ralph/${label}/${bead_id}"
+  local worktree_path
+  worktree_path=$(mktemp -d "/tmp/ralph-worktree-XXXXXX")
+
+  debug "Creating worktree at $worktree_path on branch $branch_name"
+
+  if ! git worktree add "$worktree_path" -b "$branch_name" HEAD 2>/dev/null; then
+    warn "Failed to create worktree for $bead_id"
+    rm -rf "$worktree_path"
+    return 1
+  fi
+
+  echo "$worktree_path"
+}
+
+# Merge a worktree branch back to the current branch
+# Usage: merge_worktree <worktree_path> <bead_id>
+# Returns: 0 on success, 1 on merge conflict (bead reopened with details)
+merge_worktree() {
+  local worktree_path="$1"
+  local bead_id="$2"
+  local branch_name
+  branch_name=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+  debug "Merging worktree branch $branch_name for $bead_id"
+
+  if git merge --no-edit "$branch_name" 2>/dev/null; then
+    # Success — clean up worktree and branch
+    git worktree remove "$worktree_path" 2>/dev/null || true
+    git branch -d "$branch_name" 2>/dev/null || true
+    debug "Successfully merged and cleaned up worktree for $bead_id"
+    return 0
+  else
+    # Merge conflict — abort merge, reopen bead with details
+    warn "Merge conflict for $bead_id on branch $branch_name"
+    git merge --abort 2>/dev/null || true
+
+    # Reopen the bead with conflict information
+    bd update "$bead_id" --status=open 2>/dev/null || true
+    bd update "$bead_id" --add-label "ralph:clarify" 2>/dev/null || true
+    bd update "$bead_id" --append-notes "Merge conflict when merging worktree branch $branch_name back to main working branch. Manual resolution required." 2>/dev/null || true
+
+    # Clean up worktree
+    cleanup_worktree "$worktree_path"
+    git branch -D "$branch_name" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# Force-remove a worktree (for error cleanup)
+# Usage: cleanup_worktree <worktree_path>
+# Returns: 0 always
+cleanup_worktree() {
+  local worktree_path="$1"
+
+  debug "Cleaning up worktree at $worktree_path"
+  git worktree remove --force "$worktree_path" 2>/dev/null || rm -rf "$worktree_path"
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Spec Hidden Detection
 #
 # Derives whether a spec is hidden from its spec_path in state JSON.

@@ -23,12 +23,18 @@ set -euo pipefail
 RUN_ONCE=false
 PROFILE_OVERRIDE=""
 SPEC_FLAG=""
+PARALLEL_FLAG=""
 RUN_ARGS=()
 
 for arg in "$@"; do
   if [ "${_next_is_spec:-}" = "1" ]; then
     SPEC_FLAG="$arg"
     unset _next_is_spec
+    continue
+  fi
+  if [ "${_next_is_parallel:-}" = "1" ]; then
+    PARALLEL_FLAG="$arg"
+    unset _next_is_parallel
     continue
   fi
   case "$arg" in
@@ -44,12 +50,19 @@ for arg in "$@"; do
     --spec=*)
       SPEC_FLAG="${arg#--spec=}"
       ;;
+    --parallel|-p)
+      _next_is_parallel=1
+      ;;
+    --parallel=*)
+      PARALLEL_FLAG="${arg#--parallel=}"
+      ;;
     *)
       RUN_ARGS+=("$arg")
       ;;
   esac
 done
 unset _next_is_spec
+unset _next_is_parallel
 
 # Replace positional params with filtered args
 set -- "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
@@ -66,6 +79,9 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   fi
   if [ -n "$SPEC_FLAG" ]; then
     RALPH_ARGS_PARTS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }--spec $SPEC_FLAG"
+  fi
+  if [ -n "$PARALLEL_FLAG" ]; then
+    RALPH_ARGS_PARTS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }--parallel $PARALLEL_FLAG"
   fi
   export RALPH_ARGS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }${*:-}"
 
@@ -184,6 +200,19 @@ HOOKS_ON_FAILURE=$(echo "$CONFIG" | jq -r '."hooks-on-failure" // "block"' 2>/de
 debug "Loaded hooks - pre-loop: ${HOOK_PRE_LOOP:-(none)}, pre-step: ${HOOK_PRE_STEP:-(none)}"
 debug "  post-step: ${HOOK_POST_STEP:-(none)}, post-loop: ${HOOK_POST_LOOP:-(none)}"
 debug "hooks-on-failure: $HOOKS_ON_FAILURE"
+
+# Load parallel config: flag overrides config, default 1
+PARALLEL=1
+if [ -n "$PARALLEL_FLAG" ]; then
+  PARALLEL="$PARALLEL_FLAG"
+else
+  PARALLEL=$(echo "$CONFIG" | jq -r '.loop.parallel // 1' 2>/dev/null || echo "1")
+fi
+# Validate parallel is a positive integer
+if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+  error "Invalid parallel value: $PARALLEL (must be a positive integer)"
+fi
+debug "Parallel concurrency: $PARALLEL"
 
 #-----------------------------------------------------------------------------
 # Hook Support
@@ -476,6 +505,220 @@ run_step() {
 }
 
 #-----------------------------------------------------------------------------
+# Parallel Batch Execution
+#-----------------------------------------------------------------------------
+
+# Get up to N ready bead IDs for this label (excluding epics and ralph:clarify)
+# Usage: get_ready_beads <bead_label> <limit>
+# Output: newline-separated bead IDs
+get_ready_beads() {
+  local bead_label="$1"
+  local limit="$2"
+
+  local bd_list_json
+  bd_list_json=$(bd_json ready --label "$bead_label" --sort priority --json) || {
+    warn "bd ready command failed"
+    echo ""
+    return 0
+  }
+
+  # Filter out epics and beads with ralph:clarify label, take up to limit
+  echo "$bd_list_json" | jq -r \
+    --argjson limit "$limit" \
+    '[.[] | select((.issue_type == "epic" | not) and ((.labels // []) | map(select(. == "ralph:clarify")) | length == 0))] | .[0:$limit] | .[].id' \
+    2>/dev/null || true
+}
+
+# Run a single step in a worktree (for parallel dispatch)
+# This is a simplified version of run_step that operates in a given worktree
+# Usage: run_step_in_worktree <worktree_path> <bead_id> <label> <hidden>
+# Returns: 0 on RALPH_COMPLETE, 1 on failure
+run_step_in_worktree() {
+  local worktree_path="$1"
+  local bead_id="$2"
+  local label="$3"
+  local hidden="$4"
+
+  echo "  [$bead_id] Starting work in worktree: $worktree_path"
+
+  # Mark as in-progress
+  bd update "$bead_id" --status=in_progress
+
+  # Get issue details
+  local issue_json issue_title issue_desc
+  issue_json=$(bd_json show "$bead_id" --json) || issue_json="[]"
+
+  if validate_json_array "$issue_json" "Issue $bead_id" 2>/dev/null; then
+    issue_title=$(json_array_field "$issue_json" "title" "Issue")
+    issue_desc=$(json_array_field "$issue_json" "description" "Issue")
+  else
+    issue_title=""
+    issue_desc=""
+  fi
+
+  # Pin context
+  local pinned_context=""
+  if [ -f "$SPECS_README" ]; then
+    pinned_context=$(cat "$SPECS_README")
+  fi
+
+  # Compute spec path
+  local spec_path
+  if [ "$hidden" = "true" ]; then
+    spec_path="$RALPH_DIR/state/$label.md"
+  else
+    spec_path="$SPECS_DIR/$label.md"
+  fi
+
+  # Read companion manifests
+  local companions=""
+  local state_file="$RALPH_DIR/state/${label}.json"
+  if [ -f "$state_file" ]; then
+    companions=$(read_manifests "$state_file")
+  fi
+
+  # Render template
+  local work_prompt
+  work_prompt=$(render_template run \
+    "SPEC_PATH=$spec_path" \
+    "ISSUE_ID=$bead_id" \
+    "TITLE=$issue_title" \
+    "LABEL=$label" \
+    "MOLECULE_ID=$MOLECULE_ID" \
+    "COMPANIONS=$companions" \
+    "DESCRIPTION=$issue_desc" \
+    "PINNED_CONTEXT=$pinned_context" \
+    "EXIT_SIGNALS=")
+
+  mkdir -p "$RALPH_DIR/logs"
+  local log="$RALPH_DIR/logs/work-$bead_id.log"
+
+  # Run claude in the worktree directory
+  echo "  [$bead_id] Starting claude session..."
+  (
+    cd "$worktree_path"
+    export WORK_PROMPT="$work_prompt"
+    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
+  )
+
+  # Check result
+  if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
+    echo "  [$bead_id] Work complete. Closing issue."
+    bd close "$bead_id"
+    bd dolt commit >/dev/null 2>&1 || true
+    bd dolt push 2>/dev/null || true
+    return 0
+  elif jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$log" >/dev/null 2>&1; then
+    local clarify_text
+    clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
+      | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
+    echo "  [$bead_id] Agent needs clarification."
+    add_clarify_label "$bead_id" "$clarify_text"
+    return 1
+  else
+    echo "  [$bead_id] Work did not complete. Issue remains in-progress."
+    return 1
+  fi
+}
+
+# Execute a parallel batch of beads
+# Usage: run_parallel_batch <label> <hidden> <parallel>
+# Returns: 0 if work was done, 100 if all complete, 1 on failure
+run_parallel_batch() {
+  local label="$1"
+  local hidden="$2"
+  local parallel="$3"
+  local bead_label="spec-$label"
+
+  # Get up to N ready beads
+  local bead_ids
+  bead_ids=$(get_ready_beads "$bead_label" "$parallel")
+
+  if [ -z "$bead_ids" ]; then
+    echo "No more ready issues with label: $bead_label"
+    echo "All work complete!"
+    close_epic_if_exists "$bead_label"
+    update_spec_status_to_review "$label" "$hidden"
+    return 100
+  fi
+
+  local count
+  count=$(echo "$bead_ids" | wc -l)
+  echo "Dispatching $count parallel workers..."
+
+  # Arrays for tracking workers
+  local -a worktree_paths=()
+  local -a worker_beads=()
+  local -a worker_pids=()
+
+  # Create worktrees and spawn workers
+  while IFS= read -r bead_id; do
+    [ -z "$bead_id" ] && continue
+
+    local wt_path
+    wt_path=$(create_worktree "$label" "$bead_id") || {
+      warn "Failed to create worktree for $bead_id, skipping"
+      continue
+    }
+
+    worktree_paths+=("$wt_path")
+    worker_beads+=("$bead_id")
+
+    # Spawn worker in background
+    run_step_in_worktree "$wt_path" "$bead_id" "$label" "$hidden" &
+    worker_pids+=($!)
+
+    echo "  Spawned worker for $bead_id (PID ${worker_pids[-1]})"
+  done <<< "$bead_ids"
+
+  # Wait for all workers to complete
+  echo "Waiting for ${#worker_pids[@]} workers..."
+  local -a worker_exits=()
+  for pid in "${worker_pids[@]}"; do
+    local exit_code=0
+    wait "$pid" || exit_code=$?
+    worker_exits+=("$exit_code")
+  done
+
+  # Merge worktrees back sequentially
+  echo "Merging worktree branches..."
+  local any_success=false
+  local merge_failures=0
+  for i in "${!worktree_paths[@]}"; do
+    local wt="${worktree_paths[$i]}"
+    local bead="${worker_beads[$i]}"
+    local wexit="${worker_exits[$i]}"
+
+    if [ "$wexit" -eq 0 ]; then
+      # Worker succeeded — merge back
+      if merge_worktree "$wt" "$bead"; then
+        echo "  [$bead] Merged successfully."
+        any_success=true
+      else
+        echo "  [$bead] Merge conflict — bead reopened with ralph:clarify."
+        merge_failures=$((merge_failures + 1))
+      fi
+    else
+      # Worker failed — clean up worktree
+      echo "  [$bead] Worker failed (exit $wexit) — cleaning up."
+      cleanup_worktree "$wt"
+      # Delete the worktree branch
+      local branch_name="ralph/${label}/${bead}"
+      git branch -D "$branch_name" 2>/dev/null || true
+    fi
+  done
+
+  # Check if all beads with this label are complete
+  check_all_complete "$bead_label" "$label" "$hidden"
+
+  if [ "$any_success" = "true" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+#-----------------------------------------------------------------------------
 # Main Execution
 #-----------------------------------------------------------------------------
 
@@ -490,6 +733,9 @@ if [ -n "$FEATURE_NAME" ]; then
 fi
 if [ -n "$MOLECULE_ID" ]; then
   echo "  Molecule: $MOLECULE_ID"
+fi
+if [ "$PARALLEL" -gt 1 ]; then
+  echo "  Parallel: $PARALLEL workers"
 fi
 echo ""
 
@@ -522,9 +768,13 @@ while true; do
   # Run pre-step hook
   run_hook "pre-step" "$HOOK_PRE_STEP" "$current_issue_id" "$step_count"
 
-  # Execute the step
+  # Execute the step (parallel or sequential)
   set +e
-  run_step "$FEATURE_NAME" "$SPEC_HIDDEN"
+  if [ "$PARALLEL" -gt 1 ]; then
+    run_parallel_batch "$FEATURE_NAME" "$SPEC_HIDDEN" "$PARALLEL"
+  else
+    run_step "$FEATURE_NAME" "$SPEC_HIDDEN"
+  fi
   EXIT_CODE=$?
   set -e
 

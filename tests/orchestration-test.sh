@@ -409,6 +409,222 @@ test_retry_with_context() {
 }
 
 #-----------------------------------------------------------------------------
+# test_parallel_dispatch
+#
+# Verifies that ralph run accepts -p N / --parallel N flag and reads
+# loop.parallel from config as fallback.
+#-----------------------------------------------------------------------------
+test_parallel_dispatch() {
+  echo "--- test_parallel_dispatch ---"
+
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # 1. run.sh must accept --parallel/-p flag
+  if grep -qE -- '--parallel|\-p' "$run_sh"; then
+    pass "run.sh accepts --parallel/-p flag"
+  else
+    fail "run.sh does not accept --parallel/-p flag"
+    return 1
+  fi
+
+  # 2. run.sh must read loop.parallel from config as fallback
+  if grep -q 'loop.parallel' "$run_sh"; then
+    pass "run.sh reads loop.parallel from config"
+  else
+    fail "run.sh does not read loop.parallel from config"
+    return 1
+  fi
+
+  # 3. run.sh must have a PARALLEL variable
+  if grep -q 'PARALLEL=' "$run_sh"; then
+    pass "run.sh defines PARALLEL variable"
+  else
+    fail "run.sh does not define PARALLEL variable"
+    return 1
+  fi
+
+  # 4. run.sh must validate parallel is a positive integer
+  if grep -q 'Invalid parallel value' "$run_sh"; then
+    pass "run.sh validates parallel value"
+  else
+    fail "run.sh does not validate parallel value"
+    return 1
+  fi
+
+  # 5. run.sh must use run_parallel_batch when parallel > 1
+  if grep -q 'run_parallel_batch' "$run_sh"; then
+    pass "run.sh uses run_parallel_batch for parallel dispatch"
+  else
+    fail "run.sh does not use run_parallel_batch"
+    return 1
+  fi
+
+  # 6. run.sh must preserve --parallel flag in container re-exec args
+  if grep -q 'PARALLEL_FLAG' "$run_sh" && grep -q -- '--parallel.*PARALLEL_FLAG' "$run_sh"; then
+    pass "run.sh preserves --parallel flag in container re-exec"
+  else
+    fail "run.sh does not preserve --parallel flag in container re-exec"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_parallel_worktrees
+#
+# Verifies that util.sh defines worktree helper functions for parallel
+# dispatch: create_worktree, merge_worktree, cleanup_worktree.
+#-----------------------------------------------------------------------------
+test_parallel_worktrees() {
+  echo "--- test_parallel_worktrees ---"
+
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # 1. util.sh must define create_worktree
+  if grep -q '^create_worktree()' "$util_sh"; then
+    pass "util.sh defines create_worktree"
+  else
+    fail "util.sh does not define create_worktree"
+    return 1
+  fi
+
+  # 2. create_worktree must use ralph/<label>/<bead-id> branch naming
+  # shellcheck disable=SC2016
+  if grep -A 10 '^create_worktree()' "$util_sh" | grep -q 'ralph/${label}/${bead_id}'; then
+    pass "create_worktree uses ralph/<label>/<bead-id> branch naming"
+  else
+    fail "create_worktree does not use correct branch naming"
+    return 1
+  fi
+
+  # 3. create_worktree must use git worktree add
+  if grep -A 15 '^create_worktree()' "$util_sh" | grep -q 'git worktree add'; then
+    pass "create_worktree uses git worktree add"
+  else
+    fail "create_worktree does not use git worktree add"
+    return 1
+  fi
+
+  # 4. util.sh must define cleanup_worktree
+  if grep -q '^cleanup_worktree()' "$util_sh"; then
+    pass "util.sh defines cleanup_worktree"
+  else
+    fail "util.sh does not define cleanup_worktree"
+    return 1
+  fi
+
+  # 5. cleanup_worktree must force-remove
+  if grep -A 10 '^cleanup_worktree()' "$util_sh" | grep -q 'worktree remove --force'; then
+    pass "cleanup_worktree force-removes worktree"
+  else
+    fail "cleanup_worktree does not force-remove"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_worktree_merge
+#
+# Verifies that merge_worktree merges the worktree branch back and cleans up.
+#-----------------------------------------------------------------------------
+test_worktree_merge() {
+  echo "--- test_worktree_merge ---"
+
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # 1. util.sh must define merge_worktree
+  if grep -q '^merge_worktree()' "$util_sh"; then
+    pass "util.sh defines merge_worktree"
+  else
+    fail "util.sh does not define merge_worktree"
+    return 1
+  fi
+
+  # 2. merge_worktree must call git merge
+  if grep -A 20 '^merge_worktree()' "$util_sh" | grep -q 'git merge'; then
+    pass "merge_worktree calls git merge"
+  else
+    fail "merge_worktree does not call git merge"
+    return 1
+  fi
+
+  # 3. merge_worktree must clean up worktree on success
+  if grep -A 30 '^merge_worktree()' "$util_sh" | grep -q 'worktree remove'; then
+    pass "merge_worktree cleans up worktree on success"
+  else
+    fail "merge_worktree does not clean up worktree on success"
+    return 1
+  fi
+
+  # 4. merge_worktree must delete branch on success
+  if grep -A 30 '^merge_worktree()' "$util_sh" | grep -q 'git branch -d'; then
+    pass "merge_worktree deletes branch on success"
+  else
+    fail "merge_worktree does not delete branch on success"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_merge_conflict_handling
+#
+# Verifies that merge conflicts reopen the bead with conflict details and
+# add the ralph:clarify label.
+#-----------------------------------------------------------------------------
+test_merge_conflict_handling() {
+  echo "--- test_merge_conflict_handling ---"
+
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # 1. merge_worktree must abort merge on conflict
+  if grep -A 40 '^merge_worktree()' "$util_sh" | grep -q 'merge --abort'; then
+    pass "merge_worktree aborts merge on conflict"
+  else
+    fail "merge_worktree does not abort merge on conflict"
+    return 1
+  fi
+
+  # 2. merge_worktree must reopen the bead (status=open)
+  if grep -A 40 '^merge_worktree()' "$util_sh" | grep -q 'status=open'; then
+    pass "merge_worktree reopens bead on conflict"
+  else
+    fail "merge_worktree does not reopen bead on conflict"
+    return 1
+  fi
+
+  # 3. merge_worktree must add ralph:clarify label on conflict
+  if grep -A 40 '^merge_worktree()' "$util_sh" | grep -q 'ralph:clarify'; then
+    pass "merge_worktree adds ralph:clarify on conflict"
+  else
+    fail "merge_worktree does not add ralph:clarify on conflict"
+    return 1
+  fi
+
+  # 4. merge_worktree must add conflict details to notes
+  if grep -A 40 '^merge_worktree()' "$util_sh" | grep -q 'Merge conflict'; then
+    pass "merge_worktree adds conflict details to notes"
+  else
+    fail "merge_worktree does not add conflict details to notes"
+    return 1
+  fi
+
+  # 5. merge_worktree must clean up worktree even on conflict
+  if grep -A 45 '^merge_worktree()' "$util_sh" | grep -q 'cleanup_worktree'; then
+    pass "merge_worktree cleans up worktree on conflict"
+  else
+    fail "merge_worktree does not clean up worktree on conflict"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -421,6 +637,10 @@ test_msg_list_by_spec
 test_msg_reply
 test_msg_dismiss
 test_retry_with_context
+test_parallel_dispatch
+test_parallel_worktrees
+test_worktree_merge
+test_merge_conflict_handling
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
