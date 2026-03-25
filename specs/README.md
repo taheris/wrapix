@@ -18,6 +18,7 @@ An ordered list of specs and project terminology.
 | [live-specs.md](./live-specs.md) | [`lib/ralph/cmd/spec.sh`](../lib/ralph/cmd/spec.sh) | wx-a13n | Queryable, verifiable, observable specifications |
 | [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
 | [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-9mvh | Browser automation for frontend development |
+| [orchestration.md](./orchestration.md) | [`lib/ralph/cmd/`](../lib/ralph/cmd/) | wx-fqkv | Automated verification, parallel dispatch, and observation |
 
 ## Terminology Index
 
