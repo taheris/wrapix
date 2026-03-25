@@ -127,6 +127,9 @@ if [ -f /workspace/.beads/config.yaml ]; then
       mkdir -p /workspace/.beads/dolt
       if [ -d "$DOLT_REMOTE" ]; then
         dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone failed" >&2
+      else
+        echo "Error: dolt-remote not found at $DOLT_REMOTE" >&2
+        echo "Run 'mkdir -p $DOLT_REMOTE && cd .beads/dolt/$DOLT_DB_NAME && dolt push origin main' on the host to initialize it." >&2
       fi
     fi
 
