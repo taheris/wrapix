@@ -1096,6 +1096,25 @@ extract_error_from_log() {
 }
 
 #-----------------------------------------------------------------------------
+# Notification Helper
+#
+# Fire-and-forget notification. Uses wrapix-notify if available,
+# otherwise logs to stderr. Never fails the calling script.
+#
+# Usage: notify_event <title> [body]
+#-----------------------------------------------------------------------------
+notify_event() {
+  local title="$1"
+  local body="${2:-}"
+
+  if command -v wrapix-notify &>/dev/null; then
+    wrapix-notify "$title" "$body" 2>/dev/null || true
+  else
+    debug "[notify] ${title}${body:+: $body}"
+  fi
+}
+
+#-----------------------------------------------------------------------------
 # ralph:clarify Label Management
 #
 # Helpers for adding/removing the ralph:clarify label on beads.
@@ -1119,12 +1138,10 @@ add_clarify_label() {
     bd update "$bead_id" --append-notes "Question: $question" || warn "Failed to store question in notes for $bead_id"
   fi
 
-  # Emit notification if wrapix-notify is available
-  if command -v wrapix-notify &>/dev/null; then
-    local title
-    title=$(bd show "$bead_id" --json 2>/dev/null | jq -r '.[0].title // empty' 2>/dev/null || true)
-    wrapix-notify "Ralph" "Input needed for ${title:-$bead_id}" 2>/dev/null || true
-  fi
+  # Emit notification
+  local bead_title
+  bead_title=$(bd show "$bead_id" --json 2>/dev/null | jq -r '.[0].title // empty' 2>/dev/null || true)
+  notify_event "Ralph" "Input needed for ${bead_title:-$bead_id}"
 
   return 0
 }

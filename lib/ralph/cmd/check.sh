@@ -520,10 +520,7 @@ run_spec_review() {
   echo "─────────────────────────────────────"
   if [ "$new_beads" -le 0 ]; then
     echo "✓ Review PASSED — no new beads created"
-    # Notify on success
-    if command -v wrapix-notify &>/dev/null; then
-      wrapix-notify "Ralph" "Review passed for $label" 2>/dev/null || true
-    fi
+    notify_event "Ralph" "Review passed for $label"
     return 0
   else
     echo "✗ Review FAILED — $new_beads new bead(s) created"
@@ -542,10 +539,7 @@ run_spec_review() {
       fi
     done
 
-    # Notify on follow-up beads
-    if command -v wrapix-notify &>/dev/null; then
-      wrapix-notify "Ralph" "Review found $new_beads issue(s) for $label" 2>/dev/null || true
-    fi
+    notify_event "Ralph" "Review found $new_beads issue(s) for $label"
     return 1
   fi
 }

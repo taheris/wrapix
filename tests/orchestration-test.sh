@@ -193,8 +193,8 @@ test_clarify_label() {
     return 1
   fi
 
-  # 7. add_clarify_label must emit notification via wrapix-notify
-  if grep -A 20 '^add_clarify_label()' "$util_sh" | grep -q 'wrapix-notify'; then
+  # 7. add_clarify_label must emit notification via notify_event
+  if grep -A 20 '^add_clarify_label()' "$util_sh" | grep -q 'notify_event'; then
     pass "add_clarify_label emits notification"
   else
     fail "add_clarify_label does not emit notification"
@@ -1243,7 +1243,7 @@ test_review_cycle_max_limit() {
   fi
 
   # 4. run.sh must emit notification on review limit
-  if grep -A 5 'Review limit reached' "$run_sh" | grep -q 'wrapix-notify'; then
+  if grep -A 5 'Review limit reached' "$run_sh" | grep -q 'notify_event'; then
     pass "run.sh emits notification on review limit"
   else
     fail "run.sh does not emit notification on review limit"
@@ -1435,6 +1435,149 @@ test_model_override() {
 }
 
 #-----------------------------------------------------------------------------
+# test_notifications
+#
+# Verifies that notifications fire for ralph:clarify, review results, and
+# watch detections via the notify_event helper.
+#   - util.sh defines notify_event helper
+#   - notify_event calls wrapix-notify when available, logs otherwise
+#   - add_clarify_label uses notify_event
+#   - run.sh uses notify_event for review pass / review limit / review follow-up
+#   - check.sh uses notify_event for review pass / review follow-up
+#   - watch.sh uses notify_event for max-issues and new issue detection
+#-----------------------------------------------------------------------------
+test_notifications() {
+  echo "--- test_notifications ---"
+
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+  local check_sh="$REPO_ROOT/lib/ralph/cmd/check.sh"
+  local watch_sh="$REPO_ROOT/lib/ralph/cmd/watch.sh"
+
+  # 1. util.sh must define notify_event helper
+  if grep -q '^notify_event()' "$util_sh"; then
+    pass "util.sh defines notify_event helper"
+  else
+    fail "util.sh does not define notify_event helper"
+    return 1
+  fi
+
+  # 2. notify_event must call wrapix-notify when available
+  if grep -A 10 '^notify_event()' "$util_sh" | grep -q 'wrapix-notify'; then
+    pass "notify_event calls wrapix-notify"
+  else
+    fail "notify_event does not call wrapix-notify"
+    return 1
+  fi
+
+  # 3. notify_event must be fire-and-forget (|| true or 2>/dev/null)
+  if grep -A 10 '^notify_event()' "$util_sh" | grep -q '|| true'; then
+    pass "notify_event is fire-and-forget"
+  else
+    fail "notify_event is not fire-and-forget"
+    return 1
+  fi
+
+  # 4. notify_event must fall back to stderr when wrapix-notify unavailable
+  if grep -A 10 '^notify_event()' "$util_sh" | grep -q 'debug\|echo.*>&2'; then
+    pass "notify_event falls back to stderr logging"
+  else
+    fail "notify_event does not fall back to stderr"
+    return 1
+  fi
+
+  # 5. add_clarify_label must use notify_event (not inline wrapix-notify)
+  if grep -A 20 '^add_clarify_label()' "$util_sh" | grep -q 'notify_event'; then
+    pass "add_clarify_label uses notify_event"
+  else
+    fail "add_clarify_label does not use notify_event"
+    return 1
+  fi
+
+  # 6. run.sh must use notify_event for review passed
+  if grep -q 'notify_event.*Review passed' "$run_sh"; then
+    pass "run.sh uses notify_event for review passed"
+  else
+    fail "run.sh does not use notify_event for review passed"
+    return 1
+  fi
+
+  # 7. run.sh must use notify_event for review limit
+  if grep -q 'notify_event.*Review limit' "$run_sh"; then
+    pass "run.sh uses notify_event for review limit"
+  else
+    fail "run.sh does not use notify_event for review limit"
+    return 1
+  fi
+
+  # 8. run.sh must use notify_event for review follow-up beads
+  if grep -q 'notify_event.*Review found' "$run_sh"; then
+    pass "run.sh uses notify_event for review follow-up"
+  else
+    fail "run.sh does not use notify_event for review follow-up"
+    return 1
+  fi
+
+  # 9. check.sh must use notify_event for review passed
+  if grep -q 'notify_event.*Review passed' "$check_sh"; then
+    pass "check.sh uses notify_event for review passed"
+  else
+    fail "check.sh does not use notify_event for review passed"
+    return 1
+  fi
+
+  # 10. check.sh must use notify_event for review found issues
+  if grep -q 'notify_event.*Review found' "$check_sh"; then
+    pass "check.sh uses notify_event for review found issues"
+  else
+    fail "check.sh does not use notify_event for review found issues"
+    return 1
+  fi
+
+  # 11. watch.sh must use notify_event for max-issues
+  if grep -q 'notify_event.*max issues' "$watch_sh"; then
+    pass "watch.sh uses notify_event for max-issues"
+  else
+    fail "watch.sh does not use notify_event for max-issues"
+    return 1
+  fi
+
+  # 12. watch.sh must use notify_event for new issue detection
+  if grep -q 'notify_event.*New issue detected' "$watch_sh"; then
+    pass "watch.sh uses notify_event for new issue detection"
+  else
+    fail "watch.sh does not use notify_event for new issue detection"
+    return 1
+  fi
+
+  # 13. No inline wrapix-notify calls remaining in run.sh (all via notify_event)
+  if grep -v 'notify_event\|#\|debug\|warn' "$run_sh" | grep -q 'wrapix-notify'; then
+    fail "run.sh still has inline wrapix-notify calls"
+    return 1
+  else
+    pass "run.sh has no inline wrapix-notify calls"
+  fi
+
+  # 14. No inline wrapix-notify calls remaining in check.sh
+  if grep -v 'notify_event\|#\|debug\|warn' "$check_sh" | grep -q 'wrapix-notify'; then
+    fail "check.sh still has inline wrapix-notify calls"
+    return 1
+  else
+    pass "check.sh has no inline wrapix-notify calls"
+  fi
+
+  # 15. No inline wrapix-notify calls remaining in watch.sh
+  if grep -v 'notify_event\|#\|debug\|warn' "$watch_sh" | grep -q 'wrapix-notify'; then
+    fail "watch.sh still has inline wrapix-notify calls"
+    return 1
+  else
+    pass "watch.sh has no inline wrapix-notify calls"
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -1465,6 +1608,7 @@ test_model_override
 test_run_check_triggers_review
 test_review_cycle_loops
 test_review_cycle_max_limit
+test_notifications
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

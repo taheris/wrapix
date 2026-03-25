@@ -937,14 +937,13 @@ if [ "$RUN_CHECK" = "true" ] && [ "$FINAL_EXIT_CODE" -eq 0 ] && [ "$RUN_ONCE" !=
       # Review passed — no new beads
       echo ""
       echo "Review passed for $FEATURE_NAME"
-      if command -v wrapix-notify &>/dev/null; then
-        wrapix-notify "Ralph" "Review passed for $FEATURE_NAME" 2>/dev/null || true
-      fi
+      notify_event "Ralph" "Review passed for $FEATURE_NAME"
       break
     fi
 
     echo ""
     echo "Review found $new_beads new bead(s). Resuming work loop..."
+    notify_event "Ralph" "Review found $new_beads issue(s) for $FEATURE_NAME"
     echo ""
 
     # Resume work loop to process new beads
@@ -993,9 +992,7 @@ if [ "$RUN_CHECK" = "true" ] && [ "$FINAL_EXIT_CODE" -eq 0 ] && [ "$RUN_ONCE" !=
     if [ "${new_beads:-0}" -gt 0 ]; then
       echo ""
       echo "Review limit reached for $FEATURE_NAME ($MAX_REVIEWS cycles)"
-      if command -v wrapix-notify &>/dev/null; then
-        wrapix-notify "Ralph" "Review limit reached for $FEATURE_NAME" 2>/dev/null || true
-      fi
+      notify_event "Ralph" "Review limit reached for $FEATURE_NAME"
     fi
   fi
 fi

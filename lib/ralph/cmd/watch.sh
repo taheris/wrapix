@@ -223,14 +223,14 @@ while [ "$RUNNING" = "true" ]; do
 
   if [ "$WATCH_BEAD_COUNT" -ge "$MAX_ISSUES" ]; then
     echo "Max issues reached ($WATCH_BEAD_COUNT >= $MAX_ISSUES). Pausing watch."
-    # Emit notification
-    if command -v wrapix-notify &>/dev/null; then
-      wrapix-notify "Ralph Watch" "Max issues reached for $FEATURE_NAME ($WATCH_BEAD_COUNT beads)" 2>/dev/null || true
-    fi
+    notify_event "Ralph" "Watch paused: max issues reached for $FEATURE_NAME"
     break
   fi
 
   echo "=== Watch cycle $cycle ($(date -u +%H:%M:%S)) ==="
+
+  # Record bead count before this cycle for new-issue detection
+  beads_before_cycle="$WATCH_BEAD_COUNT"
 
   # Pin context
   pinned_context=""
@@ -271,6 +271,21 @@ while [ "$RUNNING" = "true" ]; do
     break
   else
     warn "Watch cycle $cycle did not complete cleanly. Continuing..."
+  fi
+
+  # Check for newly created watch beads and notify
+  new_watch_json=$(bd_json list --label "source:watch" --parent "$MOLECULE_ID" --json 2>/dev/null || echo "[]")
+  new_watch_count=0
+  if echo "$new_watch_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    new_watch_count=$(echo "$new_watch_json" | jq 'length')
+  fi
+  if [ "$new_watch_count" -gt "$beads_before_cycle" ]; then
+    # Notify for each new bead
+    echo "$new_watch_json" | jq -r ".[$beads_before_cycle:] | .[].title // empty" 2>/dev/null | while IFS= read -r new_title; do
+      [ -z "$new_title" ] && continue
+      notify_event "Ralph" "New issue detected: $new_title"
+    done
+    WATCH_BEAD_COUNT="$new_watch_count"
   fi
 
   # Push beads (incremental sync)
