@@ -1021,6 +1021,54 @@ read_manifests() {
 }
 
 #-----------------------------------------------------------------------------
+# ralph:clarify Label Management
+#
+# Helpers for adding/removing the ralph:clarify label on beads.
+# Used when agents need human input (RALPH_CLARIFY signal).
+#-----------------------------------------------------------------------------
+
+# Add ralph:clarify label to a bead, optionally storing a question in notes
+# and emitting a desktop notification.
+# Usage: add_clarify_label <bead_id> [question]
+# Returns: 0 on success, non-zero on failure (with warnings)
+add_clarify_label() {
+  local bead_id="$1"
+  local question="${2:-}"
+
+  bd update "$bead_id" --add-label "ralph:clarify" || {
+    warn "Failed to add ralph:clarify label to $bead_id"
+    return 1
+  }
+
+  if [ -n "$question" ]; then
+    bd update "$bead_id" --append-notes "Question: $question" || warn "Failed to store question in notes for $bead_id"
+  fi
+
+  # Emit notification if wrapix-notify is available
+  if command -v wrapix-notify &>/dev/null; then
+    local title
+    title=$(bd show "$bead_id" --json 2>/dev/null | jq -r '.[0].title // empty' 2>/dev/null || true)
+    wrapix-notify "Ralph" "Input needed for ${title:-$bead_id}" 2>/dev/null || true
+  fi
+
+  return 0
+}
+
+# Remove ralph:clarify label from a bead
+# Usage: remove_clarify_label <bead_id>
+# Returns: 0 on success, non-zero on failure (with warnings)
+remove_clarify_label() {
+  local bead_id="$1"
+
+  bd update "$bead_id" --remove-label "ralph:clarify" || {
+    warn "Failed to remove ralph:clarify label from $bead_id"
+    return 1
+  }
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Spec Hidden Detection
 #
 # Derives whether a spec is hidden from its spec_path in state JSON.

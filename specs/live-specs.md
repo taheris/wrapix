@@ -110,22 +110,22 @@ The "frontend dissolves" insight: instead of building dashboards and status page
    - Individual underlying commands (`ralph status`, `ralph logs`) remain usable outside tmux
 
 11. **Awaiting input convention** — Tracker-agnostic label for human-blocked items:
-   - When agent emits `RALPH_CLARIFY`, orchestrator adds `awaiting:input` label to bead
+   - When agent emits `RALPH_CLARIFY`, orchestrator adds `ralph:clarify` label to bead
    - Question stored in bead notes
    - `ralph status` surfaces awaiting items distinctly:
      ```
      [awaiting] wx-q6x-10  Cross-platform CI
                   "Should CI use GitHub Actions or Buildkite?" (2h ago)
      ```
-   - `ralph run` skips beads with `awaiting:input` label (not truly ready)
-   - Human answers, removes label, bead becomes ready again
+   - `ralph run` skips beads with `ralph:clarify` label (not truly ready)
+   - Human answers via `ralph msg`, label removed, bead becomes ready again
    - Convention works with any tracker that supports labels/tags
 
 ### Non-Functional
 
 1. **Fast default** — `ralph spec` and `ralph status` with no flags must be instant (no tests, no LLM calls)
 2. **Clickable links** — `[verify]` and `[judge]` annotations use standard markdown link syntax, rendering as clickable links in GitHub, VS Code, and terminal markdown viewers
-3. **Tracker-agnostic** — `awaiting:input` convention uses labels, not custom status fields, so it works with any issue tracker
+3. **Tracker-agnostic** — `ralph:clarify` convention uses labels, not custom status fields, so it works with any issue tracker
 4. **Parseable annotations** — `[verify](path#fn)` and `[judge](path#fn)` patterns are easy to extract programmatically from spec markdown
 5. **Host execution** — `ralph spec --verify` and `ralph spec --judge` run on the host, not in wrapix containers; users are responsible for having required tools available (use `ralph sync --deps` to check)
 
@@ -182,11 +182,11 @@ For each `[judge]` annotation:
 ```
 ralph run (orchestrator)
   → agent emits RALPH_CLARIFY: "question text"
-  → orchestrator: bd update <id> --labels "awaiting:input"
-  → orchestrator: bd update <id> --notes "Question: <text>"
+  → orchestrator: add_clarify_label <id> "question text"
+    (adds ralph:clarify label, stores question in notes, emits notification)
   → orchestrator skips this bead in future iterations
-  → human: bd update <id> --labels "-awaiting:input"
-  → human: bd update <id> --notes "Answer: <text>"
+  → human: ralph msg -i <id> "answer text"
+    (stores answer, removes ralph:clarify label)
   → bead becomes ready again
 ```
 
@@ -198,7 +198,7 @@ Updated `ralph` command structure with live-specs additions:
 Spec-Driven Workflow Commands:
   plan            (unchanged)
   todo            (unchanged)
-  run             Execute work items (+ awaiting:input handling)
+  run             Execute work items (+ ralph:clarify handling)
     --once/-1       Execute single issue then exit
     --profile=X     Override container profile
   status          Show current workflow state
@@ -259,9 +259,9 @@ Utility Commands:
   [judge](../tests/judges/live-specs.sh#test_status_watch_no_tmux)
 - [ ] `ralph status --watch` works standalone (no active ralph run required)
   [judge](../tests/judges/live-specs.sh#test_status_watch_standalone)
-- [ ] `RALPH_CLARIFY` in orchestrator adds `awaiting:input` label to bead
+- [ ] `RALPH_CLARIFY` in orchestrator adds `ralph:clarify` label to bead
   [verify](../tests/ralph/run-tests.sh#test_run_handles_clarify_signal)
-- [ ] `ralph run` skips beads with `awaiting:input` label
+- [ ] `ralph run` skips beads with `ralph:clarify` label
   [judge](../tests/judges/live-specs.sh#test_run_skips_awaiting)
 - [ ] `ralph status` displays awaiting items with question text and age
   [judge](../tests/judges/live-specs.sh#test_status_awaiting_display)

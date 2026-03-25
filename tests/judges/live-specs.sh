@@ -48,7 +48,7 @@ test_status_watch_standalone() {
 
 test_run_skips_awaiting() {
   judge_files "lib/ralph/cmd/run.sh"
-  judge_criterion "ralph run skips beads with the awaiting:input label, treating them as not ready for automated processing"
+  judge_criterion "ralph run skips beads with the ralph:clarify label, treating them as not ready for automated processing"
 }
 
 test_status_awaiting_display() {

@@ -48,15 +48,15 @@ format_age() {
   fi
 }
 
-# Display beads with awaiting:input label for the current spec label
+# Display beads with ralph:clarify label for the current spec label
 # Usage: show_awaiting_items <bead_label>
 # Output: Formatted section showing awaiting items, or nothing if none found
 show_awaiting_items() {
   local bead_label="$1"
 
-  # Query beads with both the spec label AND awaiting:input label
+  # Query beads with both the spec label AND ralph:clarify label
   local awaiting_json
-  awaiting_json=$(bd_json list --label "$bead_label" --label "awaiting:input" --json --limit 50 2>/dev/null) || true
+  awaiting_json=$(bd_json list --label "$bead_label" --label "ralph:clarify" --json --limit 50 2>/dev/null) || true
 
   # Check if we have any results
   if [ -z "$awaiting_json" ] || [ "$awaiting_json" = "[]" ] || ! echo "$awaiting_json" | jq -e 'length > 0' >/dev/null 2>&1; then

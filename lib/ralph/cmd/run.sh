@@ -333,9 +333,9 @@ run_step() {
     bd_list_json="[]"
   }
 
-  # Filter out epics and beads with awaiting:input label (not truly ready)
+  # Filter out epics and beads with ralph:clarify label (not truly ready)
   local bd_work_items
-  bd_work_items=$(echo "$bd_list_json" | jq '[.[] | select((.issue_type == "epic" | not) and ((.labels // []) | map(select(. == "awaiting:input")) | length == 0))]' 2>/dev/null || echo "[]")
+  bd_work_items=$(echo "$bd_list_json" | jq '[.[] | select((.issue_type == "epic" | not) and ((.labels // []) | map(select(. == "ralph:clarify")) | length == 0))]' 2>/dev/null || echo "[]")
 
   # Note: || true prevents set -e from exiting on empty array (return code 1)
   local next_issue
@@ -446,7 +446,7 @@ run_step() {
     check_all_complete "$bead_label" "$label" "$hidden"
     return 0
   elif jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$log" >/dev/null 2>&1; then
-    # Agent needs clarification — add awaiting:input label and store question
+    # Agent needs clarification — add ralph:clarify label and store question
     local clarify_text
     clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
       | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
@@ -457,18 +457,12 @@ run_step() {
       echo "  Question: $clarify_text"
     fi
 
-    # Add awaiting:input label so ralph run skips this bead
-    bd update "$next_issue" --add-label "awaiting:input" || warn "Failed to add awaiting:input label"
-
-    # Store question in bead notes
-    if [ -n "$clarify_text" ]; then
-      bd update "$next_issue" --append-notes "Question: $clarify_text" || warn "Failed to store question in notes"
-    fi
+    # Add ralph:clarify label (with notification) so ralph run skips this bead
+    add_clarify_label "$next_issue" "$clarify_text"
 
     echo ""
     echo "To answer and unblock:"
-    echo "  bd update $next_issue --append-notes 'Answer: <your answer>'"
-    echo "  bd update $next_issue --remove-label awaiting:input"
+    echo "  ralph msg -i $next_issue 'your answer'"
     return 1
   else
     echo ""

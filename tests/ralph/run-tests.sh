@@ -537,7 +537,7 @@ MOCK_EOF
   done
 }
 
-# Test: ralph status displays awaiting:input items with question text and age
+# Test: ralph status displays ralph:clarify items with question text and age
 test_status_awaiting_display() {
   CURRENT_TEST="status_awaiting_display"
   test_header "Status Displays Awaiting Input Items"
@@ -559,10 +559,10 @@ SPEC_EOF
   setup_label_state "$label" "false"
   echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create a task with awaiting:input label and a question in notes
+  # Create a task with ralph:clarify label and a question in notes
   local task_json
   task_json=$(bd create --title="Cross-platform CI" --type=task \
-    --labels="spec-$label,awaiting:input" \
+    --labels="spec-$label,ralph:clarify" \
     --notes="Question: Should CI use GitHub Actions or Buildkite?" \
     --json 2>/dev/null)
   local task_id
@@ -675,7 +675,7 @@ SPEC_EOF
   setup_label_state "$label" "false"
   echo "{\"label\":\"$label\",\"hidden\":false}" > "$RALPH_DIR/state/current.json"
 
-  # Create a normal task (no awaiting:input label)
+  # Create a normal task (no ralph:clarify label)
   bd create --title="Normal task" --type=task --labels="spec-$label" --json 2>/dev/null >/dev/null
 
   # Run ralph-status
@@ -1188,8 +1188,8 @@ EOF
     test_fail "Log file not found: $LOG_FILE"
   fi
 
-  # Verify awaiting:input label was added
-  assert_bead_has_label "$TASK_ID" "awaiting:input" "Issue should have awaiting:input label after RALPH_CLARIFY"
+  # Verify ralph:clarify label was added
+  assert_bead_has_label "$TASK_ID" "ralph:clarify" "Issue should have ralph:clarify label after RALPH_CLARIFY"
 
   # Verify question text was stored in notes
   assert_bead_notes_contain "$TASK_ID" "Question:" "Issue notes should contain question text after RALPH_CLARIFY"
@@ -1197,10 +1197,10 @@ EOF
   teardown_test_env
 }
 
-# Test: run skips items with awaiting:input label
+# Test: run skips items with ralph:clarify label
 test_run_skips_awaiting_input() {
   CURRENT_TEST="run_skips_awaiting_input"
-  test_header "Step Skips Beads with awaiting:input Label"
+  test_header "Step Skips Beads with ralph:clarify Label"
 
   setup_test_env "skip-awaiting"
   init_beads
@@ -1216,14 +1216,14 @@ EOF
   # Set up label state
   echo '{"label":"test-feature","hidden":false}' > "$RALPH_DIR/state/current.json"
 
-  # Create Task 1 and add awaiting:input label (simulates previous RALPH_CLARIFY)
+  # Create Task 1 and add ralph:clarify label (simulates previous RALPH_CLARIFY)
   TASK1_ID=$(bd create --title="Task 1 - Awaiting input" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
-  bd update "$TASK1_ID" --add-label "awaiting:input" 2>/dev/null
+  bd update "$TASK1_ID" --add-label "ralph:clarify" 2>/dev/null
 
   # Create Task 2 (open, should be selected)
   TASK2_ID=$(bd create --title="Task 2 - Available" --type=task --labels="spec-test-feature" --json 2>/dev/null | jq -r '.id')
 
-  test_pass "Created Task 1 (awaiting:input): $TASK1_ID"
+  test_pass "Created Task 1 (ralph:clarify): $TASK1_ID"
   test_pass "Created Task 2 (open): $TASK2_ID"
 
   # Use complete scenario
@@ -1237,9 +1237,9 @@ EOF
 
   # Check which task was selected
   if echo "$OUTPUT" | grep -q "Working on: $TASK2_ID"; then
-    test_pass "Step correctly selected Task 2 (skipped awaiting:input Task 1)"
+    test_pass "Step correctly selected Task 2 (skipped ralph:clarify Task 1)"
   elif echo "$OUTPUT" | grep -q "Working on: $TASK1_ID"; then
-    test_fail "Step incorrectly selected Task 1 (has awaiting:input label)"
+    test_fail "Step incorrectly selected Task 1 (has ralph:clarify label)"
   else
     test_fail "Could not determine which task was selected"
   fi
@@ -1247,8 +1247,8 @@ EOF
   # Task 2 should now be closed (completed by run)
   assert_bead_closed "$TASK2_ID" "Task 2 should be closed after run"
 
-  # Task 1 should still have awaiting:input label
-  assert_bead_has_label "$TASK1_ID" "awaiting:input" "Task 1 should still have awaiting:input label"
+  # Task 1 should still have ralph:clarify label
+  assert_bead_has_label "$TASK1_ID" "ralph:clarify" "Task 1 should still have ralph:clarify label"
 
   teardown_test_env
 }
