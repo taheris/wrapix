@@ -17,6 +17,8 @@ Title: {{TITLE}}
 
 {{DESCRIPTION}}
 
+{{PREVIOUS_FAILURE}}
+
 ## Instructions
 
 1. **Understand**: Read the spec and issue thoroughly before making changes

@@ -260,6 +260,53 @@ test_msg_dismiss() {
 }
 
 #-----------------------------------------------------------------------------
+# test_retry_with_context
+#
+# Verifies that the run.md template includes the PREVIOUS_FAILURE variable
+# and that default.nix registers it as a computed variable with empty default.
+#-----------------------------------------------------------------------------
+test_retry_with_context() {
+  echo "--- test_retry_with_context ---"
+
+  local run_md="$REPO_ROOT/lib/ralph/template/run.md"
+  local default_nix="$REPO_ROOT/lib/ralph/template/default.nix"
+
+  # 1. run.md must contain {{PREVIOUS_FAILURE}} placeholder
+  if grep -q '{{PREVIOUS_FAILURE}}' "$run_md"; then
+    pass "run.md contains {{PREVIOUS_FAILURE}} placeholder"
+  else
+    fail "run.md does not contain {{PREVIOUS_FAILURE}} placeholder"
+    return 1
+  fi
+
+  # 2. default.nix must define PREVIOUS_FAILURE variable
+  if grep -q 'PREVIOUS_FAILURE' "$default_nix"; then
+    pass "default.nix defines PREVIOUS_FAILURE variable"
+  else
+    fail "default.nix does not define PREVIOUS_FAILURE variable"
+    return 1
+  fi
+
+  # 3. PREVIOUS_FAILURE must have empty string default
+  if grep -A 5 'PREVIOUS_FAILURE' "$default_nix" | grep -q 'default = ""'; then
+    pass "PREVIOUS_FAILURE has empty string default"
+  else
+    fail "PREVIOUS_FAILURE does not have empty string default"
+    return 1
+  fi
+
+  # 4. PREVIOUS_FAILURE must be in the run template's variable list
+  if grep -A 15 'run = mkTemplate' "$default_nix" | grep -q '"PREVIOUS_FAILURE"'; then
+    pass "PREVIOUS_FAILURE is in run template variable list"
+  else
+    fail "PREVIOUS_FAILURE is not in run template variable list"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -270,6 +317,7 @@ test_msg_list
 test_msg_list_by_spec
 test_msg_reply
 test_msg_dismiss
+test_retry_with_context
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
