@@ -4492,7 +4492,7 @@ test_check_valid_templates() {
   # on verifying structural checks pass.
   set +e
   local output
-  output=$(ralph-check 2>&1)
+  output=$(ralph-check -t 2>&1)
   local exit_code=$?
   set -e
 
@@ -4576,7 +4576,7 @@ test_check_missing_partial() {
   # Run ralph check
   set +e
   local output
-  output=$(ralph-check 2>&1)
+  output=$(ralph-check -t 2>&1)
   local exit_code=$?
   set -e
 
@@ -4627,7 +4627,7 @@ test_check_invalid_nix_syntax() {
   # Run ralph check
   set +e
   local output
-  output=$(ralph-check 2>&1)
+  output=$(ralph-check -t 2>&1)
   local exit_code=$?
   set -e
 
@@ -4657,7 +4657,7 @@ test_check_exit_codes() {
   # Note: May return non-zero if render checks fail due to network issues
   set +e
   local output_valid
-  output_valid=$(ralph-check 2>&1)
+  output_valid=$(ralph-check -t 2>&1)
   local exit_valid=$?
   set -e
 
@@ -4680,7 +4680,7 @@ test_check_exit_codes() {
   export RALPH_TEMPLATE_DIR="/nonexistent/path"
 
   set +e
-  ralph-check >/dev/null 2>&1
+  ralph-check -t >/dev/null 2>&1
   local exit_missing=$?
   set -e
 
@@ -4703,7 +4703,7 @@ test_check_exit_codes() {
   export RALPH_TEMPLATE_DIR="$temp_template_dir"
 
   set +e
-  ralph-check >/dev/null 2>&1
+  ralph-check -t >/dev/null 2>&1
   local exit_invalid=$?
   set -e
 
