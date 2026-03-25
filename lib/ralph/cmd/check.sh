@@ -69,7 +69,7 @@ if [ "$DO_TEMPLATES" = "false" ] && [ "$DO_SPEC" = "false" ]; then
   echo "  -s, --spec <label>      Post-epic review of completed work"
   echo "  -s <label> -t           Both template validation and spec review"
   echo ""
-  echo "Template validation checks:"
+  echo "Validates all ralph templates:"
   echo "  - Partial files exist"
   echo "  - Body files parse correctly"
   echo "  - No syntax errors in Nix expressions"
