@@ -29,6 +29,108 @@ skip() {
 }
 
 #-----------------------------------------------------------------------------
+# test_config_orchestration_keys
+#
+# Verifies that config.nix contains all orchestration settings with correct
+# defaults: loop.parallel, loop.max-retries, loop.max-reviews, model.*,
+# watch.poll-interval, watch.max-issues, watch.ignore-patterns.
+#-----------------------------------------------------------------------------
+test_config_orchestration_keys() {
+  echo "--- test_config_orchestration_keys ---"
+
+  local config_nix="$REPO_ROOT/lib/ralph/template/config.nix"
+
+  # Parse config.nix to JSON for reliable value checking
+  local config_json
+  config_json=$(nix eval --impure --expr "import $config_nix" --json 2>/dev/null) || {
+    fail "config.nix failed to parse"
+    return 1
+  }
+  pass "config.nix parses successfully"
+
+  # --- loop settings ---
+  local parallel max_retries max_reviews
+  parallel=$(echo "$config_json" | jq '.loop.parallel')
+  max_retries=$(echo "$config_json" | jq '.loop."max-retries"')
+  max_reviews=$(echo "$config_json" | jq '.loop."max-reviews"')
+
+  if [ "$parallel" = "1" ]; then
+    pass "loop.parallel defaults to 1 (sequential)"
+  else
+    fail "loop.parallel is $parallel, expected 1"
+    return 1
+  fi
+
+  if [ "$max_retries" = "2" ]; then
+    pass "loop.max-retries defaults to 2"
+  else
+    fail "loop.max-retries is $max_retries, expected 2"
+    return 1
+  fi
+
+  if [ "$max_reviews" = "2" ]; then
+    pass "loop.max-reviews defaults to 2"
+  else
+    fail "loop.max-reviews is $max_reviews, expected 2"
+    return 1
+  fi
+
+  # --- model settings (all null) ---
+  local model_phases=("run" "check" "plan" "todo" "watch")
+  for phase in "${model_phases[@]}"; do
+    local val
+    val=$(echo "$config_json" | jq ".model.\"$phase\"")
+    if [ "$val" = "null" ]; then
+      pass "model.$phase defaults to null"
+    else
+      fail "model.$phase is $val, expected null"
+      return 1
+    fi
+  done
+
+  # --- watch settings ---
+  local poll_interval max_issues ignore_patterns
+  poll_interval=$(echo "$config_json" | jq '.watch."poll-interval"')
+  max_issues=$(echo "$config_json" | jq '.watch."max-issues"')
+  ignore_patterns=$(echo "$config_json" | jq '.watch."ignore-patterns"')
+
+  if [ "$poll_interval" = "30" ]; then
+    pass "watch.poll-interval defaults to 30"
+  else
+    fail "watch.poll-interval is $poll_interval, expected 30"
+    return 1
+  fi
+
+  if [ "$max_issues" = "10" ]; then
+    pass "watch.max-issues defaults to 10"
+  else
+    fail "watch.max-issues is $max_issues, expected 10"
+    return 1
+  fi
+
+  if [ "$ignore_patterns" = "[]" ]; then
+    pass "watch.ignore-patterns defaults to []"
+  else
+    fail "watch.ignore-patterns is $ignore_patterns, expected []"
+    return 1
+  fi
+
+  # --- backward compatibility: existing keys still present ---
+  local max_iterations pause_on_failure
+  max_iterations=$(echo "$config_json" | jq '.loop."max-iterations"')
+  pause_on_failure=$(echo "$config_json" | jq '.loop."pause-on-failure"')
+
+  if [ "$max_iterations" = "0" ] && [ "$pause_on_failure" = "true" ]; then
+    pass "existing loop keys preserved (backward compatible)"
+  else
+    fail "existing loop keys changed: max-iterations=$max_iterations, pause-on-failure=$pause_on_failure"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # test_clarify_label
 #
 # Verifies that ralph:clarify label replaces awaiting:input in the run loop:
@@ -312,6 +414,7 @@ test_retry_with_context() {
 echo "=== Orchestration Tests ==="
 echo ""
 
+test_config_orchestration_keys
 test_clarify_label
 test_msg_list
 test_msg_list_by_spec

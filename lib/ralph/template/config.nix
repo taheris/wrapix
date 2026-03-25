@@ -42,6 +42,25 @@
   loop = {
     max-iterations = 0; # 0 = infinite
     pause-on-failure = true;
+    parallel = 1; # Concurrency limit (1 = sequential)
+    max-retries = 2; # Per-bead retry limit before ralph:clarify
+    max-reviews = 2; # Max review cycles before stopping
+  };
+
+  # Model overrides per phase (null = inherit ANTHROPIC_MODEL)
+  model = {
+    run = null;
+    check = null;
+    plan = null;
+    todo = null;
+    watch = null;
+  };
+
+  # Observation settings for ralph watch
+  watch = {
+    poll-interval = 30; # Seconds between watch poll cycles
+    max-issues = 10; # Max beads created before pausing watch
+    ignore-patterns = [ ]; # Optional noise filter patterns
   };
 
   # Hook points for ralph run (FR2)
