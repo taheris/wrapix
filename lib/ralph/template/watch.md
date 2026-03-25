@@ -23,7 +23,7 @@ You are an observation agent monitoring running services for spec **{{LABEL}}**.
 3. **Capture output** from tmux panes and/or playwright sessions
 4. **Evaluate** log output contextually based on the spec — do NOT pattern-match for generic errors
 5. **Investigate** anomalies by reading more context or attempting reproduction
-6. **Deduplicate** against known issues in your watch state and existing beads (`bd list`)
+6. **Deduplicate** against known issues in your watch state and existing beads (`bd list --label source:watch`)
 
 ## Creating Beads for Detected Issues
 
