@@ -336,7 +336,12 @@ impl MaybeAuditLogger {
     }
 
     /// Log create_pane (no-op if disabled)
-    pub fn log_create_pane(&self, pane_id: &str, command: &str, name: Option<&str>) -> io::Result<()> {
+    pub fn log_create_pane(
+        &self,
+        pane_id: &str,
+        command: &str,
+        name: Option<&str>,
+    ) -> io::Result<()> {
         self.log(&AuditEntry::create_pane(pane_id, command, name))
     }
 
@@ -346,7 +351,12 @@ impl MaybeAuditLogger {
     }
 
     /// Log capture_pane (no-op if disabled)
-    pub fn log_capture_pane(&self, pane_id: &str, lines: i32, output_bytes: usize) -> io::Result<()> {
+    pub fn log_capture_pane(
+        &self,
+        pane_id: &str,
+        lines: i32,
+        output_bytes: usize,
+    ) -> io::Result<()> {
         self.log(&AuditEntry::capture_pane(pane_id, lines, output_bytes))
     }
 
@@ -487,9 +497,21 @@ mod tests {
         let entry = AuditEntry::list_panes();
 
         // Timestamp should be ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-        assert!(entry.ts.len() == 20, "Timestamp length should be 20: {}", entry.ts);
-        assert!(entry.ts.ends_with('Z'), "Timestamp should end with Z: {}", entry.ts);
-        assert!(entry.ts.contains('T'), "Timestamp should contain T: {}", entry.ts);
+        assert!(
+            entry.ts.len() == 20,
+            "Timestamp length should be 20: {}",
+            entry.ts
+        );
+        assert!(
+            entry.ts.ends_with('Z'),
+            "Timestamp should end with Z: {}",
+            entry.ts
+        );
+        assert!(
+            entry.ts.contains('T'),
+            "Timestamp should contain T: {}",
+            entry.ts
+        );
         assert_eq!(entry.ts.chars().filter(|c| *c == '-').count(), 2);
         assert_eq!(entry.ts.chars().filter(|c| *c == ':').count(), 2);
     }
@@ -575,8 +597,12 @@ mod tests {
         let logger = AuditLogger::new(&log_path, None);
 
         // Log multiple entries
-        logger.log(&AuditEntry::create_pane("debug-1", "cargo run", None)).unwrap();
-        logger.log(&AuditEntry::send_keys("debug-1", "test")).unwrap();
+        logger
+            .log(&AuditEntry::create_pane("debug-1", "cargo run", None))
+            .unwrap();
+        logger
+            .log(&AuditEntry::send_keys("debug-1", "test"))
+            .unwrap();
         logger.log(&AuditEntry::kill_pane("debug-1")).unwrap();
 
         let content = fs::read_to_string(&log_path).unwrap();
@@ -605,15 +631,19 @@ mod tests {
         let log_path = temp_dir.path().join("audit.log");
 
         let logger = AuditLogger::new(&log_path, None);
-        logger.log(&AuditEntry::create_pane("debug-1", "cargo run", None)).unwrap();
-        logger.log(&AuditEntry::capture_pane("debug-1", 100, 5000)).unwrap();
+        logger
+            .log(&AuditEntry::create_pane("debug-1", "cargo run", None))
+            .unwrap();
+        logger
+            .log(&AuditEntry::capture_pane("debug-1", 100, 5000))
+            .unwrap();
 
         let content = fs::read_to_string(&log_path).unwrap();
 
         // Each line should be valid JSON
         for line in content.lines() {
-            let parsed: serde_json::Value = serde_json::from_str(line)
-                .expect(&format!("Line should be valid JSON: {}", line));
+            let parsed: serde_json::Value =
+                serde_json::from_str(line).expect(&format!("Line should be valid JSON: {}", line));
             assert!(parsed.is_object());
         }
     }
@@ -636,7 +666,9 @@ mod tests {
 
         let logger = AuditLogger::new(&log_path, Some(capture_dir.clone()));
 
-        let filename = logger.save_full_capture("debug-1", "captured content").unwrap();
+        let filename = logger
+            .save_full_capture("debug-1", "captured content")
+            .unwrap();
 
         assert!(filename.is_some());
         let filename = filename.unwrap();
@@ -658,9 +690,18 @@ mod tests {
 
         let logger = AuditLogger::new(&log_path, Some(capture_dir.clone()));
 
-        let f1 = logger.save_full_capture("debug-1", "content 1").unwrap().unwrap();
-        let f2 = logger.save_full_capture("debug-1", "content 2").unwrap().unwrap();
-        let f3 = logger.save_full_capture("debug-2", "content 3").unwrap().unwrap();
+        let f1 = logger
+            .save_full_capture("debug-1", "content 1")
+            .unwrap()
+            .unwrap();
+        let f2 = logger
+            .save_full_capture("debug-1", "content 2")
+            .unwrap()
+            .unwrap();
+        let f3 = logger
+            .save_full_capture("debug-2", "content 3")
+            .unwrap()
+            .unwrap();
 
         // Filenames should have sequential numbers
         assert_eq!(f1, "debug-1-capture-001.txt");
@@ -689,7 +730,9 @@ mod tests {
         assert!(!logger.is_enabled());
 
         // All operations should succeed silently
-        logger.log_create_pane("debug-1", "cargo run", None).unwrap();
+        logger
+            .log_create_pane("debug-1", "cargo run", None)
+            .unwrap();
         logger.log_send_keys("debug-1", "test").unwrap();
         logger.log_capture_pane("debug-1", 100, 5000).unwrap();
         logger.log_kill_pane("debug-1").unwrap();
@@ -706,7 +749,9 @@ mod tests {
 
         assert!(logger.is_enabled());
 
-        logger.log_create_pane("debug-1", "cargo run", Some("server")).unwrap();
+        logger
+            .log_create_pane("debug-1", "cargo run", Some("server"))
+            .unwrap();
 
         let content = fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("create_pane"));

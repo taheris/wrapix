@@ -29,7 +29,11 @@ impl std::fmt::Display for TmuxError {
                 write!(f, "Tmux session '{}' not found", name)
             }
             TmuxError::WindowNotFound(name) => {
-                write!(f, "Tmux window '{}' not found. Use tmux_list_panes to see active panes.", name)
+                write!(
+                    f,
+                    "Tmux window '{}' not found. Use tmux_list_panes to see active panes.",
+                    name
+                )
             }
             TmuxError::IoError(e) => write!(f, "IO error: {}", e),
         }
@@ -235,13 +239,7 @@ impl<E: CommandExecutor> TmuxSession<E> {
 
         // Format: #{window_name}|#{pane_pid}|#{pane_dead}
         let format = "#{window_name}|#{pane_pid}|#{pane_dead}";
-        let output = self.run_tmux(&[
-            "list-windows",
-            "-t",
-            &self.session_name,
-            "-F",
-            format,
-        ])?;
+        let output = self.run_tmux(&["list-windows", "-t", &self.session_name, "-F", format])?;
 
         let windows = output
             .lines()
@@ -252,11 +250,7 @@ impl<E: CommandExecutor> TmuxSession<E> {
                     let name = parts[0].to_string();
                     let pid = parts[1].parse::<u32>().ok();
                     let is_dead = parts[2] == "1";
-                    Some(WindowInfo {
-                        name,
-                        pid,
-                        is_dead,
-                    })
+                    Some(WindowInfo { name, pid, is_dead })
                 } else {
                     None
                 }
@@ -270,13 +264,7 @@ impl<E: CommandExecutor> TmuxSession<E> {
     pub fn get_window_info(&self, pane_id: &str) -> TmuxResult<WindowInfo> {
         let target = format!("{}:{}", self.session_name, pane_id);
         let format = "#{window_name}|#{pane_pid}|#{pane_dead}";
-        let output = self.run_tmux(&[
-            "list-windows",
-            "-t",
-            &target,
-            "-F",
-            format,
-        ])?;
+        let output = self.run_tmux(&["list-windows", "-t", &target, "-F", format])?;
 
         output
             .lines()
@@ -287,11 +275,7 @@ impl<E: CommandExecutor> TmuxSession<E> {
                     let name = parts[0].to_string();
                     let pid = parts[1].parse::<u32>().ok();
                     let is_dead = parts[2] == "1";
-                    Some(WindowInfo {
-                        name,
-                        pid,
-                        is_dead,
-                    })
+                    Some(WindowInfo { name, pid, is_dead })
                 } else {
                     None
                 }
@@ -333,11 +317,7 @@ pub struct WindowInfo {
 impl WindowInfo {
     /// Get the status as a string ("running" or "exited")
     pub fn status(&self) -> &'static str {
-        if self.is_dead {
-            "exited"
-        } else {
-            "running"
-        }
+        if self.is_dead { "exited" } else { "running" }
     }
 }
 

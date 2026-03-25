@@ -18,11 +18,20 @@
       url = "git+ssh://git@github.com/oxalica/rust-overlay.git?ref=master&shallow=1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    treefmt-nix = {
+      url = "git+https://github.com/numtide/treefmt-nix.git?ref=main&shallow=1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     inputs@{ nixpkgs, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [
+        inputs.treefmt-nix.flakeModule
+      ];
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -31,6 +40,7 @@
 
       perSystem =
         {
+          config,
           pkgs,
           system,
           ...
@@ -49,12 +59,12 @@
                 };
               });
 
-          hostOverlay = final: prev: {
+          hostOverlay = final: _prev: {
             beads = beadsFor final;
           };
 
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
-          linuxOverlay = final: prev: {
+          linuxOverlay = final: _prev: {
             beads = beadsFor final;
           };
           linuxPkgs = import nixpkgs {
@@ -71,13 +81,37 @@
             src = ./.;
           };
 
+          treefmtConfig = {
+            projectRootFile = "flake.nix";
+            programs = {
+              deadnix.enable = true;
+              nixfmt.enable = true;
+              rustfmt.enable = true;
+              shellcheck = {
+                enable = true;
+                severity = "warning";
+              };
+              statix.enable = true;
+            };
+            settings.formatter.shellcheck.excludes = [ ".envrc" ];
+          };
+
+          # Linux treefmt wrapper for sandbox images
+          linuxTreefmt = inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmtConfig;
+
+          # Extra packages baked into every sandbox image
+          sandboxPackages = [ linuxTreefmt ];
+
           wrapix = import ./lib { inherit pkgs system linuxPkgs; };
           ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
 
         in
         {
-          inherit (test) checks;
-          formatter = pkgs.nixfmt-tree;
+          formatter = config.treefmt.build.wrapper;
+
+          checks = test.checks // {
+            treefmt = config.treefmt.build.check ./.;
+          };
 
           _module.args.pkgs = import nixpkgs {
             inherit system;
@@ -106,24 +140,30 @@
               sandboxes = {
                 wrapix = {
                   profile = profiles.base;
+                  packages = sandboxPackages;
                 };
                 wrapix-rust = {
                   profile = profiles.rust;
+                  packages = sandboxPackages;
                 };
                 wrapix-python = {
                   profile = profiles.python;
+                  packages = sandboxPackages;
                 };
 
                 wrapix-mcp = {
                   profile = profiles.base;
+                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
                 wrapix-rust-mcp = {
                   profile = profiles.rust;
+                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
                 wrapix-python-mcp = {
                   profile = profiles.python;
+                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
               };
@@ -131,7 +171,11 @@
             mapAttrs (_: cfg: (wrapix.mkSandbox cfg).package) sandboxes
             // {
               inherit (pkgs) beads;
-              default = (wrapix.mkSandbox { profile = profiles.base; }).package;
+              default =
+                (wrapix.mkSandbox {
+                  profile = profiles.base;
+                  packages = sandboxPackages;
+                }).package;
               wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
               wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
               tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
@@ -153,18 +197,21 @@
               with pkgs;
               [
                 beads
+                config.treefmt.build.wrapper
                 dolt
                 gh
-                nixfmt
-                nixfmt-tree
                 podman
                 prek
                 wrapix.scripts
-                shellcheck
-                statix
               ]
               ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
           };
+
+          treefmt = treefmtConfig // {
+            flakeCheck = false;
+            flakeFormatter = false;
+          };
+
         };
     };
 }

@@ -37,11 +37,10 @@ let
 
   # Integration tests require NixOS VM (Linux with KVM only)
   # Skip when KVM unavailable (e.g., inside containers)
-  integrationTests =
-    if isLinux && hasKvm then import ./integration.nix { inherit pkgs system; } else { };
+  integrationTests = if isLinux && hasKvm then import ./integration.nix { inherit pkgs; } else { };
 
   # Ralph utility function tests run on all platforms
-  ralphTests = import ./ralph { inherit pkgs system; };
+  ralphTests = import ./ralph { inherit pkgs; };
 
   # Ralph template validation check (runs as part of nix flake check)
   # Uses mkTemplatesCheck from lib/ralph to validate all templates
@@ -57,14 +56,12 @@ let
     };
 
   # Shell utility tests run on all platforms
-  shellTests = import ./shell.nix { inherit pkgs system; };
+  shellTests = import ./shell.nix { inherit pkgs; };
 
   # tmux-mcp tests (Rust unit tests and shell script syntax)
   tmuxMcpTests = import ./tmux-mcp.nix { inherit pkgs system src; };
 
   # Lint checks run on all platforms
-  lintChecks = import ./lint.nix { inherit pkgs src; };
-
   # README example verification
   readmeTest = {
     readme = import ./readme.nix { inherit pkgs src; };
@@ -81,7 +78,6 @@ let
     // ralphTemplatesCheck
     // shellTests
     // tmuxMcpTests
-    // lintChecks
     // readmeTest;
 
   # ============================================================================
@@ -132,14 +128,11 @@ let
     set -euo pipefail
     echo "=== Lint Checks ==="
     echo ""
-    echo "Running: nix flake check (lint only)"
-    echo "This runs nixfmt, shellcheck, and statix checks."
+    echo "Running: nix flake check (treefmt)"
+    echo "This runs nixfmt, shellcheck, statix, deadnix, and rustfmt checks."
     echo ""
-    # Build only the lint checks
     ${pkgs.nix}/bin/nix build --no-link \
-      .#checks.${system}.nixfmt \
-      .#checks.${system}.shellcheck \
-      .#checks.${system}.statix
+      .#checks.${system}.treefmt
     echo "PASS: All lint checks"
   '';
 
@@ -291,7 +284,6 @@ in
     ralphTemplatesCheck
     shellTests
     tmuxMcpTests
-    lintChecks
     readmeTest
     ;
 }

@@ -32,8 +32,6 @@ let
     concatStringsSep
     filterAttrs
     foldl'
-    hasPrefix
-    pipe
     ;
 
   # ==========================================================================
@@ -200,14 +198,23 @@ let
 
   # Filter variables by source type
   variablesBySource =
-    source: attrNames (filterAttrs (name: def: def.source == source) variableDefinitions);
+    source: attrNames (filterAttrs (_name: def: def.source == source) variableDefinitions);
 
   # Get required variables (those with required = true)
-  requiredVariables = attrNames (filterAttrs (name: def: def.required or false) variableDefinitions);
+  requiredVariables = attrNames (filterAttrs (_name: def: def.required or false) variableDefinitions);
 
   # ==========================================================================
   # Template Functions
   # ==========================================================================
+
+  # Extract {{VAR}} variable names from content (excludes {{> partial}})
+  extractVars =
+    content:
+    let
+      parts = split "[{][{]([A-Z_]+)[}][}]" content;
+      matches = filter (p: builtins.isList p) parts;
+    in
+    map builtins.head matches;
 
   # Extract partial names from content ({{> partial-name}})
   # Returns list of partial names referenced in the template
@@ -288,12 +295,6 @@ let
       loadedPartials = loadPartials partials;
 
       # Validate that all referenced partials exist
-      referencedPartials = extractPartialRefs bodyContent;
-      missingPartials = filter (p: !(hasAttr p loadedPartials)) referencedPartials;
-      _ =
-        assert assertMsg (missingPartials == [ ])
-          "Missing partials: ${concatStringsSep ", " missingPartials}. Available: ${concatStringsSep ", " (attrNames loadedPartials)}";
-        null;
     in
     {
       inherit variables;
@@ -317,11 +318,6 @@ let
       render =
         vars:
         let
-          missing = filter (v: !(hasAttr v vars)) variables;
-          _ =
-            assert assertMsg (missing == [ ])
-              "Missing required variables: ${concatStringsSep ", " missing}. Required: ${concatStringsSep ", " variables}";
-            null;
 
           # First resolve partials
           withPartials = resolvePartials loadedPartials bodyContent;
@@ -452,6 +448,7 @@ let
 
   # Validate all templates (for use in flake check)
   # Returns true if all templates are valid, throws otherwise
+  # Checks: partials exist, no undeclared variables in body or referenced partials
   validateTemplates =
     let
       templateNames = attrNames templates;
@@ -461,8 +458,19 @@ let
           t = templates.${name};
           # Force evaluation of the template (triggers partial validation)
           forceContent = t.content;
+          # Check for undeclared variables in body and referenced partials
+          bodyVars = extractVars t.content;
+          referencedPartials = extractPartialRefs t.content;
+          referencedPartialContents = map (ref: t.partials.${ref}) referencedPartials;
+          partialVars = builtins.concatLists (map extractVars referencedPartialContents);
+          allUsed = bodyVars ++ partialVars;
+          undeclared = filter (v: !(elem v t.variables)) allUsed;
         in
-        forceContent != null;
+        assert assertMsg (forceContent != null) "Template ${name} content is null";
+        assert assertMsg (
+          undeclared == [ ]
+        ) "Template ${name} uses undeclared variables: ${concatStringsSep ", " undeclared}";
+        true;
     in
     all checkTemplate templateNames;
 

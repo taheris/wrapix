@@ -13,25 +13,24 @@ repos:
   - repo: local
     hooks:
       # === Fast hooks (pre-commit stage) ===
-      - id: nixfmt
-        name: nixfmt
-        entry: nix fmt -- --fail-on-change
+      - id: treefmt
+        name: treefmt
+        entry: treefmt --fail-on-change
         language: system
-        files: \.nix$
-        pass_filenames: true
+        pass_filenames: false
         stages: [pre-commit]
 
-      - id: shellcheck
-        name: shellcheck
-        entry: shellcheck --external-sources --source-path=lib/ralph/cmd --source-path=tests/ralph/lib --source-path=tests/tmux-mcp
+      - id: ralph-check-templates
+        name: ralph check templates
+        entry: ralph check -t
         language: system
-        types: [shell]
-        pass_filenames: true
+        files: ^lib/ralph/template/
+        pass_filenames: false
         stages: [pre-commit]
 
       - id: no-hidden-specs
         name: no hidden specs in specs/
-        entry: "bash -c 'failed=0; for f in .wrapix/ralph/state/*.md; do [ -f \"$f\" ] || continue; name=\"$(basename \"$f\")\"; if [ -f \"specs/$name\" ] || git ls-files --cached --error-unmatch \"specs/$name\" >/dev/null 2>&1; then echo \"ERROR: specs/$name is a hidden spec (exists in .wrapix/ralph/state/). Remove it from specs/.\" >&2; failed=1; fi; done; exit $failed'"
+        entry: 'bash -c ''failed=0; for f in .wrapix/ralph/state/*.md; do [ -f "$f" ] || continue; name="$(basename "$f")"; if [ -f "specs/$name" ] || git ls-files --cached --error-unmatch "specs/$name" >/dev/null 2>&1; then echo "ERROR: specs/$name is a hidden spec (exists in .wrapix/ralph/state/). Remove it from specs/." >&2; failed=1; fi; done; exit $failed'''
         language: system
         always_run: true
         pass_filenames: false
@@ -49,51 +48,6 @@ repos:
       - id: test
         name: test
         entry: nix run .#test
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-      # === Beads sync (bd) — prek-managed ===
-      # bd hooks run through prek so prek owns .git/hooks/ exclusively.
-      # The hooks directory is chmod 555 to prevent bd hooks install from
-      # overwriting prek's shims. To update hooks:
-      #   chmod 755 .git/hooks/ && prek install -f && chmod 555 .git/hooks/
-      - id: bd-pre-commit
-        name: bd pre-commit
-        entry: bd hooks run pre-commit
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-
-      - id: bd-prepare-commit-msg
-        name: bd prepare-commit-msg
-        entry: bd hooks run prepare-commit-msg
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [prepare-commit-msg]
-
-      - id: bd-post-checkout
-        name: bd post-checkout
-        entry: bd hooks run post-checkout
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [post-checkout]
-
-      - id: bd-post-merge
-        name: bd post-merge
-        entry: bd hooks run post-merge
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [post-merge]
-
-      - id: bd-pre-push
-        name: bd pre-push
-        entry: bd hooks run pre-push
         language: system
         pass_filenames: false
         always_run: true

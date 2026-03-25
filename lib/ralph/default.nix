@@ -23,7 +23,7 @@ let
 
   # Template variables as JSON (maps template name -> list of variable names)
   templatesJson = writeText "ralph-templates.json" (
-    toJSON (mapAttrs (name: tmpl: tmpl.variables) templateModule.templates)
+    toJSON (mapAttrs (_name: tmpl: tmpl.variables) templateModule.templates)
   );
 
   # All ralph scripts bundled in a single derivation

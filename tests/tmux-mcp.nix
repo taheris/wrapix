@@ -55,7 +55,7 @@ let
           name = "tmux-mcp-integration";
 
           nodes.machine =
-            { config, pkgs, ... }:
+            { pkgs, ... }:
             {
               virtualisation = {
                 memorySize = 1024;
@@ -167,7 +167,7 @@ let
           name = "tmux-mcp-e2e-sandbox";
 
           nodes.machine =
-            { config, pkgs, ... }:
+            { pkgs, ... }:
             {
               virtualisation = {
                 podman.enable = true;

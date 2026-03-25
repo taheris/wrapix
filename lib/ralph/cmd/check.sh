@@ -325,11 +325,23 @@ let
     in
     map builtins.head matches;
 
+  # Extract {{> partial-name}} references from content
+  extractPartialRefs = content:
+    let
+      parts = builtins.split "[{][{]> ([a-z-]+)[}][}]" content;
+      matches = builtins.filter (p: builtins.isList p) parts;
+    in
+    map builtins.head matches;
+
   results = builtins.mapAttrs (name: template:
     let
       declared = template.variables;
       usedInBody = extractVars template.content;
-      partialVars = builtins.concatLists (map extractVars (builtins.attrValues template.partials));
+      # Only scan partials actually referenced by this template's body
+      referencedPartials = extractPartialRefs template.content;
+      referencedPartialContents = builtins.filter (x: x != null)
+        (map (ref: template.partials.${ref} or null) referencedPartials);
+      partialVars = builtins.concatLists (map extractVars referencedPartialContents);
       allUsed = usedInBody ++ partialVars;
       undeclared = builtins.filter (v: !(builtins.elem v declared)) allUsed;
     in

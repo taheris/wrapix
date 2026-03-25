@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-MOCK_CLAUDE="$SCRIPT_DIR/mock-claude"
+export MOCK_CLAUDE="$SCRIPT_DIR/mock-claude"
 export SCENARIOS_DIR="$SCRIPT_DIR/scenarios"
 LIB_DIR="$SCRIPT_DIR/lib"
 

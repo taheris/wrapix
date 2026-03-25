@@ -32,7 +32,7 @@ Configure `.pre-commit-config.yaml` with staged hooks:
 
 | Stage | Hooks | Purpose |
 |-------|-------|---------|
-| pre-commit | bd dolt pull, nixfmt, shellcheck, builtin hooks | Fast validation on every commit |
+| pre-commit | bd dolt pull, nixfmt, shellcheck, ralph check -t (template files only), builtin hooks | Fast validation on every commit |
 | prepare-commit-msg | bd agent trailers | Add agent identity to commits |
 | post-checkout | bd dolt pull | Pull Dolt state after branch switch |
 | post-merge | bd dolt pull | Pull Dolt state after pull/merge |

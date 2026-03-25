@@ -11,8 +11,8 @@ mod tmux;
 
 use audit::MaybeAuditLogger;
 use mcp::{
-    JsonRpcResponse, McpHandler, McpMethod, ToolCallParams, ToolCallResult, INTERNAL_ERROR,
-    INVALID_PARAMS, METHOD_NOT_FOUND,
+    INTERNAL_ERROR, INVALID_PARAMS, JsonRpcResponse, METHOD_NOT_FOUND, McpHandler, McpMethod,
+    ToolCallParams, ToolCallResult,
 };
 use panes::{PaneManager, PaneStatus};
 use serde_json::Value;
@@ -76,7 +76,7 @@ fn handle_create_pane<E: CommandExecutor>(
         None => {
             return ToolCallResult::error(
                 "Missing required parameter 'command'. Provide the command to run in the pane.",
-            )
+            );
         }
     };
 
@@ -117,7 +117,7 @@ fn handle_send_keys<E: CommandExecutor>(
         None => {
             return ToolCallResult::error(
                 "Missing required parameter 'pane_id'. Use tmux_list_panes to see active panes.",
-            )
+            );
         }
     };
 
@@ -127,7 +127,7 @@ fn handle_send_keys<E: CommandExecutor>(
         None => {
             return ToolCallResult::error(
                 "Missing required parameter 'keys'. Provide the keystrokes to send.",
-            )
+            );
         }
     };
 
@@ -162,7 +162,7 @@ fn handle_capture_pane<E: CommandExecutor>(
         None => {
             return ToolCallResult::error(
                 "Missing required parameter 'pane_id'. Use tmux_list_panes to see active panes.",
-            )
+            );
         }
     };
 
@@ -219,7 +219,7 @@ fn handle_kill_pane<E: CommandExecutor>(
         None => {
             return ToolCallResult::error(
                 "Missing required parameter 'pane_id'. Use tmux_list_panes to see active panes.",
-            )
+            );
         }
     };
 
@@ -306,7 +306,7 @@ fn process_request<E: CommandExecutor>(
                 request.id.clone(),
                 INVALID_PARAMS,
                 e,
-            ))
+            ));
         }
     };
 
@@ -488,11 +488,7 @@ mod tests {
         let response = process_request(&mut state, request).unwrap();
 
         assert!(response.error.is_some());
-        assert!(response
-            .error
-            .unwrap()
-            .message
-            .contains("not initialized"));
+        assert!(response.error.unwrap().message.contains("not initialized"));
     }
 
     #[test]
@@ -539,7 +535,10 @@ mod tests {
         let mut state = test_state();
 
         let mut args = HashMap::new();
-        args.insert("command".to_string(), Value::String("cargo run".to_string()));
+        args.insert(
+            "command".to_string(),
+            Value::String("cargo run".to_string()),
+        );
         args.insert("name".to_string(), Value::String("server".to_string()));
 
         let result = handle_create_pane(&mut state, &args);
@@ -560,7 +559,11 @@ mod tests {
         let result = handle_create_pane(&mut state, &args);
 
         assert!(result.is_error);
-        assert!(result.content[0].text.contains("Missing required parameter"));
+        assert!(
+            result.content[0]
+                .text
+                .contains("Missing required parameter")
+        );
     }
 
     #[test]
@@ -610,7 +613,11 @@ mod tests {
         let result = handle_send_keys(&mut state, &args);
 
         assert!(result.is_error);
-        assert!(result.content[0].text.contains("Missing required parameter"));
+        assert!(
+            result.content[0]
+                .text
+                .contains("Missing required parameter")
+        );
     }
 
     #[test]
@@ -744,8 +751,7 @@ mod tests {
 
         assert!(!result.is_error);
         // Should be valid JSON array
-        let parsed: Vec<serde_json::Value> =
-            serde_json::from_str(&result.content[0].text).unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&result.content[0].text).unwrap();
         assert_eq!(parsed.len(), 2);
     }
 
@@ -796,7 +802,9 @@ mod tests {
         assert!(!content.is_empty());
 
         // Check isError is not present or false
-        assert!(result.get("isError").is_none() || !result.get("isError").unwrap().as_bool().unwrap());
+        assert!(
+            result.get("isError").is_none() || !result.get("isError").unwrap().as_bool().unwrap()
+        );
     }
 
     #[test]

@@ -2,7 +2,6 @@
 # Tests verify ralph utility functions work correctly
 {
   pkgs,
-  system,
 }:
 
 let

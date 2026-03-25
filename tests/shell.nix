@@ -1,7 +1,6 @@
 # Shell utility tests - verify security properties of shell helper functions
 {
   pkgs,
-  system,
 }:
 
 let

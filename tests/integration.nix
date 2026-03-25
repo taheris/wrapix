@@ -1,10 +1,10 @@
 # Integration tests - require NixOS VM with KVM
 # These tests verify actual container runtime behavior
-{ pkgs, system }:
+{ pkgs }:
 
 let
   # Use pkgs.hello as stand-in for beads and claude-code in tests
-  testPkgs = pkgs.extend (final: prev: { beads = pkgs.hello; });
+  testPkgs = pkgs.extend (_final: _prev: { beads = pkgs.hello; });
 
   # Build the sandbox image for tests
   profiles = import ../lib/sandbox/profiles.nix { pkgs = testPkgs; };
@@ -19,7 +19,7 @@ let
 
   # Common VM configuration for all tests
   commonModule =
-    { config, pkgs, ... }:
+    { pkgs, ... }:
     {
       virtualisation = {
         podman.enable = true;
@@ -50,7 +50,7 @@ in
     name = "wrapix-container-start";
 
     nodes.machine =
-      { config, pkgs, ... }:
+      { ... }:
       {
         imports = [ commonModule ];
       };
@@ -94,7 +94,7 @@ in
     name = "wrapix-filesystem-isolation";
 
     nodes.machine =
-      { config, pkgs, ... }:
+      { ... }:
       {
         imports = [ commonModule ];
       };
@@ -155,7 +155,7 @@ in
     name = "wrapix-user-namespace";
 
     nodes.machine =
-      { config, pkgs, ... }:
+      { ... }:
       {
         imports = [ commonModule ];
       };

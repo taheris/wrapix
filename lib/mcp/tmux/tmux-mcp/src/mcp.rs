@@ -203,8 +203,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                         "command".to_string(),
                         PropertyDefinition {
                             prop_type: "string".to_string(),
-                            description: "Command to run in the pane (e.g., 'RUST_LOG=debug cargo run')"
-                                .to_string(),
+                            description:
+                                "Command to run in the pane (e.g., 'RUST_LOG=debug cargo run')"
+                                    .to_string(),
                         },
                     );
                     props.insert(
@@ -240,8 +241,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                         "keys".to_string(),
                         PropertyDefinition {
                             prop_type: "string".to_string(),
-                            description: "Keystrokes to send. Use '^C' for Ctrl-C, 'Enter' for newline."
-                                .to_string(),
+                            description:
+                                "Keystrokes to send. Use '^C' for Ctrl-C, 'Enter' for newline."
+                                    .to_string(),
                         },
                     );
                     props
@@ -409,9 +411,8 @@ impl Default for McpHandler {
 
 /// Parse a line of input as a JSON-RPC request
 pub fn parse_request(line: &str) -> Result<JsonRpcRequest, JsonRpcResponse> {
-    serde_json::from_str(line).map_err(|e| {
-        JsonRpcResponse::error(None, PARSE_ERROR, format!("Parse error: {}", e))
-    })
+    serde_json::from_str(line)
+        .map_err(|e| JsonRpcResponse::error(None, PARSE_ERROR, format!("Parse error: {}", e)))
 }
 
 /// Serialize a response to a JSON string (single line)
@@ -564,8 +565,18 @@ mod tests {
         assert_eq!(create_pane.input_schema.schema_type, "object");
         assert!(create_pane.input_schema.properties.contains_key("command"));
         assert!(create_pane.input_schema.properties.contains_key("name"));
-        assert!(create_pane.input_schema.required.contains(&"command".to_string()));
-        assert!(!create_pane.input_schema.required.contains(&"name".to_string()));
+        assert!(
+            create_pane
+                .input_schema
+                .required
+                .contains(&"command".to_string())
+        );
+        assert!(
+            !create_pane
+                .input_schema
+                .required
+                .contains(&"name".to_string())
+        );
     }
 
     #[test]
@@ -669,9 +680,11 @@ mod tests {
             name: "tmux_list_panes".to_string(),
             arguments: HashMap::new(),
         };
-        assert!(handler
-            .validate_request(&McpMethod::ToolsCall(params))
-            .is_err());
+        assert!(
+            handler
+                .validate_request(&McpMethod::ToolsCall(params))
+                .is_err()
+        );
     }
 
     #[test]
@@ -687,7 +700,11 @@ mod tests {
             name: "tmux_list_panes".to_string(),
             arguments: HashMap::new(),
         };
-        assert!(handler.validate_request(&McpMethod::ToolsCall(params)).is_ok());
+        assert!(
+            handler
+                .validate_request(&McpMethod::ToolsCall(params))
+                .is_ok()
+        );
     }
 
     // --- ToolCallResult Tests ---
@@ -704,7 +721,9 @@ mod tests {
 
     #[test]
     fn test_tool_call_result_error() {
-        let result = ToolCallResult::error("Pane 'debug-1' not found. Use tmux_list_panes to see active panes.");
+        let result = ToolCallResult::error(
+            "Pane 'debug-1' not found. Use tmux_list_panes to see active panes.",
+        );
         let json = serde_json::to_string(&result).unwrap();
 
         assert!(json.contains(r#""isError":true"#));
@@ -744,10 +763,8 @@ mod tests {
         let request = parse_request(request_json).unwrap();
         let handler = McpHandler::new();
         let result = handler.handle_tools_list();
-        let response = JsonRpcResponse::success(
-            request.id.clone(),
-            serde_json::to_value(result).unwrap(),
-        );
+        let response =
+            JsonRpcResponse::success(request.id.clone(), serde_json::to_value(result).unwrap());
         let response_json = serialize_response(&response);
 
         // Verify all 5 tools are in the response
