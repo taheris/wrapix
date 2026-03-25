@@ -17,6 +17,7 @@ case "$COMMAND" in
   todo)   exec ralph-todo   "$@" ;;
   tune)   exec ralph-tune   "$@" ;;
   use)    exec ralph-use    "$@" ;;
+  watch)  exec ralph-watch  "$@" ;;
 
   edit)
       # Get current label from state/current, then spec_path from state/<label>.json
@@ -71,6 +72,11 @@ case "$COMMAND" in
     echo "  sync            Update local templates from packaged (backs up customizations)"
     echo "    --diff [name]   Show local template changes vs packaged"
     echo "  tune            AI-assisted template editing (interactive or via diff)"
+    echo ""
+    echo "Observation Commands:"
+    echo "  watch           Monitor running services and create beads for issues"
+    echo "    -s <label>      Spec label to monitor (required)"
+    echo "    --panes <p>     Tmux panes to observe"
     echo ""
     echo "Communication Commands:"
     echo "  msg             Respond to agent questions (async human communication)"

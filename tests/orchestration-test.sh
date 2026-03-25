@@ -625,6 +625,209 @@ test_merge_conflict_handling() {
 }
 
 #-----------------------------------------------------------------------------
+# test_watch_creates_beads
+#
+# Verifies that watch.sh exists, accepts -s flag, spawns poll loop, renders
+# watch template, and uses run_claude_stream for each cycle.
+#-----------------------------------------------------------------------------
+test_watch_creates_beads() {
+  echo "--- test_watch_creates_beads ---"
+
+  local watch_sh="$REPO_ROOT/lib/ralph/cmd/watch.sh"
+
+  # 1. watch.sh must exist
+  if [ ! -f "$watch_sh" ]; then
+    fail "watch.sh does not exist"
+    return 1
+  fi
+  pass "watch.sh exists"
+
+  # 2. watch.sh must accept -s/--spec flag
+  if grep -q '\-s|--spec' "$watch_sh" || grep -qE -- '--spec\|-s' "$watch_sh"; then
+    pass "watch.sh accepts -s/--spec flag"
+  else
+    fail "watch.sh does not accept -s/--spec flag"
+    return 1
+  fi
+
+  # 3. watch.sh must render watch template
+  if grep -q 'render_template watch' "$watch_sh"; then
+    pass "watch.sh renders watch template"
+  else
+    fail "watch.sh does not render watch template"
+    return 1
+  fi
+
+  # 4. watch.sh must use run_claude_stream
+  if grep -q 'run_claude_stream' "$watch_sh"; then
+    pass "watch.sh uses run_claude_stream for claude sessions"
+  else
+    fail "watch.sh does not use run_claude_stream"
+    return 1
+  fi
+
+  # 5. watch.sh must source util.sh
+  if grep -q 'source.*util.sh' "$watch_sh"; then
+    pass "watch.sh sources util.sh"
+  else
+    fail "watch.sh does not source util.sh"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_watch_deduplication
+#
+# Verifies that the watch template instructs the agent to deduplicate against
+# existing beads and known issues in watch state.
+#-----------------------------------------------------------------------------
+test_watch_deduplication() {
+  echo "--- test_watch_deduplication ---"
+
+  local watch_md="$REPO_ROOT/lib/ralph/template/watch.md"
+
+  # 1. watch.md must instruct deduplication
+  if grep -qi 'deduplic' "$watch_md"; then
+    pass "watch.md instructs deduplication"
+  else
+    fail "watch.md does not instruct deduplication"
+    return 1
+  fi
+
+  # 2. watch.md must reference bd list for checking existing beads
+  if grep -q 'bd list' "$watch_md"; then
+    pass "watch.md references bd list for existing beads check"
+  else
+    fail "watch.md does not reference bd list for existing beads"
+    return 1
+  fi
+
+  # 3. watch.md must reference watch state for known issues
+  if grep -q 'watch.md' "$watch_md" || grep -q 'watch state' "$watch_md"; then
+    pass "watch.md references watch state for known issues"
+  else
+    fail "watch.md does not reference watch state"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_watch_max_issues
+#
+# Verifies that watch.sh reads max-issues from config and checks bead count
+# before spawning new sessions.
+#-----------------------------------------------------------------------------
+test_watch_max_issues() {
+  echo "--- test_watch_max_issues ---"
+
+  local watch_sh="$REPO_ROOT/lib/ralph/cmd/watch.sh"
+
+  # 1. watch.sh must read max-issues from config
+  if grep -q 'max-issues' "$watch_sh"; then
+    pass "watch.sh reads max-issues from config"
+  else
+    fail "watch.sh does not read max-issues from config"
+    return 1
+  fi
+
+  # 2. watch.sh must check bead count against max
+  if grep -q 'MAX_ISSUES' "$watch_sh"; then
+    pass "watch.sh checks bead count against MAX_ISSUES"
+  else
+    fail "watch.sh does not check MAX_ISSUES limit"
+    return 1
+  fi
+
+  # 3. watch.sh must count source:watch beads
+  if grep -q 'source:watch' "$watch_sh"; then
+    pass "watch.sh counts source:watch beads"
+  else
+    fail "watch.sh does not count source:watch beads"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_watch_bead_labels
+#
+# Verifies that watch-created beads use the source:watch label in the template.
+#-----------------------------------------------------------------------------
+test_watch_bead_labels() {
+  echo "--- test_watch_bead_labels ---"
+
+  local watch_md="$REPO_ROOT/lib/ralph/template/watch.md"
+
+  # 1. watch.md must instruct agent to label beads with source:watch
+  if grep -q 'source:watch' "$watch_md"; then
+    pass "watch.md includes source:watch label in bead creation"
+  else
+    fail "watch.md does not include source:watch label"
+    return 1
+  fi
+
+  # 2. watch.md must instruct agent to label with spec-<label>
+  if grep -q 'spec-{{LABEL}}' "$watch_md"; then
+    pass "watch.md includes spec-<label> in bead creation"
+  else
+    fail "watch.md does not include spec-<label> label"
+    return 1
+  fi
+
+  # 3. watch.md must instruct agent to bond to molecule
+  if grep -q 'bd mol bond' "$watch_md"; then
+    pass "watch.md instructs bonding to molecule"
+  else
+    fail "watch.md does not instruct molecule bonding"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_watch_dispatcher
+#
+# Verifies that ralph.sh dispatcher routes the watch command.
+#-----------------------------------------------------------------------------
+test_watch_dispatcher() {
+  echo "--- test_watch_dispatcher ---"
+
+  local ralph_sh="$REPO_ROOT/lib/ralph/cmd/ralph.sh"
+
+  # 1. ralph.sh must have watch case
+  if grep -q 'watch)' "$ralph_sh"; then
+    pass "ralph.sh dispatches watch command"
+  else
+    fail "ralph.sh does not dispatch watch command"
+    return 1
+  fi
+
+  # 2. ralph.sh must exec ralph-watch
+  if grep -q 'ralph-watch' "$ralph_sh"; then
+    pass "ralph.sh execs ralph-watch"
+  else
+    fail "ralph.sh does not exec ralph-watch"
+    return 1
+  fi
+
+  # 3. ralph.sh help must mention watch
+  if grep -q 'watch' "$ralph_sh"; then
+    pass "ralph.sh help mentions watch"
+  else
+    fail "ralph.sh help does not mention watch"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -641,6 +844,11 @@ test_parallel_dispatch
 test_parallel_worktrees
 test_worktree_merge
 test_merge_conflict_handling
+test_watch_creates_beads
+test_watch_deduplication
+test_watch_max_issues
+test_watch_bead_labels
+test_watch_dispatcher
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
