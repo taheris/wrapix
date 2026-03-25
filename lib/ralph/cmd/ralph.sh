@@ -8,6 +8,7 @@ shift || true
 case "$COMMAND" in
   check)  exec ralph-check  "$@" ;;
   logs)   exec ralph-logs   "$@" ;;
+  msg)    exec ralph-msg    "$@" ;;
   plan)   exec ralph-plan   "$@" ;;
   run)    exec ralph-run    "$@" ;;
   spec)   exec ralph-spec   "$@" ;;
@@ -70,6 +71,13 @@ case "$COMMAND" in
     echo "  sync            Update local templates from packaged (backs up customizations)"
     echo "    --diff [name]   Show local template changes vs packaged"
     echo "  tune            AI-assisted template editing (interactive or via diff)"
+    echo ""
+    echo "Communication Commands:"
+    echo "  msg             Respond to agent questions (async human communication)"
+    echo "    -s <label>      Filter by spec"
+    echo "    -i <id>         Target specific question"
+    echo "    -i <id> \"ans\"   Reply to a question"
+    echo "    -i <id> -d      Dismiss without answering"
     echo ""
     echo "Utility Commands:"
     echo "  logs [N]        View recent work logs (default 5)"

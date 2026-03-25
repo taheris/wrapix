@@ -111,12 +111,165 @@ test_clarify_label() {
 }
 
 #-----------------------------------------------------------------------------
+# test_msg_list
+#
+# Verifies that ralph msg (list mode) queries beads with ralph:clarify label
+# and displays a table with ID, spec, source, question columns.
+#-----------------------------------------------------------------------------
+test_msg_list() {
+  echo "--- test_msg_list ---"
+
+  local msg_sh="$REPO_ROOT/lib/ralph/cmd/msg.sh"
+
+  # 1. msg.sh must exist
+  if [ ! -f "$msg_sh" ]; then
+    fail "msg.sh does not exist"
+    return 1
+  fi
+  pass "msg.sh exists"
+
+  # 2. msg.sh must query beads with ralph:clarify label
+  if grep -q 'ralph:clarify' "$msg_sh"; then
+    pass "msg.sh queries ralph:clarify label"
+  else
+    fail "msg.sh does not query ralph:clarify label"
+    return 1
+  fi
+
+  # 3. msg.sh must display table headers: ID, SPEC, SOURCE, QUESTION
+  if grep -q 'ID' "$msg_sh" && grep -q 'SPEC' "$msg_sh" && grep -q 'SOURCE' "$msg_sh" && grep -q 'QUESTION' "$msg_sh"; then
+    pass "msg.sh displays table with required columns"
+  else
+    fail "msg.sh missing table columns (ID, SPEC, SOURCE, QUESTION)"
+    return 1
+  fi
+
+  # 4. msg.sh must source util.sh for shared helpers
+  if grep -q 'source.*util.sh' "$msg_sh"; then
+    pass "msg.sh sources util.sh"
+  else
+    fail "msg.sh does not source util.sh"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_msg_list_by_spec
+#
+# Verifies that ralph msg -s <label> filters by spec label.
+#-----------------------------------------------------------------------------
+test_msg_list_by_spec() {
+  echo "--- test_msg_list_by_spec ---"
+
+  local msg_sh="$REPO_ROOT/lib/ralph/cmd/msg.sh"
+
+  # 1. msg.sh must accept -s / --spec flag
+  if grep -q '\-s|--spec' "$msg_sh"; then
+    pass "msg.sh accepts -s/--spec flag"
+  else
+    fail "msg.sh does not accept -s/--spec flag"
+    return 1
+  fi
+
+  # 2. msg.sh must use spec filter to add spec-<label> to bd query
+  # shellcheck disable=SC2016
+  if grep -q 'spec-\$SPEC_FILTER' "$msg_sh" || grep -q 'spec-${SPEC_FILTER}' "$msg_sh"; then
+    pass "msg.sh adds spec-<label> filter to bd query"
+  else
+    fail "msg.sh does not add spec-<label> filter to bd query"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_msg_reply
+#
+# Verifies that ralph msg -i <id> "answer" stores reply and removes label.
+#-----------------------------------------------------------------------------
+test_msg_reply() {
+  echo "--- test_msg_reply ---"
+
+  local msg_sh="$REPO_ROOT/lib/ralph/cmd/msg.sh"
+
+  # 1. msg.sh must accept -i / --id flag
+  if grep -q '\-i|--id' "$msg_sh"; then
+    pass "msg.sh accepts -i/--id flag"
+  else
+    fail "msg.sh does not accept -i/--id flag"
+    return 1
+  fi
+
+  # 2. msg.sh must store answer via bd update --append-notes
+  if grep -q 'append-notes.*Answer' "$msg_sh"; then
+    pass "msg.sh stores answer in bead notes"
+  else
+    fail "msg.sh does not store answer in bead notes"
+    return 1
+  fi
+
+  # 3. msg.sh must call remove_clarify_label after reply
+  if grep -q 'remove_clarify_label' "$msg_sh"; then
+    pass "msg.sh removes ralph:clarify label on reply"
+  else
+    fail "msg.sh does not remove ralph:clarify label on reply"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_msg_dismiss
+#
+# Verifies that ralph msg -i <id> -d dismisses without answering.
+#-----------------------------------------------------------------------------
+test_msg_dismiss() {
+  echo "--- test_msg_dismiss ---"
+
+  local msg_sh="$REPO_ROOT/lib/ralph/cmd/msg.sh"
+
+  # 1. msg.sh must accept -d / --dismiss flag
+  if grep -q '\-d|--dismiss' "$msg_sh"; then
+    pass "msg.sh accepts -d/--dismiss flag"
+  else
+    fail "msg.sh does not accept -d/--dismiss flag"
+    return 1
+  fi
+
+  # 2. msg.sh must store dismissal note
+  if grep -q 'Dismissed' "$msg_sh" && grep -q 'append-notes' "$msg_sh"; then
+    pass "msg.sh stores dismissal note in bead"
+  else
+    fail "msg.sh does not store dismissal note"
+    return 1
+  fi
+
+  # 3. msg.sh must call remove_clarify_label on dismiss
+  if grep -A 10 'DISMISS.*true' "$msg_sh" | grep -q 'remove_clarify_label'; then
+    pass "msg.sh removes ralph:clarify label on dismiss"
+  else
+    fail "msg.sh does not remove ralph:clarify label on dismiss"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
 echo ""
 
 test_clarify_label
+test_msg_list
+test_msg_list_by_spec
+test_msg_reply
+test_msg_dismiss
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
