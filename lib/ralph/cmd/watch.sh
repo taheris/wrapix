@@ -140,6 +140,12 @@ POLL_INTERVAL=$(echo "$CONFIG" | jq -r '.watch."poll-interval" // 30')
 MAX_ISSUES=$(echo "$CONFIG" | jq -r '.watch."max-issues" // 10')
 IGNORE_PATTERNS=$(echo "$CONFIG" | jq -r '.watch."ignore-patterns" // []')
 
+# Load model override for watch phase
+MODEL_WATCH=$(resolve_model "watch" "$CONFIG")
+if [ -n "$MODEL_WATCH" ]; then
+  debug "Model override for watch phase: $MODEL_WATCH"
+fi
+
 debug "Watch config: poll-interval=$POLL_INTERVAL max-issues=$MAX_ISSUES"
 
 # Compute spec path
@@ -252,7 +258,7 @@ while [ "$RUNNING" = "true" ]; do
 
   # Run claude with FRESH CONTEXT (new process each cycle)
   export WATCH_PROMPT="$watch_prompt"
-  run_claude_stream "WATCH_PROMPT" "$log" "$CONFIG"
+  run_claude_stream "WATCH_PROMPT" "$log" "$CONFIG" "$MODEL_WATCH"
 
   # Check result
   if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then

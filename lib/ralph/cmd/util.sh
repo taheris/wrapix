@@ -465,22 +465,48 @@ end'
   echo "$filter"
 }
 
+# Resolve model override for a given phase from config JSON
+# Usage: resolve_model <phase> <config_json>
+# Output: model string on stdout (empty if null/unset — use ANTHROPIC_MODEL default)
+# Phases: run, check, plan, todo, watch
+resolve_model() {
+  local phase="$1"
+  local config="$2"
+
+  local model
+  model=$(echo "$config" | jq -r ".model.\"$phase\" // empty" 2>/dev/null || true)
+
+  if [ -n "$model" ] && [ "$model" != "null" ]; then
+    debug "resolve_model: phase=$phase model=$model"
+    echo "$model"
+  fi
+}
+
 # Run claude with stream-json output and configurable display
-# Usage: run_claude_stream "$prompt_var_name" "$log_file" "$config_json"
+# Usage: run_claude_stream "$prompt_var_name" "$log_file" "$config_json" [model]
 # The prompt must be exported as an environment variable before calling
+# If model is provided, --model <model> is prepended to claude CLI args
 run_claude_stream() {
   local prompt_var="$1"
   local log_file="$2"
   local config="$3"
+  local model="${4:-}"
 
   local jq_filter
   jq_filter=$(build_stream_filter "$config")
 
   debug "Running claude with stream-json output to $log_file"
 
+  # Build claude args
+  local -a claude_args=(--dangerously-skip-permissions --print --output-format stream-json --verbose)
+  if [ -n "$model" ]; then
+    claude_args+=(--model "$model")
+    debug "Using model override: $model"
+  fi
+
   # Run claude with stream-json, tee to log, and filter with jq
   # The prompt variable is passed via environment
-  claude --dangerously-skip-permissions --print --output-format stream-json --verbose "${!prompt_var}" 2>&1 \
+  claude "${claude_args[@]}" "${!prompt_var}" 2>&1 \
     | tee "$log_file" \
     | jq --unbuffered -r "$jq_filter" 2>/dev/null || true
 }

@@ -155,6 +155,8 @@ let
       env ? { },
       mcp ? { },
       mcpRuntime ? false,
+      # Override the default ANTHROPIC_MODEL for this container (null = use default)
+      model ? null,
     }:
     let
       # mcpRuntime: include ALL MCP server packages, defer selection to runtime.
@@ -174,10 +176,21 @@ let
         inherit mounts env;
       };
 
-      # Merge MCP servers and profile plugins into Claude settings
+      # Merge MCP servers, profile plugins, and model override into Claude settings
       # When mcpRuntime is true, don't bake mcpServers — entrypoint handles it
+      modelEnvOverride =
+        if model != null then
+          {
+            env = baseClaudeSettings.env // {
+              ANTHROPIC_MODEL = model;
+            };
+          }
+        else
+          { };
+
       finalClaudeSettings =
         baseClaudeSettings
+        // modelEnvOverride
         // (if !mcpRuntime && mcpConfig.mcpServers != { } then { inherit (mcpConfig) mcpServers; } else { })
         // (
           if (finalProfile.enabledPlugins or { }) != { } then

@@ -1316,6 +1316,125 @@ test_msg_dispatcher() {
 }
 
 #-----------------------------------------------------------------------------
+# test_model_override
+#
+# Verifies that config.nix model overrides are passed to container/claude:
+#   - util.sh defines resolve_model helper
+#   - run_claude_stream accepts optional model parameter
+#   - run.sh reads model.run from config
+#   - check.sh reads model.check from config
+#   - watch.sh reads model.watch from config
+#   - sandbox default.nix supports model parameter
+#-----------------------------------------------------------------------------
+test_model_override() {
+  echo "--- test_model_override ---"
+
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+  local check_sh="$REPO_ROOT/lib/ralph/cmd/check.sh"
+  local watch_sh="$REPO_ROOT/lib/ralph/cmd/watch.sh"
+  local sandbox_nix="$REPO_ROOT/lib/sandbox/default.nix"
+
+  # 1. util.sh must define resolve_model helper
+  if grep -q '^resolve_model()' "$util_sh"; then
+    pass "util.sh defines resolve_model helper"
+  else
+    fail "util.sh does not define resolve_model helper"
+    return 1
+  fi
+
+  # 2. resolve_model must read model.<phase> from config JSON
+  if grep -A 10 '^resolve_model()' "$util_sh" | grep -q 'model'; then
+    pass "resolve_model reads model.<phase> from config"
+  else
+    fail "resolve_model does not read model.<phase>"
+    return 1
+  fi
+
+  # 3. run_claude_stream must accept optional model parameter
+  if grep -A 5 '^run_claude_stream()' "$util_sh" | grep -q 'model'; then
+    pass "run_claude_stream accepts model parameter"
+  else
+    fail "run_claude_stream does not accept model parameter"
+    return 1
+  fi
+
+  # 4. run_claude_stream must pass --model to claude CLI when model is set
+  if grep -A 25 '^run_claude_stream()' "$util_sh" | grep -q '\-\-model'; then
+    pass "run_claude_stream passes --model to claude CLI"
+  else
+    fail "run_claude_stream does not pass --model to claude CLI"
+    return 1
+  fi
+
+  # 5. run.sh must read model.run via resolve_model
+  if grep -q 'resolve_model.*run' "$run_sh"; then
+    pass "run.sh reads model.run via resolve_model"
+  else
+    fail "run.sh does not read model.run"
+    return 1
+  fi
+
+  # 6. run.sh must pass model to run_claude_stream
+  if grep -q 'run_claude_stream.*MODEL_RUN' "$run_sh"; then
+    pass "run.sh passes model to run_claude_stream"
+  else
+    fail "run.sh does not pass model to run_claude_stream"
+    return 1
+  fi
+
+  # 7. check.sh must read model.check via resolve_model
+  if grep -q 'resolve_model.*check' "$check_sh"; then
+    pass "check.sh reads model.check via resolve_model"
+  else
+    fail "check.sh does not read model.check"
+    return 1
+  fi
+
+  # 8. check.sh must pass model to run_claude_stream
+  if grep -q 'run_claude_stream.*model_check' "$check_sh"; then
+    pass "check.sh passes model to run_claude_stream"
+  else
+    fail "check.sh does not pass model to run_claude_stream"
+    return 1
+  fi
+
+  # 9. watch.sh must read model.watch via resolve_model
+  if grep -q 'resolve_model.*watch' "$watch_sh"; then
+    pass "watch.sh reads model.watch via resolve_model"
+  else
+    fail "watch.sh does not read model.watch"
+    return 1
+  fi
+
+  # 10. watch.sh must pass model to run_claude_stream
+  if grep -q 'run_claude_stream.*MODEL_WATCH' "$watch_sh"; then
+    pass "watch.sh passes model to run_claude_stream"
+  else
+    fail "watch.sh does not pass model to run_claude_stream"
+    return 1
+  fi
+
+  # 11. sandbox default.nix must accept model parameter in mkSandbox
+  if grep -q 'model ? null' "$sandbox_nix"; then
+    pass "sandbox default.nix accepts model parameter"
+  else
+    fail "sandbox default.nix does not accept model parameter"
+    return 1
+  fi
+
+  # 12. sandbox default.nix must override ANTHROPIC_MODEL when model is set
+  if grep -q 'ANTHROPIC_MODEL = model' "$sandbox_nix"; then
+    pass "sandbox default.nix overrides ANTHROPIC_MODEL per container"
+  else
+    fail "sandbox default.nix does not override ANTHROPIC_MODEL"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -1342,6 +1461,7 @@ test_watch_max_issues
 test_watch_bead_labels
 test_watch_dispatcher
 test_msg_dispatcher
+test_model_override
 test_run_check_triggers_review
 test_review_cycle_loops
 test_review_cycle_max_limit

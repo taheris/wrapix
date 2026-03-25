@@ -230,6 +230,12 @@ debug "Parallel concurrency: $PARALLEL"
 MAX_REVIEWS=$(echo "$CONFIG" | jq -r '.loop."max-reviews" // 2' 2>/dev/null || echo "2")
 debug "Max review cycles: $MAX_REVIEWS"
 
+# Load model override for run phase
+MODEL_RUN=$(resolve_model "run" "$CONFIG")
+if [ -n "$MODEL_RUN" ]; then
+  debug "Model override for run phase: $MODEL_RUN"
+fi
+
 #-----------------------------------------------------------------------------
 # Hook Support
 #-----------------------------------------------------------------------------
@@ -486,7 +492,7 @@ run_step() {
 
     # Use stream-json for real-time output display with configurable visibility
     export WORK_PROMPT="$work_prompt"
-    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
+    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG" "$MODEL_RUN"
 
     # Check for completion by examining the result in the JSON log
     if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
@@ -650,7 +656,7 @@ run_step_in_worktree() {
   (
     cd "$worktree_path"
     export WORK_PROMPT="$work_prompt"
-    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
+    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG" "$MODEL_RUN"
   )
 
   # Check result

@@ -468,11 +468,7 @@ run_spec_review() {
 
   # Check for model.check override
   local model_check
-  model_check=$(echo "$config" | jq -r '.model.check // empty' 2>/dev/null || true)
-  if [ -n "$model_check" ] && [ "$model_check" != "null" ]; then
-    echo "Using model override for check: $model_check"
-    export ANTHROPIC_MODEL="$model_check"
-  fi
+  model_check=$(resolve_model "check" "$config")
 
   # Render check.md template
   local review_prompt
@@ -494,7 +490,7 @@ run_spec_review() {
 
   # Run the reviewer agent
   export CHECK_PROMPT="$review_prompt"
-  run_claude_stream "CHECK_PROMPT" "$log" "$config"
+  run_claude_stream "CHECK_PROMPT" "$log" "$config" "$model_check"
 
   # Check for RALPH_COMPLETE in result
   if ! jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
