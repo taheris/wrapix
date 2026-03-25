@@ -46,6 +46,10 @@
           ...
         }:
         let
+          hostOverlay = final: _prev: {
+            beads = beadsFor final;
+          };
+
           beadsFor =
             pkgs':
             (pkgs'.callPackage "${inputs.beads}/default.nix" {
@@ -58,10 +62,6 @@
                   outputHash = "sha256-yrIlyP2fOesS74NqwaDrBK37KCjh3N1DePiF8w9ubOk=";
                 };
               });
-
-          hostOverlay = final: _prev: {
-            beads = beadsFor final;
-          };
 
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
           linuxOverlay = final: _prev: {
@@ -81,6 +81,8 @@
             src = ./.;
           };
 
+          sandboxPackages = [ (inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmtConfig) ];
+
           treefmtConfig = {
             projectRootFile = "flake.nix";
             programs = {
@@ -95,12 +97,6 @@
             };
             settings.formatter.shellcheck.excludes = [ ".envrc" ];
           };
-
-          # Linux treefmt wrapper for sandbox images
-          linuxTreefmt = inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmtConfig;
-
-          # Extra packages baked into every sandbox image
-          sandboxPackages = [ linuxTreefmt ];
 
           wrapix = import ./lib { inherit pkgs system linuxPkgs; };
           ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
@@ -211,7 +207,6 @@
             flakeCheck = false;
             flakeFormatter = false;
           };
-
         };
     };
 }

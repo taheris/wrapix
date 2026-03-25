@@ -109,7 +109,6 @@ let
     ralph.scripts
     ripgrep
     rsync
-    shellcheck
     tree
     unzip
     vim
