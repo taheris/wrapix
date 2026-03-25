@@ -201,6 +201,10 @@ debug "Loaded hooks - pre-loop: ${HOOK_PRE_LOOP:-(none)}, pre-step: ${HOOK_PRE_S
 debug "  post-step: ${HOOK_POST_STEP:-(none)}, post-loop: ${HOOK_POST_LOOP:-(none)}"
 debug "hooks-on-failure: $HOOKS_ON_FAILURE"
 
+# Load max-retries config (per bead, default 2)
+MAX_RETRIES=$(echo "$CONFIG" | jq -r '.loop."max-retries" // 2' 2>/dev/null || echo "2")
+debug "Max retries per bead: $MAX_RETRIES"
+
 # Load parallel config: flag overrides config, default 1
 PARALLEL=1
 if [ -n "$PARALLEL_FLAG" ]; then
@@ -436,72 +440,108 @@ run_step() {
     companions=$(read_manifests "$state_file")
   fi
 
-  # Render template using centralized render_template function
-  local work_prompt
-  work_prompt=$(render_template run \
-    "SPEC_PATH=$spec_path" \
-    "ISSUE_ID=$next_issue" \
-    "TITLE=$issue_title" \
-    "LABEL=$label" \
-    "MOLECULE_ID=$MOLECULE_ID" \
-    "COMPANIONS=$companions" \
-    "DESCRIPTION=$issue_desc" \
-    "PINNED_CONTEXT=$pinned_context" \
-    "EXIT_SIGNALS=")
+  # Retry loop: attempt up to MAX_RETRIES+1 times (1 initial + MAX_RETRIES retries)
+  local attempt=0
+  local previous_failure=""
 
   mkdir -p "$RALPH_DIR/logs"
-  local log="$RALPH_DIR/logs/work-$next_issue.log"
 
-  # Run claude with FRESH CONTEXT (new process)
-  echo ""
-  echo "=== Starting work (fresh context) ==="
-  echo ""
+  while true; do
+    # Render template with PREVIOUS_FAILURE context (empty on first attempt)
+    local work_prompt
+    work_prompt=$(render_template run \
+      "SPEC_PATH=$spec_path" \
+      "ISSUE_ID=$next_issue" \
+      "TITLE=$issue_title" \
+      "LABEL=$label" \
+      "MOLECULE_ID=$MOLECULE_ID" \
+      "COMPANIONS=$companions" \
+      "DESCRIPTION=$issue_desc" \
+      "PINNED_CONTEXT=$pinned_context" \
+      "PREVIOUS_FAILURE=$previous_failure" \
+      "EXIT_SIGNALS=")
 
-  # Use stream-json for real-time output display with configurable visibility
-  export WORK_PROMPT="$work_prompt"
-  run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
+    local log="$RALPH_DIR/logs/work-$next_issue.log"
 
-  # Check for completion by examining the result in the JSON log
-  if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
+    # Run claude with FRESH CONTEXT (new process)
     echo ""
-    echo "Work complete. Closing issue: $next_issue"
-    bd close "$next_issue"
-
-    # Push beads to Dolt remote (incremental sync for progress visibility and crash safety)
-    bd dolt commit >/dev/null 2>&1 || true
-    bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
-
-    # Check if all beads with this label are complete
-    check_all_complete "$bead_label" "$label" "$hidden"
-    return 0
-  elif jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$log" >/dev/null 2>&1; then
-    # Agent needs clarification — add ralph:clarify label and store question
-    local clarify_text
-    clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
-      | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
-
-    echo ""
-    echo "Agent needs clarification on issue: $next_issue"
-    if [ -n "$clarify_text" ]; then
-      echo "  Question: $clarify_text"
+    if [ "$attempt" -gt 0 ]; then
+      echo "=== Retry attempt $attempt/$MAX_RETRIES (fresh context) ==="
+    else
+      echo "=== Starting work (fresh context) ==="
     fi
+    echo ""
 
-    # Add ralph:clarify label (with notification) so ralph run skips this bead
-    add_clarify_label "$next_issue" "$clarify_text"
+    # Use stream-json for real-time output display with configurable visibility
+    export WORK_PROMPT="$work_prompt"
+    run_claude_stream "WORK_PROMPT" "$log" "$CONFIG"
 
-    echo ""
-    echo "To answer and unblock:"
-    echo "  ralph msg -i $next_issue 'your answer'"
-    return 1
-  else
-    echo ""
-    echo "Work did not complete. Issue remains in-progress: $next_issue"
-    echo "Review log: $log"
-    echo ""
-    echo "To retry this issue, reset its status:"
-    echo "  bd update $next_issue --status=open"
-    return 1
-  fi
+    # Check for completion by examining the result in the JSON log
+    if jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_COMPLETE")] | any' -s "$log" >/dev/null 2>&1; then
+      echo ""
+      echo "Work complete. Closing issue: $next_issue"
+      bd close "$next_issue"
+
+      # Push beads to Dolt remote (incremental sync for progress visibility and crash safety)
+      bd dolt commit >/dev/null 2>&1 || true
+      bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
+
+      # Check if all beads with this label are complete
+      check_all_complete "$bead_label" "$label" "$hidden"
+      return 0
+    elif jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$log" >/dev/null 2>&1; then
+      # Agent needs clarification — add ralph:clarify label and store question
+      local clarify_text
+      clarify_text=$(jq -r 'select(.type == "result") | .result' "$log" \
+        | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
+
+      echo ""
+      echo "Agent needs clarification on issue: $next_issue"
+      if [ -n "$clarify_text" ]; then
+        echo "  Question: $clarify_text"
+      fi
+
+      # Add ralph:clarify label (with notification) so ralph run skips this bead
+      add_clarify_label "$next_issue" "$clarify_text"
+
+      echo ""
+      echo "To answer and unblock:"
+      echo "  ralph msg -i $next_issue 'your answer'"
+      return 1
+    else
+      # Work did not complete — check if retries remain
+      ((++attempt))
+
+      if [ "$attempt" -gt "$MAX_RETRIES" ]; then
+        # Max retries exceeded — label ralph:clarify with failure details and move on
+        echo ""
+        echo "Work did not complete after $attempt attempt(s). Max retries ($MAX_RETRIES) exceeded."
+
+        local failure_summary
+        failure_summary=$(extract_error_from_log "$log")
+        add_clarify_label "$next_issue" "Failed after $attempt attempt(s). Last error: $failure_summary"
+
+        echo "Issue $next_issue labeled ralph:clarify — moving to next bead."
+        return 1
+      fi
+
+      # Extract error context from log for retry
+      echo ""
+      echo "Work did not complete (attempt $attempt/$((MAX_RETRIES + 1))). Retrying with error context..."
+
+      local error_output
+      error_output=$(extract_error_from_log "$log")
+      previous_failure="## Previous Failure (attempt $attempt)
+
+The previous attempt to complete this issue failed. Here is the error context from that attempt:
+
+\`\`\`
+$error_output
+\`\`\`
+
+Please analyze the failure above and take a different approach to complete the task."
+    fi
+  done
 }
 
 #-----------------------------------------------------------------------------
@@ -799,11 +839,14 @@ while true; do
       break
       ;;
     *)
+      if [ "$RUN_ONCE" = "true" ]; then
+        echo ""
+        echo "Step failed (exit code: $EXIT_CODE)."
+        exit 1
+      fi
+      # In loop mode, continue to the next bead (failed bead has ralph:clarify)
       echo ""
-      echo "Step failed (exit code: $EXIT_CODE). Pausing work."
-      echo "Review the logs and fix the issue before continuing."
-      echo "To resume: ralph run${FEATURE_NAME:+ $FEATURE_NAME}"
-      exit 1
+      echo "Step failed (exit code: $EXIT_CODE). Continuing to next bead..."
       ;;
   esac
 

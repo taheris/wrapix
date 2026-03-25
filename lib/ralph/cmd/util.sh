@@ -1021,6 +1021,55 @@ read_manifests() {
 }
 
 #-----------------------------------------------------------------------------
+# Error Extraction from Claude Logs
+#
+# Extracts error output from a JSON stream log file for retry context.
+# Looks for error messages, tool errors, and the final result text.
+#-----------------------------------------------------------------------------
+
+# Extract error context from a claude stream-json log file
+# Usage: extract_error_from_log <log_file>
+# Output: A summary of error output (truncated to ~2000 chars)
+extract_error_from_log() {
+  local log_file="$1"
+  local error_output=""
+
+  if [ ! -f "$log_file" ]; then
+    echo "(no log file found)"
+    return 0
+  fi
+
+  # Extract the final result text
+  local result_text
+  result_text=$(jq -r 'select(.type == "result") | .result // empty' "$log_file" 2>/dev/null | head -50)
+
+  # Extract tool errors (non-zero exit codes from bash, failed operations)
+  local tool_errors
+  tool_errors=$(jq -r 'select(.type == "tool_result" and .is_error == true) | .content // empty' "$log_file" 2>/dev/null | tail -30)
+
+  # Build error summary
+  if [ -n "$tool_errors" ]; then
+    error_output="Tool errors:\n$tool_errors"
+  fi
+
+  if [ -n "$result_text" ]; then
+    if [ -n "$error_output" ]; then
+      error_output="$error_output\n\nFinal output:\n$result_text"
+    else
+      error_output="Final output:\n$result_text"
+    fi
+  fi
+
+  # Fallback: last 30 lines of the log
+  if [ -z "$error_output" ]; then
+    error_output=$(tail -30 "$log_file" 2>/dev/null || echo "(could not read log)")
+  fi
+
+  # Truncate to ~2000 chars to avoid blowing up the prompt
+  echo -e "$error_output" | head -80 | cut -c1-2000
+}
+
+#-----------------------------------------------------------------------------
 # ralph:clarify Label Management
 #
 # Helpers for adding/removing the ralph:clarify label on beads.

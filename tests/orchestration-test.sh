@@ -828,6 +828,77 @@ test_watch_dispatcher() {
 }
 
 #-----------------------------------------------------------------------------
+# test_retry_max_limit
+#
+# Verifies that run.sh implements retry logic with max-retries limit and
+# ralph:clarify labeling on permanent failure.
+#-----------------------------------------------------------------------------
+test_retry_max_limit() {
+  echo "--- test_retry_max_limit ---"
+
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+  local util_sh="$REPO_ROOT/lib/ralph/cmd/util.sh"
+
+  # 1. run.sh must read loop.max-retries from config
+  if grep -q 'max-retries' "$run_sh"; then
+    pass "run.sh reads loop.max-retries from config"
+  else
+    fail "run.sh does not read loop.max-retries from config"
+    return 1
+  fi
+
+  # 2. run.sh must have a MAX_RETRIES variable
+  if grep -q 'MAX_RETRIES' "$run_sh"; then
+    pass "run.sh defines MAX_RETRIES variable"
+  else
+    fail "run.sh does not define MAX_RETRIES variable"
+    return 1
+  fi
+
+  # 3. run.sh must track attempt count in run_step
+  if grep -q 'attempt' "$run_sh"; then
+    pass "run.sh tracks retry attempts"
+  else
+    fail "run.sh does not track retry attempts"
+    return 1
+  fi
+
+  # 4. run.sh must call add_clarify_label after max retries exceeded
+  if grep -A 5 'Max retries' "$run_sh" | grep -q 'add_clarify_label'; then
+    pass "run.sh adds ralph:clarify label after max retries"
+  else
+    fail "run.sh does not add ralph:clarify label after max retries"
+    return 1
+  fi
+
+  # 5. util.sh must define extract_error_from_log helper
+  if grep -q 'extract_error_from_log' "$util_sh"; then
+    pass "util.sh defines extract_error_from_log helper"
+  else
+    fail "util.sh does not define extract_error_from_log helper"
+    return 1
+  fi
+
+  # 6. run.sh must pass PREVIOUS_FAILURE to render_template
+  if grep -q 'PREVIOUS_FAILURE=' "$run_sh"; then
+    pass "run.sh passes PREVIOUS_FAILURE to render_template"
+  else
+    fail "run.sh does not pass PREVIOUS_FAILURE to render_template"
+    return 1
+  fi
+
+  # 7. In loop mode, failed steps should continue (not exit)
+  if grep -q 'Continuing to next bead' "$run_sh"; then
+    pass "run.sh continues to next bead after failure in loop mode"
+  else
+    fail "run.sh does not continue to next bead after failure"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -840,6 +911,7 @@ test_msg_list_by_spec
 test_msg_reply
 test_msg_dismiss
 test_retry_with_context
+test_retry_max_limit
 test_parallel_dispatch
 test_parallel_worktrees
 test_worktree_merge
