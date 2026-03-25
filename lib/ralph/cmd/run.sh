@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ralph run [--once|-1] [--spec <name>|-s <name>]
+# ralph run [--once|-1] [--check|-c] [--spec <name>|-s <name>]
 # Execute work items for a feature
 #
 # Modes:
@@ -10,6 +10,7 @@ set -euo pipefail
 #
 # Options:
 #   --spec/-s <name>: Operate on named spec (default: current spec from state/current)
+#   --check/-c: Auto-trigger post-epic review after molecule reaches 100%
 #
 # Spec resolution: reads the spec label ONCE at startup (from --spec flag or
 # state/current). The label is held in memory for the duration of the run —
@@ -21,6 +22,7 @@ set -euo pipefail
 
 # Parse flags (including --spec/-s early, before container detection)
 RUN_ONCE=false
+RUN_CHECK=false
 PROFILE_OVERRIDE=""
 SPEC_FLAG=""
 PARALLEL_FLAG=""
@@ -40,6 +42,9 @@ for arg in "$@"; do
   case "$arg" in
     --once|-1)
       RUN_ONCE=true
+      ;;
+    --check|-c)
+      RUN_CHECK=true
       ;;
     --profile=*)
       PROFILE_OVERRIDE="${arg#--profile=}"
@@ -76,6 +81,9 @@ if [ ! -f /etc/wrapix/claude-config.json ] && command -v wrapix &>/dev/null; the
   RALPH_ARGS_PARTS=""
   if [ "$RUN_ONCE" = "true" ]; then
     RALPH_ARGS_PARTS="--once"
+  fi
+  if [ "$RUN_CHECK" = "true" ]; then
+    RALPH_ARGS_PARTS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }--check"
   fi
   if [ -n "$SPEC_FLAG" ]; then
     RALPH_ARGS_PARTS="${RALPH_ARGS_PARTS:+$RALPH_ARGS_PARTS }--spec $SPEC_FLAG"
@@ -217,6 +225,10 @@ if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
   error "Invalid parallel value: $PARALLEL (must be a positive integer)"
 fi
 debug "Parallel concurrency: $PARALLEL"
+
+# Load max-reviews config (for -c/--check flag, default 2)
+MAX_REVIEWS=$(echo "$CONFIG" | jq -r '.loop."max-reviews" // 2' 2>/dev/null || echo "2")
+debug "Max review cycles: $MAX_REVIEWS"
 
 #-----------------------------------------------------------------------------
 # Hook Support
@@ -777,6 +789,9 @@ fi
 if [ "$PARALLEL" -gt 1 ]; then
   echo "  Parallel: $PARALLEL workers"
 fi
+if [ "$RUN_CHECK" = "true" ]; then
+  echo "  Review: enabled (max $MAX_REVIEWS cycles)"
+fi
 echo ""
 
 # Run pre-loop hook (even in --once mode, for consistency)
@@ -856,6 +871,128 @@ while true; do
     echo ""
   fi
 done
+
+#-----------------------------------------------------------------------------
+# Review Cycle (--check/-c flag)
+#-----------------------------------------------------------------------------
+
+if [ "$RUN_CHECK" = "true" ] && [ "$FINAL_EXIT_CODE" -eq 0 ] && [ "$RUN_ONCE" != "true" ]; then
+  review_cycle=0
+  bead_label="spec-$FEATURE_NAME"
+
+  while [ "$review_cycle" -lt "$MAX_REVIEWS" ]; do
+    ((++review_cycle))
+    echo ""
+    echo "=== Review cycle $review_cycle/$MAX_REVIEWS ==="
+    echo ""
+
+    # Count beads BEFORE review
+    beads_before_json=$(bd_json list --label "$bead_label" --json 2>/dev/null || echo "[]")
+    beads_before=$(echo "$beads_before_json" | jq 'length' 2>/dev/null || echo "0")
+    debug "Beads before review: $beads_before"
+
+    # Trigger ralph check -s <label>
+    set +e
+    "$(dirname "$0")/check.sh" -s "$FEATURE_NAME"
+    check_exit=$?
+    set -e
+
+    # Handle RALPH_CLARIFY from reviewer: check if check.sh indicated clarify
+    # check.sh returns 1 on failure — check log for RALPH_CLARIFY
+    if [ $check_exit -ne 0 ]; then
+      local_check_log="$RALPH_DIR/logs/check-${FEATURE_NAME}.log"
+      if [ -f "$local_check_log" ] && jq -e '[.[] | select(.type == "result") | .result | contains("RALPH_CLARIFY")] | any' -s "$local_check_log" >/dev/null 2>&1; then
+        # Add ralph:clarify label to the epic bead with the question
+        clarify_text=$(jq -r 'select(.type == "result") | .result' "$local_check_log" \
+          | grep -oP 'RALPH_CLARIFY:\s*\K.*' | head -1)
+
+        echo "Reviewer needs clarification. Pausing review cycle."
+
+        # Find the epic bead for this label
+        epic_json=$(bd_json list --label "$bead_label" --json 2>/dev/null || echo "[]")
+        epic_id=$(echo "$epic_json" | jq -r '[.[] | select(.issue_type == "epic" and (.status == "closed" | not))][0].id // empty' 2>/dev/null)
+
+        if [ -n "$epic_id" ]; then
+          add_clarify_label "$epic_id" "$clarify_text"
+          echo "Epic $epic_id labeled ralph:clarify."
+          echo "To respond: ralph msg -i $epic_id 'your answer'"
+        fi
+        break
+      fi
+    fi
+
+    # Count beads AFTER review
+    beads_after_json=$(bd_json list --label "$bead_label" --json 2>/dev/null || echo "[]")
+    beads_after=$(echo "$beads_after_json" | jq 'length' 2>/dev/null || echo "0")
+    new_beads=$((beads_after - beads_before))
+    debug "Beads after review: $beads_after (new: $new_beads)"
+
+    if [ "$new_beads" -le 0 ]; then
+      # Review passed — no new beads
+      echo ""
+      echo "Review passed for $FEATURE_NAME"
+      if command -v wrapix-notify &>/dev/null; then
+        wrapix-notify "Ralph" "Review passed for $FEATURE_NAME" 2>/dev/null || true
+      fi
+      break
+    fi
+
+    echo ""
+    echo "Review found $new_beads new bead(s). Resuming work loop..."
+    echo ""
+
+    # Resume work loop to process new beads
+    while true; do
+      ((++step_count))
+      echo "=== Step $step_count (review follow-up) ==="
+
+      current_issue_id=""
+      if [ -n "$FEATURE_NAME" ]; then
+        current_issue_id=$(bd ready --label "$bead_label" --sort priority --json 2>/dev/null | \
+          jq -r '[.[] | select(.issue_type == "epic" | not)][0].id // empty' 2>/dev/null || true)
+      fi
+
+      run_hook "pre-step" "$HOOK_PRE_STEP" "$current_issue_id" "$step_count"
+
+      set +e
+      if [ "$PARALLEL" -gt 1 ]; then
+        run_parallel_batch "$FEATURE_NAME" "$SPEC_HIDDEN" "$PARALLEL"
+      else
+        run_step "$FEATURE_NAME" "$SPEC_HIDDEN"
+      fi
+      EXIT_CODE=$?
+      set -e
+
+      run_hook "post-step" "$HOOK_POST_STEP" "$current_issue_id" "$step_count" "$EXIT_CODE"
+
+      case $EXIT_CODE in
+        100)
+          # All follow-up beads complete — re-trigger review
+          break
+          ;;
+        0)
+          # Task completed, more may remain
+          ;;
+        *)
+          echo "Step failed (exit code: $EXIT_CODE). Continuing to next bead..."
+          ;;
+      esac
+    done
+    # Loop back to re-trigger review
+  done
+
+  # Check if max reviews reached
+  if [ "$review_cycle" -ge "$MAX_REVIEWS" ]; then
+    # Verify the last review didn't pass (i.e., new beads were still created)
+    if [ "${new_beads:-0}" -gt 0 ]; then
+      echo ""
+      echo "Review limit reached for $FEATURE_NAME ($MAX_REVIEWS cycles)"
+      if command -v wrapix-notify &>/dev/null; then
+        wrapix-notify "Ralph" "Review limit reached for $FEATURE_NAME" 2>/dev/null || true
+      fi
+    fi
+  fi
+fi
 
 # Final bead sync: push all state to Dolt remote before exiting
 echo "Pushing beads to Dolt remote..."

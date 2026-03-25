@@ -1107,6 +1107,161 @@ test_check_spec_runs_in_container() {
 }
 
 #-----------------------------------------------------------------------------
+# test_run_check_triggers_review
+#
+# Verifies that ralph run accepts -c/--check flag and triggers ralph check -s
+# after molecule reaches 100%.
+#-----------------------------------------------------------------------------
+test_run_check_triggers_review() {
+  echo "--- test_run_check_triggers_review ---"
+
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # 1. run.sh must accept --check/-c flag
+  if grep -qE -- '--check|\-c' "$run_sh"; then
+    pass "run.sh accepts --check/-c flag"
+  else
+    fail "run.sh does not accept --check/-c flag"
+    return 1
+  fi
+
+  # 2. run.sh must have a RUN_CHECK variable
+  if grep -q 'RUN_CHECK=' "$run_sh"; then
+    pass "run.sh defines RUN_CHECK variable"
+  else
+    fail "run.sh does not define RUN_CHECK variable"
+    return 1
+  fi
+
+  # 3. run.sh must call check.sh -s when RUN_CHECK is true
+  if grep -q 'check.sh.*-s' "$run_sh"; then
+    pass "run.sh calls check.sh -s for review"
+  else
+    fail "run.sh does not call check.sh -s for review"
+    return 1
+  fi
+
+  # 4. run.sh must preserve --check flag in container re-exec args
+  if grep -q 'RUN_CHECK.*true' "$run_sh" && grep -q -- '--check' "$run_sh"; then
+    pass "run.sh preserves --check flag in container re-exec"
+  else
+    fail "run.sh does not preserve --check flag in container re-exec"
+    return 1
+  fi
+
+  # 5. run.sh must compare bead counts before/after review
+  if grep -q 'beads_before' "$run_sh" && grep -q 'beads_after' "$run_sh"; then
+    pass "run.sh compares bead counts for review pass/fail"
+  else
+    fail "run.sh does not compare bead counts"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_review_cycle_loops
+#
+# Verifies that the review cycle processes follow-up beads then re-reviews:
+#   - After review finds new beads, work loop resumes
+#   - After work completes, review re-triggers
+#   - On review pass (no new beads), cycle ends
+#-----------------------------------------------------------------------------
+test_review_cycle_loops() {
+  echo "--- test_review_cycle_loops ---"
+
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # 1. run.sh must have a review cycle loop
+  if grep -q 'review_cycle' "$run_sh"; then
+    pass "run.sh implements review cycle tracking"
+  else
+    fail "run.sh does not implement review cycle tracking"
+    return 1
+  fi
+
+  # 2. run.sh must resume work loop after review finds issues
+  if grep -q 'Resuming work loop' "$run_sh"; then
+    pass "run.sh resumes work loop after review finds issues"
+  else
+    fail "run.sh does not resume work loop after review"
+    return 1
+  fi
+
+  # 3. run.sh must emit notification on review pass
+  if grep -q 'Review passed for' "$run_sh"; then
+    pass "run.sh emits review pass notification"
+  else
+    fail "run.sh does not emit review pass notification"
+    return 1
+  fi
+
+  # 4. run.sh must call run_step or run_parallel_batch in follow-up loop
+  if grep -A 30 'review follow-up' "$run_sh" | grep -q 'run_step\|run_parallel_batch'; then
+    pass "run.sh processes follow-up beads in review cycle"
+  else
+    fail "run.sh does not process follow-up beads in review cycle"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_review_cycle_max_limit
+#
+# Verifies that the review cycle respects max-reviews from config.
+#-----------------------------------------------------------------------------
+test_review_cycle_max_limit() {
+  echo "--- test_review_cycle_max_limit ---"
+
+  local run_sh="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  # 1. run.sh must read loop.max-reviews from config
+  if grep -q 'max-reviews' "$run_sh"; then
+    pass "run.sh reads loop.max-reviews from config"
+  else
+    fail "run.sh does not read loop.max-reviews from config"
+    return 1
+  fi
+
+  # 2. run.sh must have a MAX_REVIEWS variable
+  if grep -q 'MAX_REVIEWS' "$run_sh"; then
+    pass "run.sh defines MAX_REVIEWS variable"
+  else
+    fail "run.sh does not define MAX_REVIEWS variable"
+    return 1
+  fi
+
+  # 3. run.sh must stop after max review cycles
+  if grep -q 'Review limit reached' "$run_sh"; then
+    pass "run.sh stops at review limit"
+  else
+    fail "run.sh does not stop at review limit"
+    return 1
+  fi
+
+  # 4. run.sh must emit notification on review limit
+  if grep -A 5 'Review limit reached' "$run_sh" | grep -q 'wrapix-notify'; then
+    pass "run.sh emits notification on review limit"
+  else
+    fail "run.sh does not emit notification on review limit"
+    return 1
+  fi
+
+  # 5. Review cycle must handle RALPH_CLARIFY from reviewer
+  if grep -q 'ralph:clarify' "$run_sh" && grep -q 'Pausing review cycle' "$run_sh"; then
+    pass "run.sh handles RALPH_CLARIFY in review cycle"
+  else
+    fail "run.sh does not handle RALPH_CLARIFY in review cycle"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -1132,6 +1287,9 @@ test_watch_deduplication
 test_watch_max_issues
 test_watch_bead_labels
 test_watch_dispatcher
+test_run_check_triggers_review
+test_review_cycle_loops
+test_review_cycle_max_limit
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
