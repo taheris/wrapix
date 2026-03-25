@@ -30,6 +30,7 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         inputs.treefmt-nix.flakeModule
+        ./tests/flake-module.nix
       ];
 
       systems = [
@@ -76,11 +77,6 @@
             config.allowUnfree = true;
           };
 
-          test = import ./tests {
-            inherit pkgs system;
-            src = ./.;
-          };
-
           sandboxPackages = [ (inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmtConfig) ];
 
           treefmtConfig = {
@@ -103,12 +99,6 @@
 
         in
         {
-          formatter = config.treefmt.build.wrapper;
-
-          checks = test.checks // {
-            treefmt = config.treefmt.build.check ./.;
-          };
-
           _module.args.pkgs = import nixpkgs {
             inherit system;
             overlays = [
@@ -179,9 +169,6 @@
 
           apps = {
             ralph = ralph.app;
-            test = test.app;
-            test-lint = test.apps.lint;
-            test-ralph = test.apps.ralph;
           };
 
           devShells.default = wrapix.mkDevShell {
@@ -203,10 +190,7 @@
               ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
           };
 
-          treefmt = treefmtConfig // {
-            flakeCheck = false;
-            flakeFormatter = false;
-          };
+          treefmt = treefmtConfig;
         };
     };
 }
