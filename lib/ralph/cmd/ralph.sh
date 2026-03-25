@@ -68,7 +68,7 @@ case "$COMMAND" in
     echo "  use <name>      Switch active workflow"
     echo ""
     echo "Template Commands:"
-    echo "  check           Validate all templates (syntax, partials, rendering)"
+    echo "  check           Validate templates (-t) or review completed work (-s <label>)"
     echo "  sync            Update local templates from packaged (backs up customizations)"
     echo "    --diff [name]   Show local template changes vs packaged"
     echo "  tune            AI-assisted template editing (interactive or via diff)"

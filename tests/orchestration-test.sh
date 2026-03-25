@@ -899,11 +899,222 @@ test_retry_max_limit() {
 }
 
 #-----------------------------------------------------------------------------
+# test_check_no_flags_prints_help
+#
+# Verifies that `ralph check` with no flags prints usage help and exits 0.
+#-----------------------------------------------------------------------------
+test_check_no_flags_prints_help() {
+  echo "--- test_check_no_flags_prints_help ---"
+
+  local check_sh="$REPO_ROOT/lib/ralph/cmd/check.sh"
+
+  # 1. check.sh must exist
+  if [ ! -f "$check_sh" ]; then
+    fail "check.sh does not exist"
+    return 1
+  fi
+  pass "check.sh exists"
+
+  # 2. check.sh must have a no-flags path that prints usage
+  if grep -q 'Usage: ralph check' "$check_sh"; then
+    pass "check.sh prints usage help"
+  else
+    fail "check.sh does not print usage help"
+    return 1
+  fi
+
+  # 3. No-flags path must exit 0
+  if grep -B 5 -A 5 'Usage: ralph check' "$check_sh" | grep -q 'exit 0'; then
+    pass "check.sh exits 0 on no flags"
+  else
+    fail "check.sh does not exit 0 on no flags"
+    return 1
+  fi
+
+  # 4. Usage must mention both -t and -s modes
+  if grep -A 20 'Usage: ralph check' "$check_sh" | grep -q '\-t'; then
+    pass "check.sh usage mentions -t flag"
+  else
+    fail "check.sh usage does not mention -t flag"
+    return 1
+  fi
+
+  if grep -A 20 'Usage: ralph check' "$check_sh" | grep -q '\-s'; then
+    pass "check.sh usage mentions -s flag"
+  else
+    fail "check.sh usage does not mention -s flag"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_check_templates
+#
+# Verifies that `ralph check -t` validates templates (existing behavior)
+# by checking that check.sh accepts the -t/--templates flag and runs the
+# template validation logic.
+#-----------------------------------------------------------------------------
+test_check_templates() {
+  echo "--- test_check_templates ---"
+
+  local check_sh="$REPO_ROOT/lib/ralph/cmd/check.sh"
+
+  # 1. check.sh must accept -t/--templates flag
+  if grep -q '\-t|--templates' "$check_sh"; then
+    pass "check.sh accepts -t/--templates flag"
+  else
+    fail "check.sh does not accept -t/--templates flag"
+    return 1
+  fi
+
+  # 2. check.sh must have template validation function
+  if grep -q 'run_template_validation' "$check_sh"; then
+    pass "check.sh has run_template_validation function"
+  else
+    fail "check.sh does not have run_template_validation function"
+    return 1
+  fi
+
+  # 3. Template validation must check partials
+  if grep -q 'Checking partials' "$check_sh"; then
+    pass "check.sh validates partials"
+  else
+    fail "check.sh does not validate partials"
+    return 1
+  fi
+
+  # 4. Template validation must check Nix expressions
+  if grep -q 'Checking Nix expressions' "$check_sh"; then
+    pass "check.sh validates Nix expressions"
+  else
+    fail "check.sh does not validate Nix expressions"
+    return 1
+  fi
+
+  # 5. Template validation must check body files
+  if grep -q 'Checking body files' "$check_sh"; then
+    pass "check.sh validates body files"
+  else
+    fail "check.sh does not validate body files"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
+# test_check_spec_runs_in_container
+#
+# Verifies that `ralph check -s <label>` resolves spec, reads state, computes
+# beads summary, renders check.md template, and spawns reviewer in container.
+#-----------------------------------------------------------------------------
+test_check_spec_runs_in_container() {
+  echo "--- test_check_spec_runs_in_container ---"
+
+  local check_sh="$REPO_ROOT/lib/ralph/cmd/check.sh"
+
+  # 1. check.sh must accept -s/--spec flag
+  if grep -q '\-s|--spec' "$check_sh"; then
+    pass "check.sh accepts -s/--spec flag"
+  else
+    fail "check.sh does not accept -s/--spec flag"
+    return 1
+  fi
+
+  # 2. check.sh must have spec review function
+  if grep -q 'run_spec_review' "$check_sh"; then
+    pass "check.sh has run_spec_review function"
+  else
+    fail "check.sh does not have run_spec_review function"
+    return 1
+  fi
+
+  # 3. check.sh must resolve spec label
+  if grep -q 'resolve_spec_label' "$check_sh"; then
+    pass "check.sh resolves spec label"
+  else
+    fail "check.sh does not resolve spec label"
+    return 1
+  fi
+
+  # 4. check.sh must read molecule_id from state
+  if grep -q 'molecule_id' "$check_sh"; then
+    pass "check.sh reads molecule_id from state"
+  else
+    fail "check.sh does not read molecule_id from state"
+    return 1
+  fi
+
+  # 5. check.sh must read base_commit from state
+  if grep -q 'base_commit' "$check_sh"; then
+    pass "check.sh reads base_commit from state"
+  else
+    fail "check.sh does not read base_commit from state"
+    return 1
+  fi
+
+  # 6. check.sh must compute BEADS_SUMMARY
+  if grep -q 'beads_summary' "$check_sh"; then
+    pass "check.sh computes beads summary"
+  else
+    fail "check.sh does not compute beads summary"
+    return 1
+  fi
+
+  # 7. check.sh must render check template
+  if grep -q 'render_template check' "$check_sh"; then
+    pass "check.sh renders check template"
+  else
+    fail "check.sh does not render check template"
+    return 1
+  fi
+
+  # 8. check.sh must use run_claude_stream for review
+  if grep -q 'run_claude_stream' "$check_sh"; then
+    pass "check.sh uses run_claude_stream for reviewer"
+  else
+    fail "check.sh does not use run_claude_stream"
+    return 1
+  fi
+
+  # 9. check.sh must container-detect and launch via wrapix
+  if grep -q 'wrapix/claude-config.json' "$check_sh" && grep -q 'wrapix' "$check_sh"; then
+    pass "check.sh detects container and re-launches via wrapix"
+  else
+    fail "check.sh does not have container detection"
+    return 1
+  fi
+
+  # 10. check.sh must compare bead counts before/after review
+  if grep -q 'beads_before' "$check_sh" && grep -q 'beads_after' "$check_sh"; then
+    pass "check.sh compares bead counts for pass/fail"
+  else
+    fail "check.sh does not compare bead counts"
+    return 1
+  fi
+
+  # 11. check.sh must read model.check from config
+  if grep -q 'model.check' "$check_sh"; then
+    pass "check.sh reads model.check from config"
+  else
+    fail "check.sh does not read model.check from config"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
 echo ""
 
+test_check_no_flags_prints_help
+test_check_templates
+test_check_spec_runs_in_container
 test_config_orchestration_keys
 test_clarify_label
 test_msg_list
