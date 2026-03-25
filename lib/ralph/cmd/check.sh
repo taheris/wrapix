@@ -85,7 +85,7 @@ done
 echo ""
 echo "Checking body files..."
 
-BODY_FILES=("plan-new.md" "plan-update.md" "todo-new.md" "todo-update.md" "run.md")
+BODY_FILES=("plan-new.md" "plan-update.md" "todo-new.md" "todo-update.md" "run.md" "check.md" "watch.md")
 
 for body in "${BODY_FILES[@]}"; do
   body_path="$TEMPLATE_DIR/$body"
@@ -186,7 +186,7 @@ echo "Checking template rendering..."
 # We test each template individually to get better error messages
 # Dummy values are generated dynamically from variable metadata in default.nix
 
-TEMPLATES_TO_CHECK=("plan-new" "plan-update" "todo-new" "todo-update" "run")
+TEMPLATES_TO_CHECK=("plan-new" "plan-update" "todo-new" "todo-update" "run" "check" "watch")
 
 # Find flake root for lib access
 FLAKE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")

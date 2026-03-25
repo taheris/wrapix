@@ -173,6 +173,26 @@ let
       default = "";
       description = "Implementation hints from state file, formatted as markdown bullet list";
     };
+
+    # --- Orchestration variables ---
+    BEADS_SUMMARY = {
+      source = "computed";
+      required = false;
+      description = "Titles and status of molecule's beads (for reviewer context)";
+    };
+
+    BASE_COMMIT = {
+      source = "state";
+      required = false;
+      description = "SHA of the commit before implementation started";
+    };
+
+    PREVIOUS_FAILURE = {
+      source = "computed";
+      required = false;
+      default = "";
+      description = "Error output from a previous failed attempt, injected on retry";
+    };
   };
 
   # Get list of all variable names
@@ -396,6 +416,35 @@ let
         "ISSUE_ID"
         "TITLE"
         "DESCRIPTION"
+        "EXIT_SIGNALS"
+        "PREVIOUS_FAILURE"
+      ];
+    };
+
+    check = mkTemplate {
+      body = ./check.md;
+      partials = partialFiles;
+      variables = [
+        "COMPANIONS"
+        "PINNED_CONTEXT"
+        "SPEC_PATH"
+        "LABEL"
+        "BEADS_SUMMARY"
+        "BASE_COMMIT"
+        "MOLECULE_ID"
+        "EXIT_SIGNALS"
+      ];
+    };
+
+    watch = mkTemplate {
+      body = ./watch.md;
+      partials = partialFiles;
+      variables = [
+        "COMPANIONS"
+        "PINNED_CONTEXT"
+        "SPEC_PATH"
+        "LABEL"
+        "MOLECULE_ID"
         "EXIT_SIGNALS"
       ];
     };
