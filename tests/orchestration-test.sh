@@ -1262,6 +1262,60 @@ test_review_cycle_max_limit() {
 }
 
 #-----------------------------------------------------------------------------
+# test_msg_dispatcher
+#
+# Verifies that ralph.sh dispatcher routes the msg command and help text
+# includes msg, watch, and updated run flags (-c, -p).
+#-----------------------------------------------------------------------------
+test_msg_dispatcher() {
+  echo "--- test_msg_dispatcher ---"
+
+  local ralph_sh="$REPO_ROOT/lib/ralph/cmd/ralph.sh"
+
+  # 1. ralph.sh must have msg case
+  if grep -q 'msg)' "$ralph_sh"; then
+    pass "ralph.sh dispatches msg command"
+  else
+    fail "ralph.sh does not dispatch msg command"
+    return 1
+  fi
+
+  # 2. ralph.sh must exec ralph-msg
+  if grep -q 'ralph-msg' "$ralph_sh"; then
+    pass "ralph.sh execs ralph-msg"
+  else
+    fail "ralph.sh does not exec ralph-msg"
+    return 1
+  fi
+
+  # 3. ralph.sh help must mention msg
+  if grep -A 80 'help|--help' "$ralph_sh" | grep -q 'msg'; then
+    pass "ralph.sh help mentions msg"
+  else
+    fail "ralph.sh help does not mention msg"
+    return 1
+  fi
+
+  # 4. ralph.sh help must mention -c/--check for run
+  if grep -A 80 'help|--help' "$ralph_sh" | grep -q '\-c/--check'; then
+    pass "ralph.sh help mentions -c/--check for run"
+  else
+    fail "ralph.sh help does not mention -c/--check for run"
+    return 1
+  fi
+
+  # 5. ralph.sh help must mention -p/--parallel for run
+  if grep -A 80 'help|--help' "$ralph_sh" | grep -q '\-p/--parallel'; then
+    pass "ralph.sh help mentions -p/--parallel for run"
+  else
+    fail "ralph.sh help does not mention -p/--parallel for run"
+    return 1
+  fi
+
+  return 0
+}
+
+#-----------------------------------------------------------------------------
 # Main
 #-----------------------------------------------------------------------------
 echo "=== Orchestration Tests ==="
@@ -1287,6 +1341,7 @@ test_watch_deduplication
 test_watch_max_issues
 test_watch_bead_labels
 test_watch_dispatcher
+test_msg_dispatcher
 test_run_check_triggers_review
 test_review_cycle_loops
 test_review_cycle_max_limit

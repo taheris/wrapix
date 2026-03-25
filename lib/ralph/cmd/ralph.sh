@@ -59,6 +59,8 @@ case "$COMMAND" in
     echo "  todo            Convert spec to beads issues"
     echo "  run [feature]   Execute work items for a feature"
     echo "    --once/-1       Execute single issue then exit"
+    echo "    -c/--check      Auto-review after molecule completes"
+    echo "    -p/--parallel N Concurrent workers (default: 1)"
     echo "  spec            Query spec annotations"
     echo "    --verbose       Show per-criterion detail"
     echo "    --verify        Run [verify] shell tests"
