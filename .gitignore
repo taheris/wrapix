@@ -1,6 +1,7 @@
 .cache/
 .claude/
 .direnv/
+.gc/
 .wrapix/
 result
 result-*
