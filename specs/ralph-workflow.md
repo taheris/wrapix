@@ -140,11 +140,18 @@ ralph run -s <name>         # Short form
 **Spec resolution:** Reads the spec label once at startup (from `--spec` flag or `state/current`). The label is held in memory for the duration of the run — switching `state/current` via `ralph use` does not affect a running `ralph run`. Does NOT update `state/current` during execution.
 
 **Default (continuous) mode** — Runs on host as orchestrator:
-- Queries for next ready issue from molecule
+- Queries for next ready issue from molecule (skips beads with `ralph:clarify` label)
 - Spawns implementation in fresh wrapix container (profile from bead label or flag)
 - Waits for completion
+- On failure (no RALPH_COMPLETE), retries with error context (see Retry below)
 - Repeats until all issues complete
 - Handles discovered work via `bd mol bond`
+
+**Retry with context:**
+When a worker fails, retry automatically with the previous error output:
+- `loop.max-retries = 2` in `config.nix` (per bead, default 2)
+- On failure, the error output from the previous attempt is injected into the next attempt's `run.md` context as `PREVIOUS_FAILURE` template variable
+- After max retries, the bead gets `ralph:clarify` label with failure details, loop moves on
 
 **Single-issue mode (`--once` / `-1`)** — For debugging or manual control:
 - Selects next ready issue from molecule
@@ -205,18 +212,67 @@ Error-focused output: Scans for error patterns (exit code != 0, "error:", "faile
 ### `ralph check`
 
 ```bash
-ralph check
+ralph check                     # No flags: prints usage help
+ralph check -t                  # Validate templates (existing behavior)
+ralph check -s <label>          # Post-epic review of completed work
+ralph check -s <label> -t       # Both
 ```
 
-Validates all templates:
+**Template validation (`-t` / `--templates`):**
 - Partial files exist
 - Body files parse correctly
 - No syntax errors in Nix expressions
 - Dry-run render with dummy values to catch placeholder typos
+- Also runs as part of `nix flake check`
 
-Exit codes: 0 = valid, 1 = errors (with details)
+**Spec review (`-s` / `--spec`):**
 
-Also runs as part of `nix flake check`.
+An independent reviewer agent assesses the full deliverable after an epic completes. Useful as a standalone one-off review command outside of any orchestrated loop.
+
+Input context (in prompt):
+- Spec file (`specs/<label>.md`)
+- Beads summary (titles and status only — reviewer reads full descriptions on demand)
+- `base_commit` SHA (reviewer runs `git diff` / `git log` as needed)
+- Molecule ID
+
+Context pinning and companions are injected via standard partials. The reviewer has full codebase access inside the container — it reads implementation code, test files, `CLAUDE.md`, and related specs on demand.
+
+Reviewer behavior:
+- Runs inside a wrapix container with base profile
+- Explores the codebase as needed (reads files, runs git commands, inspects tests)
+- Assesses spec compliance, code quality, test adequacy, coherence
+- Creates follow-up beads (via `bd create` + `bd mol bond`) for actionable fixes
+- Flags ambiguous items with `bd human` for human decision
+- Emits RALPH_COMPLETE when review is finished — compare the molecule's bead count before and after to determine pass (unchanged) or fail (new beads added)
+
+Template: `check.md` in `lib/ralph/template/`. Reuses partials: `context-pinning`, `spec-header`, `companions-context`, `exit-signals`. Variables: `BEADS_SUMMARY`, `BASE_COMMIT`, `MOLECULE_ID`.
+
+Exit signals: RALPH_COMPLETE, RALPH_BLOCKED, RALPH_CLARIFY.
+
+Exit codes: 0 = valid/pass, 1 = errors (with details)
+
+### `ralph msg`
+
+Human interface for responding to agent questions tagged with `ralph:clarify`.
+
+```bash
+ralph msg                          # List all outstanding questions
+ralph msg -s <label>               # List for specific spec
+ralph msg -i <id>                  # Show specific question
+ralph msg -i <id> "answer"         # Reply (answer as positional)
+ralph msg -i <id> -d               # Dismiss without answering
+```
+
+**Flags:**
+- `-s` / `--spec` — filter by spec label
+- `-i` / `--id` — target specific question
+- `-d` / `--dismiss` — dismiss without answering
+
+**Behavior:**
+- List mode shows a table: ID, spec, source, question
+- Reply stores the answer in bead notes and removes `ralph:clarify` label — the run loop's next iteration picks it up
+- Dismiss removes `ralph:clarify` label with a note that the agent should work around it
+- Abstracts bead storage — today uses bead labels/notes, interface is ralph-level
 
 ### `ralph tune`
 
@@ -307,6 +363,10 @@ Sets `state/current` to the given label after validation:
 3. Writes the label to `state/current`
 4. Errors with clear message if either validation fails
 
+## `ralph:clarify` Label
+
+Beads waiting on human response are tagged with `ralph:clarify`. Used by implementation workers and the reviewer agent. The run loop filters out beads with this label when selecting the next bead to work. Each iteration re-queries, so when a human removes the label via `ralph msg`, the bead becomes eligible on the next pass. A notification is emitted when the label is first applied.
+
 ## Workflow Phases
 
 ```
@@ -339,7 +399,9 @@ Ralph runs Claude-calling commands inside wrapix containers for isolation and re
 | `ralph run --once` | wrapix container | from bead label or `--profile` flag (fallback: base) |
 | `ralph status` | host | N/A (utility) |
 | `ralph logs` | host | N/A (utility) |
-| `ralph check` | host | N/A (utility) |
+| `ralph check -t` | host | N/A (utility) |
+| `ralph check -s` | wrapix container | base |
+| `ralph msg` | host | N/A (utility) |
 | `ralph tune` | host | N/A (utility) |
 | `ralph sync` | host | N/A (utility) |
 | `ralph use` | host | N/A (utility) |
@@ -468,6 +530,7 @@ lib/ralph/template/
 │   ├── context-pinning.md   # Project context loading
 │   ├── exit-signals.md      # Exit signal format
 │   └── spec-header.md       # Label, spec path block
+├── check.md                 # Post-epic reviewer prompt
 ├── plan-new.md              # New spec interview
 ├── plan-update.md           # Update existing spec
 ├── todo-new.md              # Create molecule
@@ -492,6 +555,9 @@ lib/ralph/template/
 | `ISSUE_ID` | From `bd ready` | run |
 | `TITLE` | From issue | run |
 | `DESCRIPTION` | From issue | run |
+| `BEADS_SUMMARY` | From molecule (titles + status) | check |
+| `BASE_COMMIT` | From `state/<label>.json` | check |
+| `PREVIOUS_FAILURE` | From previous attempt error output | run (retry only) |
 | `EXIT_SIGNALS` | Template-specific list | all (via partial) |
 
 ### Flake Check Integration
@@ -526,6 +592,11 @@ Projects configure ralph via `.wrapix/ralph/config.nix` (local project overrides
 
   # Template overlay (optional, for local customizations)
   templateDir = ./.wrapix/ralph/template;  # null = use packaged only
+
+  # Run loop settings
+  loop = {
+    max-retries = 2;    # per bead, retry with PREVIOUS_FAILURE context
+  };
 }
 ```
 
@@ -853,16 +924,18 @@ Why this feature is needed.
 | `lib/ralph/cmd/ralph.sh` | Main dispatcher |
 | `lib/ralph/cmd/plan.sh` | Feature initialization + spec interview |
 | `lib/ralph/cmd/todo.sh` | Issue creation (renamed from ready.sh) |
-| `lib/ralph/cmd/run.sh` | Issue work (merged from step.sh + loop.sh) |
+| `lib/ralph/cmd/run.sh` | Issue work (merged from step.sh + loop.sh), retry logic |
 | `lib/ralph/cmd/status.sh` | Progress display |
 | `lib/ralph/cmd/logs.sh` | Error-focused log viewer |
-| `lib/ralph/cmd/check.sh` | Template validation |
+| `lib/ralph/cmd/check.sh` | Template validation + spec review |
+| `lib/ralph/cmd/msg.sh` | Async human communication |
 | `lib/ralph/cmd/tune.sh` | Template editing (interactive + integration) |
 | `lib/ralph/cmd/sync.sh` | Template sync from packaged (includes --diff) |
 | `lib/ralph/cmd/use.sh` | Active workflow switching with validation |
-| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`, `read_manifests`, `compute_spec_diff`, `discover_molecule_from_readme`) |
+| `lib/ralph/cmd/util.sh` | Shared helper functions (includes `resolve_spec_label`, `read_manifests`, `compute_spec_diff`, `discover_molecule_from_readme`, `ralph:clarify` label management) |
 | `lib/ralph/template/` | Prompt templates |
-| `lib/ralph/template/default.nix` | Nix template definitions |
+| `lib/ralph/template/check.md` | Reviewer agent prompt |
+| `lib/ralph/template/default.nix` | Nix template definitions (includes check template, `PREVIOUS_FAILURE` variable) |
 | `lib/ralph/template/partial/companions-context.md` | Companion manifest injection partial |
 
 ## Integration with Beads Molecules

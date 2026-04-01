@@ -18,7 +18,7 @@ An ordered list of specs and project terminology.
 | [live-specs.md](./live-specs.md) | [`lib/ralph/cmd/spec.sh`](../lib/ralph/cmd/spec.sh) | wx-a13n | Queryable, verifiable, observable specifications |
 | [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
 | [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-9mvh | Browser automation for frontend development |
-| [orchestration.md](./orchestration.md) | [`lib/ralph/cmd/`](../lib/ralph/cmd/) | wx-fqkv | Automated verification, parallel dispatch, and observation |
+| ~~[orchestration.md](./orchestration.md)~~ | — | ~~wx-fqkv~~ | *Superseded by gas-city.md and ralph-workflow.md* |
 | [gas-city.md](./gas-city.md) | [`lib/city/`](../lib/city/) | wx-ijfv | Multi-agent orchestration via Gas City integration |
 
 ## Terminology Index
@@ -28,10 +28,12 @@ An ordered list of specs and project terminology.
 | **Beads** | Issue tracking system used by Ralph |
 | **Deploy Key** | SSH key for git push operations from container |
 | **Focus-aware** | Notification suppression when terminal is focused |
+| **Gas City** | Multi-agent orchestration SDK integrated via `mkCity` |
 | **pasta** | Linux userspace networking for Podman containers |
 | **playwright-mcp** | MCP server wrapping @playwright/mcp for browser automation in sandboxes |
 | **prek** | Rust-based pre-commit framework (drop-in replacement for pre-commit) |
 | **Profile** | Pre-configured set of packages and environment variables |
+| **ralph:clarify** | Bead label for items awaiting human response via `ralph msg` |
 | **Ralph** | Workflow orchestrator for spec-to-implementation |
 | **Sandbox** | Isolated container environment for running Claude Code |
 | **tmux-mcp** | MCP server for AI-assisted debugging via tmux panes |
