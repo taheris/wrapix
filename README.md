@@ -39,7 +39,17 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
 }
 ```
 
-`mkSandbox` accepts: `profile`, `packages`, `env`, `mounts`, `deployKey`, `mcp`, `mcpRuntime`. See [specs/sandbox.md](specs/sandbox.md).
+| Option | Type | Description |
+|--------|------|-------------|
+| `profile` | profile attrset | Base environment (`profiles.base`, `.rust`, `.python`) |
+| `packages` | list of packages | Additional Nix packages to include |
+| `env` | attrset of strings | Environment variables |
+| `mounts` | list of `{ source, dest, mode }` | Host paths to mount into the container |
+| `deployKey` | string | SSH key name for git push (see `scripts/setup-deploy-key`) |
+| `mcp` | attrset of server configs | Baked-in MCP servers (e.g. `{ tmux = { }; }`) |
+| `mcpRuntime` | bool | Include all MCP servers, select at runtime via `WRAPIX_MCP` |
+
+See [specs/sandbox.md](specs/sandbox.md) for full details.
 
 ## Profiles
 
