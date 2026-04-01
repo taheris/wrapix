@@ -12,6 +12,6 @@ test_provider_simplicity() {
 }
 
 test_agent_abstraction() {
-  judge_files "lib/city/default.nix"
-  judge_criterion "The agent type is a configuration option (defaulting to 'claude') stored in the city config, allowing future provider swaps by adding new entries without changing mkCity's architecture or the container image build logic"
+  judge_files "lib/city/default.nix" "lib/city/agent.sh"
+  judge_criterion "The agent type is a configuration option (defaulting to 'claude') stored in the city config, with a wrapix-agent wrapper script that dispatches to agent-specific CLI calls via a registry pattern. Future provider swaps require only a new case entry in agent.sh and the corresponding package in the Nix closure, without changing mkCity's architecture or the container image build logic"
 }

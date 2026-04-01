@@ -435,6 +435,77 @@ test_persistent_role_tmux() {
   fi
 }
 
+test_agent_wrapper() {
+  echo "Test: Agent wrapper abstracts agent invocation (wrapix-agent)"
+  local agent="$REPO_ROOT/lib/city/agent.sh"
+
+  local failures=0
+
+  # Verify script exists and is executable
+  if [[ ! -x "$agent" ]]; then
+    fail "agent.sh not found or not executable"
+    return
+  fi
+
+  # Verify shell conventions
+  if ! head -20 "$agent" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify two modes: run (ephemeral) and session (persistent)
+  if ! grep -q 'claude_run' "$agent" || ! grep -q 'claude_session' "$agent"; then
+    echo "    sub-fail: missing run/session mode functions"
+    failures=$((failures + 1))
+  fi
+
+  # Verify prompt construction with docs context
+  if ! grep -q 'build_prompt' "$agent"; then
+    echo "    sub-fail: missing build_prompt function"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'WRAPIX_DOCS_DIR' "$agent"; then
+    echo "    sub-fail: no docs directory support"
+    failures=$((failures + 1))
+  fi
+
+  # Verify output capture support
+  if ! grep -q 'WRAPIX_OUTPUT_FILE' "$agent"; then
+    echo "    sub-fail: no output capture support"
+    failures=$((failures + 1))
+  fi
+
+  # Verify agent registry pattern (case dispatch on agent type)
+  if ! grep -q 'case "$AGENT"' "$agent"; then
+    echo "    sub-fail: no agent registry dispatch"
+    failures=$((failures + 1))
+  fi
+
+  # Verify session mode uses exec for interactive
+  if ! grep -q 'exec claude' "$agent"; then
+    echo "    sub-fail: session mode doesn't use exec for interactive"
+    failures=$((failures + 1))
+  fi
+
+  # Verify unknown agent is handled
+  if ! grep -q 'unknown agent' "$agent"; then
+    echo "    sub-fail: no unknown agent error handling"
+    failures=$((failures + 1))
+  fi
+
+  # Verify default agent is claude
+  if ! grep -q 'WRAPIX_AGENT:-claude' "$agent"; then
+    echo "    sub-fail: default agent is not claude"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "agent wrapper correctly structured"
+  else
+    fail "agent wrapper has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -450,6 +521,7 @@ test_docs_scaffolding
 test_provider_methods
 test_worker_worktree
 test_persistent_role_tmux
+test_agent_wrapper
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"
