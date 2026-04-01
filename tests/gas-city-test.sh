@@ -63,12 +63,139 @@ test_gascity_input_pinned() {
   fi
 }
 
+test_mkcity_minimal_eval() {
+  echo "Test: mkCity evaluates with minimal config (services.api.package = myApp)"
+  if nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services.api.package = pkgs.hello; secrets.claude = "ANTHROPIC_API_KEY"; };
+    in builtins.attrNames result
+  ' 2>/dev/null | grep -q '"config"'; then
+    pass "mkCity evaluates with minimal config"
+  else
+    fail "mkCity does not evaluate with minimal config"
+  fi
+}
+
+test_city_toml_valid() {
+  echo "Test: Generated city.toml is valid and references wrapix provider"
+  local config
+  config=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services.api.package = pkgs.hello; secrets.claude = "ANTHROPIC_API_KEY"; };
+    in result.configAttrs
+  ' 2>/dev/null)
+  if echo "$config" | grep -q '"provider":"exec:/nix/store/'; then
+    pass "city.toml references exec:<path> provider"
+  else
+    fail "city.toml missing exec: provider reference"
+  fi
+}
+
+test_service_image_build() {
+  echo "Test: Service packages are built into OCI images via dockerTools.buildLayeredImage"
+  local img_name
+  img_name=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services.api.package = pkgs.hello; secrets.claude = "ANTHROPIC_API_KEY"; };
+    in result.serviceImages.api.name
+  ' 2>/dev/null)
+  if echo "$img_name" | grep -q 'wrapix-svc-api'; then
+    pass "service image named wrapix-svc-api"
+  else
+    fail "service image not created correctly: $img_name"
+  fi
+}
+
+test_secrets_runtime_only() {
+  echo "Test: Secrets are classified for runtime injection, not baked into images"
+  local secrets
+  secrets=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity {
+        services.api.package = pkgs.hello;
+        secrets.claude = "ANTHROPIC_API_KEY";
+        secrets.deployKey = "/run/secrets/deploy-key";
+      };
+    in result.classifiedSecrets
+  ' 2>/dev/null)
+  if echo "$secrets" | grep -q '"type":"env"' && echo "$secrets" | grep -q '"type":"file"'; then
+    pass "secrets classified as env/file for runtime injection"
+  else
+    fail "secrets classification incorrect: $secrets"
+  fi
+}
+
+test_role_formulas() {
+  echo "Test: mkCity exposes agent sandbox for role containers"
+  local has_sandbox
+  has_sandbox=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services = {}; };
+    in builtins.hasAttr "package" result.agentSandbox
+  ' 2>/dev/null)
+  if [[ "$has_sandbox" == "true" ]]; then
+    pass "mkCity exposes agentSandbox with package attribute"
+  else
+    fail "mkCity agentSandbox missing package attribute"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
 test_gc_package_available
 test_gc_binary_runs
 test_gascity_input_pinned
+test_mkcity_minimal_eval
+test_city_toml_valid
+test_service_image_build
+test_secrets_runtime_only
+test_role_formulas
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"

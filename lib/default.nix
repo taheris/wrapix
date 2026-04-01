@@ -10,10 +10,15 @@ let
     inherit pkgs;
     inherit (sandbox) mkSandbox;
   };
+  city = import ./city {
+    inherit pkgs linuxPkgs;
+    inherit (sandbox) mkSandbox profiles;
+  };
 
 in
 {
   inherit (sandbox) profiles mkSandbox;
+  inherit (city) mkCity;
   inherit (ralph) mkRalph scripts;
 
   deriveProfile =

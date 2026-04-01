@@ -131,6 +131,7 @@
           legacyPackages.lib = {
             inherit (wrapix)
               deriveProfile
+              mkCity
               mkDevShell
               mkRalph
               mkSandbox
