@@ -44,6 +44,9 @@
         "aarch64-darwin"
       ];
 
+      flake.nixosModules.city = ./modules/city.nix;
+      flake.nixosModules.default = ./modules/city.nix;
+
       perSystem =
         {
           config,

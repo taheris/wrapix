@@ -1277,6 +1277,140 @@ test_crash_recovery() {
   fi
 }
 
+test_nixos_module() {
+  echo "Test: NixOS module generates systemd units and podman network"
+  local module="$REPO_ROOT/modules/city.nix"
+
+  if [[ ! -f "$module" ]]; then
+    fail "modules/city.nix not found"
+    return
+  fi
+
+  local failures=0
+
+  # Verify module file exists and has proper structure
+  if ! grep -q 'services.wrapix' "$module"; then
+    echo "    sub-fail: missing services.wrapix option"
+    failures=$((failures + 1))
+  fi
+
+  # Verify cities option is an attrsOf submodule
+  if ! grep -q 'cities' "$module"; then
+    echo "    sub-fail: missing cities option"
+    failures=$((failures + 1))
+  fi
+
+  # Verify required options exist
+  for opt in workspace profile services secrets agent workers cooldown scout resources; do
+    if ! grep -q "${opt}.*mkOption" "$module"; then
+      echo "    sub-fail: missing option: $opt"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify systemd service generation
+  if ! grep -q 'systemd.services' "$module"; then
+    echo "    sub-fail: does not generate systemd services"
+    failures=$((failures + 1))
+  fi
+
+  # Verify podman network creation
+  if ! grep -q 'wrapix-.*network' "$module"; then
+    echo "    sub-fail: does not create podman network"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'network create' "$module"; then
+    echo "    sub-fail: missing podman network create command"
+    failures=$((failures + 1))
+  fi
+
+  # Verify Restart=always for crash recovery
+  if ! grep -q 'Restart.*=.*"always"' "$module"; then
+    echo "    sub-fail: gc container service missing Restart=always"
+    failures=$((failures + 1))
+  fi
+
+  # Verify podman socket mount (sibling container pattern)
+  if ! grep -q 'podman.sock' "$module"; then
+    echo "    sub-fail: missing podman socket mount"
+    failures=$((failures + 1))
+  fi
+
+  # Verify workspace mount
+  if ! grep -q 'cityCfg.workspace' "$module"; then
+    echo "    sub-fail: missing workspace mount"
+    failures=$((failures + 1))
+  fi
+
+  # Verify city.toml mount
+  if ! grep -q 'city.toml' "$module"; then
+    echo "    sub-fail: missing city.toml mount"
+    failures=$((failures + 1))
+  fi
+
+  # Verify mkCity is invoked
+  if ! grep -q 'mkCity' "$module"; then
+    echo "    sub-fail: does not invoke mkCity"
+    failures=$((failures + 1))
+  fi
+
+  # Verify profile string shorthand resolution
+  if ! grep -q 'resolveProfile' "$module"; then
+    echo "    sub-fail: missing profile string resolution"
+    failures=$((failures + 1))
+  fi
+
+  # Verify secrets injection: file path and env var handling
+  if ! grep -q '/run/secrets/' "$module"; then
+    echo "    sub-fail: file secrets not mounted to /run/secrets/"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'env.*var' "$module" || ! grep -qi 'envsecrets\|env.*secret' "$module"; then
+    echo "    sub-fail: env var secret handling missing"
+    failures=$((failures + 1))
+  fi
+
+  # Verify service image loading
+  if ! grep -q 'podman load' "$module"; then
+    echo "    sub-fail: missing podman load for container images"
+    failures=$((failures + 1))
+  fi
+
+  # Verify virtualisation.podman.enable
+  if ! grep -q 'virtualisation.podman.enable' "$module"; then
+    echo "    sub-fail: does not enable podman virtualisation"
+    failures=$((failures + 1))
+  fi
+
+  # Verify flake exposes the NixOS module
+  if ! grep -q 'nixosModules' "$REPO_ROOT/flake.nix"; then
+    echo "    sub-fail: flake.nix does not expose nixosModules"
+    failures=$((failures + 1))
+  fi
+
+  # Verify module is a function that takes the standard NixOS module args
+  if head -20 "$module" | grep -q 'config,' && head -20 "$module" | grep -q 'lib,' && head -20 "$module" | grep -q 'pkgs,'; then
+    echo "    sub-pass: module accepts standard NixOS args (config, lib, pkgs)"
+  else
+    echo "    sub-fail: module does not accept standard NixOS module args"
+    failures=$((failures + 1))
+  fi
+
+  # Verify module returns options and config
+  if grep -q 'options.services.wrapix' "$module" && grep -q '^  config = mkIf' "$module"; then
+    echo "    sub-pass: module exports options and conditional config"
+  else
+    echo "    sub-fail: module missing options or config export"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "NixOS module correctly generates systemd units and podman network"
+  else
+    fail "NixOS module has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -1301,6 +1435,7 @@ test_notifications
 test_agent_wrapper
 test_entrypoint_wrapper
 test_crash_recovery
+test_nixos_module
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"
