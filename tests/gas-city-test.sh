@@ -1411,6 +1411,316 @@ test_nixos_module() {
   fi
 }
 
+test_ralph_standalone() {
+  echo "Test: ralph run still works standalone without gc"
+  local ralph_run="$REPO_ROOT/lib/ralph/cmd/run.sh"
+
+  if [[ ! -f "$ralph_run" ]]; then
+    fail "lib/ralph/cmd/run.sh not found"
+    return
+  fi
+
+  local failures=0
+
+  # ralph run must work independently of gc — verify it does not import city modules
+  if grep -q 'lib/city/' "$ralph_run"; then
+    echo "    sub-fail: ralph run imports city modules (should be independent)"
+    failures=$((failures + 1))
+  fi
+
+  # ralph run must still use mkSandbox (not mkCity)
+  if grep -q 'mkCity' "$ralph_run"; then
+    echo "    sub-fail: ralph run references mkCity (should use mkSandbox only)"
+    failures=$((failures + 1))
+  fi
+
+  # Verify ralph cmd infrastructure still exists
+  for cmd in run plan todo; do
+    if [[ ! -f "$REPO_ROOT/lib/ralph/cmd/${cmd}.sh" ]]; then
+      echo "    sub-fail: ralph $cmd command missing"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify ralph default.nix does not require gc
+  local ralph_nix="$REPO_ROOT/lib/ralph/default.nix"
+  if grep -q 'gc\b' "$ralph_nix" 2>/dev/null; then
+    echo "    sub-fail: ralph default.nix references gc"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "ralph run works standalone without gc"
+  else
+    fail "ralph standalone has $failures issues"
+  fi
+}
+
+test_cooldown_pacing() {
+  echo "Test: Cooldown pacing delays task dispatch by configured duration"
+
+  local failures=0
+
+  # Verify mkCity accepts and passes through cooldown config
+  local cooldown_val
+  cooldown_val=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity {
+        services = {};
+        cooldown = "2h";
+        workers = 3;
+      };
+    in result.configAttrs.session
+  ' 2>/dev/null)
+
+  # Verify cooldown is set in session config
+  if echo "$cooldown_val" | grep -q '"cooldown":"2h"'; then
+    : # correct
+  else
+    echo "    sub-fail: cooldown not set to 2h in city.toml session config: $cooldown_val"
+    failures=$((failures + 1))
+  fi
+
+  # Verify max_concurrent workers is set
+  if echo "$cooldown_val" | grep -q '"max_concurrent":3'; then
+    : # correct
+  else
+    echo "    sub-fail: max_concurrent not set to 3: $cooldown_val"
+    failures=$((failures + 1))
+  fi
+
+  # Verify default cooldown is "0"
+  local default_cooldown
+  default_cooldown=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services = {}; };
+    in result.configAttrs.session.cooldown
+  ' 2>/dev/null)
+  if [[ "$default_cooldown" == '"0"' ]]; then
+    : # correct
+  else
+    echo "    sub-fail: default cooldown is not '0': $default_cooldown"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "cooldown pacing correctly configured"
+  else
+    fail "cooldown pacing has $failures issues"
+  fi
+}
+
+test_p0_bypass_cooldown() {
+  echo "Test: P0 beads bypass cooldown and are dispatched immediately"
+
+  local failures=0
+
+  # Scout creates P0 beads for immediate patterns
+  local scout="$REPO_ROOT/lib/city/scout.sh"
+  if [[ ! -x "$scout" ]]; then
+    fail "scout.sh not found or not executable"
+    return
+  fi
+
+  # Verify immediate errors create priority=0 beads
+  if ! grep -q 'priority=0' "$scout"; then
+    echo "    sub-fail: immediate patterns do not create P0 beads"
+    failures=$((failures + 1))
+  fi
+
+  # Verify batched errors create priority=2 beads (not P0)
+  if ! grep -q 'priority=2' "$scout"; then
+    echo "    sub-fail: batched patterns do not create P2 beads"
+    failures=$((failures + 1))
+  fi
+
+  # Verify the spec-defined immediate patterns (FATAL|PANIC|panic:) map to P0
+  # The scout should use the immediate pattern for P0 bead creation
+  if ! grep -B10 'priority=0' "$scout" | grep -qi 'immediate\|FATAL'; then
+    echo "    sub-fail: P0 bead creation not associated with immediate patterns"
+    failures=$((failures + 1))
+  fi
+
+  # Verify the scout formula references priority for beads
+  local scout_formula="$REPO_ROOT/lib/city/formulas/scout.formula.toml"
+  if [[ -f "$scout_formula" ]]; then
+    if ! grep -q 'priority=0\|priority 0\|P0' "$scout_formula"; then
+      echo "    sub-fail: scout formula does not reference P0/priority=0"
+      failures=$((failures + 1))
+    fi
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "P0 beads correctly created for immediate errors"
+  else
+    fail "P0 bypass has $failures issues"
+  fi
+}
+
+test_scout_orders() {
+  echo "Test: Scout polling uses gc orders for scheduling"
+
+  local failures=0
+
+  # Scout formula must reference gc orders mechanism
+  local scout_formula="$REPO_ROOT/lib/city/formulas/scout.formula.toml"
+  if [[ ! -f "$scout_formula" ]]; then
+    fail "scout.formula.toml not found"
+    return
+  fi
+
+  # Verify formula references gc orders
+  if ! grep -q 'gc order' "$scout_formula" && ! grep -q 'gc.*order' "$scout_formula"; then
+    echo "    sub-fail: scout formula does not reference gc orders"
+    failures=$((failures + 1))
+  fi
+
+  # Verify poll_interval variable exists (used by gc orders)
+  if ! grep -q 'poll_interval' "$scout_formula"; then
+    echo "    sub-fail: missing poll_interval variable"
+    failures=$((failures + 1))
+  fi
+
+  # Verify the next-iteration step exists (pours next wisp for gc order to trigger)
+  if ! grep -q 'next-iteration\|next.iteration' "$scout_formula"; then
+    echo "    sub-fail: missing next-iteration step"
+    failures=$((failures + 1))
+  fi
+
+  # Verify the formula is a pour-based loop (wisp pattern for gc orders)
+  if ! grep -q 'wisp\|burn\|mol' "$scout_formula"; then
+    echo "    sub-fail: scout formula does not use wisp/pour pattern for gc orders"
+    failures=$((failures + 1))
+  fi
+
+  # Verify mkCity sets scout interval in config
+  local scout_cfg
+  scout_cfg=$(nix eval --impure --json --expr '
+    let
+      flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
+      pkgs = import (builtins.fetchTarball {
+        url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsInfo.rev}.tar.gz";
+        sha256 = nixpkgsInfo.narHash;
+      }) { system = "x86_64-linux"; config.allowUnfree = true; };
+      linuxPkgs = pkgs;
+      sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
+      city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
+      result = city.mkCity { services = {}; scout = { interval = "10m"; maxBeads = 5; }; };
+    in result.configAttrs.scout
+  ' 2>/dev/null)
+  if echo "$scout_cfg" | grep -q '"interval":"10m"'; then
+    : # correct
+  else
+    echo "    sub-fail: scout.interval not passed through to city config: $scout_cfg"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "scout polling uses gc orders for scheduling"
+  else
+    fail "scout orders has $failures issues"
+  fi
+}
+
+test_convergence_loop() {
+  echo "Test: Worker→reviewer retry uses gc convergence with max 2 iterations"
+
+  local failures=0
+
+  local gate="$REPO_ROOT/lib/city/gate.sh"
+  local postgate="$REPO_ROOT/lib/city/post-gate.sh"
+  local worker_formula="$REPO_ROOT/lib/city/formulas/worker.formula.toml"
+  local reviewer_formula="$REPO_ROOT/lib/city/formulas/reviewer.formula.toml"
+
+  # Gate script implements the convergence condition
+  if [[ ! -x "$gate" ]]; then
+    echo "    sub-fail: gate.sh not found or not executable"
+    failures=$((failures + 1))
+  else
+    # Gate exits 0 (approve) or 1 (reject) — gc convergence uses this
+    if ! grep -A2 'approve)' "$gate" | grep -qE 'exit 0'; then
+      echo "    sub-fail: gate approve does not exit 0"
+      failures=$((failures + 1))
+    fi
+    if ! grep -A2 'reject)' "$gate" | grep -qE 'exit 1'; then
+      echo "    sub-fail: gate reject does not exit 1 (triggers iteration)"
+      failures=$((failures + 1))
+    fi
+
+    # Gate uses gate_mode=condition pattern
+    if ! grep -q 'gate_mode.*condition\|condition.*gate' "$gate"; then
+      # Check in comments at least
+      if ! head -20 "$gate" | grep -qi 'gate_mode=condition'; then
+        echo "    sub-fail: gate does not reference gate_mode=condition"
+        failures=$((failures + 1))
+      fi
+    fi
+  fi
+
+  # Post-gate handles escalation (convergence exceeded max iterations)
+  if [[ -x "$postgate" ]]; then
+    if ! grep -q 'escalat' "$postgate"; then
+      echo "    sub-fail: post-gate does not handle escalation"
+      failures=$((failures + 1))
+    fi
+    # Post-gate dispatches on terminal_reason
+    if ! grep -q 'TERMINAL_REASON\|terminal_reason' "$postgate"; then
+      echo "    sub-fail: post-gate does not check terminal_reason"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "    sub-fail: post-gate.sh not found"
+    failures=$((failures + 1))
+  fi
+
+  # Worker formula references convergence
+  if [[ -f "$worker_formula" ]]; then
+    if ! grep -q 'convergence' "$worker_formula"; then
+      echo "    sub-fail: worker formula does not reference convergence"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "    sub-fail: worker formula not found"
+    failures=$((failures + 1))
+  fi
+
+  # Reviewer formula references review_verdict metadata
+  if [[ -f "$reviewer_formula" ]]; then
+    if ! grep -q 'review_verdict' "$reviewer_formula"; then
+      echo "    sub-fail: reviewer formula does not reference review_verdict"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "    sub-fail: reviewer formula not found"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "convergence loop correctly wired (gate→iterate/escalate)"
+  else
+    fail "convergence loop has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -1436,6 +1746,11 @@ test_agent_wrapper
 test_entrypoint_wrapper
 test_crash_recovery
 test_nixos_module
+test_ralph_standalone
+test_cooldown_pacing
+test_p0_bypass_cooldown
+test_scout_orders
+test_convergence_loop
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"

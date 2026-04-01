@@ -36,7 +36,31 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # === Gas City hooks ===
+      - id: gc-fast
+        name: gc fast checks
+        entry: nix build .#checks.x86_64-linux.gc-fast
+        language: system
+        pass_filenames: false
+        files: ^lib/city/|^modules/city\.nix|^tests/gc\.nix
+        stages: [pre-commit]
+
+      - id: gc-integration
+        name: gc integration tests
+        entry: nix build .#checks.x86_64-linux.gc-integration
+        language: system
+        pass_filenames: false
+        stages: [manual]
+
       # === Slow hooks (pre-push stage) ===
+      - id: gc-full
+        name: gc full flake check
+        entry: nix flake check
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: nix-flake-check
         name: nix flake check
         entry: nix flake check

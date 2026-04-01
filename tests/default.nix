@@ -61,11 +61,24 @@ let
   # tmux-mcp tests (Rust unit tests and shell script syntax)
   tmuxMcpTests = import ./tmux-mcp.nix { inherit pkgs system src; };
 
+  # Gas City tests (layered: eval, provider, lifecycle)
+  gcTests = import ./gc.nix { inherit pkgs system; };
+
   # Lint checks run on all platforms
   # README example verification
   readmeTest = {
     readme = import ./readme.nix { inherit pkgs src; };
   };
+
+  # Gas City combined check (for gc-fast pre-commit hook)
+  gcFastCheck = pkgs.runCommandLocal "gc-fast" { } ''
+    # Depend on all gc checks to ensure they all pass
+    ${builtins.concatStringsSep "\n" (
+      builtins.map (name: "echo \"  ${name}: ${gcTests.${name}}\"") (builtins.attrNames gcTests)
+    )}
+    echo "PASS: All Gas City fast checks"
+    mkdir $out
+  '';
 
   # All checks combined
   checks =
@@ -78,7 +91,11 @@ let
     // ralphTemplatesCheck
     // shellTests
     // tmuxMcpTests
-    // readmeTest;
+    // readmeTest
+    // gcTests
+    // {
+      gc-fast = gcFastCheck;
+    };
 
   # ============================================================================
   # Integration Test Runners (require runtime environment)
@@ -285,5 +302,6 @@ in
     shellTests
     tmuxMcpTests
     readmeTest
+    gcTests
     ;
 }
