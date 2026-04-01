@@ -746,6 +746,182 @@ show_deps() {
   printf '%s\n' "${all_pkgs[@]}" | sort -u
 }
 
+# === Docs Scaffolding Functions ===
+
+# Default content for docs/README.md
+DOCS_README_CONTENT='# Project Overview
+
+<!-- Scaffolded by ralph sync — edit this file, then close the review bead -->
+
+## Summary
+
+Describe what this project does, who it is for, and its key capabilities.
+
+## Terminology
+
+| Term | Definition |
+|------|------------|
+| Example | Replace with project-specific terms |
+'
+
+# Default content for docs/architecture.md
+DOCS_ARCHITECTURE_CONTENT='# Architecture
+
+<!-- Scaffolded by ralph sync — edit this file, then close the review bead -->
+
+## System Design
+
+Describe the high-level architecture: components, data flow, and key boundaries.
+
+## Design Principles
+
+1. Describe the guiding principles for this system.
+
+## Source Layout
+
+```
+Describe the directory structure and what each area is responsible for.
+```
+'
+
+# Default content for docs/style-guidelines.md
+DOCS_STYLE_CONTENT='# Style Guidelines
+
+<!-- Scaffolded by ralph sync — edit this file, then close the review bead -->
+
+## Code Standards
+
+Describe formatting, naming conventions, and patterns to follow.
+
+## Review Criteria
+
+- What reviewers should check for
+- What patterns to avoid
+'
+
+# Default content for docs/orchestration.md (Gas City projects only)
+DOCS_ORCHESTRATION_CONTENT='# Orchestration
+
+<!-- Scaffolded by ralph sync — edit this file, then close the review bead -->
+
+## Deploy Commands
+
+Describe how to deploy changes (e.g., `nix build`, `podman restart`).
+
+## Scout Rules
+
+Error patterns the scout watches for in service container logs.
+
+### Immediate (P0 bead)
+
+```
+FATAL|PANIC|panic:
+```
+
+### Batched (collected over one poll cycle)
+
+```
+ERROR|Exception
+```
+
+### Ignore
+
+```
+# Add patterns for known noise
+```
+
+## Auto-deploy
+
+<!-- Define criteria for changes that can be deployed without director approval -->
+<!-- Remove this section or leave empty to require director approval for all deploys -->
+'
+
+# Detect whether the flake uses mkCity
+# Returns: 0 if mkCity found, 1 otherwise
+flake_uses_mkcity() {
+  if [ -f "flake.nix" ] && grep -q 'mkCity' "flake.nix"; then
+    return 0
+  fi
+  return 1
+}
+
+# Scaffold a single docs file and create a review bead
+# Usage: scaffold_doc <filepath> <content> <description>
+# Returns: 0 if created, 1 if already exists
+scaffold_doc() {
+  local filepath="$1"
+  local content="$2"
+  local description="$3"
+
+  if [ -f "$filepath" ]; then
+    debug "Docs file already exists: $filepath"
+    return 1
+  fi
+
+  action "Scaffolding: $filepath"
+
+  if [ "$DRY_RUN" = "false" ]; then
+    mkdir -p "$(dirname "$filepath")"
+    echo "$content" > "$filepath"
+
+    # Create a bead flagged for director review
+    if command -v bd &>/dev/null; then
+      local bead_id
+      bead_id=$(bd create \
+        --title="Review scaffolded $filepath" \
+        --description="$description" \
+        --type=task \
+        --priority=2 \
+        --labels="ralph:scaffold,human" \
+        --silent 2>/dev/null) || true
+      if [ -n "$bead_id" ]; then
+        action "Created review bead: $bead_id for $filepath"
+      fi
+    fi
+  fi
+
+  return 0
+}
+
+# Scaffold missing docs files
+# Always scaffolds: docs/README.md, docs/architecture.md, docs/style-guidelines.md
+# When mkCity detected: additionally scaffolds docs/orchestration.md
+scaffold_docs() {
+  local scaffolded=0
+
+  echo ""
+  echo "Checking docs scaffolding..."
+
+  scaffold_doc "docs/README.md" \
+    "$DOCS_README_CONTENT" \
+    "Review and customize the scaffolded project overview (docs/README.md). Add project-specific terminology and description." \
+    && ((scaffolded++)) || true
+
+  scaffold_doc "docs/architecture.md" \
+    "$DOCS_ARCHITECTURE_CONTENT" \
+    "Review and customize the scaffolded architecture document (docs/architecture.md). Describe the system design, components, and key boundaries." \
+    && ((scaffolded++)) || true
+
+  scaffold_doc "docs/style-guidelines.md" \
+    "$DOCS_STYLE_CONTENT" \
+    "Review and customize the scaffolded style guidelines (docs/style-guidelines.md). Define code standards and review criteria." \
+    && ((scaffolded++)) || true
+
+  # Gas City projects get an additional orchestration doc
+  if flake_uses_mkcity; then
+    scaffold_doc "docs/orchestration.md" \
+      "$DOCS_ORCHESTRATION_CONTENT" \
+      "Review and customize the scaffolded orchestration config (docs/orchestration.md). Define deploy commands, scout error patterns, and auto-deploy criteria." \
+      && ((scaffolded++)) || true
+  fi
+
+  if [ "$scaffolded" -gt 0 ]; then
+    echo "Scaffolded $scaffolded docs file(s) — review beads created for director approval"
+  else
+    echo "All docs files already exist"
+  fi
+}
+
 # Main
 
 # Handle deps mode separately - no sync, no diff
@@ -811,6 +987,9 @@ if [ -f "$packaged_config" ]; then
 
   copy_file "$packaged_config" "$local_config" "config.nix"
 fi
+
+# Step 4: Scaffold missing docs files
+scaffold_docs
 
 echo ""
 if [ "$DRY_RUN" = "true" ]; then

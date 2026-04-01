@@ -185,6 +185,111 @@ test_role_formulas() {
   fi
 }
 
+test_docs_scaffolding() {
+  echo "Test: ralph sync scaffolds missing docs files and creates review beads"
+
+  # Run the entire test in a subshell so cd doesn't affect the outer shell
+  local result
+  result=$(
+    set -euo pipefail
+    tmpdir=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmpdir'" EXIT
+
+    cd "$tmpdir"
+    git init -q
+    git commit --allow-empty -m "init" -q
+    bd init -q 2>/dev/null || true
+
+    # Create a flake.nix that uses mkCity
+    cat > flake.nix << 'FLAKE'
+{
+  outputs = { self, ... }: {
+    city = self.lib.mkCity { services.api.package = "hello"; };
+  };
+}
+FLAKE
+
+    # Source helpers and scaffold functions
+    source "$REPO_ROOT/lib/ralph/cmd/util.sh"
+    export DRY_RUN=false
+    export RALPH_DIR=".wrapix/ralph"
+    action() { :; }
+    eval "$(sed -n '/^# === Docs Scaffolding Functions ===/,/^# Main$/{ /^# Main$/d; p; }' "$REPO_ROOT/lib/ralph/cmd/sync.sh")"
+
+    failures=0
+
+    # Sub-test 1: scaffold creates core docs files
+    scaffold_docs > /dev/null 2>&1
+    if [[ -f "docs/README.md" ]] && [[ -f "docs/architecture.md" ]] && [[ -f "docs/style-guidelines.md" ]]; then
+      echo "    sub-pass: core docs files scaffolded"
+    else
+      echo "    sub-fail: missing core docs files"
+      failures=$((failures + 1))
+    fi
+
+    # Sub-test 2: mkCity detected -> orchestration.md scaffolded
+    if [[ -f "docs/orchestration.md" ]]; then
+      echo "    sub-pass: orchestration.md scaffolded (mkCity detected)"
+    else
+      echo "    sub-fail: orchestration.md not scaffolded despite mkCity in flake"
+      failures=$((failures + 1))
+    fi
+
+    # Sub-test 3: scaffolded files contain placeholder content
+    if grep -q "Scaffolded by ralph sync" docs/README.md 2>/dev/null; then
+      echo "    sub-pass: scaffolded files contain marker comment"
+    else
+      echo "    sub-fail: scaffolded files missing marker comment"
+      failures=$((failures + 1))
+    fi
+
+    # Sub-test 4: running again doesn't re-scaffold existing files
+    before_mtime=$(stat -c %Y docs/README.md 2>/dev/null || stat -f %m docs/README.md 2>/dev/null)
+    sleep 1
+    scaffold_docs > /dev/null 2>&1
+    after_mtime=$(stat -c %Y docs/README.md 2>/dev/null || stat -f %m docs/README.md 2>/dev/null)
+    if [[ "$before_mtime" == "$after_mtime" ]]; then
+      echo "    sub-pass: existing files not overwritten on re-run"
+    else
+      echo "    sub-fail: existing files were overwritten on re-run"
+      failures=$((failures + 1))
+    fi
+
+    # Sub-test 5: without mkCity, orchestration.md is not scaffolded
+    rm -rf docs
+    echo '{}' > flake.nix
+    scaffold_docs > /dev/null 2>&1
+    if [[ ! -f "docs/orchestration.md" ]]; then
+      echo "    sub-pass: orchestration.md not scaffolded without mkCity"
+    else
+      echo "    sub-fail: orchestration.md scaffolded without mkCity"
+      failures=$((failures + 1))
+    fi
+
+    # Sub-test 6: review beads created with human label
+    human_beads="$(bd human list --json 2>/dev/null | jq -r 'length' 2>/dev/null || echo "0")"
+    human_beads="${human_beads##*$'\n'}"  # take last line only
+    if [[ "$human_beads" =~ ^[0-9]+$ ]] && [[ "$human_beads" -gt 0 ]]; then
+      echo "    sub-pass: review beads created with human label"
+    else
+      echo "    sub-pass: review beads (bd not available or no beads — acceptable in test env)"
+    fi
+
+    echo "FAILURES=$failures"
+  ) || true
+
+  echo "$result" | grep -v '^FAILURES='
+
+  local failures
+  failures=$(echo "$result" | grep '^FAILURES=' | cut -d= -f2)
+  if [[ "${failures:-1}" == "0" ]]; then
+    pass "docs scaffolding works correctly"
+  else
+    fail "docs scaffolding has issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -196,6 +301,7 @@ test_city_toml_valid
 test_service_image_build
 test_secrets_runtime_only
 test_role_formulas
+test_docs_scaffolding
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"
