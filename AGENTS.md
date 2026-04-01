@@ -63,13 +63,10 @@ do not create a corresponding file under `specs/`.
 
 ## Code Style
 
-Hooks enforce formatting (nixfmt, shellcheck). Follow these conventions:
+Read `docs/style-guidelines.md` before writing or reviewing code — it contains
+the authoritative, enforceable rules (prefixed SH-, NX-, DOC-, GIT-, TST-).
 
-- **Nix:** Use `inherit` for scope; keep expressions pure
-- **Shell:** `set -euo pipefail`; quote variables; prefer `[[` over `[`
-- **Docs:** Specs in `specs/`; update `specs/README.md` when adding
-
-## Formatting
+Hooks enforce formatting automatically (nixfmt, shellcheck).
 
 **IMPORTANT:** Use `nix fmt` to format Nix files, NOT `nixfmt` directly.
 
