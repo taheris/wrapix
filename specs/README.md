@@ -19,6 +19,7 @@ An ordered list of specs and project terminology.
 | [tmux-mcp.md](./tmux-mcp.md) | [`lib/mcp/tmux/`](../lib/mcp/tmux/) | wx-4f3g | AI-assisted debugging via tmux panes |
 | [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-9mvh | Browser automation for frontend development |
 | [orchestration.md](./orchestration.md) | [`lib/ralph/cmd/`](../lib/ralph/cmd/) | wx-fqkv | Automated verification, parallel dispatch, and observation |
+| [gas-city.md](./gas-city.md) | [`lib/city/`](../lib/city/) | — | Multi-agent orchestration via Gas City integration |
 
 ## Terminology Index
 
