@@ -7,10 +7,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1774314200,
-        "narHash": "sha256-N9odZDjGoF0Tus3t1aImY9n0j5fKGz8ocfxKgQyYuKU=",
+        "lastModified": 1775054131,
+        "narHash": "sha256-lvMybxXa4N2qMDlM4fl5Xjojf3OtSyVNqD2CjSgFQYc=",
         "ref": "main",
-        "rev": "c59b27969b7373d6be2e8d5cab028ff03e866919",
+        "rev": "c08f18a49cf6eb2fe60873dcced066de409b0976",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
@@ -46,10 +46,10 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1774106199,
-        "narHash": "sha256-US5Tda2sKmjrg2lNHQL3jRQ6p96cgfWh3J1QBliQ8Ws=",
+        "lastModified": 1774709303,
+        "narHash": "sha256-D3Q07BbIA2KnTcSXIqqu9P586uWxN74zNoCH3h2ESHg=",
         "ref": "nixos-unstable",
-        "rev": "6c9a78c09ff4d6c21d0319114873508a6ec01655",
+        "rev": "8110df5ad7abf5d4c0f6fb0f8f978390e77f9685",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/NixOS/nixpkgs.git"
@@ -77,10 +77,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1774321696,
-        "narHash": "sha256-g18xMjMNla/nsF5XyQCNyWmtb2UlZpkY0XE8KinIXAA=",
+        "lastModified": 1775013181,
+        "narHash": "sha256-zPrt6oNM1r/RO5bWYaZ3hthfG9vzkr6kQdoqDd5x4Qw=",
         "ref": "master",
-        "rev": "49a67e6894d4cb782842ee6faa466aa90c92812d",
+        "rev": "e8046c1d9ccadd497c2344d8fa49dab62f22f7be",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/oxalica/rust-overlay.git"

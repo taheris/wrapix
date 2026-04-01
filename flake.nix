@@ -59,8 +59,10 @@
               buildGoModule = pkgs'.buildGo126Module;
             }).overrideAttrs
               (old: {
+                nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs'.pkg-config ];
+                buildInputs = (old.buildInputs or [ ]) ++ [ pkgs'.icu ];
                 goModules = old.goModules.overrideAttrs {
-                  outputHash = "sha256-yrIlyP2fOesS74NqwaDrBK37KCjh3N1DePiF8w9ubOk=";
+                  outputHash = "sha256-7DJgqJX2HDa9gcGD8fLNHLIXvGAEivYeDYx3snCUyCE=";
                 };
               });
 
