@@ -67,9 +67,9 @@ let
   # Gas City tests (layered: eval, provider, lifecycle)
   gcTests = import ./gc.nix { inherit pkgs system; };
 
-  # Gas City integration tests (NixOS VM, requires KVM)
-  gcIntegrationTests =
-    if isLinux && hasKvm then import ./gc-integration.nix { inherit pkgs; } else { };
+  # Gas City integration tests (NixOS VM, requires KVM at build time)
+  # Always defined so the attribute exists; fails at build time without KVM.
+  gcIntegrationTests = if isLinux then import ./gc-integration.nix { inherit pkgs; } else { };
 
   # Lint checks run on all platforms
   # README example verification
