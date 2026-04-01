@@ -119,37 +119,58 @@ in
       mkdir $out
     '';
 
-  # Generated city.toml references exec: provider
+  # Generated city.toml matches gc's config schema
   gc-city-toml =
     let
       inherit (minimalCity) configAttrs;
-      providerStr = configAttrs.city.provider;
-      hasExecPrefix = builtins.substring 0 5 providerStr == "exec:";
-      hasNixStore = builtins.substring 5 10 providerStr == "/nix/store";
 
-      # Verify session config
-      hasSession = builtins.hasAttr "session" configAttrs;
-      hasScout = builtins.hasAttr "scout" configAttrs;
+      # Workspace section
+      hasWorkspace = builtins.hasAttr "workspace" configAttrs;
+      workspaceName = configAttrs.workspace.name;
+      workspaceProvider = configAttrs.workspace.provider;
 
-      # Verify full city has resources section
-      fullHasResources = builtins.hasAttr "resources" fullCity.configAttrs;
+      # Session section with exec provider
+      sessionProvider = configAttrs.session.provider;
+      hasExecPrefix = builtins.substring 0 5 sessionProvider == "exec:";
+      hasNixStore = builtins.substring 5 10 sessionProvider == "/nix/store";
 
-      # Verify cooldown is passed through
-      fullCooldown = fullCity.configAttrs.session.cooldown;
-      cooldownCorrect = fullCooldown == "2h";
+      # Required sections
+      hasFormulas = builtins.hasAttr "formulas" configAttrs;
+      hasBeads = builtins.hasAttr "beads" configAttrs;
+      hasDaemon = builtins.hasAttr "daemon" configAttrs;
+
+      # Agent is a list (array of tables)
+      agentIsList = builtins.isList configAttrs.agent;
+      agentCount = builtins.length configAttrs.agent;
+      hasScout = builtins.any (a: a.name == "scout") configAttrs.agent;
+      hasWorker = builtins.any (a: a.name == "worker") configAttrs.agent;
+      hasReviewer = builtins.any (a: a.name == "reviewer") configAttrs.agent;
+
+      # Full city: workers=2 reflected in workspace and worker agent
+      fullWorkspace = fullCity.configAttrs.workspace;
+      fullWorkerSessions = fullWorkspace.max_active_sessions;
     in
+    assert hasWorkspace;
+    assert workspaceName == "dev";
+    assert workspaceProvider == "claude";
     assert hasExecPrefix;
     assert hasNixStore;
-    assert hasSession;
+    assert hasFormulas;
+    assert hasBeads;
+    assert hasDaemon;
+    assert agentIsList;
+    assert agentCount == 3;
     assert hasScout;
-    assert fullHasResources;
-    assert cooldownCorrect;
+    assert hasWorker;
+    assert hasReviewer;
+    assert fullWorkerSessions == 2;
     runCommandLocal "gc-city-toml" { } ''
-      echo "PASS: city.toml is valid"
-      echo "  - provider references exec:/nix/store/..."
-      echo "  - session and scout sections present"
-      echo "  - resources section present when configured"
-      echo "  - cooldown passed through correctly"
+      echo "PASS: city.toml matches gc config schema"
+      echo "  - [workspace] with name and provider"
+      echo "  - [session] with exec:/nix/store/... provider"
+      echo "  - [formulas], [beads], [daemon] sections present"
+      echo "  - [[agent]] is list with scout, worker, reviewer"
+      echo "  - workers reflected in max_active_sessions"
       mkdir $out
     '';
 
@@ -606,6 +627,42 @@ in
         grep -q 'style-guidelines.md' "$DIR/reviewer.formula.toml" || { echo "FAIL: reviewer no style-guidelines.md"; exit 1; }
 
         echo "PASS: All role formulas valid"
+        mkdir $out
+      '';
+
+  # Validate generated city.toml with the gc binary
+  gc-config-validate =
+    runCommandLocal "gc-config-validate"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gc
+        ];
+      }
+      ''
+        set -euo pipefail
+        echo "Validating generated city.toml with gc..."
+
+        WORK=$(mktemp -d)
+        cp ${minimalCity.config} "$WORK/city.toml"
+        cd "$WORK"
+        gc config show --validate
+        echo "  PASS: minimal city config valid"
+
+        rm -f "$WORK/city.toml"
+        cp ${fullCity.config} "$WORK/city.toml"
+        cd "$WORK"
+        gc config show --validate
+        echo "  PASS: full city config valid"
+
+        rm -f "$WORK/city.toml"
+        cp ${emptyCity.config} "$WORK/city.toml"
+        cd "$WORK"
+        gc config show --validate
+        echo "  PASS: empty city config valid"
+
+        rm -rf "$WORK"
+        echo "PASS: All generated configs accepted by gc"
         mkdir $out
       '';
 }

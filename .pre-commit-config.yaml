@@ -39,15 +39,15 @@ repos:
       # === Gas City hooks ===
       - id: gc-fast
         name: gc fast checks
-        entry: nix build .#checks.x86_64-linux.gc-fast
+        entry: bash -c 'nix build ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).gc-fast"'
         language: system
         pass_filenames: false
-        files: ^lib/city/|^modules/city\.nix|^tests/gc\.nix
+        files: ^lib/city/|^modules/city\.nix|^tests/gc\.nix|^lib/util/toml\.nix|^tests/toml\.nix
         stages: [pre-commit]
 
       - id: gc-integration
         name: gc integration tests
-        entry: nix build .#checks.x86_64-linux.gc-integration
+        entry: bash -c 'nix build ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).gc-integration"'
         language: system
         pass_filenames: false
         stages: [manual]

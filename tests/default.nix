@@ -61,8 +61,15 @@ let
   # tmux-mcp tests (Rust unit tests and shell script syntax)
   tmuxMcpTests = import ./tmux-mcp.nix { inherit pkgs system src; };
 
+  # TOML utility tests
+  tomlTests = import ./toml.nix { inherit pkgs; };
+
   # Gas City tests (layered: eval, provider, lifecycle)
   gcTests = import ./gc.nix { inherit pkgs system; };
+
+  # Gas City integration tests (NixOS VM, requires KVM)
+  gcIntegrationTests =
+    if isLinux && hasKvm then import ./gc-integration.nix { inherit pkgs; } else { };
 
   # Lint checks run on all platforms
   # README example verification
@@ -91,8 +98,10 @@ let
     // ralphTemplatesCheck
     // shellTests
     // tmuxMcpTests
+    // tomlTests
     // readmeTest
     // gcTests
+    // gcIntegrationTests
     // {
       gc-fast = gcFastCheck;
     };
@@ -301,7 +310,9 @@ in
     ralphTemplatesCheck
     shellTests
     tmuxMcpTests
+    tomlTests
     readmeTest
     gcTests
+    gcIntegrationTests
     ;
 }

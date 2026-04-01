@@ -14,60 +14,16 @@
 
 let
   inherit (builtins)
-    concatStringsSep
     hasAttr
     isString
     mapAttrs
-    replaceStrings
     substring
     ;
   inherit (pkgs.lib)
-    filterAttrs
     mapAttrsToList
-    optionalAttrs
     ;
 
-  # Convert a Nix attrset into TOML text.
-  # Handles strings, integers, booleans, lists of strings, and nested tables.
-  toTOML =
-    let
-      # Escape a TOML string value
-      escapeStr = s: "\"${replaceStrings [ "\\" "\"" "\n" ] [ "\\\\" "\\\"" "\\n" ] s}\"";
-
-      # Format a single value
-      fmtValue =
-        v:
-        if builtins.isBool v then
-          (if v then "true" else "false")
-        else if builtins.isInt v then
-          toString v
-        else if builtins.isString v then
-          escapeStr v
-        else if builtins.isList v then
-          "[${concatStringsSep ", " (map fmtValue v)}]"
-        else
-          throw "toTOML: unsupported value type";
-
-      # Render a table at a given key path
-      renderTable =
-        prefix: attrs:
-        let
-          scalars = filterAttrs (_: v: !(builtins.isAttrs v)) attrs;
-          tables = filterAttrs (_: v: builtins.isAttrs v) attrs;
-
-          scalarLines = mapAttrsToList (k: v: "${k} = ${fmtValue v}") scalars;
-
-          tableBlocks = mapAttrsToList (
-            k: v:
-            let
-              fullKey = if prefix == "" then k else "${prefix}.${k}";
-            in
-            "\n[${fullKey}]\n${renderTable fullKey v}"
-          ) tables;
-        in
-        concatStringsSep "\n" (scalarLines ++ tableBlocks);
-    in
-    attrs: renderTable "" attrs;
+  toTOML = import ../util/toml.nix { inherit (pkgs) lib; };
 
   # Build a service container image from a Nix package
   mkServiceImage =
@@ -150,33 +106,48 @@ let
         cp ${./formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
       '';
 
-      # Build the city.toml configuration
+      # Build the city.toml configuration (matches gc's Go config schema)
       cityConfig = {
-        city = {
-          provider = "exec:${providerScript}";
+        workspace = {
+          inherit name;
+          provider = agent;
+          max_active_sessions = workers;
         };
 
         session = {
-          max_concurrent = workers;
-          inherit cooldown;
+          provider = "exec:${providerScript}";
         };
 
-        scout = {
-          interval = scoutInterval;
-          max_beads = scoutMaxBeads;
+        formulas = {
+          dir = ".gc/formulas";
         };
 
-        agent = {
-          type = agent;
+        beads = {
+          provider = "bd";
         };
-      }
-      // optionalAttrs (resources != { }) {
-        resources = mapAttrs (
-          _role: res:
-          { }
-          // optionalAttrs (hasAttr "cpus" res) { inherit (res) cpus; }
-          // optionalAttrs (hasAttr "memory" res) { inherit (res) memory; }
-        ) resources;
+
+        daemon = {
+          patrol_interval = "30s";
+          max_restarts = 5;
+          restart_window = "1h";
+        };
+
+        # [[agent]] — rendered as array of tables
+        agent = [
+          {
+            name = "scout";
+            scope = "city";
+          }
+          {
+            name = "worker";
+            scope = "city";
+            max_active_sessions = workers;
+          }
+          {
+            name = "reviewer";
+            scope = "city";
+          }
+        ];
       };
 
       cityToml = pkgs.writeText "city.toml" (toTOML cityConfig);
