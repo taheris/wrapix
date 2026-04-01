@@ -4,7 +4,6 @@ An ordered list of specs and project terminology.
 
 | Spec | Code | Beads | Purpose |
 |------|------|-------|---------|
-| [architecture.md](./architecture.md) | — | — | Design principles and security model |
 | [beads.md](./beads.md) | [`.beads/`](../.beads/) | — | Issue tracking with dependency support |
 | [image-builder.md](./image-builder.md) | [`lib/sandbox/image.nix`](../lib/sandbox/image.nix) | — | Nix-based OCI image creation |
 | [linux-builder.md](./linux-builder.md) | [`lib/builder/default.nix`](../lib/builder/default.nix) | wx-ope | Remote Nix builds for macOS |
@@ -20,21 +19,3 @@ An ordered list of specs and project terminology.
 | [playwright-mcp.md](./playwright-mcp.md) | [`lib/mcp/playwright/`](../lib/mcp/playwright/) | wx-9mvh | Browser automation for frontend development |
 | ~~[orchestration.md](./orchestration.md)~~ | — | ~~wx-fqkv~~ | *Superseded by gas-city.md and ralph-workflow.md* |
 | [gas-city.md](./gas-city.md) | [`lib/city/`](../lib/city/) | wx-ijfv | Multi-agent orchestration via Gas City integration |
-
-## Terminology Index
-
-| Term | Definition |
-|------|------------|
-| **Beads** | Issue tracking system used by Ralph |
-| **Deploy Key** | SSH key for git push operations from container |
-| **Focus-aware** | Notification suppression when terminal is focused |
-| **Gas City** | Multi-agent orchestration SDK integrated via `mkCity` |
-| **pasta** | Linux userspace networking for Podman containers |
-| **playwright-mcp** | MCP server wrapping @playwright/mcp for browser automation in sandboxes |
-| **prek** | Rust-based pre-commit framework (drop-in replacement for pre-commit) |
-| **Profile** | Pre-configured set of packages and environment variables |
-| **ralph:clarify** | Bead label for items awaiting human response via `ralph msg` |
-| **Ralph** | Workflow orchestrator for spec-to-implementation |
-| **Sandbox** | Isolated container environment for running Claude Code |
-| **tmux-mcp** | MCP server for AI-assisted debugging via tmux panes |
-| **virtio-fs** | Shared filesystem for macOS container VMs |

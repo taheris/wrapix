@@ -11,7 +11,7 @@ The sandbox provides **filesystem and process isolation**—code inside the cont
 
 **Network access is unrestricted by design.** Sandboxed code can reach any internet host, which is intentional for AI research, package managers, and git operations. If you need network isolation, additional firewall rules must be applied externally.
 
-For the overall security model, see [architecture.md](specs/architecture.md).
+For the overall security model, see [architecture.md](docs/architecture.md).
 
 ## Usage
 

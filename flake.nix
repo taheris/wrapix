@@ -9,14 +9,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    gascity = {
-      url = "git+ssh://git@github.com/gastownhall/gascity.git?ref=main&shallow=1";
-      flake = false;
-    };
-
     flake-parts = {
       url = "git+ssh://git@github.com/hercules-ci/flake-parts.git?ref=main&shallow=1";
       inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+
+    gascity = {
+      url = "git+ssh://git@github.com/gastownhall/gascity.git?ref=main&shallow=1";
+      flake = false;
     };
 
     rust-overlay = {
@@ -206,6 +206,7 @@
                 beads
                 config.treefmt.build.wrapper
                 dolt
+                gc
                 gh
                 podman
                 prek
