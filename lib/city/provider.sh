@@ -324,6 +324,11 @@ case "$METHOD" in
     podman image exists "$image" 2>/dev/null && echo "true" || echo "false"
     ;;
 
+  # --- RunLive ---
+  RunLive)
+    : # unsupported by exec provider — no-op
+    ;;
+
   # --- Capabilities ---
   Capabilities)
     echo "{}"
