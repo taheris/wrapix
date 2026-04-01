@@ -1,0 +1,165 @@
+description = """
+Reviewer patrol loop — reviews worker output and enforces style guidelines.
+
+Persistent session that receives nudges from the gate condition script when
+a worker completes. Reviews the diff against docs/style-guidelines.md,
+sets review_verdict on the bead metadata (approve/reject), and flags
+non-documented-rule issues for director review via bd human.
+
+Also periodically sweeps .wrapix/orchestration.md for stale dynamic context
+(expired dated entries, undated entries older than 7 days).
+
+## Context
+
+Pins docs/README.md and docs/style-guidelines.md always. Loads
+.wrapix/orchestration.md on demand for dynamic context.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| stale_days | city config | Days before undated entries are stale (default: 7) |
+"""
+formula = "wrapix-reviewer"
+version = 1
+
+[vars]
+[vars.stale_days]
+description = "Days before undated .wrapix/orchestration.md entries are considered stale"
+default = "7"
+
+[[steps]]
+id = "load-context"
+title = "Load review context and guidelines"
+description = """
+**1. Prime environment:**
+```bash
+gc prime
+bd prime
+```
+
+**2. Read pinned context:**
+
+Read `docs/README.md` for project overview.
+Read `docs/style-guidelines.md` — these are the rules you enforce.
+Internalize every rule. You will apply them mechanically.
+
+**3. Check inbox for review requests:**
+```bash
+gc mail inbox
+```
+
+The gate condition script nudges the reviewer with commit range and bead
+ID when a worker completes. Read the nudge to get:
+- Bead ID to review
+- Commit range to diff
+
+If no review pending, proceed to sweep step.
+
+**Exit criteria:** Style guidelines loaded, review assignment known (or none)."""
+
+[[steps]]
+id = "review-diff"
+title = "Review worker diff against style guidelines"
+needs = ["load-context"]
+description = """
+If no review assignment from load-context, skip to sweep step.
+
+**1. Read the bead and diff:**
+```bash
+bd show $BEAD_ID
+git diff $COMMIT_RANGE
+git log --oneline $COMMIT_RANGE
+```
+
+**2. Review mechanically against docs/style-guidelines.md:**
+
+For each rule in the style guide, check if the diff violates it.
+Be precise — only flag violations of DOCUMENTED rules.
+
+**3. Handle findings:**
+
+**If all rules pass → approve:**
+```bash
+bd meta set $BEAD_ID review_verdict approve
+bd update $BEAD_ID --notes "Reviewer: approved — all style guidelines pass"
+```
+
+**If documented rule violations found → reject:**
+```bash
+bd meta set $BEAD_ID review_verdict reject
+bd update $BEAD_ID --notes "Reviewer: rejected — $VIOLATION_DETAILS"
+```
+Include specific rule references and line numbers so the next worker
+iteration can address them precisely.
+
+**If issues found outside documented rules → flag for director:**
+Do NOT reject based on undocumented opinions. Flag for human review:
+```bash
+bd human $BEAD_ID "Non-documented concern: $DESCRIPTION"
+```
+Still set verdict based only on documented rules (approve if no
+documented violations, even if flagged).
+
+**Exit criteria:** Review verdict set on bead metadata."""
+
+[[steps]]
+id = "sweep-stale"
+title = "Sweep .wrapix/orchestration.md for stale context"
+needs = ["review-diff"]
+description = """
+Check .wrapix/orchestration.md for stale dynamic context.
+
+**1. Read the file if it exists:**
+```bash
+cat .wrapix/orchestration.md 2>/dev/null || echo "(no dynamic context)"
+```
+
+**2. Identify stale entries:**
+
+- **Dated entries with expired dates:** Any entry with an explicit date
+  that has passed should be flagged for removal
+- **Undated entries older than {{stale_days}} days:** Check git blame or
+  modification timestamps. Entries without dates that are older than
+  {{stale_days}} days are considered stale
+
+**3. Clean up stale entries:**
+
+Remove stale entries from the file. Commit the cleanup:
+```bash
+git add .wrapix/orchestration.md
+git commit -m "chore: sweep stale context from .wrapix/orchestration.md"
+```
+
+If no stale entries found, skip.
+
+**Exit criteria:** Dynamic context is current, stale entries removed."""
+
+[[steps]]
+id = "next-iteration"
+title = "Wait for next review or pour next iteration"
+needs = ["sweep-stale"]
+description = """
+End of review cycle. Wait for the next nudge or pour a new iteration.
+
+**1. Context check:**
+If context feels heavy or RSS is high:
+```bash
+gc runtime request-restart
+```
+
+**2. Pour next iteration:**
+```bash
+NEXT=$(bd mol wisp wrapix-reviewer --root-only --json | jq -r '.new_epic_id')
+bd update "$NEXT" --assignee=$GC_AGENT
+```
+
+**3. Burn this wisp:**
+```bash
+bd mol burn <this-wisp-id> --force
+```
+
+The gate condition script will nudge the reviewer when the next worker
+completes. Between reviews, gc's session_sleep auto-suspends the session.
+
+**Exit criteria:** Next wisp poured, this wisp burned."""

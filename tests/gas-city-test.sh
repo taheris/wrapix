@@ -162,9 +162,67 @@ test_secrets_runtime_only() {
 }
 
 test_role_formulas() {
-  echo "Test: mkCity exposes agent sandbox for role containers"
-  local has_sandbox
-  has_sandbox=$(nix eval --impure --json --expr '
+  echo "Test: Role behavior defined as gc formulas, overridable by consumers"
+
+  # Check formula files exist with correct naming
+  local formulas_dir="${REPO_ROOT}/lib/city/formulas"
+  local failures=0
+
+  for role in scout worker reviewer; do
+    if [[ ! -f "${formulas_dir}/${role}.formula.toml" ]]; then
+      echo "    missing ${role}.formula.toml"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Validate formula TOML structure: each must have formula=, description=, [[steps]]
+  for role in scout worker reviewer; do
+    local f="${formulas_dir}/${role}.formula.toml"
+    [[ -f "$f" ]] || continue
+
+    if ! grep -q '^formula = ' "$f"; then
+      echo "    ${role}: missing formula name"
+      failures=$((failures + 1))
+    fi
+    if ! grep -q '^description = ' "$f"; then
+      echo "    ${role}: missing description"
+      failures=$((failures + 1))
+    fi
+    if ! grep -q '^\[\[steps\]\]' "$f"; then
+      echo "    ${role}: missing steps"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Scout must reference docs/orchestration.md and maxBeads
+  if ! grep -q 'orchestration.md' "${formulas_dir}/scout.formula.toml"; then
+    echo "    scout: does not reference docs/orchestration.md"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'max_beads' "${formulas_dir}/scout.formula.toml"; then
+    echo "    scout: does not reference maxBeads cap"
+    failures=$((failures + 1))
+  fi
+
+  # Worker must reference wrapix-agent and be ephemeral (no patrol loop)
+  if ! grep -q 'wrapix-agent' "${formulas_dir}/worker.formula.toml"; then
+    echo "    worker: does not reference wrapix-agent"
+    failures=$((failures + 1))
+  fi
+
+  # Reviewer must reference style-guidelines.md and bd human
+  if ! grep -q 'style-guidelines.md' "${formulas_dir}/reviewer.formula.toml"; then
+    echo "    reviewer: does not reference docs/style-guidelines.md"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'bd human' "${formulas_dir}/reviewer.formula.toml"; then
+    echo "    reviewer: does not reference bd human for flagging"
+    failures=$((failures + 1))
+  fi
+
+  # Verify mkCity exposes formulas directory
+  local has_formulas
+  has_formulas=$(nix eval --impure --json --expr '
     let
       flakeLock = builtins.fromJSON (builtins.readFile ./flake.lock);
       nixpkgsInfo = flakeLock.nodes.nixpkgs.locked;
@@ -176,12 +234,25 @@ test_role_formulas() {
       sandbox = import ./lib/sandbox { inherit pkgs linuxPkgs; system = "x86_64-linux"; };
       city = import ./lib/city { inherit pkgs linuxPkgs; inherit (sandbox) mkSandbox profiles; };
       result = city.mkCity { services = {}; };
-    in builtins.hasAttr "package" result.agentSandbox
+    in builtins.hasAttr "formulas" result && builtins.hasAttr "defaultFormulas" result
   ' 2>/dev/null)
-  if [[ "$has_sandbox" == "true" ]]; then
-    pass "mkCity exposes agentSandbox with package attribute"
+  if [[ "$has_formulas" != "true" ]]; then
+    echo "    mkCity does not expose formulas and defaultFormulas"
+    failures=$((failures + 1))
+  fi
+
+  # Verify all three roles pinned docs/README.md
+  for role in scout worker reviewer; do
+    if ! grep -q 'docs/README.md' "${formulas_dir}/${role}.formula.toml"; then
+      echo "    ${role}: does not pin docs/README.md"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "role formulas correctly defined and exposed by mkCity"
   else
-    fail "mkCity agentSandbox missing package attribute"
+    fail "role formulas have $failures issues"
   fi
 }
 

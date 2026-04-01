@@ -126,6 +126,21 @@ let
       # Provider script — copies lib/city/provider.sh into the Nix store
       providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
 
+      # Default role formulas — consumers can override by placing files in formulas/
+      defaultFormulas = {
+        scout = ./formulas/scout.formula.toml;
+        worker = ./formulas/worker.formula.toml;
+        reviewer = ./formulas/reviewer.formula.toml;
+      };
+
+      # Copy formulas into the Nix store as a directory
+      formulasDir = pkgs.runCommand "wrapix-formulas" { } ''
+        mkdir -p $out
+        cp ${./formulas/scout.formula.toml} $out/wrapix-scout.formula.toml
+        cp ${./formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
+        cp ${./formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
+      '';
+
       # Build the city.toml configuration
       cityConfig = {
         city = {
@@ -203,6 +218,12 @@ let
 
       # Classified secrets metadata
       inherit classifiedSecrets;
+
+      # Default role formulas (directory of .formula.toml files)
+      formulas = formulasDir;
+
+      # Individual formula paths for selective override
+      inherit defaultFormulas;
 
       # Re-export inputs for downstream consumers (NixOS module, etc.)
       inherit
