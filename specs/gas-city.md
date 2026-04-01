@@ -25,18 +25,31 @@ ops pipeline with good defaults and minimal configuration.
 - Wrapix generates `city.toml` from Nix expressions — consumers never write TOML
 - Provider implemented as a shell script using Gas City's `exec:<script>` pattern
 - Provider translates `gc` commands to `podman` operations
-- One city per project; services are defined within the city
+- One city per project; service containers are managed by the wrapix provider
+  script via podman, not gc's native service abstraction (which handles
+  workflow/proxy_process types, not OCI containers)
 - `mkSandbox` remains the foundational primitive, unchanged
 - `mkCity` uses `mkSandbox` internally for agent container images
 - `mkCity` generates `city.toml`, the provider script, and container images at
   Nix build time — these are deterministic outputs in the Nix store
 
+**Components inside the gc container:**
+
+| Component | Role |
+|-----------|------|
+| `gc start --foreground` | Controller — reconciliation loop, convergence, orders, scheduling |
+| Provider script | Translates gc commands to podman operations, manages worktrees, mounts bead context |
+| Post-gate order | Event-gated order triggered by `convergence.terminated` — merge, branch cleanup, deploy bead creation |
+| Gate condition script | Bridges convergence gate and reviewer session — nudges reviewer, waits for verdict |
+| Entrypoint wrapper | Init bead check, starts `podman events` watcher, then exec's `gc start --foreground` |
+
 ### Deployment Model
 
-- `gc-control` runs in a container with the podman socket mounted (sibling
-  container pattern)
-- `gc-control` has no direct host access beyond the podman socket and workspace
-  mount
+- gc runs in a container with the podman socket mounted (sibling container
+  pattern), using `gc start --foreground` for per-city controller mode (gc
+  defaults to a machine-wide supervisor since v0.13+)
+- The gc container has no direct host access beyond the podman socket and
+  workspace mount
 - All containers (services, agents) share a podman network per city
 - Service containers are built from Nix packages via `dockerTools.buildLayeredImage`
 - NixOS module generates systemd units, a podman network
@@ -49,9 +62,9 @@ Four roles in the ops loop:
 
 | Role | Job | Lifetime | Workspace Access | Podman Socket |
 |------|-----|----------|-----------------|---------------|
-| **Scout** | Watches service containers, detects errors, creates beads | Persistent | Read-only | Read-only (logs, inspect) |
+| **Scout** | Watches service containers, detects errors, creates beads | Persistent | Read-only + `.beads/` rw | Read-only (logs, inspect) |
 | **Worker** | Picks up a bead, investigates, writes the fix | Ephemeral (per bead) | Read-write (own worktree) | None |
-| **Reviewer** | Reviews every worker's output before merge, enforces style guidelines | Persistent | Read-only | None |
+| **Reviewer** | Reviews every worker's output before merge, enforces style guidelines | Persistent | Read-only + `.beads/` rw | None |
 | **Director** | Human operator, makes structural decisions | Always | Full | Full |
 
 ### Ops Loop
@@ -67,32 +80,116 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
    +------------------------------------------ deploy     Director notified
 ```
 
-- Scout runs on a polling interval (configurable, default 5 minutes)
-- Hybrid event trigger: a lightweight shell process watches `podman events`
-  for critical lifecycle events (die, oom, restart) and wakes the scout
-  immediately
+- Scout is a persistent session. gc orders poke it on a polling interval
+  (configurable, default 5 minutes). gc's `session_sleep` auto-suspends
+  idle scouts; the next order or gc mail restarts it fresh. This keeps
+  context clean while maintaining addressability for gc mail.
+- Hybrid event trigger: the entrypoint wrapper starts a background process
+  watching `podman events` for service container lifecycle events (die, oom,
+  restart) and wakes the scout immediately via `gc nudge scout --message "..."`.
+  Nudge is push-based (directly sends to the session). Service containers are
+  not gc sessions, so gc hooks don't cover them.
+- In addition to event-driven detection, the scout scans `podman logs` for
+  error patterns using regex matching.
+  Patterns are defined in `docs/orchestration.md` under `## Scout Rules`:
+  - **Immediate** patterns (e.g., `FATAL|PANIC|panic:`) create a P0 bead
+  - **Batched** patterns (e.g., `ERROR|Exception`) are collected over one poll
+    cycle, then one bead per unique pattern
+  - **Ignore** patterns suppress known noise
+  - Defaults if the section doesn't exist: `FATAL|PANIC|panic:` immediate,
+    `ERROR|Exception` batched
 - Scout deduplicates — if a bead exists for the same error pattern, it appends
   rather than creating a new one
+- Queue overflow protection: scout collapses related errors into a single bead
+  across poll cycles, and stops creating new beads after a cap (configurable
+  via `scout.maxBeads`, default: 10 open beads). Director is notified when
+  the cap is reached.
 - Workers run in isolated git worktrees with clean state per bead (see
   Session Lifecycle for details)
-- Container exit is the completion event — no polling for task completion
+- **gc convergence owns the worker→reviewer loop end-to-end.** Worker
+  executes the fix, reviewer is the gate, max iterations = 2. gc manages
+  session lifecycle, handoff between worker and reviewer, and escalation.
+  After 2 failed iterations, convergence escalates to the director via
+  notification. An event-gated order (`on: convergence.terminated`) triggers
+  the post-gate logic (merge, deploy) when convergence approves.
 - Reviewer enforces `docs/style-guidelines.md` mechanically; flags anything
   outside documented rules for director review via `bd human`
-- Rejection: reviewer reopens the bead with review notes, a new worker picks
-  it up. If rejected twice for the same bead, director is notified
 - After reviewer approval, deploy is gated by risk tier (see Deploy section)
+
+### Ad-hoc Director Requests
+
+Two paths for the director to inject work:
+
+- **Investigation**: `gc mail send --to scout -s "investigate" -m "..."` —
+  the scout picks this up on its next order cycle, investigates, and creates
+  a bead if it finds something actionable. Lightweight, no bead created
+  upfront, no entry into the worker→reviewer loop unless warranted.
+- **Urgent fix**: `bd create --priority=0` — creates a P0 bead that bypasses
+  cooldown and enters the full ops loop (worker→reviewer→merge→deploy).
+
+### Merge
+
+The post-gate order fires on `convergence.terminated` events. It checks
+`terminal_reason=approved` and handles merge:
+
+- Linear history only: `git merge --ff-only gc-<bead-id>`
+- If fast-forward fails (main advanced): rebase the branch onto main, run
+  `prek` (pre-commit stage), then fast-forward merge. If tests fail after
+  rebase, reject back to a new worker with the failure details.
+- If rebase has conflicts: reject back to a new worker with conflict details
+  as context — no automatic conflict resolution
+- Reviewer does not run tests — it reviews code quality against
+  `docs/style-guidelines.md` only
+- After merge: `git worktree remove .wrapix/worktree/gc-<bead-id>` and
+  `git branch -d gc-<bead-id>`. On rejection, old branch is also deleted —
+  the new worker creates a fresh one.
+
+#### Reviewer Gate
+
+The worker→reviewer handoff is managed by gc convergence with
+`gate_mode=condition`. The gate condition script:
+
+1. Reads `commit_range` from bead metadata (set by the provider script
+   after worker commits via `bd meta set <bead-id> commit_range <range>`)
+2. Nudges the reviewer session with the commit range via `gc nudge reviewer`
+3. Polls bead metadata for `review_verdict` (approve/reject), set by the
+   reviewer via `bd meta set <bead-id> review_verdict approve`
+4. Returns exit 0 on approve, exit 1 on reject — gc convergence uses this
+   to decide whether to iterate or terminate
+
+The reviewer reads the bead from `.beads/`, diffs the commits, and reviews
+against `docs/style-guidelines.md`. Bead ID and role type are injected via
+the formula's `env` configuration, not `runtime.Config` directly.
+
+### Notifications
+
+- The post-gate order and entrypoint wrapper call `wrapix-notifyd` for
+  director-facing events:
+  - `bd human` flags (reviewer flagged something outside documented rules)
+  - Convergence escalation (max iterations reached — worker→reviewer loop
+    failed twice)
+  - Deploy approval needed
+  - Periodic digest (hot spots, fix counts, rejection rates) — generated
+    by a cooldown-gated digest order on a configurable interval
+- The gc container mounts the notify socket (same pattern as podman socket)
+- Future: migrate to beads hooks when available, so standalone `ralph run`
+  users also get notifications
 
 ### Deploy
 
-- Default: all deploys require director approval via `bd human`
+- After reviewer approval, the post-gate order creates a deploy bead
+  summarizing the change and its risk classification
+- Default: deploy beads are flagged for director approval via `bd human`.
+  The director runs `nix build` on the host, then restarts the affected
+  containers manually (`podman stop && podman rm && podman run`).
 - Consumer can opt into auto-deploy for low-risk changes by defining an
-  `## Auto-deploy` section in `docs/orchestration.md`
-- Deploy means: the director (or CI) runs `nix build` on the host to produce
-  updated service images, then gc-control restarts the affected containers
-  with the new image (`podman stop && podman rm && podman run`). gc-control
-  does not run Nix builds itself. Rolling restarts and database migrations
-  are out of scope for v1.
-- Reviewer classifies risk based on the auto-deploy rules
+  `## Auto-deploy` section in `docs/orchestration.md`. When the reviewer
+  classifies a change as low-risk per these rules, the post-gate order
+  skips the `bd human` flag. A cooldown-gated deploy order polls for
+  unflagged deploy beads and restarts containers automatically (still
+  requires the director or CI to have pre-built the images).
+- The gc container does not run Nix builds. Rolling restarts and database
+  migrations are out of scope for v1.
 
 ### Build-to-Ops Transition
 
@@ -102,8 +199,8 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
     (flagged via `bd human`)
   - Reviewer observations: "third patch to this module this week"
     (flagged via `bd human`)
-  - Periodic digest: hot spots, fix counts, rejection rates (mechanism TBD —
-    may be a gc subcommand or a scheduled bead summary)
+  - Periodic digest: hot spots, fix counts, rejection rates (see
+    Notifications section)
 - Director decides when to initiate `ralph plan` for a spec-driven redesign
 - During a build: creating a spec bead implicitly holds the affected area.
   The spec bead's description should name the modules/files under redesign.
@@ -115,11 +212,11 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
 
 | File | Shared | Pinned | Purpose |
 |------|--------|--------|---------|
-| `docs/README.md` | git | Always (baked into role prompts) | Project overview, terminology |
-| `docs/architecture.md` | git | On demand (referenced by role prompts when needed) | System design |
-| `docs/orchestration.md` | git | On demand (loaded by ops role prompts at session start) | Ops config, deploy commands, role rules |
-| `docs/style-guidelines.md` | git | On demand (loaded by reviewer prompt at session start) | Code standards the reviewer enforces |
-| `.wrapix/orchestration.md` | local | On demand (loaded by ops role prompts at session start) | Dynamic/temporal overrides |
+| `docs/README.md` | git | Always (baked into formulas) | Project overview, terminology |
+| `docs/architecture.md` | git | On demand (referenced by formulas when needed) | System design |
+| `docs/orchestration.md` | git | On demand (loaded by ops formulas at session start) | Ops config, deploy commands, role rules |
+| `docs/style-guidelines.md` | git | On demand (loaded by reviewer formula at session start) | Code standards the reviewer enforces |
+| `.wrapix/orchestration.md` | local | On demand (loaded by ops formulas at session start) | Dynamic/temporal overrides |
 
 - `ralph sync` always scaffolds missing docs files for any project:
   `docs/README.md` (project overview), `docs/architecture.md` (system design),
@@ -131,9 +228,9 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
 - All scaffolded files are created as beads flagged for director review via
   `bd human`
 - Director reviews and approves scaffolded files before running `gc start`
-- The gc-control entrypoint checks for unresolved init beads before starting
-  the reconciliation loop. If any exist, it prints a warning listing the
-  pending reviews and exits.
+- The entrypoint wrapper checks for unresolved scaffolding beads (created by
+  `ralph sync`) before starting gc. If any exist, it prints a warning listing
+  the pending reviews and exits.
 - `.wrapix/orchestration.md` is tool-managed — updated by gc commands, not
   manually edited
 
@@ -181,6 +278,14 @@ wrapix.mkCity {
   workers = 1;                # max concurrent workers (default: 1)
   cooldown = "2h";            # time between task dispatches (default: "0")
   scout.interval = "5m";      # polling interval (default: "5m")
+  scout.maxBeads = 10;         # bead cap before scout pauses (default: 10)
+
+  # Resource limits per role (optional, default: no limits)
+  resources = {
+    worker = { cpus = 2; memory = "4g"; };
+    scout = { cpus = 1; memory = "2g"; };
+    reviewer = { cpus = 1; memory = "2g"; };
+  };
 
   # Secrets — string = env var name, absolute path = file
   secrets.claude = "ANTHROPIC_API_KEY";                     # reads host env var
@@ -221,7 +326,8 @@ The script receives a command and arguments, translates to podman operations.
 | `Nudge` | Wait for idle + `podman exec tmux send-keys` |
 | `GetLastActivity` | `podman exec tmux display -p '#{pane_last_activity}'` |
 | `ClearScrollback` | `podman exec tmux clear-history` |
-| `RunLive` | `podman exec sh -c` |
+| `IsAttached` | Return false (not tracked in v1) |
+| `RunLive` | No-op (unsupported by exec provider — returns nil without calling script) |
 
 **Ephemeral workers** — no tmux, container exit signals completion:
 
@@ -232,17 +338,18 @@ The script receives a command and arguments, translates to podman operations.
 | `IsRunning` | `podman inspect --format '{{.State.Running}}'` |
 | `Peek` | `podman logs --tail` |
 | `Interrupt` / `SendKeys` / `Nudge` | No-op (worker runs to completion or is stopped) |
-| `Attach` / `GetLastActivity` / `ClearScrollback` / `RunLive` | No-op |
+| `IsAttached` / `Attach` / `GetLastActivity` / `ClearScrollback` / `RunLive` | No-op |
 
 **Shared across both modes:**
 
 | gc method | Provider action |
 |-----------|----------------|
 | `ListRunning` | `podman ps --filter label=gc-city=<name>` |
-| `SetMeta/GetMeta/RemoveMeta` | Container labels via `podman inspect` |
+| `SetMeta/GetMeta/RemoveMeta` | Container labels via `podman inspect` (gc session metadata — separate from bead metadata used by `bd meta`) |
 | `CopyTo` | `podman cp` |
 | `ProcessAlive` | Persistent: `podman exec pgrep`. Ephemeral: delegates to `IsRunning` |
-| `Capabilities` | `{ CanDetectAttachment: true, CanDetectActivity: true }` |
+| `CheckImage` | `podman image exists <image>` |
+| `Capabilities` | Returns empty (exec provider hardcodes all false) |
 
 Container labeling convention:
 - `gc-city=<city-name>`
@@ -258,19 +365,21 @@ Container labeling convention:
 
 **Ephemeral workers:**
 - One container per bead, clean state every time
-- gc-control creates git worktree: `git worktree add .wrapix/worktree/gc-<bead-id> -b gc-<bead-id>`
+- The provider script's `Start` handler creates the git worktree:
+  `git worktree add .wrapix/worktree/gc-<bead-id> -b gc-<bead-id>`
 - Worker container mounts the worktree as its workspace
 - Worker commits to the branch, then exits
-- Container exit event (via `podman events`) signals completion
-- gc-control checks branch for commits, sends to reviewer
-- After merge or rejection: `git worktree remove .wrapix/worktree/gc-<bead-id>`
+- gc convergence detects worker completion and hands off to the reviewer gate
+- After convergence completes (approved or escalated), the post-gate order
+  handles merge and worktree cleanup:
+  `git worktree remove .wrapix/worktree/gc-<bead-id>`
 
 **Crash recovery:**
-- gc-control is a systemd service with `Restart=always`
+- The gc container runs as a systemd service with `Restart=always`
 - On restart: scan `podman ps --filter label=gc-city=<name>` for running containers
 - Reconcile against beads state (desired vs actual)
 - Orphaned workers (no matching in-progress bead): stop and remove
-- Workers that finished (commits on branch, bead still open): send to reviewer
+- Workers that finished (commits on branch, bead still open): re-enter convergence
 - Stale worktrees in `.wrapix/worktree/gc-*`: clean up orphans
 
 ### Beads Sync
@@ -280,15 +389,23 @@ Two modes depending on execution path:
 | Mode | Beads access | Sync mechanism |
 |------|-------------|----------------|
 | `ralph run` (standalone) | Container has bd + dolt, does its own pull/push | Existing behavior, unchanged |
-| `gc start` (orchestrated) | gc-control owns beads exclusively | Workers have no bd/dolt access |
+| `gc start` (orchestrated) | gc container, scout, and reviewer have bd | Ephemeral workers have no bd/dolt access |
 
-In gc mode, gc-control passes the bead ID, task description, and relevant
-context to the worker via environment variables and a mounted task file at
-container start. The task file contains the bead description, acceptance
+In gc mode, the gc container (provider script, gate script, post-gate order),
+scout, and reviewer all have bd access for bead creation, metadata, and
+status updates. Only ephemeral workers are isolated — they receive their task
+via environment variables and a mounted task file, with no direct bd access.
+
+The provider script's `Start` handler passes the bead ID, task
+description, and relevant context to the worker via environment variables and
+a mounted task file. The task file contains the bead description, acceptance
 criteria, and any reviewer notes from prior attempts. The worker reads these,
 executes the task using `wrapix-agent`, commits results to its worktree
-branch, and exits. gc-control reads bead state and updates it based on the
-container exit code and branch contents. No dolt sync between containers.
+branch, and exits. The provider script sets `commit_range` and `branch_name` on the bead
+metadata via `bd meta set` after the worker exits, so the gate condition
+script can read this context when bridging to the reviewer.
+The post-gate order reads bead state and updates it based on the container
+exit code and branch contents. No dolt sync between containers.
 
 ### Ralph Integration
 
@@ -318,9 +435,14 @@ The provider script calls a `wrapix-agent` wrapper that translates to the
 configured agent's CLI. For claude, this invokes `claude` in both modes —
 ephemeral workers receive their task via a mounted prompt file and `docs/`
 context, persistent roles run as interactive sessions. The wrapper handles
-prompt construction and output capture. One place to swap,
-all roles benefit. Future agent providers require only a new entry in the
+prompt construction and output capture. One place to swap, all roles benefit.
+Future agent providers require only a new entry in the
 agent registry and the corresponding package in the Nix closure.
+
+Role behavior is defined as gc formulas. `mkCity` generates default formulas
+for scout, worker, and reviewer roles. Consumers can override formulas to
+customize role behavior without modifying the provider script or container
+images.
 
 ### Secrets
 
@@ -328,12 +450,18 @@ agent registry and the corresponding package in the Nix closure.
 - `secrets.claude` is required — city fails to start if not set
 - String starting with `/` = file path (works with sops-nix, agenix, or plain files)
 - Any other string = host environment variable name
-- gc-control receives secrets from the host and passes them to agent containers
+- The gc container receives secrets from the host; the provider script passes
+  them to agent containers at start
 
 ```nix
-secrets.claude = "ANTHROPIC_API_KEY";                          # env var (no leading /)
-secrets.claude = config.sops.secrets.claude-api-key.path;      # file (returns /run/secrets/...)
-secrets.deployKey = config.sops.secrets.deploy-key.path;       # optional
+# Option A: env var (no leading /)
+secrets.claude = "ANTHROPIC_API_KEY";
+
+# Option B: file path (works with sops-nix, agenix, etc.)
+secrets.claude = config.sops.secrets.claude-api-key.path;  # resolves to /run/secrets/...
+
+# Additional secrets (optional)
+secrets.deployKey = config.sops.secrets.deploy-key.path;
 ```
 
 ### Resource Limits and Pacing
@@ -354,8 +482,11 @@ Default: no limits.
 
 - `workers` — max concurrent workers (default: 1)
 - `cooldown` — time between task dispatches (default: `"0"`)
+- P0 beads bypass cooldown — dispatched immediately regardless of pacing.
+  The director can create P0 beads directly (`bd create --priority=0`) to
+  inject urgent work into the ops loop without waiting.
 - Reactive backpressure (automatic): when any agent hits a rate limit,
-  gc-control pauses dispatching until the window resets
+  gc pauses dispatching until the window resets
 
 ```nix
 workers = 1;
@@ -378,7 +509,8 @@ Layered testing integrated with prek stages:
 | 1. Nix evaluation | `mkCity` evaluates, `city.toml` valid, images build | `pre-commit` | Always |
 | 2. Provider script | Mock podman, verify command translation | `pre-commit` | Always |
 | 3. Container lifecycle | Images start, entrypoints work, tmux runs | `pre-commit` | Always |
-| 4+5. Integration + VM | Full ops loop in NixOS VM test | `manual` | On demand |
+| 4. Full flake check | All checks including gc | `pre-push` | On push |
+| 5. Integration + VM | Full ops loop in NixOS VM test | `manual` | On demand |
 
 ```yaml
 # .pre-commit-config.yaml
@@ -395,6 +527,15 @@ Layered testing integrated with prek stages:
   entry: nix build .#checks.x86_64-linux.gc-integration
 ```
 
+### Upgrades
+
+- Director rebuilds the flake on the host (`nix build`), then restarts the
+  city (`gc stop && gc start --foreground`)
+- gc does not detect or apply upgrades automatically
+- In-flight workers are stopped; their beads remain open and are picked up
+  after restart
+- Graceful drain (wait for active workers) is out of scope for v1
+
 ### Migration
 
 No breaking changes. Gas City is additive:
@@ -410,7 +551,7 @@ No new commands. Existing tools compose:
 
 | Tool | Domain | Used for |
 |------|--------|----------|
-| `gc` | Orchestration | `gc start`, `gc stop`, `gc status` |
+| `gc` | Orchestration | `gc start --foreground`, `gc stop`, `gc status`, `gc session attach/peek/nudge` |
 | `bd` | Work tracking | `bd ready`, `bd human`, `bd close` |
 | `ralph` | Spec workflow + setup | `ralph plan`, `ralph todo`, `ralph run` (fallback), `ralph sync` (city setup) |
 
@@ -422,6 +563,10 @@ No new commands. Existing tools compose:
 | Provider | `lib/city/provider.sh` (new) | Shell script for `exec:<script>` |
 | NixOS module | `modules/city.nix` (new) | `services.wrapix.cities` |
 | Agent wrapper | `lib/city/agent.sh` (new) | `wrapix-agent` CLI abstraction |
+| Formulas | `lib/city/formulas/` (new) | Default scout, worker, reviewer formulas |
+| Post-gate order | `lib/city/post-gate.sh` (new) | Event-gated order: merge, branch cleanup, deploy bead creation |
+| Gate condition | `lib/city/gate.sh` (new) | Convergence gate: nudge reviewer, wait for verdict |
+| Entrypoint | `lib/city/entrypoint.sh` (new) | Init bead check, podman events watcher, exec gc |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
 | Sandbox | `lib/sandbox/default.nix` | No changes (mkCity uses mkSandbox) |
 | Ralph | `lib/ralph/cmd/sync.sh` | Extend `ralph sync` to detect mkCity and scaffold |
@@ -433,21 +578,21 @@ No new commands. Existing tools compose:
   [verify](tests/gas-city-test.sh::test_mkcity_minimal_eval)
 - [ ] Generated `city.toml` is valid and references the wrapix provider script
   [verify](tests/gas-city-test.sh::test_city_toml_valid)
-- [ ] Provider script handles all 19 gc provider methods
+- [ ] Provider script handles all 20 gc provider methods plus `CheckImage`
   [verify](tests/gas-city-test.sh::test_provider_methods)
 - [ ] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
   [verify](tests/gas-city-test.sh::test_worker_worktree)
 - [ ] Persistent roles (scout, reviewer) start with tmux as PID 1
   [verify](tests/gas-city-test.sh::test_persistent_role_tmux)
-- [ ] Container exit events trigger gc-control reconciliation (no polling)
-  [verify](tests/gas-city-test.sh::test_exit_event_trigger)
+- [ ] gc convergence detects worker completion and triggers reviewer gate
+  [verify](tests/gas-city-test.sh::test_convergence_handoff)
 - [ ] Secrets are injected at runtime, never baked into images
   [verify](tests/gas-city-test.sh::test_secrets_runtime_only)
 - [ ] `ralph run` still works standalone without gc
   [verify](tests/gas-city-test.sh::test_ralph_standalone)
 - [ ] NixOS module generates systemd units and podman network
   [verify](tests/gas-city-test.sh::test_nixos_module)
-- [ ] Crash recovery: gc-control restarts, reconciles orphaned containers
+- [ ] Crash recovery: gc container restarts, reconciles orphaned containers
   [verify](tests/gas-city-test.sh::test_crash_recovery)
 - [ ] `ralph sync` scaffolds missing docs files and creates review beads
   [verify](tests/gas-city-test.sh::test_docs_scaffolding)
@@ -461,6 +606,24 @@ No new commands. Existing tools compose:
   [judge](tests/judges/gas-city.sh::test_provider_simplicity)
 - [ ] Agent abstraction allows future provider swaps without architectural changes
   [judge](tests/judges/gas-city.sh::test_agent_abstraction)
+- [ ] P0 beads bypass cooldown and are dispatched immediately
+  [verify](tests/gas-city-test.sh::test_p0_bypass_cooldown)
+- [ ] Merge uses fast-forward only; rebase + prek on divergence
+  [verify](tests/gas-city-test.sh::test_merge_ff_only)
+- [ ] Post-gate order sends notifications via wrapix-notifyd for director events
+  [verify](tests/gas-city-test.sh::test_notifications)
+- [ ] Scout pauses bead creation when queue cap is reached
+  [verify](tests/gas-city-test.sh::test_queue_overflow_cap)
+- [ ] Scout detects errors via log pattern regex matching
+  [verify](tests/gas-city-test.sh::test_scout_log_patterns)
+- [ ] Reviewer gate reads commit range from bead metadata
+  [verify](tests/gas-city-test.sh::test_reviewer_handoff)
+- [ ] Scout polling uses gc orders for scheduling
+  [verify](tests/gas-city-test.sh::test_scout_orders)
+- [ ] Worker→reviewer retry uses gc convergence with max 2 iterations
+  [verify](tests/gas-city-test.sh::test_convergence_loop)
+- [ ] Role behavior defined as gc formulas, overridable by consumers
+  [verify](tests/gas-city-test.sh::test_role_formulas)
 
 ## Out of Scope
 
@@ -474,88 +637,3 @@ No new commands. Existing tools compose:
 - Token tracking / budget enforcement — rely on backpressure + cooldown
 - Service builds from source — services defined by Nix package
 - Gas City upstream contributions — provider is `exec:` script, not a Go PR
-
-## Implementation Notes
-
-> This section is automatically stripped when the spec is finalized.
-
-### Docs Restructuring
-
-This spec introduces a `docs/` convention that conflicts with the current repo
-layout. As part of implementation:
-
-- Move `specs/architecture.md` to `docs/architecture.md` — it describes the
-  system as-is (descriptive), not a feature to build (prescriptive)
-- Move the Terminology Index from `specs/README.md` to `docs/README.md`
-- Slim `specs/README.md` to just the spec table (links to spec files, code, beads)
-- This applies to wrapix itself and becomes the convention for consumers
-
-### Flake Integration
-
-Gas City must be added as a flake input (pinned in `flake.lock`). Both `bd` and
-`gc` should be exposed through `legacyPackages.lib` and `packages` so consumers
-reuse the exact versions pinned by wrapix rather than managing their own:
-
-```nix
-# flake.nix inputs
-gascity = {
-  url = "github:gastownhall/gascity";
-  # follows if applicable
-};
-```
-
-Expose in outputs:
-- `packages.${system}.gc` — the Gas City binary
-- `packages.${system}.beads` — already exposed
-- `legacyPackages.lib.mkCity` — the new API function
-
-Consumers then do:
-```nix
-inputs.wrapix.packages.${system}.gc   # pinned gc binary
-inputs.wrapix.packages.${system}.beads  # pinned bd binary
-inputs.wrapix.legacyPackages.${system}.lib.mkCity { ... }
-```
-
-This follows the existing pattern where `beads` is already built from the pinned
-input and exposed as `packages.beads`.
-
-### Provider Research
-
-The Gas City provider interface has 19 methods. Key findings from research:
-
-- Many methods are best-effort — returning nil/empty is valid for conformance
-- The `exec:<script>` provider pattern is designed for external delegation
-- The subprocess provider is the simplest reference implementation
-- `AcceptStartupDialogs` helper in `runtime/dialog.go` is reusable
-- Gas City's conformance test suite (`runtimetest.RunProviderTests`) can
-  validate the provider
-
-### Worktree Concerns
-
-Git worktrees have known edge cases with submodules, nested repos, and lock
-files. The implementation should:
-
-- Test worktree creation/cleanup in CI
-- Handle `git worktree prune` during crash recovery
-- Document any submodule limitations
-
-### Overlay Filesystem Issues
-
-Overlayfs was considered as an alternative to worktrees for worker isolation
-but was not selected due to prior unspecified issues. If worktrees prove
-problematic, revisit overlayfs or podman volume copies.
-
-### Existing tmux Infrastructure
-
-The tmux MCP server (`lib/mcp/tmux/`) already has pane management, send-keys,
-and capture-pane implemented in Rust. The provider script delegates to tmux
-directly via `podman exec` rather than going through the MCP server, but the
-MCP server's test patterns may be useful reference.
-
-### Rate Limit Backpressure
-
-The reactive backpressure implementation needs to detect rate limit errors
-from the agent CLI output. Claude Code returns specific error messages when
-rate limited. The scout or gc-control needs to parse these from `podman logs`
-or the agent's exit code. Exact detection patterns should be determined
-during implementation.
