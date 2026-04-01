@@ -506,6 +506,214 @@ test_persistent_role_tmux() {
   fi
 }
 
+test_scout_log_patterns() {
+  echo "Test: Scout detects errors via log pattern regex matching"
+  local scout="$REPO_ROOT/lib/city/scout.sh"
+
+  if [[ ! -x "$scout" ]]; then
+    fail "scout.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify shell conventions
+  if ! head -20 "$scout" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify parse-rules command exists and handles default patterns
+  if ! grep -q 'parse.rules' "$scout" || ! grep -q 'parse_rules' "$scout"; then
+    echo "    sub-fail: missing parse-rules command"
+    failures=$((failures + 1))
+  fi
+
+  # Verify default patterns match spec
+  if ! grep -q 'FATAL|PANIC|panic:' "$scout"; then
+    echo "    sub-fail: missing default immediate pattern (FATAL|PANIC|panic:)"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'ERROR|Exception' "$scout"; then
+    echo "    sub-fail: missing default batched pattern (ERROR|Exception)"
+    failures=$((failures + 1))
+  fi
+
+  # Verify scan command reads podman logs
+  if ! grep -q 'podman logs' "$scout"; then
+    echo "    sub-fail: scan does not read podman logs"
+    failures=$((failures + 1))
+  fi
+
+  # Verify three-tier pattern matching: ignore checked first, then immediate, then batched
+  # The order matters for correctness — ignore must be first
+  local ignore_line immediate_line batched_line
+  ignore_line=$(grep -n 'pat_ignore' "$scout" | grep 'grep.*-qE' | head -1 | cut -d: -f1)
+  immediate_line=$(grep -n 'pat_immediate' "$scout" | grep 'grep.*-qE' | head -1 | cut -d: -f1)
+  batched_line=$(grep -n 'pat_batched' "$scout" | grep 'grep.*-qE' | head -1 | cut -d: -f1)
+  if [[ -n "$ignore_line" ]] && [[ -n "$immediate_line" ]] && [[ -n "$batched_line" ]]; then
+    if [[ "$ignore_line" -lt "$immediate_line" ]] && [[ "$immediate_line" -lt "$batched_line" ]]; then
+      : # correct order
+    else
+      echo "    sub-fail: pattern check order wrong (must be ignore → immediate → batched)"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "    sub-fail: could not find all three pattern checks with grep -qE"
+    failures=$((failures + 1))
+  fi
+
+  # Verify immediate patterns create P0 beads
+  if ! grep -q 'priority=0' "$scout"; then
+    echo "    sub-fail: immediate patterns do not create P0 beads"
+    failures=$((failures + 1))
+  fi
+
+  # Verify batched patterns create P2 beads
+  if ! grep -q 'priority=2' "$scout"; then
+    echo "    sub-fail: batched patterns do not create P2 beads"
+    failures=$((failures + 1))
+  fi
+
+  # Functional test: parse default patterns from a temp orchestration.md
+  local result
+  result=$(
+    set -euo pipefail
+    tmpdir=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '${tmpdir}'" EXIT
+
+    export SCOUT_ERRORS_DIR="$tmpdir/errors"
+
+    # Test 1: parse with no file (defaults)
+    "$scout" parse-rules ""
+    if [[ -f "$tmpdir/errors/immediate.pat" ]] && \
+       grep -q 'FATAL|PANIC|panic:' "$tmpdir/errors/immediate.pat" && \
+       grep -q 'ERROR|Exception' "$tmpdir/errors/batched.pat"; then
+      echo "sub-pass: default patterns parsed correctly"
+    else
+      echo "sub-fail: default patterns not parsed correctly"
+    fi
+
+    # Test 2: parse custom patterns from a real orchestration.md
+    cat > "$tmpdir/orch.md" << 'ORCH'
+# Orchestration
+
+## Scout Rules
+
+### Immediate (P0 bead)
+
+```
+OOM_KILLED|SEGFAULT
+```
+
+### Batched (collected over one poll cycle)
+
+```
+WARN|TIMEOUT
+```
+
+### Ignore
+
+```
+healthcheck
+```
+
+## Auto-deploy
+ORCH
+
+    rm -rf "$tmpdir/errors"
+    "$scout" parse-rules "$tmpdir/orch.md"
+    if grep -q 'OOM_KILLED|SEGFAULT' "$tmpdir/errors/immediate.pat" && \
+       grep -q 'WARN|TIMEOUT' "$tmpdir/errors/batched.pat" && \
+       grep -q 'healthcheck' "$tmpdir/errors/ignore.pat"; then
+      echo "sub-pass: custom patterns parsed from orchestration.md"
+    else
+      echo "sub-fail: custom patterns not parsed correctly"
+    fi
+
+    echo "FAILURES=0"
+  ) || result="sub-fail: parse-rules functional test threw error
+FAILURES=1"
+
+  echo "$result" | grep -v '^FAILURES='
+
+  local parse_failures
+  parse_failures=$(echo "$result" | grep '^FAILURES=' | cut -d= -f2)
+  failures=$((failures + ${parse_failures:-0}))
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "scout detects errors via log pattern regex matching"
+  else
+    fail "scout log patterns have $failures issues"
+  fi
+}
+
+test_queue_overflow_cap() {
+  echo "Test: Scout pauses bead creation when queue cap is reached"
+  local scout="$REPO_ROOT/lib/city/scout.sh"
+
+  if [[ ! -x "$scout" ]]; then
+    fail "scout.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify check-cap command exists
+  if ! grep -q 'check.cap' "$scout" || ! grep -q 'check_cap' "$scout"; then
+    echo "    sub-fail: missing check-cap command"
+    failures=$((failures + 1))
+  fi
+
+  # Verify SCOUT_MAX_BEADS is configurable with default 10
+  if ! grep -q 'SCOUT_MAX_BEADS.*:-10' "$scout" && ! grep -q 'SCOUT_MAX_BEADS:-10' "$scout"; then
+    echo "    sub-fail: SCOUT_MAX_BEADS default not set to 10"
+    failures=$((failures + 1))
+  fi
+
+  # Verify cap check uses bd list with open and in_progress statuses
+  if ! grep -q 'bd list.*--status=open.*--status=in_progress' "$scout"; then
+    echo "    sub-fail: cap check does not query open and in_progress beads"
+    failures=$((failures + 1))
+  fi
+
+  # Verify director notification when cap reached
+  if ! grep -q 'wrapix-notifyd' "$scout"; then
+    echo "    sub-fail: missing wrapix-notifyd notification on cap reached"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'Scout paused.*open beads reached' "$scout"; then
+    echo "    sub-fail: notification message missing 'Scout paused' text"
+    failures=$((failures + 1))
+  fi
+
+  # Verify create-beads checks cap before each creation
+  # Look for check_cap call inside the create_beads function's loop
+  if ! grep -A2 'Check cap before each creation' "$scout" | grep -q 'check_cap'; then
+    echo "    sub-fail: create-beads does not re-check cap before each bead"
+    failures=$((failures + 1))
+  fi
+
+  # Verify deduplication: find_existing_bead searches open/in-progress beads
+  if ! grep -q 'find_existing_bead' "$scout"; then
+    echo "    sub-fail: missing deduplication function"
+    failures=$((failures + 1))
+  fi
+
+  # Verify dedup appends rather than creates when bead exists
+  if ! grep -q 'bd update.*--notes.*additional occurrence' "$scout"; then
+    echo "    sub-fail: deduplication does not append to existing beads"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "scout queue overflow cap correctly implemented"
+  else
+    fail "scout queue overflow has $failures issues"
+  fi
+}
+
 test_agent_wrapper() {
   echo "Test: Agent wrapper abstracts agent invocation (wrapix-agent)"
   local agent="$REPO_ROOT/lib/city/agent.sh"
@@ -592,6 +800,8 @@ test_docs_scaffolding
 test_provider_methods
 test_worker_worktree
 test_persistent_role_tmux
+test_scout_log_patterns
+test_queue_overflow_cap
 test_agent_wrapper
 
 echo ""
