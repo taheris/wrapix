@@ -3,9 +3,10 @@
 #
 # 1. Checks for unresolved scaffolding beads (created by ralph sync).
 #    If any exist, prints warning listing pending reviews and exits.
-# 2. Starts a background process watching podman events for service container
+# 2. Runs crash recovery — reconciles orphaned containers and worktrees.
+# 3. Starts a background process watching podman events for service container
 #    lifecycle events (die, oom, restart) and wakes the scout via gc nudge.
-# 3. Execs gc start --foreground
+# 4. Execs gc start --foreground
 #
 # Environment variables (set by mkCity / systemd unit):
 #   GC_CITY_NAME       — city name (required)
@@ -54,7 +55,14 @@ if ! check_scaffolding_beads; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Start podman events watcher (background)
+# Step 2: Crash recovery — reconcile orphaned containers and worktrees
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/recovery.sh"
+
+# ---------------------------------------------------------------------------
+# Step 3: Start podman events watcher (background)
 # ---------------------------------------------------------------------------
 
 # Watch for service container lifecycle events and nudge the scout.
@@ -83,7 +91,7 @@ start_events_watcher() {
 start_events_watcher
 
 # ---------------------------------------------------------------------------
-# Step 3: Exec gc start --foreground
+# Step 4: Exec gc start --foreground
 # ---------------------------------------------------------------------------
 
 exec gc start --foreground

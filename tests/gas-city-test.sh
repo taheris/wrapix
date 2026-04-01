@@ -1168,6 +1168,115 @@ test_entrypoint_wrapper() {
   fi
 }
 
+test_crash_recovery() {
+  echo "Test: Crash recovery — gc container restarts, reconciles orphaned containers"
+  local recovery="$REPO_ROOT/lib/city/recovery.sh"
+  local entrypoint="$REPO_ROOT/lib/city/entrypoint.sh"
+
+  local failures=0
+
+  # Verify recovery script exists and is executable
+  if [[ ! -x "$recovery" ]]; then
+    fail "recovery.sh not found or not executable"
+    return
+  fi
+
+  # Verify shell conventions
+  if ! head -20 "$recovery" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify required environment variables
+  for var in GC_CITY_NAME GC_WORKSPACE; do
+    if ! grep -q "${var}:?" "$recovery"; then
+      echo "    sub-fail: missing required env var $var"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify step 1: scans podman ps for running containers with gc-city label
+  if ! grep -q 'podman ps.*--filter.*label=gc-city=' "$recovery"; then
+    echo "    sub-fail: does not scan podman ps for gc-city containers"
+    failures=$((failures + 1))
+  fi
+
+  # Verify step 2: reconciles workers against beads state
+  if ! grep -q 'bead_in_progress\|bead_is_open' "$recovery"; then
+    echo "    sub-fail: does not check bead status for reconciliation"
+    failures=$((failures + 1))
+  fi
+
+  # Verify orphaned workers (no matching in-progress bead) are stopped
+  if ! grep -q 'stop_container\|podman stop' "$recovery"; then
+    echo "    sub-fail: does not stop orphaned containers"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'podman rm' "$recovery"; then
+    echo "    sub-fail: does not remove orphaned containers"
+    failures=$((failures + 1))
+  fi
+
+  # Verify workers that finished (commits on branch, bead still open) re-enter convergence
+  if ! grep -q 'branch_has_commits' "$recovery"; then
+    echo "    sub-fail: does not check for finished worker commits"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'bd meta set.*commit_range' "$recovery"; then
+    echo "    sub-fail: does not set commit_range for convergence re-entry"
+    failures=$((failures + 1))
+  fi
+
+  # Verify stale worktrees in .wrapix/worktree/gc-* are cleaned up
+  if ! grep -q 'git.*worktree prune' "$recovery"; then
+    echo "    sub-fail: does not run git worktree prune"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'git.*worktree remove' "$recovery"; then
+    echo "    sub-fail: does not remove stale worktrees"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q '\.wrapix/worktree.*gc-' "$recovery"; then
+    echo "    sub-fail: does not scan .wrapix/worktree/gc-* paths"
+    failures=$((failures + 1))
+  fi
+
+  # Verify entrypoint calls recovery before gc start
+  if ! grep -q 'recovery.sh' "$entrypoint"; then
+    echo "    sub-fail: entrypoint does not call recovery.sh"
+    failures=$((failures + 1))
+  fi
+
+  # Verify recovery runs before gc start --foreground in entrypoint
+  local recovery_line gc_start_line
+  recovery_line=$(grep -n 'recovery.sh' "$entrypoint" | head -1 | cut -d: -f1)
+  gc_start_line=$(grep -n 'exec gc start --foreground' "$entrypoint" | head -1 | cut -d: -f1)
+  if [[ -n "$recovery_line" ]] && [[ -n "$gc_start_line" ]]; then
+    if [[ "$recovery_line" -ge "$gc_start_line" ]]; then
+      echo "    sub-fail: recovery runs after gc start (must run before)"
+      failures=$((failures + 1))
+    fi
+  fi
+
+  # Verify gc-bead label is used for worker identification
+  if ! grep -q 'gc-bead' "$recovery"; then
+    echo "    sub-fail: does not use gc-bead label for worker identification"
+    failures=$((failures + 1))
+  fi
+
+  # Verify persistent containers (scout/reviewer) are handled
+  if ! grep -q 'scout.*reviewer\|persistent' "$recovery"; then
+    echo "    sub-fail: does not handle persistent containers (scout/reviewer)"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "crash recovery correctly implemented"
+  else
+    fail "crash recovery has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -1191,6 +1300,7 @@ test_merge_ff_only
 test_notifications
 test_agent_wrapper
 test_entrypoint_wrapper
+test_crash_recovery
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"
