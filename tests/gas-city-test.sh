@@ -843,6 +843,174 @@ test_convergence_handoff() {
   fi
 }
 
+test_merge_ff_only() {
+  echo "Test: Merge uses fast-forward only; rebase + prek on divergence"
+  local postgate="$REPO_ROOT/lib/city/post-gate.sh"
+
+  if [[ ! -x "$postgate" ]]; then
+    fail "post-gate.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify shell conventions
+  if ! head -20 "$postgate" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify required environment variables
+  for var in GC_BEAD_ID GC_TERMINAL_REASON GC_WORKSPACE GC_CITY_NAME; do
+    if ! grep -q "${var}:?" "$postgate"; then
+      echo "    sub-fail: missing required env var $var"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify fast-forward merge attempt
+  if ! grep -q 'git.*merge --ff-only' "$postgate"; then
+    echo "    sub-fail: does not attempt git merge --ff-only"
+    failures=$((failures + 1))
+  fi
+
+  # Verify rebase onto main when ff fails
+  if ! grep -q 'git.*rebase main' "$postgate"; then
+    echo "    sub-fail: does not rebase onto main when ff fails"
+    failures=$((failures + 1))
+  fi
+
+  # Verify prek runs after rebase
+  if ! grep -q 'prek run' "$postgate"; then
+    echo "    sub-fail: does not run prek after rebase"
+    failures=$((failures + 1))
+  fi
+
+  # Verify rebase conflicts are rejected to new worker
+  if ! grep -q 'rebase --abort' "$postgate"; then
+    echo "    sub-fail: does not abort rebase on conflicts"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'reject_to_worker.*[Cc]onflict' "$postgate"; then
+    echo "    sub-fail: does not reject to worker on rebase conflicts"
+    failures=$((failures + 1))
+  fi
+
+  # Verify test failure after rebase is rejected to new worker
+  if ! grep -q 'reject_to_worker.*[Tt]ests failed after rebase' "$postgate"; then
+    echo "    sub-fail: does not reject to worker on test failure after rebase"
+    failures=$((failures + 1))
+  fi
+
+  # Verify worktree cleanup after merge
+  if ! grep -q 'git.*worktree remove' "$postgate"; then
+    echo "    sub-fail: does not remove worktree after merge"
+    failures=$((failures + 1))
+  fi
+
+  # Verify branch cleanup after merge
+  if ! grep -q 'git.*branch -d' "$postgate"; then
+    echo "    sub-fail: does not delete branch after merge"
+    failures=$((failures + 1))
+  fi
+
+  # Verify rejection cleans up old branch too
+  if ! grep -q 'cleanup_branch' "$postgate"; then
+    echo "    sub-fail: missing cleanup_branch function for branch lifecycle"
+    failures=$((failures + 1))
+  fi
+
+  # Verify deploy bead creation after merge
+  if ! grep -q 'create_deploy_bead\|bd create.*deploy' "$postgate"; then
+    echo "    sub-fail: does not create deploy bead after merge"
+    failures=$((failures + 1))
+  fi
+
+  # Verify terminal_reason dispatch (approved vs escalation)
+  if ! grep -q 'approved)' "$postgate"; then
+    echo "    sub-fail: does not dispatch on terminal_reason=approved"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "merge uses ff-only with rebase+prek fallback"
+  else
+    fail "merge logic has $failures issues"
+  fi
+}
+
+test_notifications() {
+  echo "Test: Post-gate order sends notifications via wrapix-notifyd for director events"
+  local postgate="$REPO_ROOT/lib/city/post-gate.sh"
+
+  if [[ ! -x "$postgate" ]]; then
+    fail "post-gate.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify wrapix-notifyd is called
+  if ! grep -q 'wrapix-notifyd' "$postgate"; then
+    echo "    sub-fail: does not call wrapix-notifyd"
+    failures=$((failures + 1))
+  fi
+
+  # Verify escalation notification (convergence failed)
+  if ! grep -q 'escalat' "$postgate"; then
+    echo "    sub-fail: no escalation notification"
+    failures=$((failures + 1))
+  fi
+
+  # Verify deploy approval notification
+  if ! grep -q '[Dd]eploy approval' "$postgate"; then
+    echo "    sub-fail: no deploy approval notification"
+    failures=$((failures + 1))
+  fi
+
+  # Verify merge rejection notification
+  if ! grep -q '[Mm]erge rejected' "$postgate"; then
+    echo "    sub-fail: no merge rejection notification"
+    failures=$((failures + 1))
+  fi
+
+  # Verify bd human is called for deploy beads (default path)
+  if ! grep -q 'bd human' "$postgate"; then
+    echo "    sub-fail: does not flag deploy beads with bd human"
+    failures=$((failures + 1))
+  fi
+
+  # Verify auto-deploy path: checks docs/orchestration.md for Auto-deploy section
+  if ! grep -q 'Auto-deploy' "$postgate"; then
+    echo "    sub-fail: does not check for Auto-deploy section"
+    failures=$((failures + 1))
+  fi
+
+  # Verify low-risk classification check
+  if ! grep -q 'risk_classification\|low.risk\|is_low_risk' "$postgate"; then
+    echo "    sub-fail: does not check risk classification"
+    failures=$((failures + 1))
+  fi
+
+  # Verify notifications are fire-and-forget (|| true pattern)
+  if ! grep -q 'wrapix-notifyd.*|| true' "$postgate"; then
+    echo "    sub-fail: notifications not fire-and-forget (missing || true)"
+    failures=$((failures + 1))
+  fi
+
+  # Verify city name included in notifications for context
+  if ! grep -q 'CITY_NAME' "$postgate"; then
+    echo "    sub-fail: notifications do not include city name"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "post-gate sends notifications for all director events"
+  else
+    fail "notifications have $failures issues"
+  fi
+}
+
 test_agent_wrapper() {
   echo "Test: Agent wrapper abstracts agent invocation (wrapix-agent)"
   local agent="$REPO_ROOT/lib/city/agent.sh"
@@ -933,6 +1101,8 @@ test_scout_log_patterns
 test_queue_overflow_cap
 test_reviewer_handoff
 test_convergence_handoff
+test_merge_ff_only
+test_notifications
 test_agent_wrapper
 
 echo ""
