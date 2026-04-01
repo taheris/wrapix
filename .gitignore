@@ -3,6 +3,7 @@
 .direnv/
 .gc/
 .wrapix/
+city.toml
 result
 result-*
 target/

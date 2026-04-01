@@ -211,7 +211,7 @@ let
         chmod +x $out/bin/wrapix-agent
       '';
 
-      # Shell hook: sets up .gc/ and exports env vars for provider
+      # Shell hook: symlinks config and exports env vars for provider
       shellHook = ''
         ${ralphInstance.shellHook}
         export GC_CITY_NAME="${name}"
@@ -219,9 +219,9 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
 
-        # Symlink Nix-generated config into .gc/ so gc finds it
+        # Symlink Nix-generated config so gc finds it
+        ln -sfn ${cityToml} city.toml
         mkdir -p .gc/formulas
-        ln -sfn ${cityToml} .gc/city.toml
         for f in ${formulasDir}/*.formula.toml; do
           ln -sfn "$f" .gc/formulas/
         done
@@ -261,8 +261,8 @@ let
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
 
+          ln -sfn ${cityToml} city.toml
           mkdir -p .gc/formulas
-          ln -sfn ${cityToml} .gc/city.toml
           for f in ${formulasDir}/*.formula.toml; do
             ln -sfn "$f" .gc/formulas/
           done
