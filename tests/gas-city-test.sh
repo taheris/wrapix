@@ -714,6 +714,135 @@ test_queue_overflow_cap() {
   fi
 }
 
+test_reviewer_handoff() {
+  echo "Test: Reviewer gate reads commit range from bead metadata"
+  local gate="$REPO_ROOT/lib/city/gate.sh"
+
+  if [[ ! -x "$gate" ]]; then
+    fail "gate.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify shell conventions
+  if ! head -20 "$gate" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify GC_BEAD_ID is required
+  if ! grep -q 'GC_BEAD_ID' "$gate"; then
+    echo "    sub-fail: missing GC_BEAD_ID environment variable"
+    failures=$((failures + 1))
+  fi
+
+  # Verify commit_range is read from bead metadata
+  if ! grep -q 'bd meta get.*commit_range' "$gate"; then
+    echo "    sub-fail: does not read commit_range from bead metadata"
+    failures=$((failures + 1))
+  fi
+
+  # Verify gc nudge reviewer is called with commit range
+  if ! grep -q 'gc nudge reviewer' "$gate"; then
+    echo "    sub-fail: does not nudge reviewer session"
+    failures=$((failures + 1))
+  fi
+
+  # Verify polling for review_verdict
+  if ! grep -q 'bd meta get.*review_verdict' "$gate"; then
+    echo "    sub-fail: does not poll for review_verdict"
+    failures=$((failures + 1))
+  fi
+
+  # Verify approve exits 0
+  if ! grep -q 'approve' "$gate" || ! grep -A2 'approve)' "$gate" | grep -qE 'exit 0'; then
+    echo "    sub-fail: approve does not exit 0"
+    failures=$((failures + 1))
+  fi
+
+  # Verify reject exits 1
+  if ! grep -q 'reject' "$gate" || ! grep -A2 'reject)' "$gate" | grep -qE 'exit 1'; then
+    echo "    sub-fail: reject does not exit 1"
+    failures=$((failures + 1))
+  fi
+
+  # Verify timeout handling
+  if ! grep -q 'POLL_TIMEOUT\|GC_POLL_TIMEOUT' "$gate"; then
+    echo "    sub-fail: no timeout handling for review polling"
+    failures=$((failures + 1))
+  fi
+
+  # Verify configurable poll interval
+  if ! grep -q 'POLL_INTERVAL\|GC_POLL_INTERVAL' "$gate"; then
+    echo "    sub-fail: no configurable poll interval"
+    failures=$((failures + 1))
+  fi
+
+  # Verify missing commit_range is handled
+  if ! grep -q 'no commit_range' "$gate"; then
+    echo "    sub-fail: does not handle missing commit_range"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "reviewer gate correctly reads commit range and polls for verdict"
+  else
+    fail "reviewer gate has $failures issues"
+  fi
+}
+
+test_convergence_handoff() {
+  echo "Test: gc convergence detects worker completion and triggers reviewer gate"
+
+  local gate="$REPO_ROOT/lib/city/gate.sh"
+  local provider="$REPO_ROOT/lib/city/provider.sh"
+
+  local failures=0
+
+  # Verify gate script exists
+  if [[ ! -x "$gate" ]]; then
+    echo "    sub-fail: gate.sh not found or not executable"
+    failures=$((failures + 1))
+  fi
+
+  # Verify provider sets commit_range after worker exits (consumed by gate)
+  if ! grep -q 'bd meta set.*commit_range' "$provider"; then
+    echo "    sub-fail: provider does not set commit_range after worker exit"
+    failures=$((failures + 1))
+  fi
+
+  # Verify gate reads commit_range (bridging provider→gate→reviewer)
+  if ! grep -q 'bd meta get.*commit_range' "$gate"; then
+    echo "    sub-fail: gate does not read commit_range from bead metadata"
+    failures=$((failures + 1))
+  fi
+
+  # Verify gate nudges the reviewer (triggering the handoff)
+  if ! grep -q 'gc nudge reviewer' "$gate"; then
+    echo "    sub-fail: gate does not nudge reviewer session"
+    failures=$((failures + 1))
+  fi
+
+  # Verify reviewer formula references review_verdict metadata
+  local reviewer_formula="$REPO_ROOT/lib/city/formulas/reviewer.formula.toml"
+  if [[ -f "$reviewer_formula" ]]; then
+    if ! grep -q 'review_verdict' "$reviewer_formula"; then
+      echo "    sub-fail: reviewer formula does not reference review_verdict"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "    sub-fail: reviewer formula not found"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "convergence handoff chain (provider→gate→reviewer) correctly wired"
+  else
+    fail "convergence handoff has $failures issues"
+  fi
+}
+
 test_agent_wrapper() {
   echo "Test: Agent wrapper abstracts agent invocation (wrapix-agent)"
   local agent="$REPO_ROOT/lib/city/agent.sh"
@@ -802,6 +931,8 @@ test_worker_worktree
 test_persistent_role_tmux
 test_scout_log_patterns
 test_queue_overflow_cap
+test_reviewer_handoff
+test_convergence_handoff
 test_agent_wrapper
 
 echo ""
