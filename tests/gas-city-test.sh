@@ -290,6 +290,151 @@ FLAKE
   fi
 }
 
+test_provider_methods() {
+  echo "Test: Provider script handles all 20 gc provider methods plus CheckImage"
+  local provider="$REPO_ROOT/lib/city/provider.sh"
+
+  if [[ ! -x "$provider" ]]; then
+    fail "provider.sh not found or not executable"
+    return
+  fi
+
+  local result failures=0
+
+  # Verify all 21 methods are handled in the case statement
+  local methods=(
+    Start Stop Interrupt IsRunning Attach Peek SendKeys Nudge
+    GetLastActivity ClearScrollback IsAttached ListRunning
+    SetMeta GetMeta RemoveMeta CopyTo ProcessAlive CheckImage Capabilities
+  )
+
+  for method in "${methods[@]}"; do
+    if ! grep -qE "^  ${method}\)" "$provider"; then
+      echo "    sub-fail: method $method not found in provider"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify unknown method handler exists
+  if ! grep -q '^\*\)' "$provider" 2>/dev/null && ! grep -qE '^\s+\*\)' "$provider"; then
+    echo "    sub-fail: no unknown method handler"
+    failures=$((failures + 1))
+  fi
+
+  # Verify shell conventions
+  if ! head -15 "$provider" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify container labeling convention
+  if ! grep -q 'gc-city=' "$provider" || ! grep -q 'gc-role=' "$provider" || ! grep -q 'gc-bead=' "$provider"; then
+    echo "    sub-fail: missing container labeling (gc-city, gc-role, gc-bead)"
+    failures=$((failures + 1))
+  fi
+
+  # Verify worker no-ops for Interrupt/SendKeys/Nudge
+  # (these should have is_worker checks with no-op branches)
+  for noop_method in Interrupt SendKeys Nudge ClearScrollback; do
+    if ! grep -A3 "^  ${noop_method})" "$provider" | grep -q 'is_worker'; then
+      echo "    sub-fail: $noop_method doesn't check for worker no-op"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "all provider methods present and correctly structured"
+  else
+    fail "provider methods have $failures issues"
+  fi
+}
+
+test_worker_worktree() {
+  echo "Test: Ephemeral workers use git worktrees at .wrapix/worktree/gc-<bead-id>"
+  local provider="$REPO_ROOT/lib/city/provider.sh"
+
+  local failures=0
+
+  # Verify worktree path pattern
+  if ! grep -q '\.wrapix/worktree/gc-' "$provider"; then
+    echo "    sub-fail: worktree path .wrapix/worktree/gc-<bead-id> not found"
+    failures=$((failures + 1))
+  fi
+
+  # Verify git worktree add command
+  if ! grep -q 'git.*worktree add' "$provider"; then
+    echo "    sub-fail: git worktree add command not found"
+    failures=$((failures + 1))
+  fi
+
+  # Verify branch naming convention gc-<bead-id>
+  if ! grep -q '\-b "gc-\${bead_id}"' "$provider" && ! grep -q '\-b gc-' "$provider"; then
+    echo "    sub-fail: branch naming gc-<bead-id> not found"
+    failures=$((failures + 1))
+  fi
+
+  # Verify worktree is mounted into worker container
+  if ! grep -q 'worktree_path.*:/workspace' "$provider"; then
+    echo "    sub-fail: worktree not mounted as /workspace in worker"
+    failures=$((failures + 1))
+  fi
+
+  # Verify bead metadata set after worker exits (commit_range, branch_name)
+  if ! grep -q 'bd meta set.*commit_range' "$provider"; then
+    echo "    sub-fail: commit_range not set on bead metadata"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'bd meta set.*branch_name' "$provider"; then
+    echo "    sub-fail: branch_name not set on bead metadata"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "worker worktree lifecycle correctly implemented"
+  else
+    fail "worker worktree has $failures issues"
+  fi
+}
+
+test_persistent_role_tmux() {
+  echo "Test: Persistent roles (scout, reviewer) start with tmux as PID 1"
+  local provider="$REPO_ROOT/lib/city/provider.sh"
+
+  local failures=0
+
+  # Verify tmux new-session as container entrypoint
+  if ! grep -q 'tmux new-session' "$provider"; then
+    echo "    sub-fail: tmux new-session not used as entrypoint"
+    failures=$((failures + 1))
+  fi
+
+  # Verify tmux interactions: send-keys, capture-pane, display-message, clear-history
+  for tmux_cmd in "send-keys" "capture-pane" "display-message" "clear-history"; do
+    if ! grep -q "tmux $tmux_cmd" "$provider" && ! grep -q "tmux ${tmux_cmd}" "$provider"; then
+      echo "    sub-fail: tmux $tmux_cmd not found"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Verify Attach uses tmux attach
+  if ! grep -q 'tmux attach' "$provider"; then
+    echo "    sub-fail: Attach doesn't use tmux attach"
+    failures=$((failures + 1))
+  fi
+
+  # Verify Peek for persistent uses capture-pane, for worker uses podman logs
+  if ! grep -q 'podman logs' "$provider"; then
+    echo "    sub-fail: worker Peek doesn't use podman logs"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "persistent roles correctly use tmux as PID 1"
+  else
+    fail "persistent role tmux has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -302,6 +447,9 @@ test_service_image_build
 test_secrets_runtime_only
 test_role_formulas
 test_docs_scaffolding
+test_provider_methods
+test_worker_worktree
+test_persistent_role_tmux
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"

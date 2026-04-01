@@ -7,8 +7,8 @@ test_reviewer_enforcement() {
 }
 
 test_provider_simplicity() {
-  judge_files "lib/city/default.nix"
-  judge_criterion "The provider script reference is a clean shell script path using the exec:<script> pattern with no Go dependencies, and the mkCity function generates it via pkgs.writeShellScript"
+  judge_files "lib/city/provider.sh" "lib/city/default.nix"
+  judge_criterion "The provider script is a clean, minimal shell script using the exec:<script> pattern with no Go dependencies. It uses set -euo pipefail, handles all gc provider methods via a case statement, and the mkCity function reads it via builtins.readFile into pkgs.writeShellScript"
 }
 
 test_agent_abstraction() {

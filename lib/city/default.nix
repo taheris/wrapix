@@ -123,13 +123,8 @@ let
       # Build agent sandbox (for worker/scout/reviewer containers)
       agentSandbox = mkSandbox { inherit profile; };
 
-      # Provider script — placeholder path, actual script is in lib/city/provider.sh
-      # At build time we generate the reference; the script is implemented separately.
-      providerScript = pkgs.writeShellScript "wrapix-provider" ''
-        set -euo pipefail
-        echo "wrapix provider stub — see lib/city/provider.sh for implementation" >&2
-        exit 1
-      '';
+      # Provider script — copies lib/city/provider.sh into the Nix store
+      providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
 
       # Build the city.toml configuration
       cityConfig = {
