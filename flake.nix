@@ -145,48 +145,38 @@
 
           packages =
             let
-              inherit (builtins) mapAttrs;
               inherit (wrapix) profiles;
 
-              sandboxes = {
+              mkSandboxPkg = cfg: (wrapix.mkSandbox (cfg // { packages = sandboxPackages; })).package;
+
+              sandboxPkgs = builtins.mapAttrs (_: mkSandboxPkg) {
                 wrapix = {
                   profile = profiles.base;
-                  packages = sandboxPackages;
                 };
                 wrapix-rust = {
                   profile = profiles.rust;
-                  packages = sandboxPackages;
                 };
                 wrapix-python = {
                   profile = profiles.python;
-                  packages = sandboxPackages;
                 };
-
                 wrapix-mcp = {
                   profile = profiles.base;
-                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
                 wrapix-rust-mcp = {
                   profile = profiles.rust;
-                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
                 wrapix-python-mcp = {
                   profile = profiles.python;
-                  packages = sandboxPackages;
                   mcpRuntime = true;
                 };
               };
             in
-            mapAttrs (_: cfg: (wrapix.mkSandbox cfg).package) sandboxes
+            sandboxPkgs
             // {
               inherit (pkgs) beads gc;
-              default =
-                (wrapix.mkSandbox {
-                  profile = profiles.base;
-                  packages = sandboxPackages;
-                }).package;
+              default = sandboxPkgs.wrapix;
               wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
               wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
               tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
