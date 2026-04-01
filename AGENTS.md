@@ -4,9 +4,9 @@
 
 Before implementing features, consult `specs/README.md`:
 
-- **Architecture first** — Read `specs/architecture.md` for system overview
+- **Architecture first** — Read `docs/architecture.md` for system overview
 - **Check specs before coding** — Each feature has a dedicated spec file
-- **Terminology** — `specs/README.md` has a terminology index
+- **Terminology** — `docs/README.md` has a terminology index
 
 ## Building
 

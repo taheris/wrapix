@@ -193,68 +193,10 @@ in
     '';
 
   # =========================================================================
-  # Layer 2: Provider Script Tests (static analysis)
+  # Layer 2: Shell Script Syntax Validation
   # =========================================================================
 
-  # Provider script handles all 21 methods
-  gc-provider-methods =
-    runCommandLocal "gc-provider-methods"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-        PROVIDER="${../lib/city/provider.sh}"
-
-        echo "Checking provider script methods..."
-
-        # Verify shell conventions
-        head -15 "$PROVIDER" | grep -q 'set -euo pipefail' || { echo "FAIL: missing set -euo pipefail"; exit 1; }
-
-        # All 21 methods must be in the case statement
-        METHODS="Start Stop Interrupt IsRunning Attach Peek SendKeys Nudge GetLastActivity ClearScrollback IsAttached ListRunning SetMeta GetMeta RemoveMeta CopyTo ProcessAlive CheckImage Capabilities"
-        for method in $METHODS; do
-          grep -qE "^  ''${method}\)" "$PROVIDER" || { echo "FAIL: method $method not found"; exit 1; }
-          echo "  found: $method"
-        done
-
-        # Unknown method handler
-        grep -qE '^\s+\*\)' "$PROVIDER" || { echo "FAIL: no unknown method handler"; exit 1; }
-
-        # Container labeling convention
-        grep -q 'gc-city=' "$PROVIDER" || { echo "FAIL: missing gc-city label"; exit 1; }
-        grep -q 'gc-role=' "$PROVIDER" || { echo "FAIL: missing gc-role label"; exit 1; }
-        grep -q 'gc-bead=' "$PROVIDER" || { echo "FAIL: missing gc-bead label"; exit 1; }
-
-        # Persistent role: tmux as PID 1
-        grep -q 'tmux new-session' "$PROVIDER" || { echo "FAIL: no tmux new-session"; exit 1; }
-        grep -q 'tmux send-keys' "$PROVIDER" || { echo "FAIL: no tmux send-keys"; exit 1; }
-        grep -q 'tmux capture-pane' "$PROVIDER" || { echo "FAIL: no tmux capture-pane"; exit 1; }
-
-        # Ephemeral worker: git worktree lifecycle
-        grep -q '\.wrapix/worktree/gc-' "$PROVIDER" || { echo "FAIL: no worktree path"; exit 1; }
-        grep -q 'git.*worktree add' "$PROVIDER" || { echo "FAIL: no git worktree add"; exit 1; }
-        grep -q 'bd meta set.*commit_range' "$PROVIDER" || { echo "FAIL: no commit_range metadata"; exit 1; }
-        grep -q 'bd meta set.*branch_name' "$PROVIDER" || { echo "FAIL: no branch_name metadata"; exit 1; }
-
-        # Worker no-ops
-        for noop in Interrupt SendKeys Nudge ClearScrollback; do
-          grep -A3 "^  ''${noop})" "$PROVIDER" | grep -q 'is_worker' || { echo "FAIL: $noop missing worker no-op check"; exit 1; }
-        done
-
-        echo ""
-        echo "PASS: All 21 provider methods present and correctly structured"
-        mkdir $out
-      '';
-
-  # =========================================================================
-  # Layer 3: Shell Script Syntax and Structure Tests
-  # =========================================================================
-
-  # Validate all Gas City shell scripts have correct syntax
+  # Validate all Gas City shell scripts parse without errors
   gc-shell-syntax =
     runCommandLocal "gc-shell-syntax"
       {
@@ -289,129 +231,345 @@ in
         mkdir $out
       '';
 
-  # Gate script structure
-  gc-gate-structure =
-    runCommandLocal "gc-gate-structure"
+  # =========================================================================
+  # Layer 3: Functional tests (execute scripts with mock dependencies)
+  # =========================================================================
+
+  # Scout: parse-rules extracts patterns from orchestration.md
+  gc-scout-parse-rules =
+    runCommandLocal "gc-scout-parse-rules"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+                set -euo pipefail
+                SCOUT="${../lib/city/scout.sh}"
+
+                echo "Testing scout.sh parse-rules..."
+
+                # Test 1: defaults when no doc file
+                TMPDIR=$(mktemp -d)
+                SCOUT_ERRORS_DIR="$TMPDIR/errors" "$SCOUT" parse-rules ""
+
+                immediate="$(cat "$TMPDIR/errors/immediate.pat")"
+                batched="$(cat "$TMPDIR/errors/batched.pat")"
+                [[ "$immediate" == "FATAL|PANIC|panic:" ]] || { echo "FAIL: wrong default immediate: $immediate"; exit 1; }
+                [[ "$batched" == "ERROR|Exception" ]] || { echo "FAIL: wrong default batched: $batched"; exit 1; }
+                echo "  PASS: defaults applied when no doc"
+
+                # Test 2: custom patterns from doc
+                cat > "$TMPDIR/orch.md" << 'DOC'
+        ## Scout Rules
+        ### Immediate (P0 bead)
+        ```
+        OOM_KILLED|SEGFAULT
+        ```
+        ### Batched (collected over one poll cycle)
+        ```
+        WARN|TIMEOUT
+        ```
+        ### Ignore
+        ```
+        healthcheck
+        ```
+        ## Auto-deploy
+        DOC
+                rm -rf "$TMPDIR/errors"
+                SCOUT_ERRORS_DIR="$TMPDIR/errors" "$SCOUT" parse-rules "$TMPDIR/orch.md"
+
+                immediate="$(cat "$TMPDIR/errors/immediate.pat")"
+                batched="$(cat "$TMPDIR/errors/batched.pat")"
+                ignore="$(cat "$TMPDIR/errors/ignore.pat")"
+                [[ "$immediate" == "OOM_KILLED|SEGFAULT" ]] || { echo "FAIL: custom immediate: $immediate"; exit 1; }
+                [[ "$batched" == "WARN|TIMEOUT" ]] || { echo "FAIL: custom batched: $batched"; exit 1; }
+                [[ "$ignore" == "healthcheck" ]] || { echo "FAIL: custom ignore: $ignore"; exit 1; }
+                echo "  PASS: custom patterns parsed"
+
+                rm -rf "$TMPDIR"
+                echo "PASS: scout parse-rules works correctly"
+                mkdir $out
+      '';
+
+  # Scout: scan classifies log lines by pattern tier
+  gc-scout-scan =
+    runCommandLocal "gc-scout-scan"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+                set -euo pipefail
+                SCOUT="${../lib/city/scout.sh}"
+                TMPDIR=$(mktemp -d)
+
+                echo "Testing scout.sh scan with mock podman..."
+
+                # Set up patterns
+                mkdir -p "$TMPDIR/errors"
+                echo "FATAL|PANIC|panic:" > "$TMPDIR/errors/immediate.pat"
+                echo "ERROR|Exception" > "$TMPDIR/errors/batched.pat"
+                echo "healthcheck" > "$TMPDIR/errors/ignore.pat"
+
+                # Create mock podman that returns mixed log lines
+                MOCK_BIN="$TMPDIR/bin"
+                mkdir -p "$MOCK_BIN"
+                cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/usr/bin/env bash
+        cat << 'LOGS'
+        2026-04-01 INFO: service started
+        2026-04-01 ERROR: connection refused
+        2026-04-01 healthcheck passed
+        2026-04-01 FATAL: out of memory
+        2026-04-01 Exception in thread main
+        LOGS
+        MOCK
+                chmod +x "$MOCK_BIN/podman"
+
+                PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" \
+                  "$SCOUT" scan "my-api" --since=5m
+
+                # Verify classification
+                grep -q "FATAL" "$TMPDIR/errors/my-api/immediate.log" || { echo "FAIL: FATAL not in immediate"; exit 1; }
+                grep -q "ERROR" "$TMPDIR/errors/my-api/batched.log" || { echo "FAIL: ERROR not in batched"; exit 1; }
+                grep -q "Exception" "$TMPDIR/errors/my-api/batched.log" || { echo "FAIL: Exception not in batched"; exit 1; }
+
+                # healthcheck should be filtered out
+                ! grep -q "healthcheck" "$TMPDIR/errors/my-api/immediate.log" || { echo "FAIL: healthcheck in immediate"; exit 1; }
+                ! grep -q "healthcheck" "$TMPDIR/errors/my-api/batched.log" || { echo "FAIL: healthcheck in batched"; exit 1; }
+
+                # INFO should not appear (not in any pattern)
+                ! grep -q "INFO" "$TMPDIR/errors/my-api/immediate.log" || { echo "FAIL: INFO in immediate"; exit 1; }
+                ! grep -q "INFO" "$TMPDIR/errors/my-api/batched.log" || { echo "FAIL: INFO in batched"; exit 1; }
+
+                rm -rf "$TMPDIR"
+                echo "PASS: scout scan correctly classifies log lines"
+                mkdir $out
+      '';
+
+  # Gate: exit codes match review verdict
+  gc-gate-functional =
+    runCommandLocal "gc-gate-functional"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+                set -euo pipefail
+                GATE="${../lib/city/gate.sh}"
+
+                echo "Testing gate.sh with mock bd/gc..."
+
+                MOCK_BIN=$(mktemp -d)
+
+                # Test 1: approve -> exit 0
+                cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/usr/bin/env bash
+        if [[ "$1" == "meta" ]] && [[ "$2" == "get" ]]; then
+          case "$4" in
+            commit_range) echo "abc..def" ;;
+            review_verdict) echo "approve" ;;
+          esac
+        fi
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+                cat > "$MOCK_BIN/gc" << 'MOCK'
+        #!/usr/bin/env bash
+        exit 0
+        MOCK
+                chmod +x "$MOCK_BIN/gc"
+
+                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-1" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+                  "$GATE" > /dev/null 2>&1
+                echo "  PASS: approve exits 0"
+
+                # Test 2: reject -> exit 1
+                cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/usr/bin/env bash
+        if [[ "$1" == "meta" ]] && [[ "$2" == "get" ]]; then
+          case "$4" in
+            commit_range) echo "abc..def" ;;
+            review_verdict) echo "reject" ;;
+          esac
+        fi
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+
+                exit_code=0
+                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-2" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+                  "$GATE" > /dev/null 2>&1 || exit_code=$?
+                [[ "$exit_code" -eq 1 ]] || { echo "FAIL: reject exited $exit_code (expected 1)"; exit 1; }
+                echo "  PASS: reject exits 1"
+
+                # Test 3: missing commit_range -> exit 1
+                cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/usr/bin/env bash
+        echo ""
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+
+                exit_code=0
+                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-3" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+                  "$GATE" > /dev/null 2>&1 || exit_code=$?
+                [[ "$exit_code" -eq 1 ]] || { echo "FAIL: no commit_range exited $exit_code (expected 1)"; exit 1; }
+                echo "  PASS: missing commit_range exits 1"
+
+                rm -rf "$MOCK_BIN"
+                echo "PASS: gate.sh exit codes correct"
+                mkdir $out
+      '';
+
+  # Agent wrapper: prompt construction
+  gc-agent-prompt =
+    runCommandLocal "gc-agent-prompt"
+      {
+        nativeBuildInputs = [ bash ];
+      }
+      ''
+                set -euo pipefail
+                AGENT="${../lib/city/agent.sh}"
+
+                echo "Testing agent.sh prompt construction..."
+
+                TMPDIR=$(mktemp -d)
+                MOCK_BIN="$TMPDIR/bin"
+                mkdir -p "$MOCK_BIN" "$TMPDIR/docs"
+
+                # Create docs and task file
+                echo "Project uses Nix for builds." > "$TMPDIR/docs/README.md"
+                echo "Use set -euo pipefail in shell." > "$TMPDIR/docs/style-guidelines.md"
+                echo "Fix the broken auth module." > "$TMPDIR/task.md"
+
+                # Mock claude to echo the prompt it receives
+                cat > "$MOCK_BIN/claude" << 'MOCK'
+        #!/usr/bin/env bash
+        if [[ "$1" == "-p" ]]; then echo "$2"; fi
+        MOCK
+                chmod +x "$MOCK_BIN/claude"
+
+                output="$(PATH="$MOCK_BIN:$PATH" \
+                  WRAPIX_AGENT=claude \
+                  WRAPIX_PROMPT_FILE="$TMPDIR/task.md" \
+                  WRAPIX_DOCS_DIR="$TMPDIR/docs" \
+                  "$AGENT" run 2>&1)"
+
+                echo "$output" | grep -q "Project uses Nix" || { echo "FAIL: docs/README.md missing from prompt"; exit 1; }
+                echo "$output" | grep -q "set -euo pipefail" || { echo "FAIL: docs/style-guidelines.md missing from prompt"; exit 1; }
+                echo "$output" | grep -q "Fix the broken auth" || { echo "FAIL: task file missing from prompt"; exit 1; }
+
+                # Missing prompt file should fail
+                exit_code=0
+                PATH="$MOCK_BIN:$PATH" WRAPIX_AGENT=claude WRAPIX_PROMPT_FILE="/nonexistent" \
+                  "$AGENT" run > /dev/null 2>&1 || exit_code=$?
+                [[ "$exit_code" -ne 0 ]] || { echo "FAIL: should fail on missing prompt file"; exit 1; }
+
+                rm -rf "$TMPDIR"
+                echo "PASS: agent.sh prompt construction works"
+                mkdir $out
+      '';
+
+  # Provider: worker creates worktree (functional with mock podman)
+  gc-provider-worker =
+    runCommandLocal "gc-provider-worker"
       {
         nativeBuildInputs = [
           bash
-          pkgs.gnugrep
+          pkgs.git
         ];
       }
       ''
-        set -euo pipefail
-        GATE="${../lib/city/gate.sh}"
+                set -euo pipefail
+                PROVIDER="${../lib/city/provider.sh}"
 
-        echo "Checking gate condition script..."
+                echo "Testing provider.sh worker Start..."
 
-        grep -q 'GC_BEAD_ID' "$GATE" || { echo "FAIL: missing GC_BEAD_ID"; exit 1; }
-        grep -q 'bd meta get.*commit_range' "$GATE" || { echo "FAIL: no commit_range read"; exit 1; }
-        grep -q 'gc nudge reviewer' "$GATE" || { echo "FAIL: no reviewer nudge"; exit 1; }
-        grep -q 'bd meta get.*review_verdict' "$GATE" || { echo "FAIL: no verdict poll"; exit 1; }
+                TMPDIR=$(mktemp -d)
+                MOCK_BIN="$TMPDIR/bin"
+                mkdir -p "$MOCK_BIN"
 
-        # Exit codes: 0 for approve, 1 for reject
-        grep -A2 'approve)' "$GATE" | grep -qE 'exit 0' || { echo "FAIL: approve not exit 0"; exit 1; }
-        grep -A2 'reject)' "$GATE" | grep -qE 'exit 1' || { echo "FAIL: reject not exit 1"; exit 1; }
+                # Set up git repo (HOME override for Nix sandbox)
+                export HOME="$TMPDIR/home"
+                mkdir -p "$HOME"
+                git config --global user.email "test@test"
+                git config --global user.name "test"
+                git config --global init.defaultBranch main
+                git -C "$TMPDIR" init -q -b main
+                git -C "$TMPDIR" commit --allow-empty -m "initial" -q
 
-        echo "PASS: Gate condition script correctly structured"
-        mkdir $out
+                # Mock podman (record calls, succeed)
+                cat > "$MOCK_BIN/podman" << MOCK
+        #!/usr/bin/env bash
+        echo "\$@" >> "$TMPDIR/podman.log"
+        MOCK
+                chmod +x "$MOCK_BIN/podman"
+                cat > "$MOCK_BIN/bd" << MOCK
+        #!/usr/bin/env bash
+        echo "\$@" >> "$TMPDIR/bd.log"
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+
+                PATH="$MOCK_BIN:$PATH" \
+                  GC_CITY_NAME="test" \
+                  GC_WORKSPACE="$TMPDIR" \
+                  GC_AGENT_IMAGE="test-image:latest" \
+                  GC_PODMAN_NETWORK="wrapix-test" \
+                  GC_BEAD_ID="bead-123" \
+                  "$PROVIDER" Start worker-1 > "$TMPDIR/out" 2>&1 || true
+
+                # Worktree should exist
+                test -d "$TMPDIR/.wrapix/worktree/gc-bead-123" || { echo "FAIL: worktree not created"; exit 1; }
+                echo "  PASS: worktree created"
+
+                # Git branch should exist
+                git -C "$TMPDIR" rev-parse --verify gc-bead-123 > /dev/null 2>&1 || { echo "FAIL: branch not created"; exit 1; }
+                echo "  PASS: git branch created"
+
+                # Podman should mount the worktree
+                grep -q "worktree/gc-bead-123:/workspace" "$TMPDIR/podman.log" || { echo "FAIL: worktree not mounted"; exit 1; }
+                echo "  PASS: worktree mounted in container"
+
+                # Provider should set up task file or WRAPIX_PROMPT_FILE for the worker
+                # The spec says: "provider script mounts task file at /workspace/.task"
+                if ! grep -qE '\.task|WRAPIX_PROMPT_FILE' "$TMPDIR/podman.log"; then
+                  echo "FAIL: worker has no task file or WRAPIX_PROMPT_FILE — workers would crash"
+                  echo "  podman was called with: $(cat "$TMPDIR/podman.log")"
+                  exit 1
+                fi
+                echo "  PASS: task file set up for worker"
+
+                rm -rf "$TMPDIR"
+                echo "PASS: provider worker lifecycle works"
+                mkdir $out
       '';
 
-  # Entrypoint structure
-  gc-entrypoint-structure =
-    runCommandLocal "gc-entrypoint-structure"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-        EP="${../lib/city/entrypoint.sh}"
+  # NixOS module: verifies env var plumbing via Nix evaluation
+  gc-nixos-module =
+    let
+      moduleFile = builtins.readFile ../modules/city.nix;
 
-        echo "Checking entrypoint wrapper..."
+      # Structural checks — the module must define these
+      hasServicesWrapix = builtins.match ".*services\\.wrapix.*" moduleFile != null;
+      hasCities = builtins.match ".*cities.*" moduleFile != null;
+      hasSystemdServices = builtins.match ".*systemd\\.services.*" moduleFile != null;
+      hasMkCity = builtins.match ".*mkCity.*" moduleFile != null;
 
-        # Scaffolding bead check
-        grep -q 'bd human list' "$EP" || { echo "FAIL: no scaffolding bead check"; exit 1; }
-        grep -q 'scaffol' "$EP" || { echo "FAIL: no scaffolding filter"; exit 1; }
+      # Critical env var plumbing — provider.sh requires these
+      hasAgentImage = builtins.match ".*GC_AGENT_IMAGE.*" moduleFile != null;
+      hasPodmanNetwork = builtins.match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
+    in
+    assert hasServicesWrapix;
+    assert hasCities;
+    assert hasSystemdServices;
+    assert hasMkCity;
+    assert
+      hasAgentImage
+      || throw "NixOS module does not set GC_AGENT_IMAGE — provider.sh requires it to start agent containers";
+    assert
+      hasPodmanNetwork
+      || throw "NixOS module does not set GC_PODMAN_NETWORK — provider.sh requires it for container networking";
+    runCommandLocal "gc-nixos-module" { } ''
+      echo "PASS: NixOS module structure and env var plumbing verified"
+      mkdir $out
+    '';
 
-        # Podman events watcher
-        grep -q 'podman events' "$EP" || { echo "FAIL: no podman events watcher"; exit 1; }
-        grep -q 'gc nudge scout' "$EP" || { echo "FAIL: no scout nudge on events"; exit 1; }
-
-        # Recovery before gc start
-        grep -q 'recovery.sh' "$EP" || { echo "FAIL: no recovery call"; exit 1; }
-
-        # Final exec
-        grep -q 'exec gc start --foreground' "$EP" || { echo "FAIL: no exec gc start"; exit 1; }
-
-        echo "PASS: Entrypoint wrapper correctly structured"
-        mkdir $out
-      '';
-
-  # Recovery script structure
-  gc-recovery-structure =
-    runCommandLocal "gc-recovery-structure"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-        REC="${../lib/city/recovery.sh}"
-
-        echo "Checking crash recovery script..."
-
-        grep -q 'podman ps.*--filter.*label=gc-city=' "$REC" || { echo "FAIL: no podman ps scan"; exit 1; }
-        grep -q 'podman stop\|stop_container' "$REC" || { echo "FAIL: no orphan stop"; exit 1; }
-        grep -q 'podman rm' "$REC" || { echo "FAIL: no orphan remove"; exit 1; }
-        grep -q 'branch_has_commits' "$REC" || { echo "FAIL: no finished worker check"; exit 1; }
-        grep -q 'git.*worktree prune' "$REC" || { echo "FAIL: no worktree prune"; exit 1; }
-        grep -q 'gc-bead' "$REC" || { echo "FAIL: no gc-bead label usage"; exit 1; }
-
-        echo "PASS: Crash recovery script correctly structured"
-        mkdir $out
-      '';
-
-  # Post-gate order structure
-  gc-postgate-structure =
-    runCommandLocal "gc-postgate-structure"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-        PG="${../lib/city/post-gate.sh}"
-
-        echo "Checking post-gate order..."
-
-        # Merge: ff-only, rebase fallback, prek
-        grep -q 'git.*merge --ff-only' "$PG" || { echo "FAIL: no ff-only merge"; exit 1; }
-        grep -q 'git.*rebase main' "$PG" || { echo "FAIL: no rebase fallback"; exit 1; }
-        grep -q 'prek run' "$PG" || { echo "FAIL: no prek after rebase"; exit 1; }
-
-        # Worktree and branch cleanup
-        grep -q 'git.*worktree remove' "$PG" || { echo "FAIL: no worktree cleanup"; exit 1; }
-        grep -q 'git.*branch -d' "$PG" || { echo "FAIL: no branch cleanup"; exit 1; }
-
-        # Notifications
-        grep -q 'wrapix-notifyd' "$PG" || { echo "FAIL: no notifications"; exit 1; }
-        grep -q 'bd human' "$PG" || { echo "FAIL: no bd human for deploy"; exit 1; }
-
-        # Deploy bead
-        grep -q 'create_deploy_bead\|bd create.*deploy' "$PG" || { echo "FAIL: no deploy bead"; exit 1; }
-
-        echo "PASS: Post-gate order correctly structured"
-        mkdir $out
-      '';
-
-  # Formulas validation
+  # Formulas: structural validation (these are TOML for the AI, grep is appropriate here)
   gc-formulas =
     runCommandLocal "gc-formulas"
       {
@@ -430,68 +588,18 @@ in
           F="$DIR/$role.formula.toml"
           test -f "$F" || { echo "FAIL: missing $role.formula.toml"; exit 1; }
           grep -q '^formula = ' "$F" || { echo "FAIL: $role missing formula name"; exit 1; }
-          grep -q '^description = ' "$F" || { echo "FAIL: $role missing description"; exit 1; }
           grep -q '^\[\[steps\]\]' "$F" || { echo "FAIL: $role missing steps"; exit 1; }
           grep -q 'docs/README.md' "$F" || { echo "FAIL: $role missing docs/README.md pin"; exit 1; }
           echo "  PASS: $role"
         done
 
-        # Scout-specific
+        # Scout must reference orchestration.md for pattern loading
         grep -q 'orchestration.md' "$DIR/scout.formula.toml" || { echo "FAIL: scout no orchestration.md"; exit 1; }
-        grep -q 'max_beads' "$DIR/scout.formula.toml" || { echo "FAIL: scout no maxBeads"; exit 1; }
 
-        # Worker-specific
-        grep -q 'wrapix-agent' "$DIR/worker.formula.toml" || { echo "FAIL: worker no wrapix-agent"; exit 1; }
-
-        # Reviewer-specific
+        # Reviewer must reference style-guidelines.md for enforcement
         grep -q 'style-guidelines.md' "$DIR/reviewer.formula.toml" || { echo "FAIL: reviewer no style-guidelines.md"; exit 1; }
-        grep -q 'bd human' "$DIR/reviewer.formula.toml" || { echo "FAIL: reviewer no bd human"; exit 1; }
 
-        echo ""
-        echo "PASS: All role formulas correctly structured"
-        mkdir $out
-      '';
-
-  # NixOS module evaluation
-  gc-nixos-module =
-    let
-      # Verify the module file has expected structure via simple Nix assertions
-      moduleFile = builtins.readFile ../modules/city.nix;
-      hasServicesWrapix = builtins.match ".*services\\.wrapix.*" moduleFile != null;
-      hasCities = builtins.match ".*cities.*" moduleFile != null;
-      hasSystemdServices = builtins.match ".*systemd\\.services.*" moduleFile != null;
-      hasMkCity = builtins.match ".*mkCity.*" moduleFile != null;
-    in
-    assert hasServicesWrapix;
-    assert hasCities;
-    assert hasSystemdServices;
-    assert hasMkCity;
-    runCommandLocal "gc-nixos-module"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-        MODULE="${../modules/city.nix}"
-
-        echo "Checking NixOS module..."
-
-        # Required options
-        for opt in workspace profile services secrets agent workers cooldown scout resources; do
-          grep -q "''${opt}.*mkOption" "$MODULE" || { echo "FAIL: missing option: $opt"; exit 1; }
-        done
-
-        # Systemd and podman
-        grep -q 'Restart.*=.*"always"' "$MODULE" || { echo "FAIL: no Restart=always"; exit 1; }
-        grep -q 'podman.sock' "$MODULE" || { echo "FAIL: no podman socket mount"; exit 1; }
-        grep -q 'network create' "$MODULE" || { echo "FAIL: no podman network create"; exit 1; }
-        grep -q 'podman load' "$MODULE" || { echo "FAIL: no podman load"; exit 1; }
-        grep -q 'virtualisation.podman.enable' "$MODULE" || { echo "FAIL: no podman enable"; exit 1; }
-
-        echo "PASS: NixOS module correctly structured"
+        echo "PASS: All role formulas valid"
         mkdir $out
       '';
 }

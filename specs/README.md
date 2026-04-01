@@ -1,6 +1,6 @@
 # Project Specifications
 
-An ordered list of specs and project terminology.
+An ordered list of specs.
 
 | Spec | Code | Beads | Purpose |
 |------|------|-------|---------|

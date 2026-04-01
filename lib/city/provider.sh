@@ -104,6 +104,27 @@ worker_start() {
       git -C "${GC_WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}"
   fi
 
+  # Build task file from bead description, acceptance criteria, and reviewer notes
+  local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
+  {
+    local bead_json
+    bead_json="$(bd show "${bead_id}" --json 2>/dev/null)" || bead_json=""
+    if [[ -n "$bead_json" ]]; then
+      echo "$bead_json" | jq -r '.description // empty' 2>/dev/null
+      local acceptance
+      acceptance="$(echo "$bead_json" | jq -r '.acceptance // empty' 2>/dev/null)"
+      if [[ -n "$acceptance" ]]; then
+        printf '\n## Acceptance Criteria\n\n%s\n' "$acceptance"
+      fi
+    fi
+    # Append reviewer notes from prior attempts (if any)
+    local reviewer_notes
+    reviewer_notes="$(bd meta get "${bead_id}" merge_failure 2>/dev/null)" || reviewer_notes=""
+    if [[ -n "$reviewer_notes" ]]; then
+      printf '\n## Prior Rejection\n\n%s\n' "$reviewer_notes"
+    fi
+  } > "$task_file" 2>/dev/null || true
+
   # shellcheck disable=SC2046
   podman run -d \
     --name "$name" \
@@ -112,13 +133,14 @@ worker_start() {
     $(resource_flags worker) \
     -v "${GC_WORKSPACE}/${worktree_path}:/workspace:rw" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
+    -v "${task_file}:/workspace/.task:ro" \
     ${GC_SECRET_FLAGS:-} \
     -e "GC_ROLE=worker" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
-    ${GC_TASK_FLAGS:-} \
+    -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     "${GC_AGENT_IMAGE}" \
-    ${GC_TASK_CMD:-wrapix-agent}
+    wrapix-agent run
 
   # Monitor worker exit in background — set bead metadata when done
   (

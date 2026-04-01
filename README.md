@@ -215,6 +215,53 @@ nix run github:taheris/wrapix#wrapix-notifyd
 **Home-manager**: See [scripts/notify/README.md](scripts/notify/README.md) for
 launchd/systemd configuration.
 
+## Gas City (Multi-Agent Orchestration)
+
+Gas City runs an autonomous ops loop: scout watches services, workers fix issues, a reviewer enforces style guidelines, and the human director makes structural decisions.
+
+### Quick start
+
+```nix
+# In your flake.nix
+wrapix.mkCity {
+  services.api.package = myApp;
+}
+```
+
+This generates `city.toml`, the provider script, container images, and default formulas. Run `ralph sync` to scaffold `docs/` context files, review them, then `gc start`.
+
+### NixOS module
+
+```nix
+services.wrapix.cities.myproject = {
+  workspace = "/srv/myproject";
+  profile = "rust";
+  services.api.package = myApp;
+  secrets.claude = "/run/secrets/claude-api-key";
+};
+```
+
+### Full options
+
+```nix
+wrapix.mkCity {
+  services.api = {
+    package = myApp;
+    ports = [ 8080 ];
+    environment.DATABASE_URL = "postgres://db/app";
+  };
+  profile = "rust";
+  agent = "claude";
+  workers = 2;
+  cooldown = "30m";
+  scout = { interval = "5m"; maxBeads = 10; };
+  secrets.claude = "/run/secrets/claude-api-key";
+  resources.worker = { cpus = 2; memory = "4g"; };
+}
+```
+
+See [specs/gas-city.md](specs/gas-city.md) for the full specification and [docs/architecture.md](docs/architecture.md) for how it fits into the system.
+
 ## Linux Builder (macOS)
 
 Build `aarch64-linux` packages on macOS with Nix via a remote builder:

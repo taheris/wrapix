@@ -304,6 +304,8 @@ let
           --label=gc-city="${name}" \
           --env=GC_CITY_NAME="${name}" \
           --env=GC_WORKSPACE=/workspace \
+          --env=GC_AGENT_IMAGE="${imageName}" \
+          --env=GC_PODMAN_NETWORK="${networkName}" \
           ${builtins.concatStringsSep " \\\n      " secretArgs} \
           "${imageName}" \
           "${entrypoint}"
