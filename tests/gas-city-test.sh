@@ -1082,6 +1082,92 @@ test_agent_wrapper() {
   fi
 }
 
+test_entrypoint_wrapper() {
+  echo "Test: Entrypoint wrapper checks scaffolding beads, starts events watcher, execs gc"
+  local entrypoint="$REPO_ROOT/lib/city/entrypoint.sh"
+
+  if [[ ! -x "$entrypoint" ]]; then
+    fail "entrypoint.sh not found or not executable"
+    return
+  fi
+
+  local failures=0
+
+  # Verify shell conventions
+  if ! head -20 "$entrypoint" | grep -q 'set -euo pipefail'; then
+    echo "    sub-fail: missing set -euo pipefail"
+    failures=$((failures + 1))
+  fi
+
+  # Verify required environment variables
+  for var in GC_CITY_NAME GC_WORKSPACE; do
+    if ! grep -q "${var}:?" "$entrypoint" && ! grep -q "${var}:\?" "$entrypoint"; then
+      echo "    sub-fail: missing required env var $var"
+      failures=$((failures + 1))
+    fi
+  done
+
+  # Step 1: Verify scaffolding bead check
+  if ! grep -q 'bd human list' "$entrypoint"; then
+    echo "    sub-fail: does not check bd human list for scaffolding beads"
+    failures=$((failures + 1))
+  fi
+  if ! grep -q 'scaffol' "$entrypoint"; then
+    echo "    sub-fail: does not filter for scaffolding beads"
+    failures=$((failures + 1))
+  fi
+  # Verify it exits on unresolved scaffolding beads
+  if ! grep -q 'exit 1' "$entrypoint"; then
+    echo "    sub-fail: does not exit on unresolved scaffolding beads"
+    failures=$((failures + 1))
+  fi
+  # Verify it prints a warning listing pending reviews
+  if ! grep -q 'Pending reviews' "$entrypoint" && ! grep -q 'pending review' "$entrypoint"; then
+    echo "    sub-fail: does not print warning listing pending reviews"
+    failures=$((failures + 1))
+  fi
+
+  # Step 2: Verify podman events watcher
+  if ! grep -q 'podman events' "$entrypoint"; then
+    echo "    sub-fail: does not start podman events watcher"
+    failures=$((failures + 1))
+  fi
+  # Verify it watches for die, oom, restart events
+  for event in die oom restart; do
+    if ! grep -q "event=${event}" "$entrypoint"; then
+      echo "    sub-fail: does not watch for ${event} events"
+      failures=$((failures + 1))
+    fi
+  done
+  # Verify it nudges the scout
+  if ! grep -q 'gc nudge scout' "$entrypoint"; then
+    echo "    sub-fail: does not nudge scout on service events"
+    failures=$((failures + 1))
+  fi
+  # Verify watcher runs in background
+  if ! grep -q '&$' "$entrypoint" && ! grep -qE '^\s+\) &' "$entrypoint"; then
+    echo "    sub-fail: events watcher does not run in background"
+    failures=$((failures + 1))
+  fi
+  # Verify gc-managed containers are skipped
+  if ! grep -q 'gc-.*CITY_NAME' "$entrypoint"; then
+    echo "    sub-fail: does not skip gc-managed containers in event watcher"
+    failures=$((failures + 1))
+  fi
+
+  # Step 3: Verify exec gc start --foreground
+  if ! grep -q 'exec gc start --foreground' "$entrypoint"; then
+    echo "    sub-fail: does not exec gc start --foreground"
+    failures=$((failures + 1))
+  fi
+
+  if [[ "$failures" -eq 0 ]]; then
+    pass "entrypoint wrapper correctly structured"
+  else
+    fail "entrypoint wrapper has $failures issues"
+  fi
+}
+
 # --- Run ---
 
 echo "=== Gas City Tests ==="
@@ -1104,6 +1190,7 @@ test_convergence_handoff
 test_merge_ff_only
 test_notifications
 test_agent_wrapper
+test_entrypoint_wrapper
 
 echo ""
 echo "Results: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_RUN total"
