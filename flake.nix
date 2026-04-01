@@ -51,6 +51,7 @@
         {
           config,
           pkgs,
+          self',
           system,
           ...
         }:
@@ -118,7 +119,7 @@
           };
 
           wrapix = import ./lib { inherit pkgs system linuxPkgs; };
-          ralph = wrapix.mkRalph { profile = wrapix.profiles.base; };
+          city = wrapix.mkCity { profile = wrapix.profiles.base; };
 
         in
         {
@@ -192,27 +193,18 @@
             };
 
           apps = {
-            ralph = ralph.app;
+            city = city.app;
+            ralph = city.ralph.app;
           };
 
           devShells.default = wrapix.mkDevShell {
-            shellHook = ''
-              ${ralph.shellHook}
-            '';
-
-            packages =
-              with pkgs;
-              [
-                beads
-                config.treefmt.build.wrapper
-                dolt
-                gc
-                gh
-                podman
-                prek
-                wrapix.scripts
-              ]
-              ++ [ (import ./lib/notify/daemon.nix { inherit pkgs; }) ];
+            inherit (city) shellHook;
+            packages = city.packages ++ [
+              config.treefmt.build.wrapper
+              pkgs.gh
+              pkgs.podman
+              self'.packages.wrapix-notifyd
+            ];
           };
 
           treefmt = treefmtConfig;

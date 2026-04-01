@@ -17,6 +17,8 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
 
 ## Flake Integration
 
+### Sandbox only
+
 ```nix
 {
   inputs.wrapix.url = "github:taheris/wrapix";
@@ -26,18 +28,43 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = { system, ... }:
-        let wrapix = inputs.wrapix.legacyPackages.${system}.lib;
-        in {
-          packages.default = (wrapix.mkSandbox {
+        let
+          wrapix = inputs.wrapix.legacyPackages.${system}.lib;
+          sandbox = wrapix.mkSandbox {
             profile = wrapix.profiles.rust;   # or base, python
             # packages = [ linuxPkgs.sqlx-cli ];
             # env.DATABASE_URL = "postgres://localhost/mydb";
             # mcp.tmux = { };
-          }).package;
+          };
+        in {
+          packages.default = sandbox.package;
         };
     };
 }
 ```
+
+### With Gas City (multi-agent orchestration)
+
+```nix
+perSystem = { system, ... }:
+  let
+    wrapix = inputs.wrapix.legacyPackages.${system}.lib;
+    city = wrapix.mkCity {
+      profile = wrapix.profiles.rust;
+      services.api.package = myApp;
+      secrets.claude = "ANTHROPIC_API_KEY";
+    };
+  in {
+    packages.default = city.sandbox.package;  # ad-hoc container
+    apps.city = city.app;                      # gc start --foreground
+    apps.ralph = city.ralph.app;               # ralph in a sandbox
+    devShells.default = city.devShell;         # gc, bd, ralph — all on PATH
+  };
+```
+
+`mkCity` creates one shared sandbox and threads it through everything. The devShell gives you `gc`, `bd`, `ralph`, and `wrapix` — all ready to use. Use `city.mkDevShell { packages = [ ... ]; }` to add your own packages.
+
+## mkSandbox Options
 
 | Option | Type | Description |
 |--------|------|-------------|
@@ -51,6 +78,22 @@ nix run github:taheris/wrapix#wrapix-python  # python profile
 
 See [specs/sandbox.md](specs/sandbox.md) for full details.
 
+## mkCity Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `profile` | profile or string | `"base"` | Shared sandbox profile |
+| `sandbox` | sandbox attrset | — | Use existing sandbox instead of profile |
+| `services` | attrset | `{ }` | Service containers to monitor |
+| `secrets` | attrset of strings | `{ }` | Secrets (`"/path"` = file, else = env var) |
+| `name` | string | `"dev"` | City name (used for container/network naming) |
+| `workers` | int | `1` | Max concurrent workers |
+| `cooldown` | string | `"0"` | Delay between task dispatches |
+| `scout` | `{ interval, maxBeads }` | `5m`, `10` | Scout polling config |
+| `resources` | attrset | `{ }` | Per-role resource limits |
+
+See [specs/gas-city.md](specs/gas-city.md) for the full specification.
+
 ## Profiles
 
 | Profile | Packages |
@@ -59,33 +102,9 @@ See [specs/sandbox.md](specs/sandbox.md) for full details.
 | `rust` | base + rust-overlay toolchain, gcc, openssl, pkg-config |
 | `python` | base + python3, uv, ty, ruff |
 
-## Ralph (Single-Agent Workflow)
+## NixOS Module
 
 ```nix
-ralph = wrapix.mkRalph { inherit sandbox; };
-# or: ralph = wrapix.mkRalph { profile = wrapix.profiles.rust; };
-```
-
-Spec-driven AI orchestration. See [specs/ralph-workflow.md](specs/ralph-workflow.md).
-
-## Gas City (Multi-Agent Orchestration)
-
-Autonomous ops loop: scout watches services, workers fix issues, reviewer enforces style guidelines, human director makes structural decisions.
-
-```nix
-# Minimal
-wrapix.mkCity { services.api.package = myApp; }
-
-# Full options
-wrapix.mkCity {
-  services.api = { package = myApp; ports = [ 8080 ]; };
-  profile = "rust";  workers = 2;  cooldown = "30m";
-  scout = { interval = "5m"; maxBeads = 10; };
-  secrets.claude = "/run/secrets/claude-api-key";
-  resources.worker = { cpus = 2; memory = "4g"; };
-}
-
-# NixOS module
 services.wrapix.cities.myproject = {
   workspace = "/srv/myproject";
   profile = "rust";
@@ -94,7 +113,7 @@ services.wrapix.cities.myproject = {
 };
 ```
 
-See [specs/gas-city.md](specs/gas-city.md).
+Generates systemd units and a podman network per city.
 
 ## MCP Servers
 

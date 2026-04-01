@@ -37,9 +37,15 @@ let
     inherit linuxPkgs;
   };
 
+  ralph = import ../lib/ralph {
+    inherit pkgs;
+    inherit (sandbox) mkSandbox;
+  };
+
   city = import ../lib/city {
     inherit pkgs linuxPkgs;
     inherit (sandbox) mkSandbox profiles;
+    inherit (ralph) mkRalph;
   };
 
   # Evaluate mkCity with minimal config

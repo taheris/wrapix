@@ -8,6 +8,7 @@
   pkgs,
   linuxPkgs,
   mkSandbox,
+  mkRalph,
   profiles,
 }:
 
@@ -105,6 +106,7 @@ let
   mkCity =
     {
       services ? { },
+      sandbox ? null,
       profile ? profiles.base,
       agent ? "claude",
       workers ? 1,
@@ -112,6 +114,7 @@ let
       scout ? { },
       resources ? { },
       secrets ? { },
+      name ? "dev",
     }:
     let
       scoutInterval = scout.interval or "5m";
@@ -120,8 +123,14 @@ let
       # Build service container images
       serviceImages = mapAttrs mkServiceImage services;
 
-      # Build agent sandbox (for worker/scout/reviewer containers)
-      agentSandbox = mkSandbox { inherit profile; };
+      # One sandbox shared by ad-hoc container, ralph, and gc agents
+      agentSandbox = if sandbox != null then sandbox else mkSandbox { inherit profile; };
+
+      # Ralph wired to the same sandbox
+      ralphInstance = mkRalph { sandbox = agentSandbox; };
+
+      imageName = "wrapix-${agentSandbox.profile.name}:latest";
+      networkName = "wrapix-${name}";
 
       # Provider script — copies lib/city/provider.sh into the Nix store
       providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
@@ -195,9 +204,91 @@ let
           }
       ) secrets;
 
+      # City helper scripts bundled for PATH
+      cityScripts = pkgs.runCommand "wrapix-city-scripts" { } ''
+        mkdir -p $out/bin
+        cp ${./agent.sh} $out/bin/wrapix-agent
+        chmod +x $out/bin/wrapix-agent
+      '';
+
+      # Shell hook: sets up .gc/ and exports env vars for provider
+      shellHook = ''
+        ${ralphInstance.shellHook}
+        export GC_CITY_NAME="${name}"
+        export GC_WORKSPACE="$(pwd)"
+        export GC_AGENT_IMAGE="${imageName}"
+        export GC_PODMAN_NETWORK="${networkName}"
+
+        # Symlink Nix-generated config into .gc/ so gc finds it
+        mkdir -p .gc/formulas
+        ln -sfn ${cityToml} .gc/city.toml
+        for f in ${formulasDir}/*.formula.toml; do
+          ln -sfn "$f" .gc/formulas/
+        done
+      '';
+
+      # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox
+      cityPackages = ralphInstance.packages ++ [
+        pkgs.gc
+        cityScripts
+      ];
+
+      # Pre-built devShell with everything on PATH
+      devShell = pkgs.mkShell {
+        packages = cityPackages;
+        inherit shellHook;
+      };
+
+      # Extend devShell with consumer extras
+      cityMkDevShell =
+        extra:
+        pkgs.mkShell {
+          packages = cityPackages ++ (extra.packages or [ ]);
+          shellHook = ''
+            ${shellHook}
+            ${extra.shellHook or ""}
+          '';
+        };
+
+      # App for `nix run .#city` — sets up env and runs gc
+      app = {
+        meta.description = "Gas City orchestration loop";
+        type = "app";
+        program = "${pkgs.writeShellScriptBin "wrapix-city" ''
+          set -euo pipefail
+          export GC_CITY_NAME="${name}"
+          export GC_WORKSPACE="$(pwd)"
+          export GC_AGENT_IMAGE="${imageName}"
+          export GC_PODMAN_NETWORK="${networkName}"
+
+          mkdir -p .gc/formulas
+          ln -sfn ${cityToml} .gc/city.toml
+          for f in ${formulasDir}/*.formula.toml; do
+            ln -sfn "$f" .gc/formulas/
+          done
+
+          exec ${pkgs.gc}/bin/gc start --foreground "$@"
+        ''}/bin/wrapix-city";
+      };
+
     in
     assert secretsValid;
     {
+      # Consumer-facing API (like mkRalph)
+      inherit
+        app
+        devShell
+        shellHook
+        ;
+      packages = cityPackages;
+      mkDevShell = cityMkDevShell;
+
+      # Shared sandbox (ad-hoc container via sandbox.package)
+      sandbox = agentSandbox;
+
+      # Ralph instance (e.g. city.ralph.app)
+      ralph = ralphInstance;
+
       # The generated city.toml
       config = cityToml;
 
@@ -209,12 +300,6 @@ let
 
       # Service container images keyed by service name
       inherit serviceImages;
-
-      # Agent sandbox (used by provider to start agent containers)
-      inherit agentSandbox;
-
-      # Profile used for agent containers
-      inherit profile;
 
       # Classified secrets metadata
       inherit classifiedSecrets;

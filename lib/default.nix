@@ -13,6 +13,7 @@ let
   city = import ./city {
     inherit pkgs linuxPkgs;
     inherit (sandbox) mkSandbox profiles;
+    inherit (ralph) mkRalph;
   };
 
 in

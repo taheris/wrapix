@@ -187,7 +187,7 @@ let
 
   # Build the city derivation for a given city config
   mkCityForConfig =
-    cityCfg:
+    cityName: cityCfg:
     let
       profile = resolveProfile cityCfg.profile;
 
@@ -211,6 +211,7 @@ let
       ) (filterAttrs (_: res: res.cpus != null || res.memory != null) cityCfg.resources);
     in
     wrapix.mkCity {
+      name = cityName;
       services = serviceAttrs;
       inherit profile;
       inherit (cityCfg)
@@ -267,7 +268,7 @@ let
   cityServices = mapAttrs' (
     name: cityCfg:
     let
-      city = mkCityForConfig cityCfg;
+      city = mkCityForConfig name cityCfg;
       resolvedProfile = resolveProfile cityCfg.profile;
       imageName = "wrapix-${resolvedProfile.name}:latest";
       networkName = "wrapix-${name}";
@@ -281,7 +282,7 @@ let
       loadImages = pkgs.writeShellScript "load-images-${name}" (
         ''
           set -euo pipefail
-          ${pkgs.podman}/bin/podman load < ${city.agentSandbox.package}
+          ${pkgs.podman}/bin/podman load < ${city.sandbox.package}
         ''
         + builtins.concatStringsSep "" (
           mapAttrsToList (svcName: _svc: ''
