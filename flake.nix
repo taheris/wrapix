@@ -9,6 +9,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    gascity = {
+      url = "git+ssh://git@github.com/gastownhall/gascity.git?ref=main&shallow=1";
+      flake = false;
+    };
+
     flake-parts = {
       url = "git+ssh://git@github.com/hercules-ci/flake-parts.git?ref=main&shallow=1";
       inputs.nixpkgs-lib.follows = "nixpkgs";
@@ -49,6 +54,7 @@
         let
           hostOverlay = final: _prev: {
             beads = beadsFor final;
+            gc = gcFor final;
           };
 
           beadsFor =
@@ -66,9 +72,21 @@
                 };
               });
 
+          gcFor =
+            pkgs':
+            pkgs'.buildGo126Module {
+              pname = "gc";
+              version = "dev";
+              src = inputs.gascity;
+              subPackages = [ "cmd/gc" ];
+              vendorHash = "sha256-ywH32kh5p5W3TttgolibegBA+ZDC7yfNSVxJkoZcQ8E=";
+              doCheck = false;
+            };
+
           linuxSystem = if system == "aarch64-darwin" then "aarch64-linux" else system;
           linuxOverlay = final: _prev: {
             beads = beadsFor final;
+            gc = gcFor final;
           };
           linuxPkgs = import nixpkgs {
             system = linuxSystem;
@@ -158,7 +176,7 @@
             in
             mapAttrs (_: cfg: (wrapix.mkSandbox cfg).package) sandboxes
             // {
-              inherit (pkgs) beads;
+              inherit (pkgs) beads gc;
               default =
                 (wrapix.mkSandbox {
                   profile = profiles.base;

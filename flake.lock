@@ -44,6 +44,24 @@
         "url": "ssh://git@github.com/hercules-ci/flake-parts.git"
       }
     },
+    "gascity": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775022390,
+        "narHash": "sha256-Wo254jwwwjNTNygph3bEZrvGadu+ovAYWFkYsm7DKnQ=",
+        "ref": "main",
+        "rev": "d74832194c7349714a593f2948f50a64c80990c3",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/gastownhall/gascity.git"
+      },
+      "original": {
+        "ref": "main",
+        "shallow": true,
+        "type": "git",
+        "url": "ssh://git@github.com/gastownhall/gascity.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1774709303,
@@ -65,6 +83,7 @@
       "inputs": {
         "beads": "beads",
         "flake-parts": "flake-parts",
+        "gascity": "gascity",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"
