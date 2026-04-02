@@ -14,6 +14,7 @@ METHOD="${1:?missing method}"
 SESSION="${2:-}"
 shift 2 || shift $#
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -69,8 +70,10 @@ persistent_start() {
 
   # shellcheck disable=SC2046
   podman run -d \
+    --replace \
     --name "$name" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --workdir /workspace \
     $(container_labels) \
     $(resource_flags "${SESSION}") \
     -v "${GC_WORKSPACE:?}:/workspace:ro" \
@@ -78,8 +81,9 @@ persistent_start() {
     ${GC_SECRET_FLAGS:-} \
     -e "GC_ROLE=${SESSION}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    -e "TERM=xterm" \
     "${GC_AGENT_IMAGE:?}" \
-    tmux new-session -d -s main \; wait-for -S init
+    bash -c 'tmux new-session -d -s main "claude --dangerously-skip-permissions" && exec tmux wait-for gc-shutdown'
 }
 
 persistent_exec() {
@@ -95,7 +99,20 @@ persistent_exec() {
 worker_start() {
   local name bead_id worktree_path
   name="$(container_name)"
-  bead_id="${GC_BEAD_ID:?worker Start requires GC_BEAD_ID}"
+
+  # gc does not pass GC_BEAD_ID — discover the bead via gc's pull model:
+  # claim the first unassigned bead routed to worker.
+  bead_id="${GC_BEAD_ID:-}"
+  if [[ -z "$bead_id" ]]; then
+    bead_id="$(cd "${GC_WORKSPACE}" && bd ready --metadata-field gc.routed_to=worker --unassigned --json 2>/dev/null \
+      | jq -r '.[0].id // empty' 2>/dev/null)" || bead_id=""
+  fi
+  if [[ -z "$bead_id" ]]; then
+    echo "worker Start: no bead routed to worker" >&2
+    return 1
+  fi
+  # Claim the bead so other workers don't pick it up
+  (cd "${GC_WORKSPACE}" && bd update "$bead_id" --claim) 2>/dev/null || true
   worktree_path=".wrapix/worktree/gc-${bead_id}"
 
   # Create git worktree on the host
@@ -103,6 +120,12 @@ worker_start() {
     git -C "${GC_WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" 2>/dev/null || \
       git -C "${GC_WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}"
   fi
+
+  # Rewrite worktree .git reference for container-internal mount path.
+  # The host worktree's .git file points to <host-abs>/.git/worktrees/gc-<id>,
+  # which doesn't exist inside the container. Mount the main .git at /mnt/git
+  # and rewrite the gitdir to match.
+  echo "gitdir: /mnt/git/worktrees/gc-${bead_id}" > "${GC_WORKSPACE}/${worktree_path}/.git"
 
   # Build task file from bead description, acceptance criteria, and reviewer notes
   local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
@@ -119,7 +142,7 @@ worker_start() {
     fi
     # Append reviewer notes from prior attempts (if any)
     local reviewer_notes
-    reviewer_notes="$(bd meta get "${bead_id}" merge_failure 2>/dev/null)" || reviewer_notes=""
+    reviewer_notes="$(bd show "${bead_id}" --json 2>/dev/null | jq -r '.[0].metadata.merge_failure // empty' 2>/dev/null)" || reviewer_notes=""
     if [[ -n "$reviewer_notes" ]]; then
       printf '\n## Prior Rejection\n\n%s\n' "$reviewer_notes"
     fi
@@ -127,11 +150,14 @@ worker_start() {
 
   # shellcheck disable=SC2046
   podman run -d \
+    --replace \
     --name "$name" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --workdir /workspace \
     $(container_labels) \
     $(resource_flags worker) \
     -v "${GC_WORKSPACE}/${worktree_path}:/workspace:rw" \
+    -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
     -v "${task_file}:/workspace/.task:ro" \
     ${GC_SECRET_FLAGS:-} \
@@ -151,8 +177,8 @@ worker_start() {
     local merge_base
     merge_base="$(git -C "${GC_WORKSPACE}" merge-base main "${branch}" 2>/dev/null || echo "")"
     if [[ -n "$merge_base" ]]; then
-      bd meta set "${bead_id}" commit_range "${merge_base}..${branch}" 2>/dev/null || true
-      bd meta set "${bead_id}" branch_name "${branch}" 2>/dev/null || true
+      bd update "${bead_id}" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
+      bd update "${bead_id}" --set-metadata "branch_name=${branch}" 2>/dev/null || true
     fi
   ) &
 }
@@ -163,8 +189,7 @@ worker_start() {
 
 case "$METHOD" in
 
-  # --- Start ---
-  Start)
+  start)
     if is_worker; then
       worker_start
     else
@@ -172,15 +197,13 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- Stop ---
-  Stop)
+  stop)
     name="$(container_name)"
     podman stop "$name" 2>/dev/null || true
     podman rm -f "$name" 2>/dev/null || true
     ;;
 
-  # --- Interrupt ---
-  Interrupt)
+  interrupt)
     if is_worker; then
       : # no-op for workers
     else
@@ -188,15 +211,13 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- IsRunning ---
-  IsRunning)
+  is-running)
     name="$(container_name)"
     running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
     echo "$running"
     ;;
 
-  # --- Attach ---
-  Attach)
+  attach)
     if is_worker; then
       : # no-op
     else
@@ -205,8 +226,7 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- Peek ---
-  Peek)
+  peek)
     name="$(container_name)"
     if is_worker; then
       podman logs --tail "${1:-50}" "$name" 2>&1
@@ -215,8 +235,7 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- SendKeys ---
-  SendKeys)
+  send-keys)
     if is_worker; then
       : # no-op
     else
@@ -224,8 +243,7 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- Nudge ---
-  Nudge)
+  nudge)
     if is_worker; then
       : # no-op
     else
@@ -245,8 +263,7 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- GetLastActivity ---
-  GetLastActivity)
+  get-last-activity)
     if is_worker; then
       echo "0"
     else
@@ -254,8 +271,7 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- ClearScrollback ---
-  ClearScrollback)
+  clear-scrollback)
     if is_worker; then
       : # no-op
     else
@@ -263,74 +279,63 @@ case "$METHOD" in
     fi
     ;;
 
-  # --- IsAttached ---
-  IsAttached)
+  is-attached)
     echo "false"
     ;;
 
-  # --- ListRunning ---
-  ListRunning)
+  list-running)
     podman ps --filter "label=gc-city=${GC_CITY_NAME}" --format '{{.Names}}' 2>/dev/null
     ;;
 
-  # --- SetMeta ---
-  SetMeta)
+  set-meta)
     name="$(container_name)"
-    key="${1:?SetMeta requires key}"
-    value="${2:?SetMeta requires value}"
+    key="${1:?set-meta requires key}"
+    value="${2:?set-meta requires value}"
     # Store metadata as container labels via podman container rename is not
     # supported — use a label file inside the container instead
     podman exec "$name" sh -c "mkdir -p /tmp/gc-meta && echo '${value}' > /tmp/gc-meta/${key}" 2>/dev/null
     ;;
 
-  # --- GetMeta ---
-  GetMeta)
+  get-meta)
     name="$(container_name)"
-    key="${1:?GetMeta requires key}"
+    key="${1:?get-meta requires key}"
     podman exec "$name" cat "/tmp/gc-meta/${key}" 2>/dev/null || echo ""
     ;;
 
-  # --- RemoveMeta ---
-  RemoveMeta)
+  remove-meta)
     name="$(container_name)"
-    key="${1:?RemoveMeta requires key}"
+    key="${1:?remove-meta requires key}"
     podman exec "$name" rm -f "/tmp/gc-meta/${key}" 2>/dev/null || true
     ;;
 
-  # --- CopyTo ---
-  CopyTo)
+  copy-to)
     name="$(container_name)"
-    src="${1:?CopyTo requires source path}"
-    dst="${2:?CopyTo requires destination path}"
+    src="${1:?copy-to requires source path}"
+    dst="${2:?copy-to requires destination path}"
     podman cp "$src" "${name}:${dst}"
     ;;
 
-  # --- ProcessAlive ---
-  ProcessAlive)
+  process-alive)
     name="$(container_name)"
-    if is_worker; then
-      # Delegates to IsRunning for ephemeral workers
-      running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
-      echo "$running"
+    if [[ -n "${1:-}" ]]; then
+      # Check for a specific process inside the container
+      podman exec "$name" pgrep -x "$1" >/dev/null 2>&1 && echo "true" || echo "false"
     else
-      process="${1:?ProcessAlive requires process name}"
-      podman exec "$name" pgrep -x "$process" >/dev/null 2>&1 && echo "true" || echo "false"
+      # No process name — check if the container itself is running
+      podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false"
     fi
     ;;
 
-  # --- CheckImage ---
-  CheckImage)
-    image="${1:?CheckImage requires image name}"
+  check-image)
+    image="${1:?check-image requires image name}"
     podman image exists "$image" 2>/dev/null && echo "true" || echo "false"
     ;;
 
-  # --- RunLive ---
-  RunLive)
+  run-live)
     : # unsupported by exec provider — no-op
     ;;
 
-  # --- Capabilities ---
-  Capabilities)
+  capabilities)
     echo "{}"
     ;;
 

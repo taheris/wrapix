@@ -1,0 +1,5 @@
+[order]
+description = "Post-convergence merge, branch cleanup, and deploy bead creation"
+gate = "event"
+on = "convergence.terminated"
+exec = ".gc/scripts/post-gate.sh"

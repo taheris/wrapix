@@ -23,7 +23,7 @@ POLL_TIMEOUT="${GC_POLL_TIMEOUT:-600}"
 # Step 1: Read commit_range from bead metadata
 # ---------------------------------------------------------------------------
 
-commit_range="$(bd meta get "$BEAD_ID" commit_range 2>/dev/null)" || commit_range=""
+commit_range="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || commit_range=""
 
 if [[ -z "$commit_range" ]]; then
   echo "gate: no commit_range set on bead $BEAD_ID — worker may not have committed" >&2
@@ -44,7 +44,7 @@ elapsed=0
 verdict=""
 
 while [[ "$elapsed" -lt "$POLL_TIMEOUT" ]]; do
-  verdict="$(bd meta get "$BEAD_ID" review_verdict 2>/dev/null)" || verdict=""
+  verdict="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null)" || verdict=""
 
   if [[ "$verdict" == "approve" ]] || [[ "$verdict" == "reject" ]]; then
     break

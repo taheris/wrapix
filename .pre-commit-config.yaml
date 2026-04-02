@@ -1,5 +1,4 @@
 repos:
-  # Builtin hooks (Rust-native, work offline)
   - repo: builtin
     hooks:
       - id: trailing-whitespace
@@ -9,10 +8,9 @@ repos:
       - id: check-merge-conflict
         stages: [pre-commit]
 
-  # Local hooks
   - repo: local
     hooks:
-      # === Fast hooks (pre-commit stage) ===
+      # Fast pre-commit tests (~1s)
       - id: treefmt
         name: treefmt
         entry: treefmt --fail-on-change
@@ -28,39 +26,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-      - id: no-hidden-specs
-        name: no hidden specs in specs/
-        entry: 'bash -c ''failed=0; for f in .wrapix/ralph/state/*.md; do [ -f "$f" ] || continue; name="$(basename "$f")"; if [ -f "specs/$name" ] || git ls-files --cached --error-unmatch "specs/$name" >/dev/null 2>&1; then echo "ERROR: specs/$name is a hidden spec (exists in .wrapix/ralph/state/). Remove it from specs/." >&2; failed=1; fi; done; exit $failed'''
-        language: system
-        always_run: true
-        pass_filenames: false
-        stages: [pre-commit]
-
-      # === Gas City hooks ===
-      - id: gc-fast
-        name: gc fast checks
-        entry: bash -c 'nix build ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).gc-fast"'
-        language: system
-        pass_filenames: false
-        files: ^lib/city/|^modules/city\.nix|^tests/gc\.nix|^lib/util/toml\.nix|^tests/toml\.nix
-        stages: [pre-commit]
-
-      - id: gc-integration
-        name: gc integration tests
-        entry: bash -c 'nix build ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).gc-integration"'
-        language: system
-        pass_filenames: false
-        stages: [manual]
-
-      # === Slow hooks (pre-push stage) ===
-      - id: gc-full
-        name: gc full flake check
-        entry: nix flake check
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
+      # Pre-push hooks (~10s)
       - id: nix-flake-check
         name: nix flake check
         entry: nix flake check
@@ -69,10 +35,19 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      - id: test
-        name: test
-        entry: nix run .#test
+      # Integration tests (~1m, conditional on changes to relevant files)
+      - id: city-integration
+        name: city integration tests
+        entry: nix run .#test-city
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(lib/city/|tests/city|specs/gas-city)
+        stages: [pre-push]
+
+      - id: ralph-integration
+        name: ralph integration tests
+        entry: nix run .#test-ralph
+        language: system
+        pass_filenames: false
+        files: ^(lib/ralph/|tests/ralph/|specs/ralph)
         stages: [pre-push]

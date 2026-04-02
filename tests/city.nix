@@ -13,7 +13,7 @@
 # Layer 3 (pre-commit): Container lifecycle / shell syntax tests
 #   - Entrypoint, recovery, gate, post-gate, scout, agent scripts validate
 #
-# Combined as gc-fast check for pre-commit stage.
+# All gc checks run as part of nix flake check.
 {
   pkgs,
   system,
@@ -92,7 +92,7 @@ in
   # =========================================================================
 
   # mkCity evaluates with minimal config
-  gc-mkcity-eval =
+  city-mkcity-eval =
     let
       hasConfig = builtins.hasAttr "config" minimalCity;
       hasProvider = builtins.hasAttr "provider" minimalCity;
@@ -113,14 +113,14 @@ in
     assert hasDefaultFormulas;
     assert fullHasConfig;
     assert emptyHasConfig;
-    runCommandLocal "gc-mkcity-eval" { } ''
+    runCommandLocal "city-mkcity-eval" { } ''
       echo "PASS: mkCity evaluates with minimal, full, and empty configs"
       echo "  - config, provider, serviceImages, formulas, defaultFormulas present"
       mkdir $out
     '';
 
   # Generated city.toml matches gc's config schema
-  gc-city-toml =
+  city-city-toml =
     let
       inherit (minimalCity) configAttrs;
 
@@ -149,6 +149,11 @@ in
       # Full city: workers=2 reflected in workspace and worker agent
       fullWorkspace = fullCity.configAttrs.workspace;
       fullWorkerSessions = fullWorkspace.max_active_sessions;
+
+      # Convergence config
+      hasConvergence = builtins.hasAttr "convergence" configAttrs;
+      convergenceMaxPerAgent = configAttrs.convergence.max_per_agent;
+      convergenceMaxTotal = configAttrs.convergence.max_total;
     in
     assert hasWorkspace;
     assert workspaceName == "dev";
@@ -158,24 +163,27 @@ in
     assert hasFormulas;
     assert hasBeads;
     assert hasDaemon;
+    assert hasConvergence;
+    assert convergenceMaxPerAgent == 2;
+    assert convergenceMaxTotal == 10;
     assert agentIsList;
     assert agentCount == 3;
     assert hasScout;
     assert hasWorker;
     assert hasReviewer;
     assert fullWorkerSessions == 2;
-    runCommandLocal "gc-city-toml" { } ''
+    runCommandLocal "city-city-toml" { } ''
       echo "PASS: city.toml matches gc config schema"
       echo "  - [workspace] with name and provider"
       echo "  - [session] with exec:/nix/store/... provider"
-      echo "  - [formulas], [beads], [daemon] sections present"
+      echo "  - [formulas], [beads], [daemon], [convergence] sections present"
       echo "  - [[agent]] is list with scout, worker, reviewer"
       echo "  - workers reflected in max_active_sessions"
       mkdir $out
     '';
 
   # Service packages build into OCI images
-  gc-service-images =
+  city-service-images =
     let
       apiImage = minimalCity.serviceImages.api;
       imageName = apiImage.name;
@@ -188,7 +196,7 @@ in
     assert nameCorrect;
     assert fullHasApi;
     assert fullHasDb;
-    runCommandLocal "gc-service-images" { } ''
+    runCommandLocal "city-service-images" { } ''
       echo "Checking service image is a valid tar archive..."
       test -f ${apiImage}
       tar -tf ${apiImage} >/dev/null
@@ -199,7 +207,7 @@ in
     '';
 
   # Secrets classification
-  gc-secrets =
+  city-secrets =
     let
       inherit (minimalCity) classifiedSecrets;
       claudeSecret = classifiedSecrets.claude;
@@ -212,7 +220,7 @@ in
     assert claudeIsEnv;
     assert deployIsFile;
     assert deployPath;
-    runCommandLocal "gc-secrets" { } ''
+    runCommandLocal "city-secrets" { } ''
       echo "PASS: Secrets classified correctly"
       echo "  - env var secret: type=env"
       echo "  - file path secret: type=file with correct path"
@@ -224,8 +232,8 @@ in
   # =========================================================================
 
   # Validate all Gas City shell scripts parse without errors
-  gc-shell-syntax =
-    runCommandLocal "gc-shell-syntax"
+  city-shell-syntax =
+    runCommandLocal "city-shell-syntax"
       {
         nativeBuildInputs = [
           bash
@@ -263,10 +271,13 @@ in
   # =========================================================================
 
   # Scout: parse-rules extracts patterns from orchestration.md
-  gc-scout-parse-rules =
-    runCommandLocal "gc-scout-parse-rules"
+  city-scout-parse-rules =
+    runCommandLocal "city-scout-parse-rules"
       {
-        nativeBuildInputs = [ bash ];
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
       }
       ''
                 set -euo pipefail
@@ -276,7 +287,7 @@ in
 
                 # Test 1: defaults when no doc file
                 TMPDIR=$(mktemp -d)
-                SCOUT_ERRORS_DIR="$TMPDIR/errors" "$SCOUT" parse-rules ""
+                SCOUT_ERRORS_DIR="$TMPDIR/errors" bash "$SCOUT" parse-rules ""
 
                 immediate="$(cat "$TMPDIR/errors/immediate.pat")"
                 batched="$(cat "$TMPDIR/errors/batched.pat")"
@@ -302,7 +313,7 @@ in
         ## Auto-deploy
         DOC
                 rm -rf "$TMPDIR/errors"
-                SCOUT_ERRORS_DIR="$TMPDIR/errors" "$SCOUT" parse-rules "$TMPDIR/orch.md"
+                SCOUT_ERRORS_DIR="$TMPDIR/errors" bash "$SCOUT" parse-rules "$TMPDIR/orch.md"
 
                 immediate="$(cat "$TMPDIR/errors/immediate.pat")"
                 batched="$(cat "$TMPDIR/errors/batched.pat")"
@@ -318,10 +329,13 @@ in
       '';
 
   # Scout: scan classifies log lines by pattern tier
-  gc-scout-scan =
-    runCommandLocal "gc-scout-scan"
+  city-scout-scan =
+    runCommandLocal "city-scout-scan"
       {
-        nativeBuildInputs = [ bash ];
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
       }
       ''
                 set -euo pipefail
@@ -340,7 +354,7 @@ in
                 MOCK_BIN="$TMPDIR/bin"
                 mkdir -p "$MOCK_BIN"
                 cat > "$MOCK_BIN/podman" << 'MOCK'
-        #!/usr/bin/env bash
+        #!/bin/sh
         cat << 'LOGS'
         2026-04-01 INFO: service started
         2026-04-01 ERROR: connection refused
@@ -352,7 +366,7 @@ in
                 chmod +x "$MOCK_BIN/podman"
 
                 PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" \
-                  "$SCOUT" scan "my-api" --since=5m
+                  bash "$SCOUT" scan "my-api" --since=5m
 
                 # Verify classification
                 grep -q "FATAL" "$TMPDIR/errors/my-api/immediate.log" || { echo "FAIL: FATAL not in immediate"; exit 1; }
@@ -373,10 +387,13 @@ in
       '';
 
   # Gate: exit codes match review verdict
-  gc-gate-functional =
-    runCommandLocal "gc-gate-functional"
+  city-gate-functional =
+    runCommandLocal "city-gate-functional"
       {
-        nativeBuildInputs = [ bash ];
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
       }
       ''
                 set -euo pipefail
@@ -388,8 +405,8 @@ in
 
                 # Test 1: approve -> exit 0
                 cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/usr/bin/env bash
-        if [[ "$1" == "meta" ]] && [[ "$2" == "get" ]]; then
+        #!/bin/sh
+        if [ "$1" = "meta" ] && [ "$2" = "get" ]; then
           case "$4" in
             commit_range) echo "abc..def" ;;
             review_verdict) echo "approve" ;;
@@ -398,19 +415,19 @@ in
         MOCK
                 chmod +x "$MOCK_BIN/bd"
                 cat > "$MOCK_BIN/gc" << 'MOCK'
-        #!/usr/bin/env bash
+        #!/bin/sh
         exit 0
         MOCK
                 chmod +x "$MOCK_BIN/gc"
 
                 PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-1" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  "$GATE" > /dev/null 2>&1
+                  bash "$GATE" > /dev/null 2>&1
                 echo "  PASS: approve exits 0"
 
                 # Test 2: reject -> exit 1
                 cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/usr/bin/env bash
-        if [[ "$1" == "meta" ]] && [[ "$2" == "get" ]]; then
+        #!/bin/sh
+        if [ "$1" = "meta" ] && [ "$2" = "get" ]; then
           case "$4" in
             commit_range) echo "abc..def" ;;
             review_verdict) echo "reject" ;;
@@ -421,20 +438,20 @@ in
 
                 exit_code=0
                 PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-2" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  "$GATE" > /dev/null 2>&1 || exit_code=$?
+                  bash "$GATE" > /dev/null 2>&1 || exit_code=$?
                 [[ "$exit_code" -eq 1 ]] || { echo "FAIL: reject exited $exit_code (expected 1)"; exit 1; }
                 echo "  PASS: reject exits 1"
 
                 # Test 3: missing commit_range -> exit 1
                 cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/usr/bin/env bash
+        #!/bin/sh
         echo ""
         MOCK
                 chmod +x "$MOCK_BIN/bd"
 
                 exit_code=0
                 PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-3" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  "$GATE" > /dev/null 2>&1 || exit_code=$?
+                  bash "$GATE" > /dev/null 2>&1 || exit_code=$?
                 [[ "$exit_code" -eq 1 ]] || { echo "FAIL: no commit_range exited $exit_code (expected 1)"; exit 1; }
                 echo "  PASS: missing commit_range exits 1"
 
@@ -444,10 +461,13 @@ in
       '';
 
   # Agent wrapper: prompt construction
-  gc-agent-prompt =
-    runCommandLocal "gc-agent-prompt"
+  city-agent-prompt =
+    runCommandLocal "city-agent-prompt"
       {
-        nativeBuildInputs = [ bash ];
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
       }
       ''
                 set -euo pipefail
@@ -465,9 +485,9 @@ in
                 echo "Fix the broken auth module." > "$TMPDIR/task.md"
 
                 # Mock claude to echo the prompt it receives
-                cat > "$MOCK_BIN/claude" << 'MOCK'
-        #!/usr/bin/env bash
-        if [[ "$1" == "-p" ]]; then echo "$2"; fi
+                cat > "$MOCK_BIN/claude" << MOCK
+        #!$(command -v bash)
+        if [[ "\$1" == "-p" ]]; then echo "\$2"; fi
         MOCK
                 chmod +x "$MOCK_BIN/claude"
 
@@ -475,7 +495,7 @@ in
                   WRAPIX_AGENT=claude \
                   WRAPIX_PROMPT_FILE="$TMPDIR/task.md" \
                   WRAPIX_DOCS_DIR="$TMPDIR/docs" \
-                  "$AGENT" run 2>&1)"
+                  bash "$AGENT" run 2>&1)"
 
                 echo "$output" | grep -q "Project uses Nix" || { echo "FAIL: docs/README.md missing from prompt"; exit 1; }
                 echo "$output" | grep -q "set -euo pipefail" || { echo "FAIL: docs/style-guidelines.md missing from prompt"; exit 1; }
@@ -484,7 +504,7 @@ in
                 # Missing prompt file should fail
                 exit_code=0
                 PATH="$MOCK_BIN:$PATH" WRAPIX_AGENT=claude WRAPIX_PROMPT_FILE="/nonexistent" \
-                  "$AGENT" run > /dev/null 2>&1 || exit_code=$?
+                  bash "$AGENT" run > /dev/null 2>&1 || exit_code=$?
                 [[ "$exit_code" -ne 0 ]] || { echo "FAIL: should fail on missing prompt file"; exit 1; }
 
                 rm -rf "$TMPDIR"
@@ -493,8 +513,8 @@ in
       '';
 
   # Provider: worker creates worktree (functional with mock podman)
-  gc-provider-worker =
-    runCommandLocal "gc-provider-worker"
+  city-provider-worker =
+    runCommandLocal "city-provider-worker"
       {
         nativeBuildInputs = [
           bash
@@ -505,7 +525,7 @@ in
                 set -euo pipefail
                 PROVIDER="${../lib/city/provider.sh}"
 
-                echo "Testing provider.sh worker Start..."
+                echo "Testing provider.sh worker start..."
 
                 TMPDIR=$(mktemp -d)
                 MOCK_BIN="$TMPDIR/bin"
@@ -522,12 +542,12 @@ in
 
                 # Mock podman (record calls, succeed)
                 cat > "$MOCK_BIN/podman" << MOCK
-        #!/usr/bin/env bash
+        #!/bin/sh
         echo "\$@" >> "$TMPDIR/podman.log"
         MOCK
                 chmod +x "$MOCK_BIN/podman"
                 cat > "$MOCK_BIN/bd" << MOCK
-        #!/usr/bin/env bash
+        #!/bin/sh
         echo "\$@" >> "$TMPDIR/bd.log"
         MOCK
                 chmod +x "$MOCK_BIN/bd"
@@ -538,7 +558,7 @@ in
                   GC_AGENT_IMAGE="test-image:latest" \
                   GC_PODMAN_NETWORK="wrapix-test" \
                   GC_BEAD_ID="bead-123" \
-                  "$PROVIDER" Start worker-1 > "$TMPDIR/out" 2>&1 || true
+                  bash "$PROVIDER" start worker-1 > "$TMPDIR/out" 2>&1 || true
 
                 # Worktree should exist
                 test -d "$TMPDIR/.wrapix/worktree/gc-bead-123" || { echo "FAIL: worktree not created"; exit 1; }
@@ -567,7 +587,7 @@ in
       '';
 
   # NixOS module: verifies env var plumbing via Nix evaluation
-  gc-nixos-module =
+  city-nixos-module =
     let
       moduleFile = builtins.readFile ../modules/city.nix;
 
@@ -591,14 +611,14 @@ in
     assert
       hasPodmanNetwork
       || throw "NixOS module does not set GC_PODMAN_NETWORK — provider.sh requires it for container networking";
-    runCommandLocal "gc-nixos-module" { } ''
+    runCommandLocal "city-nixos-module" { } ''
       echo "PASS: NixOS module structure and env var plumbing verified"
       mkdir $out
     '';
 
   # Formulas: structural validation (these are TOML for the AI, grep is appropriate here)
-  gc-formulas =
-    runCommandLocal "gc-formulas"
+  city-formulas =
+    runCommandLocal "city-formulas"
       {
         nativeBuildInputs = [
           bash
@@ -630,9 +650,47 @@ in
         mkdir $out
       '';
 
+  # Scripts and orders bundle
+  city-scripts-bundle =
+    let
+      hasScripts = builtins.hasAttr "scripts" minimalCity;
+    in
+    assert hasScripts;
+    runCommandLocal "city-scripts-bundle"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+        echo "Checking scripts bundle..."
+
+        # Gate, post-gate, recovery scripts are bundled
+        test -f "${minimalCity.scripts}/gate.sh" || { echo "FAIL: gate.sh missing"; exit 1; }
+        test -f "${minimalCity.scripts}/post-gate.sh" || { echo "FAIL: post-gate.sh missing"; exit 1; }
+        test -f "${minimalCity.scripts}/recovery.sh" || { echo "FAIL: recovery.sh missing"; exit 1; }
+        echo "  PASS: gate.sh, post-gate.sh, recovery.sh bundled"
+
+        # Scripts are executable
+        test -x "${minimalCity.scripts}/gate.sh" || { echo "FAIL: gate.sh not executable"; exit 1; }
+        test -x "${minimalCity.scripts}/post-gate.sh" || { echo "FAIL: post-gate.sh not executable"; exit 1; }
+        echo "  PASS: scripts are executable"
+
+        # Orders directory exists with post-gate order
+        test -f "${minimalCity.formulas}/orders/post-gate/order.toml" || { echo "FAIL: post-gate order missing"; exit 1; }
+        grep -q 'convergence.terminated' "${minimalCity.formulas}/orders/post-gate/order.toml" || \
+          { echo "FAIL: post-gate order missing event trigger"; exit 1; }
+        echo "  PASS: post-gate order bundled"
+
+        echo "PASS: Scripts and orders bundle verified"
+        mkdir $out
+      '';
+
   # Validate generated city.toml with the gc binary
-  gc-config-validate =
-    runCommandLocal "gc-config-validate"
+  city-config-validate =
+    runCommandLocal "city-config-validate"
       {
         nativeBuildInputs = [
           bash

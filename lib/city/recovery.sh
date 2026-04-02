@@ -157,8 +157,8 @@ reconcile_finished_workers() {
       local merge_base
       merge_base="$(git -C "$WORKSPACE" merge-base main "$branch" 2>/dev/null)" || merge_base=""
       if [[ -n "$merge_base" ]]; then
-        bd meta set "$bead_id" commit_range "${merge_base}..${branch}" 2>/dev/null || true
-        bd meta set "$bead_id" branch_name "$branch" 2>/dev/null || true
+        bd update "$bead_id" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
+        bd update "$bead_id" --set-metadata "branch_name=$branch" 2>/dev/null || true
       fi
     fi
   done <<< "$worktrees"

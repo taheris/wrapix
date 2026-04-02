@@ -28,15 +28,18 @@ WORKTREE_PATH=".wrapix/worktree/gc-${BEAD_ID}"
 # ---------------------------------------------------------------------------
 
 notify() {
-  wrapix-notifyd "$1" 2>/dev/null || true
+  wrapix-notify "Gas City" "$1" 2>/dev/null || true
 }
 
 # Clean up worktree and branch for a bead. Called after merge or rejection.
 cleanup_branch() {
   local branch="$1" worktree="$2"
 
-  if git -C "$WORKSPACE" worktree list --porcelain | grep -q "$worktree"; then
-    git -C "$WORKSPACE" worktree remove "$worktree" --force 2>/dev/null || true
+  # Remove worktree directory directly — git worktree remove may fail because
+  # provider.sh rewrites .git to a container-internal path (/mnt/git/...).
+  if [[ -d "$worktree" ]]; then
+    rm -rf "$worktree"
+    git -C "$WORKSPACE" worktree prune 2>/dev/null || true
   fi
 
   if git -C "$WORKSPACE" rev-parse --verify "$branch" >/dev/null 2>&1; then
@@ -52,7 +55,7 @@ reject_to_worker() {
   echo "post-gate: rejecting bead $BEAD_ID back to worker: $reason" >&2
 
   # Record failure context on the bead so the next worker sees it
-  bd meta set "$BEAD_ID" merge_failure "$reason" 2>/dev/null || true
+  bd update "$BEAD_ID" --set-metadata "merge_failure=$reason" 2>/dev/null || true
   bd update "$BEAD_ID" --status=open --notes="Merge rejected: $reason" 2>/dev/null || true
 
   # Clean up old branch — new worker creates a fresh one
@@ -70,7 +73,7 @@ has_auto_deploy() {
 # Check if the reviewer classified the change as low-risk.
 is_low_risk() {
   local risk
-  risk="$(bd meta get "$BEAD_ID" risk_classification 2>/dev/null)" || risk=""
+  risk="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.risk_classification // empty' 2>/dev/null)" || risk=""
   [[ "$risk" == "low" ]]
 }
 
@@ -178,10 +181,10 @@ create_deploy_bead() {
   # Determine whether to flag for director approval or auto-deploy
   if has_auto_deploy && is_low_risk; then
     echo "post-gate: auto-deploy eligible (low-risk + Auto-deploy configured)"
-    bd meta set "$deploy_id" auto_deploy "true" 2>/dev/null || true
+    bd update "$deploy_id" --set-metadata "auto_deploy=true" 2>/dev/null || true
   else
     # Default: flag for director approval
-    bd human "$deploy_id" 2>/dev/null || true
+    bd label add "$deploy_id" human 2>/dev/null || true
     notify "[${CITY_NAME}] Deploy approval needed: ${title} (bead ${deploy_id})"
   fi
 }

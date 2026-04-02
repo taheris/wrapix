@@ -8,8 +8,6 @@
 let
   inherit (builtins) elem pathExists;
   inherit (pkgs) writeShellScriptBin;
-
-  isDarwin = system == "aarch64-darwin";
   isLinux = elem system [
     "x86_64-linux"
     "aarch64-linux"
@@ -65,27 +63,16 @@ let
   tomlTests = import ./toml.nix { inherit pkgs; };
 
   # Gas City tests (layered: eval, provider, lifecycle)
-  gcTests = import ./gc.nix { inherit pkgs system; };
+  cityTests = import ./city.nix { inherit pkgs system; };
 
-  # Gas City integration tests (NixOS VM, requires KVM at build time)
-  # Always defined so the attribute exists; fails at build time without KVM.
-  gcIntegrationTests = if isLinux then import ./gc-integration.nix { inherit pkgs; } else { };
+  # Gas City integration test (shell-based, requires podman at runtime)
+  cityIntegration = import ./city-integration.nix { inherit pkgs; };
 
   # Lint checks run on all platforms
   # README example verification
   readmeTest = {
     readme = import ./readme.nix { inherit pkgs src; };
   };
-
-  # Gas City combined check (for gc-fast pre-commit hook)
-  gcFastCheck = pkgs.runCommandLocal "gc-fast" { } ''
-    # Depend on all gc checks to ensure they all pass
-    ${builtins.concatStringsSep "\n" (
-      builtins.map (name: "echo \"  ${name}: ${gcTests.${name}}\"") (builtins.attrNames gcTests)
-    )}
-    echo "PASS: All Gas City fast checks"
-    mkdir $out
-  '';
 
   # All checks combined
   checks =
@@ -100,18 +87,13 @@ let
     // tmuxMcpTests
     // tomlTests
     // readmeTest
-    // gcTests
-    // gcIntegrationTests
-    // {
-      gc-fast = gcFastCheck;
-    };
+    // cityTests;
 
   # ============================================================================
   # Integration Test Runners (require runtime environment)
   # ============================================================================
 
   # Darwin container integration tests
-  darwinIntegrationTests = import ./darwin { inherit pkgs system; };
 
   # Ralph workflow integration tests (with mock-claude)
   # Copy entire ralph test directory to store so run-tests.sh can find mock-claude and scenarios
@@ -140,29 +122,12 @@ let
   '';
 
   # Builder integration tests (Darwin only)
-  builderIntegrationTests = writeShellScriptBin "test-builder" ''
-    set -euo pipefail
-    exec ${./builder-test.sh}
-  '';
 
   # ============================================================================
-  # Individual Test Runner Apps
+  # Test Runner Apps
   # ============================================================================
 
-  # Lint-only tests (fast: ~5s)
-  testLint = writeShellScriptBin "test-lint" ''
-    set -euo pipefail
-    echo "=== Lint Checks ==="
-    echo ""
-    echo "Running: nix flake check (treefmt)"
-    echo "This runs nixfmt, shellcheck, statix, deadnix, and rustfmt checks."
-    echo ""
-    ${pkgs.nix}/bin/nix build --no-link \
-      .#checks.${system}.treefmt
-    echo "PASS: All lint checks"
-  '';
-
-  # Ralph integration tests only (no flake check)
+  # Ralph integration tests only
   testRalph = writeShellScriptBin "test-ralph" ''
     set -euo pipefail
     echo "=== Ralph Integration Tests ==="
@@ -170,104 +135,10 @@ let
     ${ralphIntegrationTests}/bin/test-ralph-integration
   '';
 
-  # ============================================================================
-  # Unified Test Runner App
-  # ============================================================================
-
+  # Fast tests: nix flake check (lint, smoke, unit tests)
   testAll = writeShellScriptBin "test-all" ''
     set -euo pipefail
-
-    FAILED=0
-    SKIPPED_TESTS=""
-
-    echo "=== Wrapix Test Suite ==="
-    echo ""
-
-    # ----------------------------------------
-    # Nix Flake Checks (skipped - already run by nix flake check)
-    # ----------------------------------------
-    # NOTE: Removed embedded "nix flake check" call.
-    # If you ran "nix run .#test", the checks were already built.
-    # Run "nix flake check" separately if you want lint/smoke checks.
-    # This saves ~50s by avoiding redundant evaluation.
-
-    # ----------------------------------------
-    # Ralph Integration Tests
-    # ----------------------------------------
-    echo "----------------------------------------"
-    echo "Running: Ralph Integration Tests"
-    echo "----------------------------------------"
-    if ${ralphIntegrationTests}/bin/test-ralph-integration; then
-      echo "PASS: Ralph integration tests"
-    else
-      echo "FAIL: Ralph integration tests"
-      FAILED=1
-    fi
-    echo ""
-
-    # ----------------------------------------
-    # Darwin Integration Tests
-    # ----------------------------------------
-    echo "----------------------------------------"
-    echo "Running: Darwin Integration Tests"
-    echo "----------------------------------------"
-    ${
-      if isDarwin then
-        ''
-          if ${darwinIntegrationTests}/bin/test-darwin; then
-            echo "PASS: Darwin integration tests"
-          else
-            echo "FAIL: Darwin integration tests"
-            FAILED=1
-          fi
-        ''
-      else
-        ''
-          echo "SKIP: Darwin tests (not on Darwin)"
-          SKIPPED_TESTS="$SKIPPED_TESTS darwin"
-        ''
-    }
-    echo ""
-
-    # ----------------------------------------
-    # Builder Integration Tests (Darwin only)
-    # ----------------------------------------
-    echo "----------------------------------------"
-    echo "Running: Builder Integration Tests"
-    echo "----------------------------------------"
-    ${
-      if isDarwin then
-        ''
-          if ${builderIntegrationTests}/bin/test-builder; then
-            echo "PASS: Builder integration tests"
-          else
-            echo "FAIL: Builder integration tests"
-            FAILED=1
-          fi
-        ''
-      else
-        ''
-          echo "SKIP: Builder tests (not on Darwin)"
-          SKIPPED_TESTS="$SKIPPED_TESTS builder"
-        ''
-    }
-    echo ""
-
-    # ----------------------------------------
-    # Summary
-    # ----------------------------------------
-    echo "========================================"
-    if [ "$FAILED" -eq 0 ]; then
-      if [ -n "$SKIPPED_TESTS" ]; then
-        echo "ALL TESTS PASSED (skipped:$SKIPPED_TESTS)"
-      else
-        echo "ALL TESTS PASSED"
-      fi
-      exit 0
-    else
-      echo "SOME TESTS FAILED"
-      exit 1
-    fi
+    exec ${pkgs.nix}/bin/nix flake check "$@"
   '';
 
 in
@@ -275,27 +146,27 @@ in
   # Checks for `nix flake check`
   inherit checks;
 
-  # App for `nix run .#test`
+  # App for `nix run .#test` — fast checks (~10s)
   app = {
-    meta.description = "Run all tests (some skip gracefully based on platform)";
+    meta.description = "Run fast tests: nix flake check (lint, smoke, unit)";
     type = "app";
     program = "${testAll}/bin/test-all";
   };
 
-  # Additional apps for selective testing
+  # Individual test apps for selective running
   apps = {
-    # Fast lint-only tests (~5s)
-    lint = {
-      meta.description = "Run lint checks only (nixfmt, shellcheck, statix)";
-      type = "app";
-      program = "${testLint}/bin/test-lint";
-    };
-
     # Ralph integration tests only (~20s)
     ralph = {
       meta.description = "Run ralph integration tests only";
       type = "app";
       program = "${testRalph}/bin/test-ralph";
+    };
+
+    # Gas City integration test (requires podman)
+    city = {
+      meta.description = "Run Gas City full ops loop integration test (requires podman)";
+      type = "app";
+      program = "${cityIntegration.script}/bin/test-city";
     };
   };
 
@@ -312,7 +183,7 @@ in
     tmuxMcpTests
     tomlTests
     readmeTest
-    gcTests
-    gcIntegrationTests
+    cityTests
+    cityIntegration
     ;
 }

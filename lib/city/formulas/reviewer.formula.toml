@@ -81,13 +81,13 @@ Be precise — only flag violations of DOCUMENTED rules.
 
 **If all rules pass → approve:**
 ```bash
-bd meta set $BEAD_ID review_verdict approve
+bd update $BEAD_ID --set-metadata "review_verdict=approve"
 bd update $BEAD_ID --notes "Reviewer: approved — all style guidelines pass"
 ```
 
 **If documented rule violations found → reject:**
 ```bash
-bd meta set $BEAD_ID review_verdict reject
+bd update $BEAD_ID --set-metadata "review_verdict=reject"
 bd update $BEAD_ID --notes "Reviewer: rejected — $VIOLATION_DETAILS"
 ```
 Include specific rule references and line numbers so the next worker
@@ -96,7 +96,7 @@ iteration can address them precisely.
 **If issues found outside documented rules → flag for director:**
 Do NOT reject based on undocumented opinions. Flag for human review:
 ```bash
-bd human $BEAD_ID "Non-documented concern: $DESCRIPTION"
+bd label add $BEAD_ID human && bd note $BEAD_ID "Non-documented concern: $DESCRIPTION"
 ```
 Still set verdict based only on documented rules (approve if no
 documented violations, even if flagged).

@@ -98,12 +98,22 @@ let
         reviewer = ./formulas/reviewer.formula.toml;
       };
 
-      # Copy formulas into the Nix store as a directory
+      # Copy formulas and orders into the Nix store as a directory
       formulasDir = pkgs.runCommand "wrapix-formulas" { } ''
-        mkdir -p $out
+        mkdir -p $out/orders/post-gate
         cp ${./formulas/scout.formula.toml} $out/wrapix-scout.formula.toml
         cp ${./formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
         cp ${./formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
+        cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
+      '';
+
+      # City scripts — gate, post-gate, recovery bundled for .gc/scripts/
+      scriptsDir = pkgs.runCommand "wrapix-city-scripts-dir" { } ''
+        mkdir -p $out
+        cp ${./gate.sh} $out/gate.sh
+        cp ${./post-gate.sh} $out/post-gate.sh
+        cp ${./recovery.sh} $out/recovery.sh
+        chmod +x $out/*.sh
       '';
 
       # Build the city.toml configuration (matches gc's Go config schema)
@@ -132,20 +142,43 @@ let
           restart_window = "1h";
         };
 
+        convergence = {
+          max_per_agent = 2;
+          max_total = 10;
+        };
+
         # [[agent]] — rendered as array of tables
+        # Custom scale_check: gc's default runs two bd queries which can
+        # timeout under dolt contention (gc hardcodes 30s). A single
+        # bd list query is ~2x faster and avoids the timeout.
         agent = [
           {
             name = "scout";
             scope = "city";
+            scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
           {
             name = "worker";
             scope = "city";
             max_active_sessions = workers;
+            scale_check = "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
           {
             name = "reviewer";
             scope = "city";
+            scale_check = "bd list --metadata-field gc.routed_to=reviewer --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+          }
+        ];
+
+        # [[named_session]] — persistent sessions that gc auto-starts
+        named_session = [
+          {
+            template = "scout";
+            mode = "always";
+          }
+          {
+            template = "reviewer";
+            mode = "always";
           }
         ];
       };
@@ -193,10 +226,27 @@ let
         # Copy Nix-generated config so gc finds it
         # (files must be real, not store symlinks, for container mounts)
         cp -f ${cityToml} city.toml
-        mkdir -p .gc/formulas
+        mkdir -p .gc/formulas .gc/scripts
         for f in ${formulasDir}/*.formula.toml; do
           cp -f "$f" .gc/formulas/
         done
+        # Copy orders (preserve directory structure)
+        cp -rf ${formulasDir}/orders .gc/formulas/
+        # Copy scripts (gate, post-gate, recovery)
+        for f in ${scriptsDir}/*; do
+          cp -f "$f" .gc/scripts/
+        done
+
+        # gc creates beads with custom types (session, convoy, convergence, etc.);
+        # register the gc default set plus convergence (used by gc converge create).
+        if [ -d .beads ]; then
+          _gc_types="molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
+          _existing=$(bd config get types.custom 2>/dev/null || echo "")
+          if [ -z "$_existing" ] || [ "$_existing" != "$_gc_types" ]; then
+            bd config set types.custom "$_gc_types" 2>/dev/null || true
+          fi
+          unset _gc_types _existing
+        fi
       '';
 
       # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox
@@ -222,7 +272,7 @@ let
           '';
         };
 
-      # App for `nix run .#city` — sets up env and runs gc
+      # App for `nix run .#city` — sets up env and runs gc via entrypoint
       app = {
         meta.description = "Gas City orchestration loop";
         type = "app";
@@ -234,12 +284,16 @@ let
           export GC_PODMAN_NETWORK="${networkName}"
 
           cp -f ${cityToml} city.toml
-          mkdir -p .gc/formulas
+          mkdir -p .gc/formulas .gc/scripts
           for f in ${formulasDir}/*.formula.toml; do
             cp -f "$f" .gc/formulas/
           done
+          cp -rf ${formulasDir}/orders .gc/formulas/
+          for f in ${scriptsDir}/*; do
+            cp -f "$f" .gc/scripts/
+          done
 
-          exec ${pkgs.gc}/bin/gc start --foreground "$@"
+          exec ${./entrypoint.sh}
         ''}/bin/wrapix-city";
       };
 
@@ -278,6 +332,9 @@ let
 
       # Default role formulas (directory of .formula.toml files)
       formulas = formulasDir;
+
+      # City scripts (gate, post-gate, recovery) for .gc/scripts/
+      scripts = scriptsDir;
 
       # Individual formula paths for selective override
       inherit defaultFormulas;
