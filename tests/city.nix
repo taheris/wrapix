@@ -393,6 +393,7 @@ in
         nativeBuildInputs = [
           bash
           pkgs.coreutils
+          pkgs.jq
         ];
       }
       ''
@@ -406,11 +407,9 @@ in
                 # Test 1: approve -> exit 0
                 cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        if [ "$1" = "meta" ] && [ "$2" = "get" ]; then
-          case "$4" in
-            commit_range) echo "abc..def" ;;
-            review_verdict) echo "approve" ;;
-          esac
+        # bd show <id> --json returns array with metadata
+        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
+          echo '[{"metadata":{"commit_range":"abc..def","review_verdict":"approve"}}]'
         fi
         MOCK
                 chmod +x "$MOCK_BIN/bd"
@@ -427,11 +426,8 @@ in
                 # Test 2: reject -> exit 1
                 cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        if [ "$1" = "meta" ] && [ "$2" = "get" ]; then
-          case "$4" in
-            commit_range) echo "abc..def" ;;
-            review_verdict) echo "reject" ;;
-          esac
+        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
+          echo '[{"metadata":{"commit_range":"abc..def","review_verdict":"reject"}}]'
         fi
         MOCK
                 chmod +x "$MOCK_BIN/bd"
@@ -445,7 +441,9 @@ in
                 # Test 3: missing commit_range -> exit 1
                 cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo ""
+        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
+          echo '[{"metadata":{}}]'
+        fi
         MOCK
                 chmod +x "$MOCK_BIN/bd"
 

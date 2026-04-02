@@ -11,14 +11,19 @@
 #     4. Worker processes in worktree, commits, exits
 #     5. gate.sh nudges reviewer, reviewer approves
 #     6. post-gate.sh merges, creates deploy bead, flags bd human
-#     7. Director approves deploy via bd human respond
-#     8. Verify: merge on main, worktree cleaned up, stale context swept
+#     7. Verify: merge on main, worktree cleaned up
+#     gc is stopped after Phase 1 — remaining phases run without it.
 #
 #   Phase 2 (merge conflict):
 #     1. Conflicting change on main
-#     2. Second bead slung, worker commits, reviewer approves
+#     2. Simulated worker commits on divergent branch
 #     3. post-gate detects rebase conflict → reject_to_worker
 #     4. Verify: bead reopened, worktree cleaned up
+#
+#   Phase 3 (escalation):
+#     1. Convergence ends with non-approved reason
+#     2. post-gate handles escalation path
+#     3. Verify: worktree and branch cleaned up
 #
 # Requires podman. Run via: nix run .#test-city
 { pkgs }:
@@ -85,7 +90,7 @@ let
             ;;
           reviewer|reviewer*)
             # Poll for beads needing review, approve them
-            for i in $(seq 1 120); do
+            for i in $(seq 1 300); do
               for id in $(bd list --status=in_progress --json 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
                 cr=$(bd show "$id" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null) || cr=""
                 if [ -n "$cr" ]; then
@@ -97,7 +102,7 @@ let
                   fi
                 fi
               done
-              sleep 2
+              sleep 1
             done
             ;;
           *)
@@ -279,13 +284,12 @@ let
       echo ""
       echo "--- Cleanup ---"
       if [ -n "$GC_PID" ] && kill -0 "$GC_PID" 2>/dev/null; then
-        kill "$GC_PID" 2>/dev/null || true
-        # Give gc 5s to exit gracefully, then force-kill
+        kill -TERM -"$GC_PID" 2>/dev/null || true
         for _ in $(seq 1 50); do
           kill -0 "$GC_PID" 2>/dev/null || break
           sleep 0.1
         done
-        kill -9 "$GC_PID" 2>/dev/null || true
+        kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
       podman ps --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
@@ -333,13 +337,20 @@ let
     poll_until() {
       local cmd="$1"
       local timeout="''${2:-30}"
-      local interval="''${3:-2}"
+      local interval="''${3:-1}"
       local elapsed=0
       echo "  > waiting (up to ''${timeout}s): $cmd"
       while [ "$elapsed" -lt "$timeout" ]; do
         if eval "$cmd" >/dev/null 2>&1; then
           echo "  > satisfied after ''${elapsed}s"
           return 0
+        fi
+        # Early exit if gc died while we're polling
+        if [ -n "$GC_PID" ] && ! kill -0 "$GC_PID" 2>/dev/null; then
+          echo "  > gc (pid $GC_PID) died during poll"
+          echo "  gc.log tail:"
+          tail -20 "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
+          return 1
         fi
         sleep "$interval"
         elapsed=$((elapsed + interval))
@@ -353,8 +364,8 @@ let
     # ================================================================
 
     if ! command -v podman >/dev/null 2>&1; then
-      echo "ERROR: podman not found. This test requires podman on the host."
-      exit 1
+      echo "SKIP: podman not found — city integration tests require podman on the host."
+      exit 0
     fi
 
     echo "=== Gas City Integration Test ==="
@@ -432,7 +443,7 @@ let
       # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-scout gc-test-city-reviewer 2>/dev/null || true
       podman network create "$NETWORK_NAME"
-      gc start --foreground > "$WS/gc.log" 2>&1 &
+      setsid gc start --foreground > "$WS/gc.log" 2>&1 &
       GC_PID=$!
       sleep 3
       if ! kill -0 "$GC_PID" 2>/dev/null; then
@@ -497,6 +508,29 @@ let
     subtest "Verify branch cleaned up" verify_branch_cleaned
 
     # ================================================================
+    # Stop gc — Phase 2+ don't need it (saves resources, faster cleanup)
+    # ================================================================
+
+    stop_gc() {
+      if [ -n "$GC_PID" ] && kill -0 "$GC_PID" 2>/dev/null; then
+        # gc runs in its own session (setsid) — kill the entire process group
+        # so bd/dolt grandchildren don't orphan and hold dolt locks
+        kill -TERM -"$GC_PID" 2>/dev/null || true
+        for _ in $(seq 1 100); do
+          kill -0 "$GC_PID" 2>/dev/null || break
+          sleep 0.1
+        done
+        kill -9 -"$GC_PID" 2>/dev/null || true
+        wait "$GC_PID" 2>/dev/null || true
+      fi
+      # Stop and remove gc containers
+      podman ps --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+      podman ps -a --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+      GC_PID=""
+    }
+    subtest "Stop gc after Phase 1" stop_gc
+
+    # ================================================================
     # Phase 2: Merge conflict — rebase fails, reject_to_worker
     # ================================================================
 
@@ -553,6 +587,41 @@ let
 
     subtest "Verify old worktree cleaned up after rejection" \
       test ! -d "$WS/.wrapix/worktree/gc-$BEAD2"
+
+    # ================================================================
+    # Phase 3: Escalation — convergence ends with non-approved reason
+    # ================================================================
+
+    subtest "Create escalation bead" \
+      bd create --title="Escalation test" --type=bug --priority=2
+
+    BEAD3=$(bd list --json --title "Escalation test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_escalation_worktree() {
+      [ -n "$BEAD3" ] && [ "$BEAD3" != "null" ] || return 1
+      local wt="$WS/.wrapix/worktree/gc-$BEAD3"
+      git worktree add "$wt" -b "gc-$BEAD3" HEAD 2>/dev/null || \
+        git worktree add "$wt" "gc-$BEAD3"
+      bd update "$BEAD3" --status=in_progress
+    }
+    subtest "Set up worktree for escalation bead" setup_escalation_worktree
+
+    run_post_gate_escalation() {
+      GC_BEAD_ID="$BEAD3" \
+      GC_TERMINAL_REASON="max_rounds_exceeded" \
+      GC_WORKSPACE="$WS" \
+      GC_CITY_NAME="test-city" \
+        bash ${scriptsDir}/post-gate.sh
+    }
+    subtest "Post-gate handles escalation (non-approved)" run_post_gate_escalation
+
+    subtest "Verify escalation worktree cleaned up" \
+      test ! -d "$WS/.wrapix/worktree/gc-$BEAD3"
+
+    verify_escalation_branch_cleaned() {
+      ! git branch | grep "gc-$BEAD3"
+    }
+    subtest "Verify escalation branch cleaned up" verify_escalation_branch_cleaned
   '';
 
 in
