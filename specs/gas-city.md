@@ -42,9 +42,9 @@ ops pipeline with good defaults and minimal configuration.
 |-----------|------|
 | `gc start --foreground` | Controller — reconciliation loop, convergence, orders, scheduling |
 | Provider script | Translates gc commands to podman operations, manages worktrees, mounts bead context |
-| Post-gate order | Event-gated order triggered by `convergence.terminated` — merge, branch cleanup, deploy bead creation |
-| Gate condition script | Bridges convergence gate and reviewer session — nudges reviewer, waits for verdict |
-| Entrypoint wrapper | Init bead check, starts `podman events` watcher, then exec's `gc start --foreground` |
+| Post-gate order | Event-gated order triggered by `convergence.terminated` — notifies judge, deploy bead creation |
+| Gate condition script | Bridges convergence gate and judge session — nudges judge, waits for verdict |
+| Entrypoint wrapper | Prints pending review status, starts `podman events` watcher, then exec's `gc start --foreground` |
 
 ### Deployment Model
 
@@ -61,26 +61,32 @@ ops pipeline with good defaults and minimal configuration.
 
 ### Roles
 
-Four roles in the ops loop:
+Four agent roles in the ops loop (city government theme):
 
 | Role | Job | Lifetime | Workspace Access | Podman Socket |
 |------|-----|----------|-----------------|---------------|
-| **Scout** | Watches service containers, detects errors, creates beads | Persistent | Read-only + `.beads/` rw | Read-only (logs, inspect) |
+| **Mayor** | Human's conversational interface — triage, status briefing, executes approved actions | Persistent | Read-only + `.beads/` rw | None |
+| **Scout** | Watches service containers, detects errors, creates beads, system housekeeping | Persistent | Read-only + `.beads/` rw | Read-only (logs, inspect) |
 | **Worker** | Picks up a bead, investigates, writes the fix | Ephemeral (per bead) | Read-write (own worktree) | None |
-| **Reviewer** | Reviews every worker's output before merge, enforces style guidelines | Persistent | Read-only + `.beads/` rw | None |
-| **Director** | Human operator, makes structural decisions | Always | Full | Full |
+| **Judge** | Reviews every worker's output, enforces style guidelines, owns merge | Persistent | Read-write (for merge) + `.beads/` rw | None |
+
+The human interacts primarily through the Mayor via `gc session attach mayor`.
+Direct CLI access (`gc`, `bd`, `ralph`) is always available as a bypass.
 
 ### Ops Loop
 
 ```
-Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
+Scout (watching) --> creates bead --> Worker (fixes) --> Judge (reviews + merges)
    ^                                                          |
    |                                              +-----------+
    |                                              v           v
    |                                           merge       reject --> Worker retry
    |                                              |           |
    |                                              v           v (loop > 1)
-   +------------------------------------------ deploy     Director notified
+   +------------------------------------------ deploy     Mayor notified
+                                                              |
+                                                              v
+                                                     Human (via attach)
 ```
 
 - Scout is a persistent session. gc orders poke it on a polling interval
@@ -105,35 +111,84 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
   rather than creating a new one
 - Queue overflow protection: scout collapses related errors into a single bead
   across poll cycles, and stops creating new beads after a cap (configurable
-  via `scout.maxBeads`, default: 10 open beads). Director is notified when
+  via `scout.maxBeads`, default: 10 open beads). Mayor is notified when
   the cap is reached.
 - Workers run in isolated git worktrees with clean state per bead (see
   Session Lifecycle for details)
-- **gc convergence owns the worker→reviewer loop end-to-end.** Worker
-  executes the fix, reviewer is the gate, max iterations = 2. gc manages
-  session lifecycle, handoff between worker and reviewer, and escalation.
-  After 2 failed iterations, convergence escalates to the director via
-  notification. An event-gated order (`on: convergence.terminated`) triggers
-  the post-gate logic (merge, deploy) when convergence approves.
-- Reviewer enforces `docs/style-guidelines.md` mechanically; flags anything
-  outside documented rules for director review via `bd label add <id> human`
-- After reviewer approval, deploy is gated by risk tier (see Deploy section)
+- **gc convergence owns the worker→judge loop end-to-end.** Worker
+  executes the fix, judge is the gate, max iterations = 2. gc manages
+  session lifecycle, handoff between worker and judge, and escalation.
+  After 2 failed iterations, convergence escalates to the mayor.
+  An event-gated order (`on: convergence.terminated`) triggers
+  the post-gate logic (notify judge to merge, deploy bead) when
+  convergence approves.
+- Judge enforces `docs/style-guidelines.md` mechanically; flags anything
+  outside documented rules for human review via `bd label add <id> human`
+- After judge approval, deploy is gated by risk tier (see Deploy section)
 
-### Ad-hoc Director Requests
+### Mayor
 
-Two paths for the director to inject work:
+The mayor is a persistent agent that serves as the human's conversational
+interface to the city. The human interacts primarily via
+`gc session attach mayor` (primary) or `gc mail send --to mayor` (async).
+
+**Proactive briefing on attach:** When the human attaches, the mayor
+immediately presents:
+- Items pending human review (`bd human` queue) with context and
+  suggested actions (approve, reject, investigate further)
+- Changes that landed since last attach (merges, deploys)
+- Escalations or failures (convergence failures, judge flags)
+- Scout alerts (bead cap reached, container health issues)
+
+**Spec decomposition:** On startup and on attach, the mayor checks for spec
+changes via git diff against the last decomposition commit. If changes are
+found, it proposes beads broken down into implementable units. By default,
+the mayor waits for human approval before creating beads. Set
+`mayor.autoDecompose = true` to auto-create without approval.
+
+**Action execution:** The mayor executes approved actions on the human's
+behalf — dismissing beads, approving deploys, filing investigations,
+creating P0s. The human discusses and decides; the mayor runs the commands.
+
+**Informal grouping:** When asked about a topic ("what's happening with
+auth?"), the mayor queries beads and groups by common patterns — same
+module, same error, same area — without requiring a formal convoy/grouping
+data model.
+
+**Concierge, not analyst:** The mayor aggregates signals from the scout,
+judge, and convergence. It does not duplicate their analysis — it presents
+their findings conversationally with suggested actions.
+
+### Scout Housekeeping
+
+In addition to error detection, the scout performs system housekeeping
+during each patrol cycle:
+- **Stale beads:** identifies beads with no recent activity
+- **Orphaned workers:** detects containers with no matching in-progress bead
+- **Worktree cleanup:** removes stale worktrees in `.wrapix/worktree/gc-*`
+
+Housekeeping findings are reported via bead notes or flagged for human review
+if action is needed.
+
+### Ad-hoc Requests
+
+Two paths for the human to inject work (directly or via the Mayor):
 
 - **Investigation**: `gc mail send --to scout -s "investigate" -m "..."` —
   the scout picks this up on its next order cycle, investigates, and creates
   a bead if it finds something actionable. Lightweight, no bead created
-  upfront, no entry into the worker→reviewer loop unless warranted.
+  upfront, no entry into the worker→judge loop unless warranted. Via the
+  Mayor: "can you have the scout look into X?"
 - **Urgent fix**: `bd create --priority=0` — creates a P0 bead that bypasses
-  cooldown and enters the full ops loop (worker→reviewer→merge→deploy).
+  cooldown and enters the full ops loop (worker→judge→merge→deploy).
+  Via the Mayor: "this is urgent, create a P0 for X"
 
 ### Merge
 
-The post-gate order fires on `convergence.terminated` events. It checks
-`terminal_reason=approved` and handles merge:
+The judge owns both review and merge as one continuous flow. After approving
+a worker's changes, the judge merges immediately — no handoff to a separate
+script. This naturally serializes merges since the judge processes its queue
+one at a time.
 
 - Linear history only: `git merge --ff-only gc-<bead-id>`
 - If fast-forward fails (main advanced): rebase the branch onto main, run
@@ -141,78 +196,98 @@ The post-gate order fires on `convergence.terminated` events. It checks
   rebase, reject back to a new worker with the failure details.
 - If rebase has conflicts: reject back to a new worker with conflict details
   as context — no automatic conflict resolution
-- Reviewer does not run tests — it reviews code quality against
-  `docs/style-guidelines.md` only
+- Judge does not run tests — it reviews code quality against
+  `docs/style-guidelines.md` only. `prek` runs tests during rebase.
 - After merge: `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
   and `git branch -d gc-<bead-id>`. `git worktree remove` cannot be used
   because the provider rewrites the worktree's `.git` file with a
   container-internal path. On rejection, old branch is also deleted — the
   new worker creates a fresh one.
 
-#### Reviewer Gate
+The post-gate order still fires on `convergence.terminated` events but is
+lighter — it notifies the judge to merge (for approved convergences),
+handles deploy bead creation, and sends notifications. The judge does the
+actual git operations.
 
-The worker→reviewer handoff is managed by gc convergence with
+#### Judge Gate
+
+The worker→judge handoff is managed by gc convergence with
 `gate_mode=condition`. The gate condition script:
 
 1. Reads `commit_range` from bead metadata (set by the provider script
    after worker commits via `bd update <bead-id> --set-metadata "commit_range=<range>"`)
-2. Nudges the reviewer session with the commit range via `gc nudge reviewer`
+2. Nudges the judge session with the commit range via `gc nudge judge`
 3. Polls bead metadata for `review_verdict` (approve/reject), set by the
-   reviewer via `bd update <bead-id> --set-metadata "review_verdict=approve"`
+   judge via `bd update <bead-id> --set-metadata "review_verdict=approve"`
 4. Returns exit 0 on approve, exit 1 on reject — gc convergence uses this
    to decide whether to iterate or terminate
 
-The reviewer reads the bead from `.beads/`, diffs the commits, and reviews
+On rejection, the judge provides specific feedback referencing documented
+rules and line numbers. gc convergence starts a new worker iteration with
+the judge's notes included in the task file. After 2 failed iterations,
+convergence escalates to the mayor, who presents the situation to the human
+conversationally.
+
+The judge reads the bead from `.beads/`, diffs the commits, and reviews
 against `docs/style-guidelines.md`. Bead ID and role type are injected via
 the formula's `env` configuration, not `runtime.Config` directly.
 
 ### Notifications
 
-- The post-gate order and entrypoint wrapper call `wrapix-notify` (the
-  notification client) for director-facing events. `wrapix-notifyd` is the
-  daemon and must not be called directly (it blocks).
-  - `bd label add <id> human` flags (reviewer flagged something outside
-    documented rules)
-  - Convergence escalation (max iterations reached — worker→reviewer loop
-    failed twice)
-  - Deploy approval needed
-  - Periodic digest (hot spots, fix counts, rejection rates) — generated
-    by a cooldown-gated digest order on a configurable interval
+Two notification paths:
+
+**Mayor-mediated (primary):** The mayor aggregates signals from other roles
+and presents them to the human conversationally on attach. Events flow to the
+mayor, not directly to the human:
+- `bd label add <id> human` flags (judge flagged something outside
+  documented rules)
+- Convergence escalation (max iterations reached — worker→judge loop
+  failed twice)
+- Deploy approval needed
+- Spec decomposition proposals ready for review
+
+**`wrapix-notify` (fallback):** For events that need attention when the human
+is not attached to the mayor. The post-gate order and entrypoint wrapper call
+`wrapix-notify` (the notification client). `wrapix-notifyd` is the daemon and
+must not be called directly (it blocks).
+- Periodic digest (hot spots, fix counts, rejection rates) — generated
+  by a cooldown-gated digest order on a configurable interval
 - The gc container mounts the notify socket (same pattern as podman socket)
 - Future: migrate to beads hooks when available, so standalone `ralph run`
   users also get notifications
 
 ### Deploy
 
-- After reviewer approval, the post-gate order creates a deploy bead
+- After judge approval and merge, the post-gate order creates a deploy bead
   summarizing the change and its risk classification
-- Default: deploy beads are flagged for director approval via
-  `bd label add <id> human`. The director runs `nix build` on the host,
+- Default: deploy beads are flagged for human approval via
+  `bd label add <id> human`. The mayor presents deploy beads to the human
+  on attach with suggested action. The human runs `nix build` on the host,
   then restarts the affected containers manually
   (`podman stop && podman rm && podman run`).
 - Consumer can opt into auto-deploy for low-risk changes by defining an
-  `## Auto-deploy` section in `docs/orchestration.md`. When the reviewer
+  `## Auto-deploy` section in `docs/orchestration.md`. When the judge
   classifies a change as low-risk per these rules, the post-gate order
   skips the human label. A cooldown-gated deploy order polls for
   unflagged deploy beads and restarts containers automatically (still
-  requires the director or CI to have pre-built the images).
+  requires the human or CI to have pre-built the images).
 - The gc container does not run Nix builds. Rolling restarts and database
   migrations are out of scope for v1.
 
 ### Build-to-Ops Transition
 
 - No automatic escalation from ops to build mode, ever
-- The system surfaces patterns for the director to interpret:
+- The system surfaces patterns for the human to interpret (via the mayor):
   - Worker observations: "this is a patch, the real fix needs restructuring"
     (flagged via `bd label add <id> human`)
-  - Reviewer observations: "third patch to this module this week"
+  - Judge observations: "third patch to this module this week"
     (flagged via `bd label add <id> human`)
   - Periodic digest: hot spots, fix counts, rejection rates (see
     Notifications section)
-- Director decides when to initiate `ralph plan` for a spec-driven redesign
+- Human decides when to initiate `ralph plan` for a spec-driven redesign
 - During a build: creating a spec bead implicitly holds the affected area.
   The spec bead's description should name the modules/files under redesign.
-  The reviewer checks for active spec beads and rejects worker fixes that
+  The judge checks for active spec beads and rejects worker fixes that
   touch held areas. When the spec bead closes, the hold lifts automatically.
 - Build complete to ops: automatic — scout watches new code, no explicit handoff
 
@@ -223,7 +298,7 @@ the formula's `env` configuration, not `runtime.Config` directly.
 | `docs/README.md` | git | Always (baked into formulas) | Project overview, terminology |
 | `docs/architecture.md` | git | On demand (referenced by formulas when needed) | System design |
 | `docs/orchestration.md` | git | On demand (loaded by ops formulas at session start) | Ops config, deploy commands, role rules |
-| `docs/style-guidelines.md` | git | On demand (loaded by reviewer formula at session start) | Code standards the reviewer enforces |
+| `docs/style-guidelines.md` | git | On demand (loaded by judge formula at session start) | Code standards the judge enforces |
 | `.wrapix/orchestration.md` | local | On demand (loaded by ops formulas at session start) | Dynamic/temporal overrides |
 
 - `ralph sync` always scaffolds missing docs files for any project:
@@ -233,22 +308,21 @@ the formula's `env` configuration, not `runtime.Config` directly.
 - When `ralph sync` detects `mkCity` in the flake, it additionally scaffolds
   `docs/orchestration.md` from the built city config with placeholder sections
   for deploy commands, scout rules, and auto-deploy criteria.
-- All scaffolded files are created as beads flagged for director review via
+- All scaffolded files are created as beads flagged for human review via
   `bd label add <id> human`
-- Director reviews and approves scaffolded files before running `gc start`
-- The entrypoint wrapper checks for unresolved scaffolding beads (created by
-  `ralph sync`) before starting gc. If any exist, it prints a warning listing
-  the pending reviews and exits.
+- The entrypoint wrapper prints an informational summary of pending reviews
+  on startup (including scaffolding beads) but does not block. This is
+  expected operation — the mayor presents these items to the human on attach.
 - `.wrapix/orchestration.md` is tool-managed — updated by gc commands, not
   manually edited
 
 ### Anti-Slop
 
-- Reviewer enforces `docs/style-guidelines.md` mechanically
-- Changes outside documented rules are flagged for director, not auto-decided
-- Director decisions feed back into `docs/style-guidelines.md`, growing the rules
+- Judge enforces `docs/style-guidelines.md` mechanically
+- Changes outside documented rules are flagged for human (via mayor), not auto-decided
+- Human decisions feed back into `docs/style-guidelines.md`, growing the rules
   organically
-- Reviewer also sweeps `.wrapix/orchestration.md` for stale dynamic context
+- Judge also sweeps `.wrapix/orchestration.md` for stale dynamic context
   (expired dated entries, undated entries older than 7 days)
 
 ### Nix API
@@ -288,11 +362,15 @@ wrapix.mkCity {
   scout.interval = "5m";      # polling interval (default: "5m")
   scout.maxBeads = 10;         # bead cap before scout pauses (default: 10)
 
+  # Mayor configuration
+  mayor.autoDecompose = false; # auto-create beads from spec changes (default: false)
+
   # Resource limits per role (optional, default: no limits)
   resources = {
     worker = { cpus = 2; memory = "4g"; };
     scout = { cpus = 1; memory = "2g"; };
-    reviewer = { cpus = 1; memory = "2g"; };
+    judge = { cpus = 1; memory = "2g"; };
+    mayor = { cpus = 1; memory = "2g"; };
   };
 
   # Secrets — string = env var name, absolute path = file
@@ -320,7 +398,7 @@ services.wrapix.cities.myapp = {
 Shell script implementing Gas City's `exec:<script>` provider pattern.
 The script receives a command and arguments, translates to podman operations.
 
-**Persistent roles (scout, reviewer)** — full tmux-based interaction:
+**Persistent roles (mayor, scout, judge)** — full tmux-based interaction:
 
 | gc method | Provider action |
 |-----------|----------------|
@@ -361,15 +439,16 @@ The script receives a command and arguments, translates to podman operations.
 
 Container labeling convention:
 - `gc-city=<city-name>`
-- `gc-role=worker|scout|reviewer`
+- `gc-role=mayor|scout|worker|judge`
 - `gc-bead=<bead-id>` (workers only)
 
 ### Session Lifecycle
 
-**Persistent roles (scout, reviewer):**
+**Persistent roles (mayor, scout, judge):**
 - Started with the city, stopped with the city
 - `podman run -d` with tmux server as PID 1
 - gc interacts via `podman exec tmux send-keys` / `capture-pane`
+- Human attaches to the mayor via `gc session attach mayor`
 
 **Ephemeral workers:**
 - One container per bead, clean state every time
@@ -383,12 +462,12 @@ Container labeling convention:
   at `/mnt/git:rw` so git operations work inside the container
 - Worker container mounts the worktree as its workspace (`/workspace:rw`),
   `.beads/` as read-only, and receives a `.task` file built from the bead
-  description, acceptance criteria, and any reviewer notes from prior attempts
+  description, acceptance criteria, and any judge notes from prior attempts
 - Worker commits to the branch, then exits. A background monitor sets
   `commit_range` and `branch_name` on the bead metadata after exit.
-- gc convergence detects worker completion and hands off to the reviewer gate
-- After convergence completes (approved or escalated), the post-gate order
-  handles merge and worktree cleanup:
+- gc convergence detects worker completion and hands off to the judge gate
+- After convergence completes (approved or escalated), the judge handles
+  merge and worktree cleanup:
   `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
 
 **Crash recovery:**
@@ -406,22 +485,22 @@ Two modes depending on execution path:
 | Mode | Beads access | Sync mechanism |
 |------|-------------|----------------|
 | `ralph run` (standalone) | Container has bd + dolt, does its own pull/push | Existing behavior, unchanged |
-| `gc start` (orchestrated) | gc container, scout, and reviewer have bd | Ephemeral workers have no bd/dolt access |
+| `gc start` (orchestrated) | gc container, mayor, scout, and judge have bd | Ephemeral workers have no bd/dolt access |
 
 In gc mode, the gc container (provider script, gate script, post-gate order),
-scout, and reviewer all have bd access for bead creation, metadata, and
+mayor, scout, and judge all have bd access for bead creation, metadata, and
 status updates. Only ephemeral workers are isolated — they receive their task
 via environment variables and a mounted task file, with no direct bd access.
 
 The provider script's `Start` handler passes the bead ID, task
 description, and relevant context to the worker via environment variables and
 a mounted task file. The task file contains the bead description, acceptance
-criteria, and any reviewer notes from prior attempts. The worker reads these,
+criteria, and any judge notes from prior attempts. The worker reads these,
 executes the task using `wrapix-agent`, commits results to its worktree
 branch, and exits. A background monitor in the provider script sets
 `commit_range` and `branch_name` on the bead metadata via
 `bd update --set-metadata` after the worker exits, so the gate condition
-script can read this context when bridging to the reviewer.
+script can read this context when bridging to the judge.
 The post-gate order reads bead state and updates it based on the container
 exit code and branch contents. No dolt sync between containers.
 
@@ -432,11 +511,17 @@ Ralph stays as the standalone workflow tool. Gas City is additive:
 | Phase | Ralph (standalone) | Gas City (orchestrated) |
 |-------|-------------------|------------------------|
 | Spec authoring | `ralph plan` | `ralph plan` (unchanged) |
-| Work decomposition | `ralph todo` | `ralph todo` (unchanged) |
+| Work decomposition | `ralph todo` | Mayor decomposes specs into beads |
 | Execution | `ralph run` (single agent, one container) | `gc start` (multi-agent, parallel workers) |
 
-`ralph todo` produces beads. Both `ralph run` and `gc start` consume them.
-No changes to `ralph todo` needed — beads are the interface.
+In city mode, the mayor handles spec decomposition — the same job as
+`ralph todo` but as a formula step. On startup and on human attach, the
+mayor checks for spec changes (git diff against last decomposition commit).
+If changes are found, it proposes beads and waits for human approval before
+creating them (default). Set `mayor.autoDecompose = true` to skip approval.
+
+`ralph todo` still works standalone for `ralph run` users — beads are the
+interface regardless of which tool creates them.
 
 ### Agent Abstraction
 
@@ -458,7 +543,7 @@ Future agent providers require only a new entry in the
 agent registry and the corresponding package in the Nix closure.
 
 Role behavior is defined as gc formulas. `mkCity` generates default formulas
-for scout, worker, and reviewer roles. Consumers can override formulas to
+for mayor, scout, worker, and judge roles. Consumers can override formulas to
 customize role behavior without modifying the provider script or container
 images.
 
@@ -490,7 +575,8 @@ secrets.deployKey = config.sops.secrets.deploy-key.path;
 resources = {
   worker = { cpus = 2; memory = "4g"; };
   scout = { cpus = 1; memory = "2g"; };
-  reviewer = { cpus = 1; memory = "2g"; };
+  judge = { cpus = 1; memory = "2g"; };
+  mayor = { cpus = 1; memory = "2g"; };
 };
 ```
 
@@ -501,8 +587,8 @@ Default: no limits.
 - `workers` — max concurrent workers (default: 1)
 - `cooldown` — time between task dispatches (default: `"0"`)
 - P0 beads bypass cooldown — dispatched immediately regardless of pacing.
-  The director can create P0 beads directly (`bd create --priority=0`) to
-  inject urgent work into the ops loop without waiting.
+  The human can create P0 beads directly (`bd create --priority=0`) or
+  ask the mayor to inject urgent work into the ops loop.
 - Reactive backpressure (automatic): when any agent hits a rate limit,
   gc pauses dispatching until the window resets
 
@@ -525,16 +611,16 @@ Layered testing via `nix flake check` and pre-commit hooks:
 | Layer | What | Hook | Automated |
 |-------|------|------|-----------|
 | 1. Nix evaluation | `mkCity` evaluates, `city.toml` valid, TOML generation | `nix-flake-check` (pre-push) | On push |
-| 2. Unit tests | Shell syntax, gate exit codes, provider commands, scout parsing, config validation | `nix-flake-check` (pre-push) | On push |
+| 2. Unit tests | Shell syntax, gate exit codes, provider commands, scout parsing, config validation, formula step commands | `nix-flake-check` (pre-push) | On push |
 | 3. Integration | Full ops loop: gc → provider.sh → podman → container → mock claude | `city-integration` (pre-push) | On push (requires podman, skips gracefully if missing) |
 
 Unit tests live in `tests/city/unit.nix` and run inside the Nix sandbox (no
 podman needed). The integration test lives in `tests/city/integration.nix`
 and exercises the real stack end-to-end:
 
-- Phase 1 (happy path): gc starts scout + reviewer via podman, scout creates
-  bead, director slings into convergence, worker commits in worktree,
-  reviewer approves, post-gate merges and creates deploy bead
+- Phase 1 (happy path): gc starts mayor + scout + judge via podman, scout
+  creates bead, worker commits in worktree, judge approves and merges,
+  post-gate creates deploy bead
 - Phase 2 (merge conflict): conflicting change on main, post-gate detects
   rebase conflict, rejects back to worker with failure context
 - Phase 3 (escalation): convergence ends with non-approved reason, post-gate
@@ -554,7 +640,7 @@ and exercises the real stack end-to-end:
 
 ### Upgrades
 
-- Director rebuilds the flake on the host (`nix build`), then restarts the
+- Human rebuilds the flake on the host (`nix build`), then restarts the
   city (`gc stop && gc start --foreground`)
 - gc does not detect or apply upgrades automatically
 - In-flight workers are stopped; their beads remain open and are picked up
@@ -576,9 +662,9 @@ No new commands. Existing tools compose:
 
 | Tool | Domain | Used for |
 |------|--------|----------|
-| `gc` | Orchestration | `gc start --foreground`, `gc stop`, `gc status`, `gc session attach/peek/nudge` |
-| `bd` | Work tracking | `bd ready`, `bd human`, `bd close` |
-| `ralph` | Spec workflow + setup | `ralph plan`, `ralph todo`, `ralph run` (fallback), `ralph sync` (city setup) |
+| `gc` | Orchestration | `gc start --foreground`, `gc stop`, `gc status`, `gc session attach mayor` |
+| `bd` | Work tracking | `bd ready`, `bd human`, `bd close` (direct bypass) |
+| `ralph` | Spec workflow + setup | `ralph plan`, `ralph todo` (standalone), `ralph run` (fallback), `ralph sync` (city setup) |
 
 ## Affected Files/Modules
 
@@ -588,12 +674,12 @@ No new commands. Existing tools compose:
 | Provider | `lib/city/provider.sh` | Shell script for `exec:<script>` |
 | NixOS module | `modules/city.nix` | `services.wrapix.cities` |
 | Agent wrapper | `lib/city/agent.sh` | `wrapix-agent` CLI abstraction |
-| Formulas | `lib/city/formulas/` | Default scout, worker, reviewer formulas |
-| Post-gate order | `lib/city/post-gate.sh` | Event-gated order: merge, branch cleanup, deploy bead creation |
+| Formulas | `lib/city/formulas/` | Default mayor, scout, worker, judge formulas |
+| Post-gate order | `lib/city/post-gate.sh` | Event-gated order: notify judge to merge, deploy bead creation |
 | Orders | `lib/city/orders/post-gate/order.toml` | gc order definition for post-gate event trigger |
-| Gate condition | `lib/city/gate.sh` | Convergence gate: nudge reviewer, wait for verdict |
+| Gate condition | `lib/city/gate.sh` | Convergence gate: nudge judge, wait for verdict |
 | Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
-| Entrypoint | `lib/city/entrypoint.sh` | Init bead check, podman events watcher, exec gc |
+| Entrypoint | `lib/city/entrypoint.sh` | Print pending review status, podman events watcher, exec gc |
 | Unit tests | `tests/city/unit.nix` | Nix-sandbox tests for all components |
 | Integration tests | `tests/city/integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
@@ -611,10 +697,10 @@ No new commands. Existing tools compose:
   [verify](tests/city/unit.nix::city-shell-syntax), [verify](tests/city/unit.nix::city-provider-worker)
 - [x] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
   [verify](tests/city/integration.nix::Phase 1 worker worktree)
-- [x] Persistent roles (scout, reviewer) start with tmux as PID 1
-  [verify](tests/city/integration.nix::Phase 1 scout/reviewer start)
-- [x] gc convergence detects worker completion and triggers reviewer gate
-  [verify](tests/city/integration.nix::Phase 1 reviewer approval)
+- [x] Persistent roles (mayor, scout, judge) start with tmux as PID 1
+  [verify](tests/city/integration.nix::Phase 1 mayor/scout/judge start)
+- [x] gc convergence detects worker completion and triggers judge gate
+  [verify](tests/city/integration.nix::Phase 1 judge approval)
 - [x] Secrets are injected at runtime, never baked into images
   [verify](tests/city/unit.nix::city-secrets)
 - [ ] `ralph run` still works standalone without gc
@@ -625,7 +711,7 @@ No new commands. Existing tools compose:
 - [x] Service packages are built into OCI images via `dockerTools.buildLayeredImage`
   [verify](tests/city/unit.nix::city-service-images)
 - [ ] Cooldown pacing delays task dispatch by configured duration
-- [ ] Reviewer enforces `docs/style-guidelines.md` rules
+- [ ] Judge enforces `docs/style-guidelines.md` rules
   [judge]
 - [x] Provider script is clean, minimal shell with no Go dependencies
   [judge]
@@ -634,31 +720,46 @@ No new commands. Existing tools compose:
 - [ ] P0 beads bypass cooldown and are dispatched immediately
 - [x] Merge uses fast-forward only; rebase + prek on divergence
   [verify](tests/city/integration.nix::Phase 1 post-gate merge), [verify](tests/city/integration.nix::Phase 2 merge conflict)
-- [x] Post-gate order sends notifications via `wrapix-notify` for director events
+- [x] Post-gate order sends notifications via `wrapix-notify`
   [verify](tests/city/integration.nix::Phase 1 deploy bead)
 - [ ] Scout pauses bead creation when queue cap is reached
 - [x] Scout detects errors via log pattern regex matching
   [verify](tests/city/unit.nix::city-scout-parse-rules), [verify](tests/city/unit.nix::city-scout-scan)
-- [x] Reviewer gate reads commit range from bead metadata
+- [x] Judge gate reads commit range from bead metadata
   [verify](tests/city/unit.nix::city-gate-functional)
 - [ ] Scout polling uses gc orders for scheduling
-- [ ] Worker→reviewer retry uses gc convergence with max 2 iterations
+- [ ] Worker→judge retry uses gc convergence with max 2 iterations
 - [x] Role behavior defined as gc formulas, overridable by consumers
   [verify](tests/city/unit.nix::city-formulas)
 - [x] Post-gate handles escalation path (non-approved convergence)
   [verify](tests/city/integration.nix::Phase 3 escalation)
 - [x] Custom scale_check avoids gc's 30s timeout under dolt contention
   [verify](tests/city/unit.nix::city-config-validate)
+- [ ] Mayor formula starts as persistent session and responds on attach
+- [ ] Mayor presents proactive briefing (pending reviews, recent merges, escalations)
+- [ ] Mayor decomposes spec changes into proposed beads on startup/attach
+- [ ] Mayor executes approved actions on human's behalf (dismiss, approve, file)
+- [ ] Mayor `autoDecompose` config option skips human approval
+- [ ] Judge owns merge after approval (review + merge as one flow)
+  [verify](tests/city/integration.nix::Phase 1 judge merge)
+- [ ] Judge rejection includes specific rule references and line numbers
+- [ ] Escalation flows to mayor instead of raw notification
+- [ ] Scout performs housekeeping (stale beads, orphaned workers, worktree cleanup)
+- [ ] Entrypoint prints informational pending-review status without blocking
+- [ ] Formula step commands are individually testable against known state
+  [verify](tests/city/unit.nix::city-formula-steps)
 
 ## Out of Scope
 
-- Web UI / dashboard — the director interacts via CLI only (`gc`, `bd`, `ralph`)
+- Web UI / dashboard — the human interacts via mayor and CLI (`gc`, `bd`, `ralph`)
+- Voice interaction with mayor — future work
 - Multi-machine cities — one city per host; architecture supports future
   multi-host via podman remote but not implemented in v1
 - Non-Nix consumers — `mkCity` requires Nix
 - Custom agent providers — claude only at launch; Codex/Gemini are future work
 - The Wasteland — federated cities / trust networks
 - macOS production cities — dev only, Linux for production
+- Formal convoy/grouping data model — mayor handles informal grouping via queries
 - Token tracking / budget enforcement — rely on backpressure + cooldown
 - Service builds from source — services defined by Nix package
 - Gas City upstream contributions — provider is `exec:` script, not a Go PR
