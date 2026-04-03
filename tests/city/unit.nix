@@ -1867,6 +1867,88 @@ in
         [[ "$ESC_REASON" == "max_rounds_exceeded" ]] || { echo "FAIL: wrong reason: $ESC_REASON"; exit 1; }
         echo "  PASS: escalated beads filtered correctly"
 
+        # Formula command: recent merges (git log --since)
+        WS_BRIEF="$TMPDIR/briefing-ws"
+        mkdir -p "$WS_BRIEF"
+        git -C "$WS_BRIEF" init -q -b main
+        echo "base" > "$WS_BRIEF/f.txt"
+        git -C "$WS_BRIEF" add -A && git -C "$WS_BRIEF" commit -m "initial" -q
+        echo "merged" > "$WS_BRIEF/f.txt"
+        git -C "$WS_BRIEF" add -A && git -C "$WS_BRIEF" commit -m "feat: add auth module" -q
+        RECENT=$(git -C "$WS_BRIEF" log --oneline --since="24 hours ago" -- ':(exclude).beads')
+        echo "$RECENT" | grep -q "feat: add auth module" || { echo "FAIL: recent merge not found"; exit 1; }
+        echo "  PASS: recent merges captured via git log"
+
+        # =====================================================================
+        # Mayor: triage — execute approved actions
+        # =====================================================================
+        echo "=== Mayor: triage ==="
+
+        # Mock bd and gc for triage action testing
+        TRIAGE_LOG="/tmp/gc-triage.log"
+        rm -f "$TRIAGE_LOG"
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/gc-triage.log
+        case "$1" in
+          human)
+            echo '{"status":"dismissed"}'
+            ;;
+          create)
+            echo "wx-new1"
+            ;;
+          list)
+            echo '[{"id":"wx-a1","title":"Fix auth retry","labels":["auth"]},{"id":"wx-a2","title":"Auth token expiry","labels":["auth"]},{"id":"wx-b1","title":"DB migration","labels":["db"]}]'
+            ;;
+          search)
+            echo '[{"id":"wx-a1","title":"Fix auth retry"},{"id":"wx-a2","title":"Auth token expiry"}]'
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        cat > "$MOCK_BIN/gc" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/gc-triage.log
+        MOCK
+        chmod +x "$MOCK_BIN/gc"
+
+        # Formula command: dismiss a bead
+        PATH="$MOCK_BIN:$PATH" bd human dismiss wx-r1 --reason="not relevant"
+        grep -q 'human dismiss wx-r1' "$TRIAGE_LOG" || { echo "FAIL: dismiss not called"; exit 1; }
+        echo "  PASS: dismiss bead action"
+
+        # Formula command: approve deploy
+        rm -f "$TRIAGE_LOG"
+        PATH="$MOCK_BIN:$PATH" bd human respond wx-d1 --response="approved"
+        grep -q 'human respond wx-d1' "$TRIAGE_LOG" || { echo "FAIL: approve not called"; exit 1; }
+        echo "  PASS: approve deploy action"
+
+        # Formula command: file investigation via scout
+        rm -f "$TRIAGE_LOG"
+        PATH="$MOCK_BIN:$PATH" gc mail send --to scout -s "investigate" -m "Check auth module for token leaks"
+        grep -q 'mail send --to scout' "$TRIAGE_LOG" || { echo "FAIL: investigation not filed"; exit 1; }
+        echo "  PASS: file investigation via scout"
+
+        # Formula command: create P0
+        rm -f "$TRIAGE_LOG"
+        PATH="$MOCK_BIN:$PATH" bd create --title="Critical auth bypass" --description="Tokens not validated" --type=bug --priority=0
+        grep -q 'create --title=Critical auth bypass' "$TRIAGE_LOG" || { echo "FAIL: P0 not created"; exit 1; }
+        echo "  PASS: create P0 action"
+
+        # Formula command: informal grouping — query beads and group by topic
+        rm -f "$TRIAGE_LOG"
+        BEADS_JSON=$(PATH="$MOCK_BIN:$PATH" bd list --status=open --json --limit=0)
+        AUTH_BEADS=$(echo "$BEADS_JSON" | jq '[.[] | select(.title | test("auth|Auth"; "i"))]')
+        AUTH_COUNT=$(echo "$AUTH_BEADS" | jq 'length')
+        [[ "$AUTH_COUNT" -eq 2 ]] || { echo "FAIL: expected 2 auth beads, got $AUTH_COUNT"; exit 1; }
+        echo "  PASS: informal grouping filters beads by topic pattern"
+
+        # Formula command: search beads by keyword
+        SEARCH_RESULTS=$(PATH="$MOCK_BIN:$PATH" bd search auth)
+        echo "$SEARCH_RESULTS" | jq -e 'length == 2' >/dev/null || { echo "FAIL: search returned wrong count"; exit 1; }
+        echo "  PASS: bd search returns matching beads"
+
         # =====================================================================
         # Scout: load-context — cap check via bd list + jq length
         # =====================================================================
