@@ -155,6 +155,11 @@ worker_start() {
     fi
   } > "$task_file" 2>/dev/null || true
 
+  # Record dispatch timestamp for cooldown pacing
+  local state_dir="${GC_WORKSPACE}/.wrapix/state"
+  mkdir -p "$state_dir"
+  date +%s > "$state_dir/last-dispatch"
+
   # shellcheck disable=SC2046
   podman run -d \
     --replace \

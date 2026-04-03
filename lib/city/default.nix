@@ -91,6 +91,9 @@ let
       # Provider script — copies lib/city/provider.sh into the Nix store
       providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
 
+      # Dispatch check script — cooldown-aware scale_check for workers
+      dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (builtins.readFile ./dispatch.sh);
+
       # Default role formulas — consumers can override by placing files in formulas/
       defaultFormulas = {
         scout = ./formulas/scout.formula.toml;
@@ -107,14 +110,22 @@ let
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
-      # City scripts — gate, post-gate, recovery bundled for .gc/scripts/
+      # City scripts — gate, post-gate, recovery, dispatch bundled for .gc/scripts/
       scriptsDir = pkgs.runCommand "wrapix-city-scripts-dir" { } ''
         mkdir -p $out
         cp ${./gate.sh} $out/gate.sh
         cp ${./post-gate.sh} $out/post-gate.sh
         cp ${./recovery.sh} $out/recovery.sh
+        cp ${./dispatch.sh} $out/dispatch.sh
         chmod +x $out/*.sh
       '';
+
+      # Worker scale_check: cooldown-aware when cooldown is non-zero
+      workerScaleCheck =
+        if cooldown == "0" then
+          "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
+        else
+          "GC_COOLDOWN=${cooldown} GC_WORKSPACE=\"$(pwd)\" ${dispatchScript}";
 
       # Build the city.toml configuration (matches gc's Go config schema)
       cityConfig = {
@@ -161,7 +172,7 @@ let
             name = "worker";
             scope = "city";
             max_active_sessions = workers;
-            scale_check = "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = workerScaleCheck;
           }
           {
             name = "reviewer";
@@ -222,6 +233,7 @@ let
         export GC_WORKSPACE="$(pwd)"
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
+        export GC_COOLDOWN="${cooldown}"
 
         # Copy Nix-generated config so gc finds it
         # (files must be real, not store symlinks, for container mounts)

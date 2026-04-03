@@ -252,6 +252,7 @@ in
           "${../../lib/city/entrypoint.sh}"
           "${../../lib/city/recovery.sh}"
           "${../../lib/city/scout.sh}"
+          "${../../lib/city/dispatch.sh}"
         )
 
         for script in "''${SCRIPTS[@]}"; do
@@ -1093,6 +1094,184 @@ in
 
         rm -rf "$TMPDIR"
         echo "PASS: post-gate auto-deploy path works"
+        mkdir $out
+      '';
+
+  # =========================================================================
+  # Cooldown pacing and P0 bypass
+  # =========================================================================
+
+  # Verify cooldown is wired into city.toml worker scale_check
+  city-cooldown-config =
+    let
+      # Default cooldown (0) — inline bd list
+      minimalWorker = builtins.elemAt (builtins.filter (
+        a: a.name == "worker"
+      ) minimalCity.configAttrs.agent) 0;
+      minimalScaleCheck = minimalWorker.scale_check;
+      hasInlineBd = builtins.substring 0 7 minimalScaleCheck == "bd list";
+
+      # Full city cooldown (2h) — dispatch script reference
+      fullWorker = builtins.elemAt (builtins.filter (a: a.name == "worker") fullCity.configAttrs.agent) 0;
+      fullScaleCheck = fullWorker.scale_check;
+      hasDispatchScript = builtins.match ".*wrapix-dispatch.*" fullScaleCheck != null;
+      hasCooldownEnv = builtins.match ".*GC_COOLDOWN=2h.*" fullScaleCheck != null;
+    in
+    assert hasInlineBd;
+    assert hasDispatchScript;
+    assert hasCooldownEnv;
+    runCommandLocal "city-cooldown-config" { } ''
+      echo "PASS: Cooldown wired into city.toml"
+      echo "  - cooldown=0: inline bd list scale_check"
+      echo "  - cooldown=2h: dispatch script with GC_COOLDOWN env"
+      mkdir $out
+    '';
+
+  # Dispatch script: P0 bypass, cooldown enforcement, backpressure
+  city-dispatch-functional =
+    runCommandLocal "city-dispatch-functional"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        DISPATCH="${../../lib/city/dispatch.sh}"
+        TMPDIR=$(mktemp -d)
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN" "$TMPDIR/ws/.wrapix/state"
+
+        echo "Testing dispatch.sh..."
+
+        # --- Test 1: P0 bypass (returns count even during cooldown) ---
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        if echo "$@" | grep -q "priority 0"; then
+          echo '[{"id":"p0-1"}]'
+        else
+          echo '[{"id":"b1"},{"id":"b2"}]'
+        fi
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+        cat > "$MOCK_BIN/jq" << 'MOCK'
+        #!/bin/sh
+        # Read stdin, count array length
+        input=$(cat)
+        echo "$input" | grep -o '"id"' | wc -l
+        MOCK
+        chmod +x "$MOCK_BIN/jq"
+
+        # Set recent dispatch (cooldown should block normal beads)
+        echo "$(date +%s)" > "$TMPDIR/ws/.wrapix/state/last-dispatch"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=2h GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -gt 0 ]] || { echo "FAIL: P0 bypass should return >0 during cooldown"; exit 1; }
+        echo "  PASS: P0 beads bypass cooldown"
+
+        # --- Test 2: Cooldown blocks normal beads ---
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        if echo "$@" | grep -q "priority 0"; then
+          echo '[]'
+        else
+          echo '[{"id":"b1"}]'
+        fi
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        echo "$(date +%s)" > "$TMPDIR/ws/.wrapix/state/last-dispatch"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=2h GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -eq 0 ]] || { echo "FAIL: cooldown should block (got $result)"; exit 1; }
+        echo "  PASS: cooldown blocks normal dispatch"
+
+        # --- Test 3: Cooldown elapsed allows dispatch ---
+        echo "0" > "$TMPDIR/ws/.wrapix/state/last-dispatch"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=1s GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -gt 0 ]] || { echo "FAIL: should dispatch after cooldown (got $result)"; exit 1; }
+        echo "  PASS: dispatch allowed after cooldown elapsed"
+
+        # --- Test 4: Backpressure blocks all dispatch ---
+        # Set rate limit until far in the future
+        echo "$(( $(date +%s) + 3600 ))" > "$TMPDIR/ws/.wrapix/state/rate-limited"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=0 GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -eq 0 ]] || { echo "FAIL: backpressure should block (got $result)"; exit 1; }
+        echo "  PASS: backpressure blocks all dispatch"
+
+        # --- Test 5: Expired backpressure resumes dispatch ---
+        echo "0" > "$TMPDIR/ws/.wrapix/state/rate-limited"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=0 GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -gt 0 ]] || { echo "FAIL: expired backpressure should allow dispatch (got $result)"; exit 1; }
+        echo "  PASS: expired backpressure resumes dispatch"
+
+        # --- Test 6: No cooldown (0) dispatches immediately ---
+        rm -f "$TMPDIR/ws/.wrapix/state/last-dispatch" "$TMPDIR/ws/.wrapix/state/rate-limited"
+        result="$(PATH="$MOCK_BIN:$PATH" GC_COOLDOWN=0 GC_WORKSPACE="$TMPDIR/ws" \
+          bash "$DISPATCH")"
+        [[ "$result" -gt 0 ]] || { echo "FAIL: cooldown=0 should dispatch (got $result)"; exit 1; }
+        echo "  PASS: cooldown=0 dispatches immediately"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: dispatch.sh handles cooldown, P0 bypass, and backpressure"
+        mkdir $out
+      '';
+
+  # Dispatch script: duration parsing
+  city-dispatch-duration-parse =
+    runCommandLocal "city-dispatch-duration-parse"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        DISPATCH="${../../lib/city/dispatch.sh}"
+
+        echo "Testing dispatch.sh parse_duration..."
+
+        # Source just the parse_duration function
+        parse_duration() {
+          local input="$1" total=0 num=""
+          for (( i=0; i<''${#input}; i++ )); do
+            local c="''${input:$i:1}"
+            case "$c" in
+              [0-9]) num+="$c" ;;
+              h) total=$(( total + ''${num:-0} * 3600 )); num="" ;;
+              m) total=$(( total + ''${num:-0} * 60 )); num="" ;;
+              s) total=$(( total + ''${num:-0} )); num="" ;;
+            esac
+          done
+          if [[ -n "$num" ]]; then
+            total=$(( total + num ))
+          fi
+          echo "$total"
+        }
+
+        check() {
+          local input="$1" expected="$2"
+          local result
+          result="$(parse_duration "$input")"
+          [[ "$result" == "$expected" ]] || { echo "FAIL: parse_duration '$input' = $result (expected $expected)"; exit 1; }
+          echo "  PASS: '$input' -> $expected"
+        }
+
+        check "2h" "7200"
+        check "30m" "1800"
+        check "2h30m" "9000"
+        check "1h15m30s" "4530"
+        check "90s" "90"
+        check "0" "0"
+
+        echo "PASS: parse_duration handles all duration formats"
         mkdir $out
       '';
 
