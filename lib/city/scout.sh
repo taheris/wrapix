@@ -5,12 +5,9 @@
 # Scans podman logs for error patterns, deduplicates against existing beads,
 # and enforces the maxBeads queue cap.
 #
-# Usage:
-#   scout.sh parse-rules <orchestration-md>   — parse Scout Rules from docs
-#   scout.sh scan <container> [--since=5m]     — scan container logs for errors
-#   scout.sh create-beads                      — create/deduplicate beads from scan results
-#   scout.sh check-cap                         — check if bead cap is reached
-#
+# Usage: scout.sh <command> [args]
+# Commands: parse-rules, scan, create-beads, check-cap, housekeeping,
+#           housekeeping-stale, housekeeping-orphans, housekeeping-worktrees
 # Environment variables:
 #   GC_CITY_NAME     — city name (for container filtering)
 #   SCOUT_MAX_BEADS  — bead cap (default: 10)
@@ -334,6 +331,93 @@ $(echo "$details" | head -5)" \
   echo "$created"
 }
 
+# ---------------------------------------------------------------------------
+# Housekeeping
+# ---------------------------------------------------------------------------
+
+GC_CITY_NAME="${GC_CITY_NAME:-}"
+GC_WORKSPACE="${GC_WORKSPACE:-.}"
+
+# Run all housekeeping tasks: stale beads, orphaned workers, worktree cleanup.
+housekeeping() {
+  housekeeping_stale_beads
+  housekeeping_orphaned_workers
+  housekeeping_worktree_cleanup
+}
+
+# Flag stale beads for human review.
+housekeeping_stale_beads() {
+  local stale
+  stale="$(bd stale --json 2>/dev/null)" || stale="[]"
+
+  local ids
+  ids="$(echo "$stale" | jq -r '.[].id' 2>/dev/null)" || ids=""
+
+  for id in $ids; do
+    [[ -z "$id" ]] && continue
+    bd label add "$id" human 2>/dev/null || true
+    bd update "$id" --notes "$(date -u +%FT%TZ): flagged stale by scout housekeeping" 2>/dev/null || true
+  done
+}
+
+# Detect and stop orphaned worker containers (no matching in-progress bead).
+housekeeping_orphaned_workers() {
+  [[ -z "$GC_CITY_NAME" ]] && return 0
+
+  local workers
+  workers="$(podman ps --filter "label=gc-city=$GC_CITY_NAME" \
+    --filter "label=gc-role=worker" \
+    --format '{{.Names}}' 2>/dev/null)" || workers=""
+
+  [[ -z "$workers" ]] && return 0
+
+  local in_progress
+  in_progress="$(bd list --status=in_progress --json --limit=0 2>/dev/null | jq -r '.[].id' 2>/dev/null)" || in_progress=""
+
+  while IFS= read -r container; do
+    [[ -z "$container" ]] && continue
+
+    # Extract bead ID from container labels
+    local bead_id
+    bead_id="$(podman inspect --format '{{index .Config.Labels "gc-bead"}}' "$container" 2>/dev/null)" || bead_id=""
+
+    [[ -z "$bead_id" ]] && continue
+
+    # Check if bead is in the in-progress list
+    if ! echo "$in_progress" | grep -qF "$bead_id"; then
+      podman stop "$container" 2>/dev/null || true
+      podman rm "$container" 2>/dev/null || true
+      wrapix-notify "Gas City" "Scout housekeeping: stopped orphaned worker $container (bead $bead_id not in_progress)" 2>/dev/null || true
+    fi
+  done <<< "$workers"
+}
+
+# Remove stale worktrees with no matching running worker or active bead.
+housekeeping_worktree_cleanup() {
+  local worktree_dir="$GC_WORKSPACE/.wrapix/worktree"
+  [[ -d "$worktree_dir" ]] || return 0
+
+  for wt in "$worktree_dir"/gc-*; do
+    [[ -d "$wt" ]] || continue
+
+    local bead_id="${wt##*gc-}"
+
+    # Check if a worker container exists for this bead
+    if podman ps --filter "label=gc-bead=$bead_id" --format '{{.Names}}' 2>/dev/null | grep -q .; then
+      continue
+    fi
+
+    # Check the bead is not in_progress (avoid cleaning active worktrees)
+    local status
+    status="$(bd show "$bead_id" --json 2>/dev/null | jq -r 'if type == "array" then .[0].status else .status end // "unknown"' 2>/dev/null)" || status="unknown"
+
+    if [[ "$status" != "in_progress" ]]; then
+      rm -rf "$wt"
+      git -C "$GC_WORKSPACE" worktree prune 2>/dev/null || true
+    fi
+  done
+}
+
 # Clean up scan results from a previous cycle.
 clean() {
   rm -rf "$SCOUT_ERRORS_DIR"
@@ -362,6 +446,18 @@ case "$cmd" in
   notify-cap)
     notify_cap_reached
     ;;
+  housekeeping)
+    housekeeping
+    ;;
+  housekeeping-stale)
+    housekeeping_stale_beads
+    ;;
+  housekeeping-orphans)
+    housekeeping_orphaned_workers
+    ;;
+  housekeeping-worktrees)
+    housekeeping_worktree_cleanup
+    ;;
   clean)
     clean
     ;;
@@ -369,7 +465,7 @@ case "$cmd" in
     open_bead_count
     ;;
   *)
-    echo "Usage: scout.sh {parse-rules|scan|create-beads|check-cap|notify-cap|clean|open-count}" >&2
+    echo "Usage: scout.sh {parse-rules|scan|create-beads|check-cap|notify-cap|housekeeping|clean|open-count}" >&2
     exit 1
     ;;
 esac

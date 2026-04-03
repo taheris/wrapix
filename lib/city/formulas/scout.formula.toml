@@ -1,11 +1,13 @@
 description = """
-Scout patrol loop — watches service containers for errors and creates beads.
+Scout patrol loop — watches service containers for errors, creates beads,
+and performs system housekeeping.
 
 Persistent session, poked by gc orders on a configurable interval. Scans
 podman logs for error patterns (immediate and batched), deduplicates against
 existing beads, and respects the maxBeads cap before pausing creation. The
 entrypoint wrapper also pushes events via `gc nudge` on container lifecycle
-events (die, oom, restart).
+events (die, oom, restart). Each cycle also runs housekeeping: stale bead
+detection, orphaned worker cleanup, and worktree garbage collection.
 
 Each wisp is ONE patrol iteration: check services, scan logs, create beads
 if needed, pour next iteration. On crash, re-read formula steps and resume
@@ -167,9 +169,70 @@ Stop creating beads if OPEN_COUNT >= {{max_beads}}.
 **Exit criteria:** All detected errors have corresponding beads, or cap reached."""
 
 [[steps]]
+id = "housekeeping"
+title = "System housekeeping"
+needs = ["create-beads"]
+description = """
+Perform system maintenance checks: stale beads, orphaned workers, worktree cleanup.
+
+**1. Stale beads:**
+```bash
+STALE=$(bd stale --json 2>/dev/null) || STALE="[]"
+```
+
+If stale beads are found, flag them for human review:
+```bash
+for ID in $(echo "$STALE" | jq -r '.[].id'); do
+  bd label add "$ID" human
+  bd update "$ID" --notes "$(date -u +%FT%TZ): flagged stale by scout housekeeping"
+done
+```
+
+**2. Orphaned workers:**
+
+List worker containers and cross-reference against in-progress beads:
+```bash
+WORKERS=$(podman ps --filter "label=gc-city=$GC_CITY_NAME" \
+  --filter "label=gc-role=worker" --format '{{.Names}} {{.Labels}}')
+IN_PROGRESS=$(bd list --status=in_progress --json --limit=0 | jq -r '.[].id')
+```
+
+For each worker container, extract the `gc-bead` label. If the bead is not
+in the in-progress list (missing, closed, or never existed), the worker is
+orphaned:
+```bash
+podman stop "$CONTAINER" && podman rm "$CONTAINER"
+```
+
+Report orphaned workers via notification:
+```bash
+wrapix-notify "Scout housekeeping: stopped orphaned worker $CONTAINER (bead $BEAD_ID not in_progress)"
+```
+
+**3. Worktree cleanup:**
+
+Scan for stale worktrees that have no matching running worker container:
+```bash
+for WT in .wrapix/worktree/gc-*; do
+  BEAD_ID="${WT##*gc-}"
+  # Check if a worker container exists for this bead
+  if ! podman ps --filter "label=gc-bead=$BEAD_ID" --format '{{.Names}}' | grep -q .; then
+    # Check the bead is not in_progress (avoid cleaning active worktrees)
+    STATUS=$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.status // "unknown"')
+    if [ "$STATUS" != "in_progress" ]; then
+      rm -rf "$WT"
+      git worktree prune
+    fi
+  fi
+done
+```
+
+**Exit criteria:** Housekeeping complete — stale beads flagged, orphans stopped, worktrees pruned."""
+
+[[steps]]
 id = "next-iteration"
 title = "Pour next iteration and wait"
-needs = ["create-beads"]
+needs = ["housekeeping"]
 description = """
 End of patrol cycle. Pour the next iteration for the gc order to trigger.
 

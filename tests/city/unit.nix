@@ -652,6 +652,13 @@ in
         # Scout must reference orchestration.md for pattern loading
         grep -q 'orchestration.md' "$DIR/scout.formula.toml" || { echo "FAIL: scout no orchestration.md"; exit 1; }
 
+        # Scout must have housekeeping step
+        grep -q 'id = "housekeeping"' "$DIR/scout.formula.toml" || { echo "FAIL: scout missing housekeeping step"; exit 1; }
+        grep -q 'bd stale' "$DIR/scout.formula.toml" || { echo "FAIL: scout housekeeping missing stale beads"; exit 1; }
+        grep -q 'gc-role=worker' "$DIR/scout.formula.toml" || { echo "FAIL: scout housekeeping missing orphaned workers"; exit 1; }
+        grep -q 'worktree' "$DIR/scout.formula.toml" || { echo "FAIL: scout housekeeping missing worktree cleanup"; exit 1; }
+        echo "  PASS: scout has housekeeping step"
+
         # Reviewer must reference style-guidelines.md for enforcement
         grep -q 'style-guidelines.md' "$DIR/reviewer.formula.toml" || { echo "FAIL: reviewer no style-guidelines.md"; exit 1; }
 
@@ -963,6 +970,185 @@ in
 
         rm -rf "$TMPDIR"
         echo "PASS: recovery.sh works correctly"
+        mkdir $out
+      '';
+
+  # Scout housekeeping: stale beads, orphaned workers, worktree cleanup
+  city-scout-housekeeping =
+    runCommandLocal "city-scout-housekeeping"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        SCOUT="${../../lib/city/scout.sh}"
+        TMPDIR=$(mktemp -d)
+
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        echo "Testing scout.sh housekeeping..."
+
+        # ---- Test 1: stale beads flagged for human review ----
+
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/scout-hk-bd.log
+        case "$1" in
+          stale)
+            echo '[{"id":"stale-1"},{"id":"stale-2"}]'
+            ;;
+          label|update)
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Mock podman (no containers)
+        cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/bin/sh
+        echo ""
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        # Mock wrapix-notify
+        cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
+        #!/bin/sh
+        echo "NOTIFY: $*" >> /tmp/scout-hk-notify.log
+        MOCK
+        chmod +x "$MOCK_BIN/wrapix-notify"
+
+        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-notify.log
+
+        PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" \
+          bash "$SCOUT" housekeeping-stale
+
+        grep -c "label add" /tmp/scout-hk-bd.log | grep -q "2" || \
+          { echo "FAIL: expected 2 label add calls"; cat /tmp/scout-hk-bd.log; exit 1; }
+        grep -q "stale-1" /tmp/scout-hk-bd.log || { echo "FAIL: stale-1 not flagged"; exit 1; }
+        grep -q "stale-2" /tmp/scout-hk-bd.log || { echo "FAIL: stale-2 not flagged"; exit 1; }
+        grep -q "flagged stale by scout housekeeping" /tmp/scout-hk-bd.log || \
+          { echo "FAIL: notes not added"; exit 1; }
+        echo "  PASS: stale beads flagged for human review"
+
+        # ---- Test 2: orphaned workers detected and stopped ----
+
+        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-notify.log
+
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/scout-hk-bd.log
+        case "$1" in
+          stale) echo "[]" ;;
+          list) echo '[{"id":"bead-active"}]' ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/scout-hk-podman.log
+        case "$1" in
+          ps)
+            # Check if filtering by gc-bead (worktree cleanup check)
+            if echo "$@" | grep -q "gc-bead"; then
+              echo ""
+            else
+              echo "worker-orphan-1"
+            fi
+            ;;
+          inspect)
+            echo "bead-orphaned"
+            ;;
+          stop|rm)
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        rm -f /tmp/scout-hk-podman.log
+
+        PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" \
+          bash "$SCOUT" housekeeping-orphans
+
+        grep -q "stop worker-orphan-1" /tmp/scout-hk-podman.log || \
+          { echo "FAIL: orphaned worker not stopped"; cat /tmp/scout-hk-podman.log; exit 1; }
+        grep -q "rm worker-orphan-1" /tmp/scout-hk-podman.log || \
+          { echo "FAIL: orphaned worker not removed"; cat /tmp/scout-hk-podman.log; exit 1; }
+        echo "  PASS: orphaned workers stopped and removed"
+
+        # ---- Test 3: stale worktrees cleaned up ----
+
+        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-podman.log /tmp/scout-hk-notify.log
+
+        # Set up a git repo with a stale worktree
+        WS="$TMPDIR/ws"
+        mkdir -p "$WS"
+        git -C "$WS" init -q -b main
+        git -C "$WS" commit --allow-empty -m "initial" -q
+        mkdir -p "$WS/.wrapix/worktree"
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-stale-bead" -b gc-stale-bead -q
+
+        test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
+
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        case "$1" in
+          show) echo '{"status":"closed"}' ;;
+          stale) echo "[]" ;;
+          list) echo "[]" ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/bin/sh
+        # No containers running
+        echo ""
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" \
+          bash "$SCOUT" housekeeping-worktrees
+
+        ! test -d "$WS/.wrapix/worktree/gc-stale-bead" || \
+          { echo "FAIL: stale worktree not cleaned"; exit 1; }
+        echo "  PASS: stale worktrees cleaned up"
+
+        # ---- Test 4: in-progress worktrees preserved ----
+
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-active-bead" -b gc-active-bead -q
+
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        case "$1" in
+          show) echo '{"status":"in_progress"}' ;;
+          stale) echo "[]" ;;
+          list) echo "[]" ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" \
+          bash "$SCOUT" housekeeping-worktrees
+
+        test -d "$WS/.wrapix/worktree/gc-active-bead" || \
+          { echo "FAIL: in-progress worktree was removed"; exit 1; }
+        echo "  PASS: in-progress worktrees preserved"
+
+        rm -rf "$TMPDIR" /tmp/scout-hk-bd.log /tmp/scout-hk-podman.log /tmp/scout-hk-notify.log
+        echo "PASS: scout housekeeping works correctly"
         mkdir $out
       '';
 
