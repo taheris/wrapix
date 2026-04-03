@@ -32,6 +32,9 @@ ops pipeline with good defaults and minimal configuration.
 - `mkCity` uses `mkSandbox` internally for agent container images
 - `mkCity` generates `city.toml`, the provider script, and container images at
   Nix build time — these are deterministic outputs in the Nix store
+- All agents use a custom `scale_check` — a single `bd list` query instead
+  of gc's default two-query check, which times out under dolt contention
+  (gc hardcodes a 30s timeout for scale_check that cannot be configured)
 
 **Components inside the gc container:**
 
@@ -113,7 +116,7 @@ Scout (watching) --> creates bead --> Worker (fixes) --> Reviewer (reviews)
   notification. An event-gated order (`on: convergence.terminated`) triggers
   the post-gate logic (merge, deploy) when convergence approves.
 - Reviewer enforces `docs/style-guidelines.md` mechanically; flags anything
-  outside documented rules for director review via `bd human`
+  outside documented rules for director review via `bd label add <id> human`
 - After reviewer approval, deploy is gated by risk tier (see Deploy section)
 
 ### Ad-hoc Director Requests
@@ -140,9 +143,11 @@ The post-gate order fires on `convergence.terminated` events. It checks
   as context — no automatic conflict resolution
 - Reviewer does not run tests — it reviews code quality against
   `docs/style-guidelines.md` only
-- After merge: `git worktree remove .wrapix/worktree/gc-<bead-id>` and
-  `git branch -d gc-<bead-id>`. On rejection, old branch is also deleted —
-  the new worker creates a fresh one.
+- After merge: `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
+  and `git branch -d gc-<bead-id>`. `git worktree remove` cannot be used
+  because the provider rewrites the worktree's `.git` file with a
+  container-internal path. On rejection, old branch is also deleted — the
+  new worker creates a fresh one.
 
 #### Reviewer Gate
 
@@ -150,10 +155,10 @@ The worker→reviewer handoff is managed by gc convergence with
 `gate_mode=condition`. The gate condition script:
 
 1. Reads `commit_range` from bead metadata (set by the provider script
-   after worker commits via `bd meta set <bead-id> commit_range <range>`)
+   after worker commits via `bd update <bead-id> --set-metadata "commit_range=<range>"`)
 2. Nudges the reviewer session with the commit range via `gc nudge reviewer`
 3. Polls bead metadata for `review_verdict` (approve/reject), set by the
-   reviewer via `bd meta set <bead-id> review_verdict approve`
+   reviewer via `bd update <bead-id> --set-metadata "review_verdict=approve"`
 4. Returns exit 0 on approve, exit 1 on reject — gc convergence uses this
    to decide whether to iterate or terminate
 
@@ -163,9 +168,11 @@ the formula's `env` configuration, not `runtime.Config` directly.
 
 ### Notifications
 
-- The post-gate order and entrypoint wrapper call `wrapix-notifyd` for
-  director-facing events:
-  - `bd human` flags (reviewer flagged something outside documented rules)
+- The post-gate order and entrypoint wrapper call `wrapix-notify` (the
+  notification client) for director-facing events. `wrapix-notifyd` is the
+  daemon and must not be called directly (it blocks).
+  - `bd label add <id> human` flags (reviewer flagged something outside
+    documented rules)
   - Convergence escalation (max iterations reached — worker→reviewer loop
     failed twice)
   - Deploy approval needed
@@ -179,13 +186,14 @@ the formula's `env` configuration, not `runtime.Config` directly.
 
 - After reviewer approval, the post-gate order creates a deploy bead
   summarizing the change and its risk classification
-- Default: deploy beads are flagged for director approval via `bd human`.
-  The director runs `nix build` on the host, then restarts the affected
-  containers manually (`podman stop && podman rm && podman run`).
+- Default: deploy beads are flagged for director approval via
+  `bd label add <id> human`. The director runs `nix build` on the host,
+  then restarts the affected containers manually
+  (`podman stop && podman rm && podman run`).
 - Consumer can opt into auto-deploy for low-risk changes by defining an
   `## Auto-deploy` section in `docs/orchestration.md`. When the reviewer
   classifies a change as low-risk per these rules, the post-gate order
-  skips the `bd human` flag. A cooldown-gated deploy order polls for
+  skips the human label. A cooldown-gated deploy order polls for
   unflagged deploy beads and restarts containers automatically (still
   requires the director or CI to have pre-built the images).
 - The gc container does not run Nix builds. Rolling restarts and database
@@ -196,9 +204,9 @@ the formula's `env` configuration, not `runtime.Config` directly.
 - No automatic escalation from ops to build mode, ever
 - The system surfaces patterns for the director to interpret:
   - Worker observations: "this is a patch, the real fix needs restructuring"
-    (flagged via `bd human`)
+    (flagged via `bd label add <id> human`)
   - Reviewer observations: "third patch to this module this week"
-    (flagged via `bd human`)
+    (flagged via `bd label add <id> human`)
   - Periodic digest: hot spots, fix counts, rejection rates (see
     Notifications section)
 - Director decides when to initiate `ralph plan` for a spec-driven redesign
@@ -226,7 +234,7 @@ the formula's `env` configuration, not `runtime.Config` directly.
   `docs/orchestration.md` from the built city config with placeholder sections
   for deploy commands, scout rules, and auto-deploy criteria.
 - All scaffolded files are created as beads flagged for director review via
-  `bd human`
+  `bd label add <id> human`
 - Director reviews and approves scaffolded files before running `gc start`
 - The entrypoint wrapper checks for unresolved scaffolding beads (created by
   `ralph sync`) before starting gc. If any exist, it prints a warning listing
@@ -345,7 +353,7 @@ The script receives a command and arguments, translates to podman operations.
 | gc method | Provider action |
 |-----------|----------------|
 | `ListRunning` | `podman ps --filter label=gc-city=<name>` |
-| `SetMeta/GetMeta/RemoveMeta` | Container labels via `podman inspect` (gc session metadata — separate from bead metadata used by `bd meta`) |
+| `SetMeta/GetMeta/RemoveMeta` | Container-internal files at `/tmp/gc-meta/<key>` via `podman exec` (gc session metadata — separate from bead metadata managed by `bd update --set-metadata`) |
 | `CopyTo` | `podman cp` |
 | `ProcessAlive` | Persistent: `podman exec pgrep`. Ephemeral: delegates to `IsRunning` |
 | `CheckImage` | `podman image exists <image>` |
@@ -365,14 +373,23 @@ Container labeling convention:
 
 **Ephemeral workers:**
 - One container per bead, clean state every time
+- Workers discover beads via gc's pull model: `bd ready --metadata-field
+  gc.routed_to=worker --unassigned` (gc routes beads via its
+  `EffectiveSlingQuery` which sets `gc.routed_to=<agent_template>`)
 - The provider script's `Start` handler creates the git worktree:
   `git worktree add .wrapix/worktree/gc-<bead-id> -b gc-<bead-id>`
-- Worker container mounts the worktree as its workspace
-- Worker commits to the branch, then exits
+- The provider rewrites the worktree's `.git` file to
+  `gitdir: /mnt/git/worktrees/gc-<bead-id>` and mounts the main `.git`
+  at `/mnt/git:rw` so git operations work inside the container
+- Worker container mounts the worktree as its workspace (`/workspace:rw`),
+  `.beads/` as read-only, and receives a `.task` file built from the bead
+  description, acceptance criteria, and any reviewer notes from prior attempts
+- Worker commits to the branch, then exits. A background monitor sets
+  `commit_range` and `branch_name` on the bead metadata after exit.
 - gc convergence detects worker completion and hands off to the reviewer gate
 - After convergence completes (approved or escalated), the post-gate order
   handles merge and worktree cleanup:
-  `git worktree remove .wrapix/worktree/gc-<bead-id>`
+  `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
 
 **Crash recovery:**
 - The gc container runs as a systemd service with `Restart=always`
@@ -401,8 +418,9 @@ description, and relevant context to the worker via environment variables and
 a mounted task file. The task file contains the bead description, acceptance
 criteria, and any reviewer notes from prior attempts. The worker reads these,
 executes the task using `wrapix-agent`, commits results to its worktree
-branch, and exits. The provider script sets `commit_range` and `branch_name` on the bead
-metadata via `bd meta set` after the worker exits, so the gate condition
+branch, and exits. A background monitor in the provider script sets
+`commit_range` and `branch_name` on the bead metadata via
+`bd update --set-metadata` after the worker exits, so the gate condition
 script can read this context when bridging to the reviewer.
 The post-gate order reads bead state and updates it based on the container
 exit code and branch contents. No dolt sync between containers.
@@ -502,29 +520,36 @@ cooldown = "2h";     # supports "30m", "1h", "2h30m", etc.
 
 ### Testing
 
-Layered testing integrated with prek stages:
+Layered testing via `nix flake check` and pre-commit hooks:
 
-| Layer | What | prek stage | Automated |
-|-------|------|-----------|-----------|
-| 1. Nix evaluation | `mkCity` evaluates, `city.toml` valid, images build | `pre-commit` | Always |
-| 2. Provider script | Mock podman, verify command translation | `pre-commit` | Always |
-| 3. Container lifecycle | Images start, entrypoints work, tmux runs | `pre-commit` | Always |
-| 4. Full flake check | All checks including gc | `pre-push` | On push |
-| 5. Integration + VM | Full ops loop in NixOS VM test | `manual` | On demand |
+| Layer | What | Hook | Automated |
+|-------|------|------|-----------|
+| 1. Nix evaluation | `mkCity` evaluates, `city.toml` valid, TOML generation | `nix-flake-check` (pre-push) | On push |
+| 2. Unit tests | Shell syntax, gate exit codes, provider commands, scout parsing, config validation | `nix-flake-check` (pre-push) | On push |
+| 3. Integration | Full ops loop: gc → provider.sh → podman → container → mock claude | `city-integration` (pre-push) | On push (requires podman, skips gracefully if missing) |
+
+Unit tests live in `tests/city.nix` and run inside the Nix sandbox (no
+podman needed). The integration test lives in `tests/city-integration.nix`
+and exercises the real stack end-to-end:
+
+- Phase 1 (happy path): gc starts scout + reviewer via podman, scout creates
+  bead, director slings into convergence, worker commits in worktree,
+  reviewer approves, post-gate merges and creates deploy bead
+- Phase 2 (merge conflict): conflicting change on main, post-gate detects
+  rebase conflict, rejects back to worker with failure context
+- Phase 3 (escalation): convergence ends with non-approved reason, post-gate
+  cleans up worktree and branch
 
 ```yaml
 # .pre-commit-config.yaml
-- id: gc-fast
-  stages: [pre-commit]
-  entry: nix build .#checks.x86_64-linux.gc-fast
-
-- id: gc-full
+- id: nix-flake-check
   stages: [pre-push]
   entry: nix flake check
 
-- id: gc-integration
-  stages: [manual]
-  entry: nix build .#checks.x86_64-linux.gc-integration
+- id: city-integration
+  stages: [pre-push]
+  entry: nix run .#test-city
+  files: ^(lib/city/|tests/city|specs/gas-city)
 ```
 
 ### Upgrades
@@ -559,14 +584,18 @@ No new commands. Existing tools compose:
 
 | Area | Files | Change |
 |------|-------|--------|
-| Nix API | `lib/city/default.nix` (new) | `mkCity` function |
-| Provider | `lib/city/provider.sh` (new) | Shell script for `exec:<script>` |
-| NixOS module | `modules/city.nix` (new) | `services.wrapix.cities` |
-| Agent wrapper | `lib/city/agent.sh` (new) | `wrapix-agent` CLI abstraction |
-| Formulas | `lib/city/formulas/` (new) | Default scout, worker, reviewer formulas |
-| Post-gate order | `lib/city/post-gate.sh` (new) | Event-gated order: merge, branch cleanup, deploy bead creation |
-| Gate condition | `lib/city/gate.sh` (new) | Convergence gate: nudge reviewer, wait for verdict |
-| Entrypoint | `lib/city/entrypoint.sh` (new) | Init bead check, podman events watcher, exec gc |
+| Nix API | `lib/city/default.nix` | `mkCity` function |
+| Provider | `lib/city/provider.sh` | Shell script for `exec:<script>` |
+| NixOS module | `modules/city.nix` | `services.wrapix.cities` |
+| Agent wrapper | `lib/city/agent.sh` | `wrapix-agent` CLI abstraction |
+| Formulas | `lib/city/formulas/` | Default scout, worker, reviewer formulas |
+| Post-gate order | `lib/city/post-gate.sh` | Event-gated order: merge, branch cleanup, deploy bead creation |
+| Orders | `lib/city/orders/post-gate/order.toml` | gc order definition for post-gate event trigger |
+| Gate condition | `lib/city/gate.sh` | Convergence gate: nudge reviewer, wait for verdict |
+| Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
+| Entrypoint | `lib/city/entrypoint.sh` | Init bead check, podman events watcher, exec gc |
+| Unit tests | `tests/city.nix` | Nix-sandbox tests for all components |
+| Integration tests | `tests/city-integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
 | Sandbox | `lib/sandbox/default.nix` | No changes (mkCity uses mkSandbox) |
 | Ralph | `lib/ralph/cmd/sync.sh` | Extend `ralph sync` to detect mkCity and scaffold |
@@ -574,56 +603,52 @@ No new commands. Existing tools compose:
 
 ## Success Criteria
 
-- [ ] `mkCity` evaluates with minimal config (`services.api.package = myApp`)
-  [verify](tests/gas-city-test.sh::test_mkcity_minimal_eval)
-- [ ] Generated `city.toml` is valid and references the wrapix provider script
-  [verify](tests/gas-city-test.sh::test_city_toml_valid)
-- [ ] Provider script handles all 20 gc provider methods plus `CheckImage`
-  [verify](tests/gas-city-test.sh::test_provider_methods)
-- [ ] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
-  [verify](tests/gas-city-test.sh::test_worker_worktree)
-- [ ] Persistent roles (scout, reviewer) start with tmux as PID 1
-  [verify](tests/gas-city-test.sh::test_persistent_role_tmux)
-- [ ] gc convergence detects worker completion and triggers reviewer gate
-  [verify](tests/gas-city-test.sh::test_convergence_handoff)
-- [ ] Secrets are injected at runtime, never baked into images
-  [verify](tests/gas-city-test.sh::test_secrets_runtime_only)
+- [x] `mkCity` evaluates with minimal config (`services.api.package = myApp`)
+  [verify](tests/city.nix::city-mkcity-eval)
+- [x] Generated `city.toml` is valid and references the wrapix provider script
+  [verify](tests/city.nix::city-city-toml), [verify](tests/city.nix::city-config-validate)
+- [x] Provider script handles all gc provider methods
+  [verify](tests/city.nix::city-shell-syntax), [verify](tests/city.nix::city-provider-worker)
+- [x] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
+  [verify](tests/city-integration.nix::Phase 1 worker worktree)
+- [x] Persistent roles (scout, reviewer) start with tmux as PID 1
+  [verify](tests/city-integration.nix::Phase 1 scout/reviewer start)
+- [x] gc convergence detects worker completion and triggers reviewer gate
+  [verify](tests/city-integration.nix::Phase 1 reviewer approval)
+- [x] Secrets are injected at runtime, never baked into images
+  [verify](tests/city.nix::city-secrets)
 - [ ] `ralph run` still works standalone without gc
-  [verify](tests/gas-city-test.sh::test_ralph_standalone)
-- [ ] NixOS module generates systemd units and podman network
-  [verify](tests/gas-city-test.sh::test_nixos_module)
+- [x] NixOS module generates systemd units and podman network
+  [verify](tests/city.nix::city-nixos-module)
 - [ ] Crash recovery: gc container restarts, reconciles orphaned containers
-  [verify](tests/gas-city-test.sh::test_crash_recovery)
 - [ ] `ralph sync` scaffolds missing docs files and creates review beads
-  [verify](tests/gas-city-test.sh::test_docs_scaffolding)
-- [ ] Service packages are built into OCI images via `dockerTools.buildLayeredImage`
-  [verify](tests/gas-city-test.sh::test_service_image_build)
+- [x] Service packages are built into OCI images via `dockerTools.buildLayeredImage`
+  [verify](tests/city.nix::city-service-images)
 - [ ] Cooldown pacing delays task dispatch by configured duration
-  [verify](tests/gas-city-test.sh::test_cooldown_pacing)
 - [ ] Reviewer enforces `docs/style-guidelines.md` rules
-  [judge](tests/judges/gas-city.sh::test_reviewer_enforcement)
-- [ ] Provider script is clean, minimal shell with no Go dependencies
-  [judge](tests/judges/gas-city.sh::test_provider_simplicity)
-- [ ] Agent abstraction allows future provider swaps without architectural changes
-  [judge](tests/judges/gas-city.sh::test_agent_abstraction)
+  [judge]
+- [x] Provider script is clean, minimal shell with no Go dependencies
+  [judge]
+- [x] Agent abstraction allows future provider swaps without architectural changes
+  [judge]
 - [ ] P0 beads bypass cooldown and are dispatched immediately
-  [verify](tests/gas-city-test.sh::test_p0_bypass_cooldown)
-- [ ] Merge uses fast-forward only; rebase + prek on divergence
-  [verify](tests/gas-city-test.sh::test_merge_ff_only)
-- [ ] Post-gate order sends notifications via wrapix-notifyd for director events
-  [verify](tests/gas-city-test.sh::test_notifications)
+- [x] Merge uses fast-forward only; rebase + prek on divergence
+  [verify](tests/city-integration.nix::Phase 1 post-gate merge), [verify](tests/city-integration.nix::Phase 2 merge conflict)
+- [x] Post-gate order sends notifications via `wrapix-notify` for director events
+  [verify](tests/city-integration.nix::Phase 1 deploy bead)
 - [ ] Scout pauses bead creation when queue cap is reached
-  [verify](tests/gas-city-test.sh::test_queue_overflow_cap)
-- [ ] Scout detects errors via log pattern regex matching
-  [verify](tests/gas-city-test.sh::test_scout_log_patterns)
-- [ ] Reviewer gate reads commit range from bead metadata
-  [verify](tests/gas-city-test.sh::test_reviewer_handoff)
+- [x] Scout detects errors via log pattern regex matching
+  [verify](tests/city.nix::city-scout-parse-rules), [verify](tests/city.nix::city-scout-scan)
+- [x] Reviewer gate reads commit range from bead metadata
+  [verify](tests/city.nix::city-gate-functional)
 - [ ] Scout polling uses gc orders for scheduling
-  [verify](tests/gas-city-test.sh::test_scout_orders)
 - [ ] Worker→reviewer retry uses gc convergence with max 2 iterations
-  [verify](tests/gas-city-test.sh::test_convergence_loop)
-- [ ] Role behavior defined as gc formulas, overridable by consumers
-  [verify](tests/gas-city-test.sh::test_role_formulas)
+- [x] Role behavior defined as gc formulas, overridable by consumers
+  [verify](tests/city.nix::city-formulas)
+- [x] Post-gate handles escalation path (non-approved convergence)
+  [verify](tests/city-integration.nix::Phase 3 escalation)
+- [x] Custom scale_check avoids gc's 30s timeout under dolt contention
+  [verify](tests/city.nix::city-config-validate)
 
 ## Out of Scope
 
