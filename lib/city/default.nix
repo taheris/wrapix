@@ -68,6 +68,7 @@ let
       workers ? 1,
       cooldown ? "0",
       scout ? { },
+      mayor ? { },
       resources ? { },
       secrets ? { },
       name ? "dev",
@@ -75,6 +76,7 @@ let
     let
       scoutInterval = scout.interval or "5m";
       scoutMaxBeads = scout.maxBeads or 10;
+      mayorAutoDecompose = mayor.autoDecompose or false;
 
       # Build service container images
       serviceImages = mapAttrs mkServiceImage services;
@@ -99,6 +101,7 @@ let
         scout = ./formulas/scout.formula.toml;
         worker = ./formulas/worker.formula.toml;
         judge = ./formulas/judge.formula.toml;
+        mayor = ./formulas/mayor.formula.toml;
       };
 
       # Copy formulas and orders into the Nix store as a directory.
@@ -112,6 +115,9 @@ let
           ${./formulas/scout.formula.toml} > $out/wrapix-scout.formula.toml
         cp ${./formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
         cp ${./formulas/judge.formula.toml} $out/wrapix-judge.formula.toml
+        ${pkgs.gnused}/bin/sed \
+          -e 's|^default = "false"$|default = "${if mayorAutoDecompose then "true" else "false"}"|' \
+          ${./formulas/mayor.formula.toml} > $out/wrapix-mayor.formula.toml
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
@@ -169,6 +175,11 @@ let
         # bd list query is ~2x faster and avoids the timeout.
         agent = [
           {
+            name = "mayor";
+            scope = "city";
+            scale_check = "echo 0";
+          }
+          {
             name = "scout";
             scope = "city";
             scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
@@ -188,6 +199,10 @@ let
 
         # [[named_session]] — persistent sessions that gc auto-starts
         named_session = [
+          {
+            template = "mayor";
+            mode = "always";
+          }
           {
             template = "scout";
             mode = "always";
@@ -372,6 +387,9 @@ let
       scoutConfig = {
         interval = scoutInterval;
         maxBeads = scoutMaxBeads;
+      };
+      mayorConfig = {
+        autoDecompose = mayorAutoDecompose;
       };
     };
 

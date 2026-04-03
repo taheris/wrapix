@@ -38,6 +38,10 @@ is_judge() {
   [[ "${SESSION}" == judge* ]]
 }
 
+is_mayor() {
+  [[ "${SESSION}" == mayor* ]]
+}
+
 # Standard labels applied to every container
 container_labels() {
   local role
@@ -47,6 +51,8 @@ container_labels() {
     role="scout"
   elif [[ "${SESSION}" == judge* ]]; then
     role="judge"
+  elif [[ "${SESSION}" == mayor* ]]; then
+    role="mayor"
   else
     role="${SESSION}"
   fi

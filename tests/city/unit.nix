@@ -69,6 +69,9 @@ let
       interval = "10m";
       maxBeads = 5;
     };
+    mayor = {
+      autoDecompose = true;
+    };
     resources = {
       worker = {
         cpus = 2;
@@ -99,6 +102,7 @@ in
       hasServiceImages = builtins.hasAttr "serviceImages" minimalCity;
       hasFormulas = builtins.hasAttr "formulas" minimalCity;
       hasDefaultFormulas = builtins.hasAttr "defaultFormulas" minimalCity;
+      hasMayorConfig = builtins.hasAttr "mayorConfig" minimalCity;
 
       # Full city also evaluates
       fullHasConfig = builtins.hasAttr "config" fullCity;
@@ -111,6 +115,7 @@ in
     assert hasServiceImages;
     assert hasFormulas;
     assert hasDefaultFormulas;
+    assert hasMayorConfig;
     assert fullHasConfig;
     assert emptyHasConfig;
     runCommandLocal "city-mkcity-eval" { } ''
@@ -142,6 +147,7 @@ in
       # Agent is a list (array of tables)
       agentIsList = builtins.isList configAttrs.agent;
       agentCount = builtins.length configAttrs.agent;
+      hasMayor = builtins.any (a: a.name == "mayor") configAttrs.agent;
       hasScout = builtins.any (a: a.name == "scout") configAttrs.agent;
       hasWorker = builtins.any (a: a.name == "worker") configAttrs.agent;
       hasJudge = builtins.any (a: a.name == "judge") configAttrs.agent;
@@ -158,6 +164,10 @@ in
       # scoutConfig exported with correct values
       minimalScoutConfig = minimalCity.scoutConfig;
       fullScoutConfig = fullCity.scoutConfig;
+
+      # mayorConfig exported with correct values
+      minimalMayorConfig = minimalCity.mayorConfig;
+      hasMayorConfig = builtins.hasAttr "mayorConfig" minimalCity;
     in
     assert hasWorkspace;
     assert workspaceName == "dev";
@@ -171,7 +181,8 @@ in
     assert convergenceMaxPerAgent == 2;
     assert convergenceMaxTotal == 10;
     assert agentIsList;
-    assert agentCount == 3;
+    assert agentCount == 4;
+    assert hasMayor;
     assert hasScout;
     assert hasWorker;
     assert hasJudge;
@@ -181,14 +192,18 @@ in
     assert minimalScoutConfig.interval == "5m";
     assert fullScoutConfig.maxBeads == 5;
     assert fullScoutConfig.interval == "10m";
+    # mayorConfig
+    assert hasMayorConfig;
+    assert !minimalMayorConfig.autoDecompose;
     runCommandLocal "city-city-toml" { } ''
       echo "PASS: city.toml matches gc config schema"
       echo "  - [workspace] with name and provider"
       echo "  - [session] with exec:/nix/store/... provider"
       echo "  - [formulas], [beads], [daemon], [convergence] sections present"
-      echo "  - [[agent]] is list with scout, worker, judge"
+      echo "  - [[agent]] is list with mayor, scout, worker, judge"
       echo "  - workers reflected in max_active_sessions"
       echo "  - scoutConfig exports correct maxBeads and interval"
+      echo "  - mayorConfig exports correct autoDecompose"
       mkdir $out
     '';
 
@@ -640,7 +655,7 @@ in
 
         echo "Checking role formulas..."
 
-        for role in scout worker judge; do
+        for role in scout worker judge mayor; do
           F="$DIR/$role.formula.toml"
           test -f "$F" || { echo "FAIL: missing $role.formula.toml"; exit 1; }
           grep -q '^formula = ' "$F" || { echo "FAIL: $role missing formula name"; exit 1; }
@@ -648,6 +663,16 @@ in
           grep -q 'docs/README.md' "$F" || { echo "FAIL: $role missing docs/README.md pin"; exit 1; }
           echo "  PASS: $role"
         done
+
+        # Mayor must reference architecture.md and orchestration.md
+        grep -q 'architecture.md' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor no architecture.md"; exit 1; }
+        grep -q 'orchestration.md' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor no orchestration.md"; exit 1; }
+        # Mayor must have briefing and triage steps
+        grep -q 'id = "briefing"' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor missing briefing step"; exit 1; }
+        grep -q 'id = "triage"' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor missing triage step"; exit 1; }
+        grep -q 'id = "check-specs"' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor missing check-specs step"; exit 1; }
+        grep -q 'auto_decompose' "$DIR/mayor.formula.toml" || { echo "FAIL: mayor missing auto_decompose var"; exit 1; }
+        echo "  PASS: mayor has required steps and variables"
 
         # Scout must reference orchestration.md for pattern loading
         grep -q 'orchestration.md' "$DIR/scout.formula.toml" || { echo "FAIL: scout no orchestration.md"; exit 1; }
@@ -734,7 +759,16 @@ in
         fi
         echo "  PASS: full city overrides defaults (10m, 5)"
 
-        echo "PASS: Scout formula defaults correctly rewritten"
+        # Mayor formula: autoDecompose defaults rewritten
+        MINIMAL_MAYOR="${minimalCity.formulas}/wrapix-mayor.formula.toml"
+        grep -q 'default = "false"' "$MINIMAL_MAYOR" || { echo "FAIL: minimal mayor auto_decompose not false"; exit 1; }
+        echo "  PASS: minimal city mayor keeps default (false)"
+
+        FULL_MAYOR="${fullCity.formulas}/wrapix-mayor.formula.toml"
+        grep -q 'default = "true"' "$FULL_MAYOR" || { echo "FAIL: full mayor auto_decompose not true"; exit 1; }
+        echo "  PASS: full city mayor overrides auto_decompose (true)"
+
+        echo "PASS: Scout and mayor formula defaults correctly rewritten"
         mkdir $out
       '';
 
