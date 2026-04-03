@@ -394,6 +394,15 @@ let
       sleep 1
       find .beads -name LOCK -delete 2>/dev/null || true
       rm -f .beads/dolt-server.pid .beads/dolt-server.lock
+      # Rewrite dolt_server_port in metadata.json to point at the shared
+      # dolt container.  gc init wrote the embedded dolt's (now dead) port
+      # here.  gc's reconciliation loop deletes the port file, so metadata.json
+      # is the only reliable fallback for bd to discover the server.
+      if [ -f .beads/metadata.json ]; then
+        jq --argjson p "$DOLT_PORT" '.dolt_server_port = $p' \
+          .beads/metadata.json > .beads/metadata.json.tmp \
+          && mv .beads/metadata.json.tmp .beads/metadata.json
+      fi
       chmod 700 .beads
 
       # --- Step 2: Start shared dolt container serving gc's database ---
@@ -477,6 +486,10 @@ let
         cat "$WS/gc.log" 2>/dev/null | sed 's/^/  /' || true
         return 1
       fi
+      # Re-create the port file — gc removes it during startup when
+      # GC_DOLT=skip is set.  Belt-and-suspenders: metadata.json also has
+      # the correct port as a fallback for bd.
+      echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
     }
     subtest "Start gc daemon" start_gc
 
