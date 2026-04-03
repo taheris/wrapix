@@ -1361,6 +1361,108 @@ in
         mkdir $out
       '';
 
+  # Post-gate: escalation routes through mayor (metadata + label + mail)
+  city-post-gate-escalation =
+    runCommandLocal "city-post-gate-escalation"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        POST_GATE="${../../lib/city/post-gate.sh}"
+        TMPDIR=$(mktemp -d)
+
+        echo "Testing post-gate.sh escalation flow..."
+
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+
+        WS="$TMPDIR/ws"
+        mkdir -p "$WS"
+        git -C "$WS" init -q -b main
+        git -C "$WS" commit --allow-empty -m "initial" -q
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        # Create a worktree to be cleaned up
+        mkdir -p "$WS/.wrapix/worktree"
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-esc-bead" -b gc-esc-bead -q
+
+        # Mock bd — record all calls
+        BD_LOG="$TMPDIR/bd.log"
+        cat > "$MOCK_BIN/bd" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$BD_LOG"
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Mock gc — record mail calls
+        GC_LOG="$TMPDIR/gc.log"
+        cat > "$MOCK_BIN/gc" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$GC_LOG"
+        MOCK
+        chmod +x "$MOCK_BIN/gc"
+
+        # Mock wrapix-notify
+        NOTIFY_LOG="$TMPDIR/notify.log"
+        cat > "$MOCK_BIN/wrapix-notify" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$NOTIFY_LOG"
+        MOCK
+        chmod +x "$MOCK_BIN/wrapix-notify"
+
+        # Run post-gate with escalation
+        PATH="$MOCK_BIN:$PATH" \
+          GC_BEAD_ID=esc-bead \
+          GC_TERMINAL_REASON=max_rounds_exceeded \
+          GC_WORKSPACE="$WS" \
+          GC_CITY_NAME=test \
+          bash "$POST_GATE" 2>&1
+
+        # Verify escalated=true metadata set
+        grep -q 'escalated=true' "$BD_LOG" || { echo "FAIL: escalated metadata not set"; cat "$BD_LOG"; exit 1; }
+        echo "  PASS: escalated=true metadata set"
+
+        # Verify escalation_reason metadata set
+        grep -q 'escalation_reason=max_rounds_exceeded' "$BD_LOG" || { echo "FAIL: escalation_reason not set"; cat "$BD_LOG"; exit 1; }
+        echo "  PASS: escalation_reason metadata set"
+
+        # Verify human label added
+        grep -q 'label add esc-bead human' "$BD_LOG" || { echo "FAIL: human label not added"; cat "$BD_LOG"; exit 1; }
+        echo "  PASS: human label added"
+
+        # Verify gc mail sent to mayor
+        grep -q 'mail send --to mayor' "$GC_LOG" || { echo "FAIL: no mail sent to mayor"; cat "$GC_LOG"; exit 1; }
+        grep -q 'escalation' "$GC_LOG" || { echo "FAIL: mail missing escalation subject"; cat "$GC_LOG"; exit 1; }
+        echo "  PASS: gc mail sent to mayor"
+
+        # Verify fallback notification also sent
+        test -f "$NOTIFY_LOG" || { echo "FAIL: fallback notify not called"; exit 1; }
+        echo "  PASS: fallback notification sent"
+
+        # Verify worktree cleaned up
+        ! test -d "$WS/.wrapix/worktree/gc-esc-bead" || { echo "FAIL: worktree not cleaned"; exit 1; }
+        echo "  PASS: worktree cleaned up"
+
+        # Verify branch cleaned up
+        ! git -C "$WS" rev-parse --verify gc-esc-bead 2>/dev/null || { echo "FAIL: branch not cleaned"; exit 1; }
+        echo "  PASS: branch cleaned up"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: post-gate escalation routes through mayor correctly"
+        mkdir $out
+      '';
+
   # =========================================================================
   # Cooldown pacing and P0 bypass
   # =========================================================================

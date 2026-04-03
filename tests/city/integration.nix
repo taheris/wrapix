@@ -643,6 +643,21 @@ let
       ! git branch | grep "gc-$BEAD3"
     }
     subtest "Verify escalation branch cleaned up" verify_escalation_branch_cleaned
+
+    verify_escalation_metadata() {
+      local escalated
+      escalated="$(bd show "$BEAD3" --json 2>/dev/null | jq -r '.[0].metadata.escalated // empty')"
+      [ "$escalated" = "true" ] || { echo "FAIL: escalated metadata not set"; return 1; }
+      local reason
+      reason="$(bd show "$BEAD3" --json 2>/dev/null | jq -r '.[0].metadata.escalation_reason // empty')"
+      [ "$reason" = "max_rounds_exceeded" ] || { echo "FAIL: escalation_reason=$reason"; return 1; }
+    }
+    subtest "Verify escalation metadata set on bead" verify_escalation_metadata
+
+    verify_escalation_human_label() {
+      bd show "$BEAD3" --json 2>/dev/null | jq -r '.[0].labels[]' 2>/dev/null | grep -q "human"
+    }
+    subtest "Verify escalation bead flagged for human review" verify_escalation_human_label
   '';
 
 in

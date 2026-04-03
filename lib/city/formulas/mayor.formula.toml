@@ -53,7 +53,11 @@ gc mail inbox
 Handle messages from:
 - Scout: bead cap reached, container health issues
 - Judge: flagged items outside documented rules
-- Convergence: escalations (max iterations reached)
+- **Escalation mail (subject: "escalation"):** The post-gate order sends
+  mail when convergence fails after max worker→judge iterations. The
+  message includes the bead ID and terminal reason. These beads also have
+  `escalated=true` metadata and a `human` label — present them in the
+  briefing with full context and suggested actions.
 
 **Exit criteria:** Context loaded, inbox processed."""
 
@@ -134,7 +138,12 @@ Check for convergence failures (beads with metadata `escalated=true`):
 bd list --status=open --json --limit=0 | jq '[.[] | select(.metadata.escalated == "true")]'
 ```
 
-Present each escalation with the worker's attempts and judge's feedback.
+For each escalated bead, present:
+- Bead ID, title, and escalation reason (`escalation_reason` metadata)
+- Worker attempts and judge feedback (from bead notes)
+- **Suggested actions:** retry with different approach, create P0 for
+  manual fix, dismiss if no longer relevant, or investigate further
+  via scout (`gc mail send --to scout -s "investigate" -m "..."`)
 
 **4. Scout alerts:**
 

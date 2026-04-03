@@ -84,6 +84,20 @@ is_low_risk() {
 handle_escalation() {
   echo "post-gate: convergence escalated for bead $BEAD_ID (reason: $TERMINAL_REASON)"
 
+  # Mark bead with escalation metadata so the mayor can find and present it
+  bd update "$BEAD_ID" --set-metadata "escalated=true" 2>/dev/null || true
+  bd update "$BEAD_ID" --set-metadata "escalation_reason=$TERMINAL_REASON" 2>/dev/null || true
+  bd update "$BEAD_ID" --notes="Convergence escalated: $TERMINAL_REASON — needs human review via mayor" 2>/dev/null || true
+
+  # Flag for human review — mayor picks this up via bd human list
+  bd label add "$BEAD_ID" human 2>/dev/null || true
+
+  # Notify mayor directly so it can present on next attach
+  gc mail send --to mayor -s "escalation" \
+    -m "Convergence escalated for bead $BEAD_ID (reason: $TERMINAL_REASON). Worker→judge loop exhausted after max iterations. Review via bd show $BEAD_ID." \
+    2>/dev/null || true
+
+  # Fallback notification for when human is not attached to mayor
   notify "[${CITY_NAME}] Convergence escalated: bead ${BEAD_ID} — ${TERMINAL_REASON}"
 
   # Clean up worktree and branch on escalation
