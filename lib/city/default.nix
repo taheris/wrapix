@@ -101,10 +101,15 @@ let
         reviewer = ./formulas/reviewer.formula.toml;
       };
 
-      # Copy formulas and orders into the Nix store as a directory
+      # Copy formulas and orders into the Nix store as a directory.
+      # Scout formula defaults are rewritten with configured values so gc
+      # uses the right max_beads and poll_interval without extra config.
       formulasDir = pkgs.runCommand "wrapix-formulas" { } ''
         mkdir -p $out/orders/post-gate
-        cp ${./formulas/scout.formula.toml} $out/wrapix-scout.formula.toml
+        ${pkgs.gnused}/bin/sed \
+          -e 's|^default = "5m"$|default = "${scoutInterval}"|' \
+          -e 's|^default = "10"$|default = "${toString scoutMaxBeads}"|' \
+          ${./formulas/scout.formula.toml} > $out/wrapix-scout.formula.toml
         cp ${./formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
         cp ${./formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
@@ -234,6 +239,7 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
+        export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
         # Copy Nix-generated config so gc finds it
         # (files must be real, not store symlinks, for container mounts)
@@ -296,6 +302,7 @@ let
           export GC_WORKSPACE="$(pwd)"
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
+          export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
           cp -f ${cityToml} city.toml
           mkdir -p .gc/formulas .gc/scripts

@@ -154,6 +154,10 @@ in
       hasConvergence = builtins.hasAttr "convergence" configAttrs;
       convergenceMaxPerAgent = configAttrs.convergence.max_per_agent;
       convergenceMaxTotal = configAttrs.convergence.max_total;
+
+      # scoutConfig exported with correct values
+      minimalScoutConfig = minimalCity.scoutConfig;
+      fullScoutConfig = fullCity.scoutConfig;
     in
     assert hasWorkspace;
     assert workspaceName == "dev";
@@ -172,6 +176,11 @@ in
     assert hasWorker;
     assert hasReviewer;
     assert fullWorkerSessions == 2;
+    # scoutConfig reflects configured values
+    assert minimalScoutConfig.maxBeads == 10;
+    assert minimalScoutConfig.interval == "5m";
+    assert fullScoutConfig.maxBeads == 5;
+    assert fullScoutConfig.interval == "10m";
     runCommandLocal "city-city-toml" { } ''
       echo "PASS: city.toml matches gc config schema"
       echo "  - [workspace] with name and provider"
@@ -179,6 +188,7 @@ in
       echo "  - [formulas], [beads], [daemon], [convergence] sections present"
       echo "  - [[agent]] is list with scout, worker, reviewer"
       echo "  - workers reflected in max_active_sessions"
+      echo "  - scoutConfig exports correct maxBeads and interval"
       mkdir $out
     '';
 
@@ -684,6 +694,40 @@ in
         echo "  PASS: post-gate order bundled"
 
         echo "PASS: Scripts and orders bundle verified"
+        mkdir $out
+      '';
+
+  # Scout formula defaults rewritten with configured values
+  city-scout-formula-defaults =
+    runCommandLocal "city-scout-formula-defaults"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+        echo "Checking scout formula defaults are rewritten..."
+
+        # Minimal city: defaults should remain (5m, 10)
+        MINIMAL="${minimalCity.formulas}/wrapix-scout.formula.toml"
+        grep -q 'default = "5m"' "$MINIMAL" || { echo "FAIL: minimal poll_interval not 5m"; exit 1; }
+        grep -q 'default = "10"' "$MINIMAL" || { echo "FAIL: minimal max_beads not 10"; exit 1; }
+        echo "  PASS: minimal city keeps defaults (5m, 10)"
+
+        # Full city: defaults should be overridden (10m, 5)
+        FULL="${fullCity.formulas}/wrapix-scout.formula.toml"
+        grep -q 'default = "10m"' "$FULL" || { echo "FAIL: full poll_interval not 10m"; exit 1; }
+        grep -q 'default = "5"' "$FULL" || { echo "FAIL: full max_beads not 5"; exit 1; }
+        # Verify original defaults are NOT present
+        if grep -q 'default = "10"' "$FULL" 2>/dev/null; then
+          echo "FAIL: full city still has default max_beads=10"
+          exit 1
+        fi
+        echo "  PASS: full city overrides defaults (10m, 5)"
+
+        echo "PASS: Scout formula defaults correctly rewritten"
         mkdir $out
       '';
 
