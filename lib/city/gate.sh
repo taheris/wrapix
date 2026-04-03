@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Convergence gate condition script — bridges worker→reviewer handoff.
+# Convergence gate condition script — bridges worker→judge handoff.
 #
 # Called by gc convergence with gate_mode=condition. After a worker completes,
-# this script reads the commit range from bead metadata, nudges the reviewer
+# this script reads the commit range from bead metadata, nudges the judge
 # session, polls for the review verdict, and returns the result.
 #
 # Exit codes:
-#   0 — reviewer approved (convergence terminates successfully)
-#   1 — reviewer rejected (convergence iterates or escalates)
+#   0 — judge approved (convergence terminates successfully)
+#   1 — judge rejected (convergence iterates or escalates)
 #
 # Environment variables (set by formula env configuration):
 #   GC_BEAD_ID       — bead being reviewed (required)
@@ -31,10 +31,10 @@ if [[ -z "$commit_range" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Nudge the reviewer session with the commit range
+# Step 2: Nudge the judge session with the commit range
 # ---------------------------------------------------------------------------
 
-gc session nudge reviewer "Review bead $BEAD_ID — commit range: $commit_range"
+gc session nudge judge "Review bead $BEAD_ID — commit range: $commit_range"
 
 # ---------------------------------------------------------------------------
 # Step 3: Poll bead metadata for review_verdict
@@ -60,11 +60,11 @@ done
 
 case "$verdict" in
   approve)
-    echo "gate: bead $BEAD_ID approved by reviewer"
+    echo "gate: bead $BEAD_ID approved by judge"
     exit 0
     ;;
   reject)
-    echo "gate: bead $BEAD_ID rejected by reviewer"
+    echo "gate: bead $BEAD_ID rejected by judge"
     exit 1
     ;;
   *)

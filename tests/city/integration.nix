@@ -5,11 +5,11 @@
 #
 # Test flow:
 #   Phase 1 (happy path):
-#     1. gc starts scout + reviewer via provider.sh → podman
+#     1. gc starts scout + judge via provider.sh → podman
 #     2. Scout (mock claude) creates a bead
 #     3. Director (test script) slings bead into convergence
 #     4. Worker processes in worktree, commits, exits
-#     5. gate.sh nudges reviewer, reviewer approves
+#     5. gate.sh nudges judge, judge approves
 #     6. post-gate.sh merges, creates deploy bead, flags bd human
 #     7. Verify: merge on main, worktree cleaned up
 #     gc is stopped after Phase 1 — remaining phases run without it.
@@ -65,7 +65,7 @@ let
     set -euo pipefail
 
     # Write all output to host-visible log (mounted workspace .beads dir is rw for
-    # scout/reviewer, but ro for workers — use /tmp as fallback)
+    # scout/judge, but ro for workers — use /tmp as fallback)
     MOCK_LOG="/workspace/.beads/mock-claude-''${GC_ROLE:-unknown}.log"
     if ! touch "$MOCK_LOG" 2>/dev/null; then
       MOCK_LOG="/tmp/mock-claude-''${GC_ROLE:-unknown}.log"
@@ -82,7 +82,7 @@ let
         git commit -m "fix: resolve test error"
         ;;
       --dangerously-skip-permissions)
-        # Persistent session mode (scout or reviewer)
+        # Persistent session mode (scout or judge)
         # Ensure dolt config exists (container has no global config)
         dolt config --global --add user.email mock@test 2>/dev/null || true
         dolt config --global --add user.name mock 2>/dev/null || true
@@ -92,7 +92,7 @@ let
             # Stay alive for gc to manage
             sleep 600
             ;;
-          reviewer|reviewer*)
+          judge|judge*)
             # Poll for beads needing review, approve them
             for i in $(seq 1 300); do
               for id in $(bd list --status=in_progress --json 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
@@ -445,7 +445,7 @@ let
     subtest "Set up workspace" setup_workspace
 
     # ================================================================
-    # Phase 1: Happy path — scout → worker → reviewer → director
+    # Phase 1: Happy path — scout → worker → judge → director
     # ================================================================
 
     validate_config() {
@@ -463,7 +463,7 @@ let
       # shared server rather than starting embedded dolt instances.
       export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
       # Clean up any containers left by gc rig add's auto-start
-      podman rm -f gc-test-city-scout gc-test-city-reviewer 2>/dev/null || true
+      podman rm -f gc-test-city-scout gc-test-city-judge 2>/dev/null || true
       setsid gc start --foreground > "$WS/gc.log" 2>&1 &
       GC_PID=$!
       sleep 3
@@ -489,12 +489,12 @@ let
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
 
-    subtest "Wait for reviewer approval" \
+    subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
 
     # gc convergence would normally drive gate → post-gate via events.
     # Since the test uses gc sling (no convergence loop), invoke post-gate
-    # directly as the director would after reviewer approval.
+    # directly as the director would after judge approval.
     run_post_gate() {
       GC_BEAD_ID="$BEAD_ID" \
       GC_TERMINAL_REASON="approved" \

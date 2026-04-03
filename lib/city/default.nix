@@ -98,7 +98,7 @@ let
       defaultFormulas = {
         scout = ./formulas/scout.formula.toml;
         worker = ./formulas/worker.formula.toml;
-        reviewer = ./formulas/reviewer.formula.toml;
+        judge = ./formulas/judge.formula.toml;
       };
 
       # Copy formulas and orders into the Nix store as a directory.
@@ -111,7 +111,7 @@ let
           -e 's|^default = "10"$|default = "${toString scoutMaxBeads}"|' \
           ${./formulas/scout.formula.toml} > $out/wrapix-scout.formula.toml
         cp ${./formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
-        cp ${./formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
+        cp ${./formulas/judge.formula.toml} $out/wrapix-judge.formula.toml
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
@@ -180,9 +180,9 @@ let
             scale_check = workerScaleCheck;
           }
           {
-            name = "reviewer";
+            name = "judge";
             scope = "city";
-            scale_check = "bd list --metadata-field gc.routed_to=reviewer --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
         ];
 
@@ -193,7 +193,7 @@ let
             mode = "always";
           }
           {
-            template = "reviewer";
+            template = "judge";
             mode = "always";
           }
         ];

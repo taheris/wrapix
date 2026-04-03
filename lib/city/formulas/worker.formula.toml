@@ -2,7 +2,7 @@ description = """
 Worker formula — ephemeral per-bead task execution.
 
 Receives task context via environment variables and a mounted task file
-(bead description, acceptance criteria, reviewer notes from prior attempts).
+(bead description, acceptance criteria, judge notes from prior attempts).
 Runs in an isolated git worktree, uses wrapix-agent for implementation,
 commits results, and exits. The container exit signals completion to gc
 convergence.
@@ -53,7 +53,7 @@ cat /workspace/.task
 
 **3. Understand the assignment:**
 - What exactly needs to be done?
-- If this is a retry: read reviewer rejection notes carefully
+- If this is a retry: read judge rejection notes carefully
 - What files are likely involved?
 - What does "done" look like?
 
@@ -74,7 +74,7 @@ git add <files>
 git commit -m "<type>: <description> ($GC_BEAD_ID)"
 ```
 
-If this is a retry after reviewer rejection: focus on fixing the specific
+If this is a retry after judge rejection: focus on fixing the specific
 issues noted in the rejection, not redoing everything.
 
 **2. Stay scoped:**
@@ -120,6 +120,6 @@ git add -A && git commit -m "chore: capture remaining work ($GC_BEAD_ID)"
 
 The container exit signals worker completion to gc convergence. The
 provider script reads the branch state and sets bead metadata
-(commit_range, branch_name) for the reviewer gate.
+(commit_range, branch_name) for the judge gate.
 
 **Exit criteria:** All changes committed, working tree clean, exit 0."""

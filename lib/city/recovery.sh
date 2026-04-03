@@ -206,7 +206,7 @@ cleanup_stale_worktrees() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 4: Stop orphaned persistent containers (scout/reviewer) that gc
+# Step 4: Stop orphaned persistent containers (scout/judge) that gc
 # will re-create on start
 # ---------------------------------------------------------------------------
 
@@ -224,7 +224,7 @@ cleanup_persistent_containers() {
     role="$(get_container_role "$container")"
 
     # gc will recreate persistent roles on start — stop stale ones
-    if [[ "$role" == "scout" || "$role" == "reviewer" ]]; then
+    if [[ "$role" == "scout" || "$role" == "judge" ]]; then
       echo "recovery: stopping stale persistent container $container (gc will recreate)"
       podman stop "$container" 2>/dev/null || true
       podman rm -f "$container" 2>/dev/null || true

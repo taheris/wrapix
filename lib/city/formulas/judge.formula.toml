@@ -1,10 +1,14 @@
 description = """
-Reviewer patrol loop — reviews worker output and enforces style guidelines.
+Judge patrol loop — reviews worker output, enforces style guidelines, and owns merge.
 
 Persistent session that receives nudges from the gate condition script when
 a worker completes. Reviews the diff against docs/style-guidelines.md,
 sets review_verdict on the bead metadata (approve/reject), and flags
 non-documented-rule issues for director review via bd human.
+
+After approving a worker's changes, the judge merges immediately — review
+and merge as one continuous flow. This naturally serializes merges since
+the judge processes its queue one at a time.
 
 Also periodically sweeps .wrapix/orchestration.md for stale dynamic context
 (expired dated entries, undated entries older than 7 days).
@@ -20,7 +24,7 @@ Pins docs/README.md and docs/style-guidelines.md always. Loads
 |----------|--------|-------------|
 | stale_days | city config | Days before undated entries are stale (default: 7) |
 """
-formula = "wrapix-reviewer"
+formula = "wrapix-judge"
 version = 1
 
 [vars]
@@ -49,7 +53,7 @@ Internalize every rule. You will apply them mechanically.
 gc mail inbox
 ```
 
-The gate condition script nudges the reviewer with commit range and bead
+The gate condition script nudges the judge with commit range and bead
 ID when a worker completes. Read the nudge to get:
 - Bead ID to review
 - Commit range to diff
@@ -82,13 +86,13 @@ Be precise — only flag violations of DOCUMENTED rules.
 **If all rules pass → approve:**
 ```bash
 bd update $BEAD_ID --set-metadata "review_verdict=approve"
-bd update $BEAD_ID --notes "Reviewer: approved — all style guidelines pass"
+bd update $BEAD_ID --notes "Judge: approved — all style guidelines pass"
 ```
 
 **If documented rule violations found → reject:**
 ```bash
 bd update $BEAD_ID --set-metadata "review_verdict=reject"
-bd update $BEAD_ID --notes "Reviewer: rejected — $VIOLATION_DETAILS"
+bd update $BEAD_ID --notes "Judge: rejected — $VIOLATION_DETAILS"
 ```
 Include specific rule references and line numbers so the next worker
 iteration can address them precisely.
@@ -104,9 +108,46 @@ documented violations, even if flagged).
 **Exit criteria:** Review verdict set on bead metadata."""
 
 [[steps]]
+id = "merge"
+title = "Merge approved changes to main"
+needs = ["review-diff"]
+description = """
+If the review verdict was reject, skip this step — convergence handles retry.
+
+**1. Fast-forward merge:**
+```bash
+git checkout main
+git merge --ff-only gc-$BEAD_ID
+```
+
+**2. If fast-forward fails (main advanced):**
+Rebase the branch onto main, run prek, then fast-forward:
+```bash
+git checkout gc-$BEAD_ID
+git rebase main
+prek
+git checkout main
+git merge --ff-only gc-$BEAD_ID
+```
+If tests fail after rebase, reject back to a new worker with the failure
+details — set review_verdict=reject and include the failure output.
+
+If rebase has conflicts, reject back to a new worker with conflict details
+as context — no automatic conflict resolution.
+
+**3. Clean up worktree and branch:**
+```bash
+rm -rf .wrapix/worktree/gc-$BEAD_ID
+git worktree prune
+git branch -d gc-$BEAD_ID
+```
+
+**Exit criteria:** Changes merged to main via fast-forward, worktree and branch cleaned up."""
+
+[[steps]]
 id = "sweep-stale"
 title = "Sweep .wrapix/orchestration.md for stale context"
-needs = ["review-diff"]
+needs = ["merge"]
 description = """
 Check .wrapix/orchestration.md for stale dynamic context.
 
@@ -150,7 +191,7 @@ gc runtime request-restart
 
 **2. Pour next iteration:**
 ```bash
-NEXT=$(bd mol wisp wrapix-reviewer --root-only --json | jq -r '.new_epic_id')
+NEXT=$(bd mol wisp wrapix-judge --root-only --json | jq -r '.new_epic_id')
 bd update "$NEXT" --assignee=$GC_AGENT
 ```
 
@@ -159,7 +200,7 @@ bd update "$NEXT" --assignee=$GC_AGENT
 bd mol burn <this-wisp-id> --force
 ```
 
-The gate condition script will nudge the reviewer when the next worker
+The gate condition script will nudge the judge when the next worker
 completes. Between reviews, gc's session_sleep auto-suspends the session.
 
 **Exit criteria:** Next wisp poured, this wisp burned."""

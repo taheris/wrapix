@@ -2,7 +2,7 @@
 # Post-gate order — event-gated order triggered by convergence.terminated.
 #
 # Handles merge, branch cleanup, deploy bead creation, and director
-# notifications after the worker→reviewer convergence loop completes.
+# notifications after the worker→judge convergence loop completes.
 #
 # Exit codes:
 #   0 — post-gate actions completed successfully
@@ -70,7 +70,7 @@ has_auto_deploy() {
   [[ -f "$orch_file" ]] && grep -qE '^#+\s+Auto-deploy' "$orch_file"
 }
 
-# Check if the reviewer classified the change as low-risk.
+# Check if the judge classified the change as low-risk.
 is_low_risk() {
   local risk
   risk="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.risk_classification // empty' 2>/dev/null)" || risk=""

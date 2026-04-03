@@ -34,6 +34,10 @@ is_worker() {
   [[ "${SESSION}" == worker* ]]
 }
 
+is_judge() {
+  [[ "${SESSION}" == judge* ]]
+}
+
 # Standard labels applied to every container
 container_labels() {
   local role
@@ -41,8 +45,8 @@ container_labels() {
     role="worker"
   elif [[ "${SESSION}" == scout* ]]; then
     role="scout"
-  elif [[ "${SESSION}" == reviewer* ]]; then
-    role="reviewer"
+  elif [[ "${SESSION}" == judge* ]]; then
+    role="judge"
   else
     role="${SESSION}"
   fi
@@ -68,12 +72,20 @@ resource_flags() {
 }
 
 # ---------------------------------------------------------------------------
-# Persistent role helpers (scout, reviewer) — tmux as PID 1
+# Persistent role helpers (scout, judge) — tmux as PID 1
 # ---------------------------------------------------------------------------
 
 persistent_start() {
-  local name
+  local name ws_mode
   name="$(container_name)"
+
+  # Judge needs read-write workspace access for merge operations;
+  # other persistent roles (scout, mayor) get read-only.
+  if is_judge; then
+    ws_mode="rw"
+  else
+    ws_mode="ro"
+  fi
 
   # shellcheck disable=SC2046
   podman run -d \
@@ -83,7 +95,7 @@ persistent_start() {
     --workdir /workspace \
     $(container_labels) \
     $(resource_flags "${SESSION}") \
-    -v "${GC_WORKSPACE:?}:/workspace:ro" \
+    -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:rw" \
     ${GC_SECRET_FLAGS:-} \
     -e "GC_ROLE=${SESSION}" \
@@ -134,7 +146,7 @@ worker_start() {
   # and rewrite the gitdir to match.
   echo "gitdir: /mnt/git/worktrees/gc-${bead_id}" > "${GC_WORKSPACE}/${worktree_path}/.git"
 
-  # Build task file from bead description, acceptance criteria, and reviewer notes
+  # Build task file from bead description, acceptance criteria, and judge notes
   local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
   {
     local bead_json
@@ -147,11 +159,11 @@ worker_start() {
         printf '\n## Acceptance Criteria\n\n%s\n' "$acceptance"
       fi
     fi
-    # Append reviewer notes from prior attempts (if any)
-    local reviewer_notes
-    reviewer_notes="$(bd show "${bead_id}" --json 2>/dev/null | jq -r '.[0].metadata.merge_failure // empty' 2>/dev/null)" || reviewer_notes=""
-    if [[ -n "$reviewer_notes" ]]; then
-      printf '\n## Prior Rejection\n\n%s\n' "$reviewer_notes"
+    # Append judge notes from prior attempts (if any)
+    local judge_notes
+    judge_notes="$(bd show "${bead_id}" --json 2>/dev/null | jq -r '.[0].metadata.merge_failure // empty' 2>/dev/null)" || judge_notes=""
+    if [[ -n "$judge_notes" ]]; then
+      printf '\n## Prior Rejection\n\n%s\n' "$judge_notes"
     fi
   } > "$task_file" 2>/dev/null || true
 

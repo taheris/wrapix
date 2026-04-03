@@ -144,7 +144,7 @@ in
       agentCount = builtins.length configAttrs.agent;
       hasScout = builtins.any (a: a.name == "scout") configAttrs.agent;
       hasWorker = builtins.any (a: a.name == "worker") configAttrs.agent;
-      hasReviewer = builtins.any (a: a.name == "reviewer") configAttrs.agent;
+      hasJudge = builtins.any (a: a.name == "judge") configAttrs.agent;
 
       # Full city: workers=2 reflected in workspace and worker agent
       fullWorkspace = fullCity.configAttrs.workspace;
@@ -174,7 +174,7 @@ in
     assert agentCount == 3;
     assert hasScout;
     assert hasWorker;
-    assert hasReviewer;
+    assert hasJudge;
     assert fullWorkerSessions == 2;
     # scoutConfig reflects configured values
     assert minimalScoutConfig.maxBeads == 10;
@@ -186,7 +186,7 @@ in
       echo "  - [workspace] with name and provider"
       echo "  - [session] with exec:/nix/store/... provider"
       echo "  - [formulas], [beads], [daemon], [convergence] sections present"
-      echo "  - [[agent]] is list with scout, worker, reviewer"
+      echo "  - [[agent]] is list with scout, worker, judge"
       echo "  - workers reflected in max_active_sessions"
       echo "  - scoutConfig exports correct maxBeads and interval"
       mkdir $out
@@ -640,7 +640,7 @@ in
 
         echo "Checking role formulas..."
 
-        for role in scout worker reviewer; do
+        for role in scout worker judge; do
           F="$DIR/$role.formula.toml"
           test -f "$F" || { echo "FAIL: missing $role.formula.toml"; exit 1; }
           grep -q '^formula = ' "$F" || { echo "FAIL: $role missing formula name"; exit 1; }
@@ -659,8 +659,8 @@ in
         grep -q 'worktree' "$DIR/scout.formula.toml" || { echo "FAIL: scout housekeeping missing worktree cleanup"; exit 1; }
         echo "  PASS: scout has housekeeping step"
 
-        # Reviewer must reference style-guidelines.md for enforcement
-        grep -q 'style-guidelines.md' "$DIR/reviewer.formula.toml" || { echo "FAIL: reviewer no style-guidelines.md"; exit 1; }
+        # Judge must reference style-guidelines.md for enforcement
+        grep -q 'style-guidelines.md' "$DIR/judge.formula.toml" || { echo "FAIL: judge no style-guidelines.md"; exit 1; }
 
         echo "PASS: All role formulas valid"
         mkdir $out
