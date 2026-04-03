@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Gas City judge rubrics — evaluates design quality criteria from specs/gas-city.md
 
-test_reviewer_enforcement() {
+test_judge_enforcement() {
   judge_files "lib/city/default.nix" "specs/gas-city.md"
-  judge_criterion "The mkCity function generates configuration that supports a reviewer role which enforces docs/style-guidelines.md rules, with the reviewer being a persistent session role distinct from worker and scout"
+  judge_criterion "The mkCity function generates configuration that supports a judge role which enforces docs/style-guidelines.md rules, with the judge being a persistent session role distinct from worker and scout"
 }
 
 test_provider_simplicity() {

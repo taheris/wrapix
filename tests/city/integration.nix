@@ -5,7 +5,7 @@
 #
 # Test flow:
 #   Phase 1 (happy path):
-#     1. gc starts scout + judge via provider.sh → podman
+#     1. gc starts mayor + scout + judge via provider.sh → podman
 #     2. Scout (mock claude) creates a bead
 #     3. Director (test script) slings bead into convergence
 #     4. Worker processes in worktree, commits, exits
@@ -66,7 +66,7 @@ let
     set -euo pipefail
 
     # Write all output to host-visible log (mounted workspace .beads dir is rw for
-    # scout/judge, but ro for workers — use /tmp as fallback)
+    # mayor/scout/judge, but ro for workers — use /tmp as fallback)
     MOCK_LOG="/workspace/.beads/mock-claude-''${GC_ROLE:-unknown}.log"
     if ! touch "$MOCK_LOG" 2>/dev/null; then
       MOCK_LOG="/tmp/mock-claude-''${GC_ROLE:-unknown}.log"
@@ -83,11 +83,15 @@ let
         git commit -m "fix: resolve test error"
         ;;
       --dangerously-skip-permissions)
-        # Persistent session mode (scout or judge)
+        # Persistent session mode (mayor, scout, or judge)
         # Ensure dolt config exists (container has no global config)
         dolt config --global --add user.email mock@test 2>/dev/null || true
         dolt config --global --add user.name mock 2>/dev/null || true
         case "''${GC_ROLE:-}" in
+          mayor|mayor*)
+            # Mayor stays alive — responds on attach with briefing
+            sleep 600
+            ;;
           scout|scout*)
             bd create --title="Fix test error" --type=bug --priority=2
             # Stay alive for gc to manage
@@ -103,7 +107,7 @@ let
                   existing=$(bd show "$id" --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null) || existing=""
                   if [ -z "$existing" ]; then
                     bd update "$id" --set-metadata "review_verdict=approve" 2>/dev/null || true
-                    bd update "$id" --notes "Reviewer: approved — test" 2>/dev/null || true
+                    bd update "$id" --notes "Judge: approved — test" 2>/dev/null || true
                   fi
                 fi
               done
@@ -446,7 +450,7 @@ let
     subtest "Set up workspace" setup_workspace
 
     # ================================================================
-    # Phase 1: Happy path — scout → worker → judge → director
+    # Phase 1: Happy path — mayor + scout + judge → worker → judge merge
     # ================================================================
 
     validate_config() {
@@ -464,7 +468,7 @@ let
       # shared server rather than starting embedded dolt instances.
       export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
       # Clean up any containers left by gc rig add's auto-start
-      podman rm -f gc-test-city-scout gc-test-city-judge 2>/dev/null || true
+      podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
       setsid gc start --foreground > "$WS/gc.log" 2>&1 &
       GC_PID=$!
       sleep 3
@@ -475,6 +479,9 @@ let
       fi
     }
     subtest "Start gc daemon" start_gc
+
+    subtest "Wait for mayor container to start" \
+      poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30
 
     subtest "Wait for scout to create a bead" \
       poll_until 'timeout 5 bd list --json 2>/dev/null | jq -e "[.[] | select(.title | test(\"Fix test error\"))] | length > 0"' 60
