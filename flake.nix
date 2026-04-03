@@ -84,7 +84,7 @@
                 version = "dev";
                 src = inputs.gascity;
                 subPackages = [ "cmd/gc" ];
-                vendorHash = "sha256-ywH32kh5p5W3TttgolibegBA+ZDC7yfNSVxJkoZcQ8E=";
+                vendorHash = "sha256-Z5fI5WqPXJfKv3kB1MVLBhxdAI+knAcxa0CWlmyNzkg=";
                 doCheck = false;
               };
 
