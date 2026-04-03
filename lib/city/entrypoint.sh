@@ -44,8 +44,15 @@ print_pending_reviews
 # Step 2: Crash recovery — reconcile orphaned containers and worktrees
 # ---------------------------------------------------------------------------
 
+# recovery.sh lives alongside the other city scripts in .gc/scripts/ —
+# the app and shellHook copy them there from the Nix store.  Fall back to
+# SCRIPT_DIR for the integration test which patches this line.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"${SCRIPT_DIR}/recovery.sh"
+RECOVERY="${GC_WORKSPACE:-.}/.gc/scripts/recovery.sh"
+if [[ ! -x "$RECOVERY" ]]; then
+  RECOVERY="${SCRIPT_DIR}/recovery.sh"
+fi
+"$RECOVERY"
 
 # ---------------------------------------------------------------------------
 # Step 3: Start podman events watcher (background)
