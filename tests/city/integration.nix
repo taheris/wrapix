@@ -26,35 +26,39 @@
 #     3. Verify: worktree and branch cleaned up
 #
 # Requires podman. Run via: nix run .#test-city
-{ pkgs }:
+{ pkgs, system }:
 
 let
   inherit (pkgs) lib;
 
-  toTOML = import ../lib/util/toml.nix { inherit lib; };
+  # ================================================================
+  # Reuse live city module — only the LLM binary is substituted
+  # ================================================================
 
-  # Provider script from lib/city
-  providerScript = pkgs.writeShellScript "wrapix-provider" (
-    builtins.readFile ../lib/city/provider.sh
-  );
+  linuxPkgs = pkgs; # integration test runs on Linux only
+  sandbox = import ../../lib/sandbox {
+    inherit pkgs system linuxPkgs;
+  };
+  ralph = import ../../lib/ralph {
+    inherit pkgs;
+    inherit (sandbox) mkSandbox;
+  };
+  cityMod = import ../../lib/city {
+    inherit pkgs linuxPkgs;
+    inherit (sandbox) mkSandbox profiles;
+    inherit (ralph) mkRalph;
+  };
 
-  # City scripts bundle
-  scriptsDir = pkgs.runCommand "test-city-scripts" { } ''
-    mkdir -p $out
-    cp ${../lib/city/gate.sh} $out/gate.sh
-    cp ${../lib/city/post-gate.sh} $out/post-gate.sh
-    cp ${../lib/city/recovery.sh} $out/recovery.sh
-    chmod +x $out/*.sh
-  '';
+  # Call mkCity to get live provider, scripts, formulas, config
+  liveCity = cityMod.mkCity {
+    name = "test-city";
+    workers = 2;
+  };
 
-  # Formulas + orders bundle
-  formulasDir = pkgs.runCommand "test-city-formulas" { } ''
-    mkdir -p $out/orders/post-gate
-    cp ${../lib/city/formulas/scout.formula.toml} $out/wrapix-scout.formula.toml
-    cp ${../lib/city/formulas/worker.formula.toml} $out/wrapix-worker.formula.toml
-    cp ${../lib/city/formulas/reviewer.formula.toml} $out/wrapix-reviewer.formula.toml
-    cp ${../lib/city/orders/post-gate/order.toml} $out/orders/post-gate/order.toml
-  '';
+  # Live outputs — no duplication
+  inherit (liveCity) scripts formulas;
+
+  toTOML = import ../../lib/util/toml.nix { inherit lib; };
 
   # Mock claude binary — deterministic bash script per role
   mockClaude = pkgs.writeShellScriptBin "claude" ''
@@ -117,86 +121,41 @@ let
     esac
   '';
 
-  # Test city.toml using real toTOML
-  cityToml = pkgs.writeText "city.toml" (toTOML {
-    workspace = {
-      name = "test-city";
-      provider = "claude";
-    };
-    session = {
-      provider = "exec:${providerScript}";
-    };
-    formulas = {
-      dir = ".gc/formulas";
-    };
-    beads = {
-      provider = "bd";
-    };
-    daemon = {
-      patrol_interval = "5s";
-      max_restarts = 3;
-      restart_window = "1h";
-    };
-    convergence = {
-      max_per_agent = 2;
-      max_total = 10;
-    };
-    agent = [
-      {
-        name = "scout";
-        scope = "city";
-        scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
-      }
-      {
-        name = "worker";
-        scope = "city";
-        max_active_sessions = 2;
-        scale_check = "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
-      }
-      {
-        name = "reviewer";
-        scope = "city";
-        scale_check = "bd list --metadata-field gc.routed_to=reviewer --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
-      }
-    ];
-    named_session = [
-      {
-        template = "scout";
-        mode = "always";
-      }
-      {
-        template = "reviewer";
-        mode = "always";
-      }
-    ];
-  });
+  # Port for the shared dolt server (fixed — known at Nix eval time)
+  doltPort = 3307;
 
-  # wrapix-agent wrapper (same as cityScripts in lib/city/default.nix)
-  # Replace #!/usr/bin/env bash with direct Nix bash path for container compatibility
-  # (test image lacks /usr/bin/env)
-  agentScript = pkgs.runCommand "wrapix-agent" { } ''
-    mkdir -p $out/bin
-    echo '#!${pkgs.bash}/bin/bash' > $out/bin/wrapix-agent
-    tail -n +2 ${../lib/city/agent.sh} >> $out/bin/wrapix-agent
-    chmod +x $out/bin/wrapix-agent
-  '';
+  # Test city.toml: live config with test-specific overrides
+  # (shorter intervals for fast testing, [dolt] section for shared server)
+  cityToml = pkgs.writeText "city.toml" (
+    toTOML (
+      liveCity.configAttrs
+      // {
+        # External dolt server — gc reads this via its [dolt] config support.
+        # With --network=host, 127.0.0.1 is the same namespace everywhere.
+        dolt = {
+          host = "127.0.0.1";
+          port = doltPort;
+        };
+        daemon = liveCity.configAttrs.daemon // {
+          patrol_interval = "5s";
+          max_restarts = 3;
+        };
+      }
+    )
+  );
 
-  # Packages included in the test container
-  testImagePkgs = [
-    pkgs.bash
-    pkgs.coreutils
-    pkgs.git
-    pkgs.dolt
-    pkgs.beads
-    pkgs.gc
-    pkgs.jq
-    pkgs.tmux
-    pkgs.gnugrep
-    pkgs.gnused
-    pkgs.findutils
-    mockClaude
-    agentScript
-  ];
+  # Packages included in the test container:
+  # - Base profile: all standard dev tools (bash, git, dolt, beads, gc, jq, ...)
+  # - liveCity.packages: wrapix-agent, ralph scripts (live city code)
+  # - tmux: required by provider.sh persistent sessions (not in base profile)
+  # - mockClaude: the only test-specific binary
+  testImagePkgs =
+    sandbox.profiles.base.packages
+    ++ liveCity.packages
+    ++ [
+      pkgs.tmux
+      mockClaude
+    ];
 
   # Test container image with mock claude (streamed for fast loading)
   testImageStream = pkgs.dockerTools.streamLayeredImage {
@@ -213,24 +172,16 @@ let
       ];
     };
 
+    # /usr/bin/env needed for live script shebangs (#!/usr/bin/env bash)
     fakeRootCommands = ''
-      mkdir -p ./home/wrapix
-      mkdir -p ./tmp
+      mkdir -p ./usr/bin ./home/wrapix ./tmp
+      ln -s ${pkgs.coreutils}/bin/env ./usr/bin/env
     '';
   };
 
-  # Runtime dependencies for the test script
-  testDeps = [
-    pkgs.gc
-    pkgs.beads
-    pkgs.dolt
-    pkgs.git
+  # Runtime dependencies for the test script (host-side)
+  testDeps = sandbox.profiles.base.packages ++ [
     pkgs.tmux
-    pkgs.jq
-    pkgs.coreutils
-    pkgs.gnugrep
-    pkgs.gnused
-    pkgs.findutils
     pkgs.lsof
   ];
 
@@ -247,7 +198,8 @@ let
     FAILED=0
     GC_PID=""
     WS=""
-    NETWORK_NAME="wrapix-test-$$"
+    DOLT_CONTAINER="dolt-server-$$"
+    DOLT_PORT=${toString doltPort}
     # Pass --no-fail-fast to run all tests even after failures
     FAIL_FAST=true
     if [ "''${1:-}" = "--no-fail-fast" ]; then
@@ -257,17 +209,25 @@ let
     dump_diagnostics() {
       echo ""
       echo "--- Diagnostics ---"
+      # Dolt server state
+      echo "  dolt server:"
+      echo "    container: $(podman inspect --format '{{.State.Status}}' "$DOLT_CONTAINER" 2>/dev/null || echo 'not found')"
+      echo "    port file: $(cat "$WS/.beads/dolt-server.port" 2>/dev/null || echo 'missing')"
+      echo "    reachable: $(bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && echo yes || echo no)"
+      echo "    GC_DOLT_HOST=''${GC_DOLT_HOST:-unset} GC_DOLT_PORT=''${GC_DOLT_PORT:-unset}"
       if [ -n "$WS" ] && [ -f "$WS/gc.log" ]; then
-        echo "  gc.log:"
-        cat "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
+        echo "  gc.log (last 40 lines):"
+        tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
       fi
       # Show logs from any gc containers
-      for cid in $(podman ps -a --filter "network=$NETWORK_NAME" -q 2>/dev/null); do
+      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
         local cname
         cname=$(podman inspect --format '{{.Name}}' "$cid" 2>/dev/null || echo "$cid")
         echo "  container $cname (podman logs):"
         podman logs "$cid" 2>&1 | tail -20 | sed 's/^/    /' || true
       done
+      echo "  dolt container logs:"
+      podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 | sed 's/^/    /' || true
       # Mock claude logs written to host-visible .beads/ dir
       for logf in "$WS"/.beads/mock-claude-*.log; do
         [ -f "$logf" ] || continue
@@ -292,9 +252,10 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      podman ps --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
-      podman ps -a --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
-      podman network rm "$NETWORK_NAME" 2>/dev/null || true
+      podman stop -t 3 "$DOLT_CONTAINER" 2>/dev/null || true
+      podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+      podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+      podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       podman rmi wrapix-test:latest 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
@@ -377,7 +338,7 @@ let
     subtest "Load test container image" \
       sh -c '${testImageStream} | podman load'
 
-    WS=$(mktemp -d)
+    WS=$(mktemp -d -t citytest-XXXXXX)
     echo "  > workspace: $WS"
     cd "$WS"
 
@@ -385,43 +346,101 @@ let
       git init -b main
       git config user.email test@test
       git config user.name test
+      git config commit.gpgsign false
       dolt config --global --add user.email test@test
       dolt config --global --add user.name test
       git commit --allow-empty -m initial
 
-      # Skip gc-beads-bd lifecycle (dolt server management) — it forces server mode
-      # which breaks in containers. We use embedded dolt via bd init instead.
-      export GC_DOLT=skip
+      # --- Step 1: Let gc init handle everything (bd init, prefix, scaffold) ---
+      # gc init creates .gc/ scaffold AND .beads/ (via gc-beads-bd) with gc's
+      # preferred prefix. It then auto-starts the supervisor and blocks — we
+      # kill it after the scaffold appears, then replace the embedded dolt
+      # with a shared container serving the same database.
+      # Use setsid so we can kill the entire process group (gc spawns dolt
+      # as a child that would otherwise become orphaned).
+      setsid gc init --file ${cityToml} --skip-provider-readiness </dev/null &
+      _GC_INIT_PID=$!
+      # Wait for bd init to complete (indicated by .beads/metadata.json)
+      for _i in $(seq 1 60); do
+        [ -f .beads/metadata.json ] && break
+        sleep 0.5
+      done
+      # Kill the entire gc init process group (includes embedded dolt)
+      kill -TERM -"$_GC_INIT_PID" 2>/dev/null || true
+      for _i in $(seq 1 30); do
+        kill -0 "$_GC_INIT_PID" 2>/dev/null || break
+        sleep 0.2
+      done
+      kill -9 -"$_GC_INIT_PID" 2>/dev/null || true
+      wait "$_GC_INIT_PID" 2>/dev/null || true
+      gc supervisor stop 2>&1 || true
+      gc unregister "$WS" 2>&1 || true
 
-      # Bootstrap the city via gc init — creates .gc/ scaffold.
-      # gc init exits 1 on missing optional deps (tmux/lsof) but still creates the scaffold.
-      gc init --file ${cityToml} --skip-provider-readiness 2>&1 || true
-      test -d .gc/system/bin
-
-      # Initialize beads in embedded mode (no dolt server).
-      # Containers mount .beads and can't reach a host-side server.
-      bd init --non-interactive --sandbox
+      # Kill gc's embedded dolt — belt and suspenders
+      if [ -f .beads/dolt-server.pid ]; then
+        kill "$(cat .beads/dolt-server.pid)" 2>/dev/null || true
+      fi
+      # Kill anything still listening on the embedded dolt port
+      if [ -f .beads/dolt-server.port ]; then
+        _EDOLT_PORT=$(cat .beads/dolt-server.port)
+        fuser -k "$_EDOLT_PORT/tcp" 2>/dev/null || true
+      fi
+      # Wait for processes to fully release and remove all lock files
+      sleep 1
+      find .beads -name LOCK -delete 2>/dev/null || true
+      rm -f .beads/dolt-server.pid .beads/dolt-server.lock
       chmod 700 .beads
-      # gc creates beads with custom types (session, convoy, convergence, etc.);
-      # register the gc default set plus convergence (used by gc converge create).
+
+      # --- Step 2: Start shared dolt container serving gc's database ---
+      # Mount gc's .beads/dolt/ so all participants share the same data
+      # and prefix. --network=host means 127.0.0.1 works everywhere.
+      podman run -d \
+        --name "$DOLT_CONTAINER" \
+        --network host \
+        -v "$WS/.beads/dolt:/doltdb:rw" \
+        localhost/wrapix-test:latest \
+        bash -c "dolt config --global --add user.email test@test && dolt config --global --add user.name test && cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P $DOLT_PORT"
+      # Wait for dolt to be ready
+      for _i in $(seq 1 50); do
+        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        sleep 0.2
+      done
+      if ! bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null; then
+        echo "FATAL: dolt server not reachable on 127.0.0.1:$DOLT_PORT"
+        podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 || true
+        return 1
+      fi
+      echo "  > shared dolt server ready on 127.0.0.1:$DOLT_PORT"
+
+      # --- Step 3: Point gc and bd at the shared server ---
+      echo "$DOLT_PORT" > .beads/dolt-server.port
+      export GC_DOLT=skip
+      export GC_DOLT_HOST="127.0.0.1"
+      export GC_DOLT_PORT="$DOLT_PORT"
+      export BEADS_DOLT_AUTO_START=0
+
       bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
-      git add -A && git commit -m "bd init"
 
-      gc rig add . --name test-city 2>&1
-      gc supervisor stop 2>&1
-      gc unregister . 2>&1
+      # Verify bd can reach the shared dolt server
+      bd list >/dev/null 2>&1 || {
+        echo "FATAL: bd cannot connect to dolt server"
+        return 1
+      }
+      echo "  > bd connectivity verified"
 
-      # Overlay our formulas and scripts on top of the gc scaffold
+      git add -A && git commit -m "workspace setup"
+
+      # Overlay live formulas and scripts on top of the gc scaffold
       mkdir -p .gc/formulas/orders/post-gate .gc/scripts
-      for f in ${formulasDir}/*.formula.toml; do cp -f "$f" .gc/formulas/; done
-      cp -f ${formulasDir}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
-      for f in ${scriptsDir}/*; do cp -f "$f" .gc/scripts/; done
+      for f in ${formulas}/*.formula.toml; do cp -f "$f" .gc/formulas/; done
+      cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
+      for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
 
       mkdir -p docs .wrapix
       printf "## Scout Rules\nimmediate: FATAL|PANIC\nbatched: ERROR\n## Auto-deploy\nLow-risk: docs only\n" > docs/orchestration.md
       printf "# Style Guidelines\nSH-1: Use set -euo pipefail\n" > docs/style-guidelines.md
       printf "<!-- expires: 2025-01-01 -->\nTemporary: freeze deploys during migration\n" > .wrapix/orchestration.md
-      git add -A && git commit -m "setup: workspace"
+      git add -A && git commit -m "setup: formulas and scripts"
     }
     subtest "Set up workspace" setup_workspace
 
@@ -438,11 +457,13 @@ let
     start_gc() {
       export GC_CITY_NAME=test-city
       export GC_WORKSPACE="$WS"
-      export GC_AGENT_IMAGE=wrapix-test:latest
-      export GC_PODMAN_NETWORK="$NETWORK_NAME"
+      export GC_AGENT_IMAGE=localhost/wrapix-test:latest
+      export GC_PODMAN_NETWORK="host"
+      # Pass dolt config into containers so bd/gc inside them find the
+      # shared server rather than starting embedded dolt instances.
+      export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
       # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-scout gc-test-city-reviewer 2>/dev/null || true
-      podman network create "$NETWORK_NAME"
       setsid gc start --foreground > "$WS/gc.log" 2>&1 &
       GC_PID=$!
       sleep 3
@@ -479,7 +500,7 @@ let
       GC_TERMINAL_REASON="approved" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scriptsDir}/post-gate.sh
+        bash ${scripts}/post-gate.sh
     }
     subtest "Run post-gate merge" run_post_gate
 
@@ -524,8 +545,8 @@ let
         wait "$GC_PID" 2>/dev/null || true
       fi
       # Stop and remove gc containers
-      podman ps --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
-      podman ps -a --filter "network=$NETWORK_NAME" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+      podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+      podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       GC_PID=""
     }
     subtest "Stop gc after Phase 1" stop_gc
@@ -570,7 +591,7 @@ let
       GC_TERMINAL_REASON="approved" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scriptsDir}/post-gate.sh
+        bash ${scripts}/post-gate.sh
     }
     subtest "Post-gate detects merge conflict and rejects" run_post_gate2
 
@@ -611,7 +632,7 @@ let
       GC_TERMINAL_REASON="max_rounds_exceeded" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scriptsDir}/post-gate.sh
+        bash ${scripts}/post-gate.sh
     }
     subtest "Post-gate handles escalation (non-approved)" run_post_gate_escalation
 

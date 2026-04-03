@@ -29,19 +29,19 @@ let
     else
       pkgs;
 
-  profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
+  profiles = import ../../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
 
-  baseImage = import ../lib/sandbox/image.nix {
+  baseImage = import ../../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     profile = profiles.base;
     entrypointPkg = linuxPkgs.claude-code;
     entrypointSh =
-      if isDarwin then ../lib/sandbox/darwin/entrypoint.sh else ../lib/sandbox/linux/entrypoint.sh;
+      if isDarwin then ../../lib/sandbox/darwin/entrypoint.sh else ../../lib/sandbox/linux/entrypoint.sh;
     claudeConfig = { };
     claudeSettings = { };
   };
 
-  sandboxLib = import ../lib { inherit pkgs system linuxPkgs; };
+  sandboxLib = import ../../lib { inherit pkgs system linuxPkgs; };
   sandbox = sandboxLib.mkSandbox { profile = sandboxLib.profiles.base; };
   wrapix = sandbox.package;
 
@@ -92,11 +92,11 @@ in
       }
       ''
         echo "Checking Darwin entrypoint syntax..."
-        bash -n ${../lib/sandbox/darwin/entrypoint.sh}
+        bash -n ${../../lib/sandbox/darwin/entrypoint.sh}
 
         echo "Verifying entrypoint handles mount env vars..."
         # Test that entrypoint processes WRAPIX_DIR_MOUNTS correctly
-        SCRIPT="${../lib/sandbox/darwin/entrypoint.sh}"
+        SCRIPT="${../../lib/sandbox/darwin/entrypoint.sh}"
         grep -q 'WRAPIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_DIR_MOUNTS handling"; exit 1; }
         grep -q 'WRAPIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRAPIX_FILE_MOUNTS handling"; exit 1; }
 
@@ -116,7 +116,7 @@ in
       }
       ''
         echo "Checking Linux entrypoint syntax..."
-        bash -n ${../lib/sandbox/linux/entrypoint.sh}
+        bash -n ${../../lib/sandbox/linux/entrypoint.sh}
 
         echo "Linux entrypoint validation passed"
         mkdir $out
@@ -127,7 +127,7 @@ in
   # See specs/security-review.md "Builder SSH Keys" section
   builder-keys-structure =
     let
-      builderKeys = import ../lib/builder/hostkey.nix { inherit pkgs; };
+      builderKeys = import ../../lib/builder/hostkey.nix { inherit pkgs; };
     in
     runCommandLocal "smoke-builder-keys" { } ''
       echo "Checking builder key structure..."
@@ -178,7 +178,7 @@ in
       }
       ''
         echo "Checking builder sshd security configuration..."
-        SCRIPT="${../lib/sandbox/builder/entrypoint.sh}"
+        SCRIPT="${../../lib/sandbox/builder/entrypoint.sh}"
 
         # Verify password authentication is disabled
         grep -q 'PasswordAuthentication no' "$SCRIPT" || { echo "FAIL: PasswordAuthentication must be 'no'"; exit 1; }
@@ -213,7 +213,7 @@ in
       }
       ''
         echo "Checking builder SSH port is localhost-only..."
-        SCRIPT="${../lib/builder/default.nix}"
+        SCRIPT="${../../lib/builder/default.nix}"
 
         # Verify SSH port is bound to 127.0.0.1 (localhost), not 0.0.0.0 or unbound
         # The pattern should be: -p "127.0.0.1:$SSH_PORT:22"
@@ -373,12 +373,12 @@ in
         }
 
         # Entrypoint checks (source files, no build needed)
-        LINUX_EP="${../lib/sandbox/linux/entrypoint.sh}"
+        LINUX_EP="${../../lib/sandbox/linux/entrypoint.sh}"
         grep -q 'iptables' "$LINUX_EP" || { echo "FAIL: Missing iptables in Linux entrypoint"; exit 1; }
         grep -q 'WRAPIX_NETWORK' "$LINUX_EP" || { echo "FAIL: Missing WRAPIX_NETWORK check in Linux entrypoint"; exit 1; }
         echo "PASS: Linux entrypoint has network filtering"
 
-        DARWIN_EP="${../lib/sandbox/darwin/entrypoint.sh}"
+        DARWIN_EP="${../../lib/sandbox/darwin/entrypoint.sh}"
         grep -q 'iptables' "$DARWIN_EP" || { echo "FAIL: Missing iptables in Darwin entrypoint"; exit 1; }
         grep -q 'WRAPIX_NETWORK' "$DARWIN_EP" || { echo "FAIL: Missing WRAPIX_NETWORK check in Darwin entrypoint"; exit 1; }
         echo "PASS: Darwin entrypoint has network filtering"
@@ -393,7 +393,7 @@ in
   # Reference: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
   github-known-hosts-fingerprints =
     let
-      knownHosts = import ../lib/sandbox/known-hosts.nix { inherit pkgs; };
+      knownHosts = import ../../lib/sandbox/known-hosts.nix { inherit pkgs; };
     in
     runCommandLocal "smoke-github-fingerprints"
       {

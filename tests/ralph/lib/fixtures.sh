@@ -48,125 +48,21 @@ _ensure_ralph_metadata() {
 }
 
 #-----------------------------------------------------------------------------
-# Shared Dolt Server (one server for all tests)
+# Shared Dolt Server (sourced from tests/lib/)
 #-----------------------------------------------------------------------------
 
-# Kill orphaned dolt sql-server processes left over from previous test runs.
-# Each test run writes a runner.pid file into its SHARED_DOLT_DIR. At startup
-# we scan /tmp/ralph-test-dolt-*/runner.pid — if the recorded runner PID is no
-# longer alive, the dolt server in that directory is orphaned and safe to kill.
-# Usage: kill_stale_test_dolt_servers
-kill_stale_test_dolt_servers() {
-  local killed=0
-  for pidfile in /tmp/ralph-test-dolt-*/runner.pid; do
-    [ -f "$pidfile" ] || continue
-
-    local runner_pid dolt_pid dir
-    runner_pid=$(cat "$pidfile" 2>/dev/null || echo "")
-    [ -n "$runner_pid" ] || continue
-
-    # If the runner is still alive, this is an active test run — skip
-    if kill -0 "$runner_pid" 2>/dev/null; then
-      continue
-    fi
-
-    # Runner is dead — kill the dolt server and clean up
-    dir=$(dirname "$pidfile")
-    dolt_pid=$(cat "$dir/dolt.pid" 2>/dev/null || echo "")
-    if [ -n "$dolt_pid" ]; then
-      kill "$dolt_pid" 2>/dev/null && killed=$((killed + 1)) || true
-    fi
-    rm -rf "$dir"
-  done
-  if [ "$killed" -gt 0 ]; then
-    echo "Cleaned up $killed orphaned dolt sql-server process(es) from previous run"
-    sleep 0.2
-  fi
-}
-
-# Start a single shared Dolt sql-server before all tests.
-# Each test gets its own database via a unique --prefix in bd init.
-# Usage: setup_shared_dolt_server (call once in main, before any tests)
-# Exports: SHARED_DOLT_DIR, SHARED_DOLT_PORT, SHARED_DOLT_PID
-setup_shared_dolt_server() {
-  # Clean up stale dolt processes from interrupted previous runs
-  kill_stale_test_dolt_servers
-
-  SHARED_DOLT_DIR=$(mktemp -d -t "ralph-test-dolt-XXXXXX")
-
-  # Initialize dolt data directory
-  mkdir -p "$SHARED_DOLT_DIR/data"
-  (cd "$SHARED_DOLT_DIR/data" && dolt init >/dev/null 2>&1)
-
-  # Try up to 5 random ports to avoid collisions with existing services
-  local attempts=5
-  while [ $attempts -gt 0 ]; do
-    SHARED_DOLT_PORT=$((20000 + RANDOM % 40000))
-
-    # Skip port if already in use
-    if bash -c "echo > /dev/tcp/127.0.0.1/$SHARED_DOLT_PORT" 2>/dev/null; then
-      attempts=$((attempts - 1))
-      continue
-    fi
-
-    # Start server on this port
-    dolt sql-server -H 127.0.0.1 -P "$SHARED_DOLT_PORT" \
-      --data-dir="$SHARED_DOLT_DIR/data" \
-      &>"$SHARED_DOLT_DIR/server.log" &
-    SHARED_DOLT_PID=$!
-
-    # Wait for server readiness, checking PID is still alive
-    local retries=50
-    local started=false
-    while [ $retries -gt 0 ]; do
-      # If dolt exited (e.g. port race), stop polling
-      if ! kill -0 "$SHARED_DOLT_PID" 2>/dev/null; then
-        break
-      fi
-      if bash -c "echo > /dev/tcp/127.0.0.1/$SHARED_DOLT_PORT" 2>/dev/null; then
-        started=true
-        break
-      fi
-      sleep 0.1
-      retries=$((retries - 1))
-    done
-
-    if [ "$started" = true ]; then
-      break
-    fi
-
-    # Server failed on this port — clean up and retry
-    kill "$SHARED_DOLT_PID" 2>/dev/null || true
-    wait "$SHARED_DOLT_PID" 2>/dev/null || true
-    attempts=$((attempts - 1))
-  done
-
-  if [ $attempts -eq 0 ]; then
-    echo "ERROR: Shared dolt server failed to start after 5 port attempts" >&2
-    cat "$SHARED_DOLT_DIR/server.log" >&2
-    exit 1
-  fi
-
-  # Write PID files for stale process detection by concurrent/future runs
-  echo "$$" > "$SHARED_DOLT_DIR/runner.pid"
-  echo "$SHARED_DOLT_PID" > "$SHARED_DOLT_DIR/dolt.pid"
-
-  export SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
-}
-
-# Stop the shared Dolt server and clean up.
-# Usage: teardown_shared_dolt_server (call once after all tests, typically via EXIT trap)
-teardown_shared_dolt_server() {
-  if [ -n "${SHARED_DOLT_PID:-}" ]; then
-    kill "$SHARED_DOLT_PID" 2>/dev/null || true
-    wait "$SHARED_DOLT_PID" 2>/dev/null || true
-  fi
-
-  if [ -n "${SHARED_DOLT_DIR:-}" ] && [ -d "$SHARED_DOLT_DIR" ]; then
-    rm -rf "$SHARED_DOLT_DIR"
-  fi
-  unset SHARED_DOLT_DIR SHARED_DOLT_PORT SHARED_DOLT_PID
-}
+# Resolve shared lib relative to this file's location.
+# When run from the Nix store (via ralphTestDir), the lib is bundled at lib-shared/.
+# When run directly from the repo, it's at ../../lib/.
+_FIXTURES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_FIXTURES_DIR/../lib-shared/dolt-server.sh" ]; then
+  source "$_FIXTURES_DIR/../lib-shared/dolt-server.sh"
+elif [ -f "$_FIXTURES_DIR/../../lib/dolt-server.sh" ]; then
+  source "$_FIXTURES_DIR/../../lib/dolt-server.sh"
+else
+  echo "ERROR: Cannot find tests/lib/dolt-server.sh" >&2
+  exit 1
+fi
 
 #-----------------------------------------------------------------------------
 # Test Environment Setup

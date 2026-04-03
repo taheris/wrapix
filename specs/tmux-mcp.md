@@ -352,7 +352,7 @@ Run with `cargo test` in the `tmux-mcp` crate.
 
 ### Integration Tests
 
-Located in `tests/tmux-mcp/`:
+Located in `tests/mcp/tmux/`:
 
 | Test | Description |
 |------|-------------|
@@ -370,7 +370,7 @@ Tests spawn the MCP server, send JSON-RPC requests over stdio, and verify respon
 
 ### End-to-End Tests (Sandbox)
 
-Located in `tests/tmux-mcp/e2e/`:
+Located in `tests/mcp/tmux/e2e/`:
 
 | Test | Description |
 |------|-------------|
@@ -388,10 +388,10 @@ These tests use `nix build` to create sandbox images and `podman run` to execute
 nix develop -c cargo test -p tmux-mcp
 
 # Integration tests (requires tmux)
-nix develop -c ./tests/tmux-mcp/run-integration.sh
+nix develop -c ./tests/mcp/tmux/run-integration.sh
 
 # E2E tests (requires podman)
-nix develop -c ./tests/tmux-mcp/run-e2e.sh
+nix develop -c ./tests/mcp/tmux/run-e2e.sh
 
 # All tests
 nix flake check
@@ -400,21 +400,21 @@ nix flake check
 ## Success Criteria
 
 - [ ] Pane lifecycle works: Create, list, kill panes successfully
-  [verify:wrapix](../tests/tmux-mcp/test_create_pane.sh)
+  [verify:wrapix](../tests/mcp/tmux/test_create_pane.sh)
 - [ ] I/O works: Send keys and capture output accurately
-  [verify:wrapix](../tests/tmux-mcp/test_send_keys.sh)
+  [verify:wrapix](../tests/mcp/tmux/test_send_keys.sh)
 - [ ] Exited pane visibility: Exited panes show status and allow final output capture
-  [verify:wrapix](../tests/tmux-mcp/test_exited_pane.sh)
+  [verify:wrapix](../tests/mcp/tmux/test_exited_pane.sh)
 - [ ] Sandbox contained: All pane commands run within wrapix isolation
-  [verify:wrapix](../tests/tmux-mcp/e2e/test_filesystem_isolation.sh)
+  [verify:wrapix](../tests/mcp/tmux/e2e/test_filesystem_isolation.sh)
 - [ ] Audit works: When enabled, all operations logged correctly
-  [verify:wrapix](../tests/tmux-mcp/test_audit_log.sh)
+  [verify:wrapix](../tests/mcp/tmux/test_audit_log.sh)
 - [ ] Cleanup: Panes and session terminated on MCP server exit
-  [verify:wrapix](../tests/tmux-mcp/test_cleanup_on_exit.sh)
+  [verify:wrapix](../tests/mcp/tmux/test_cleanup_on_exit.sh)
 - [ ] MCP integration: MCP servers integrate cleanly with any profile via `mcp` parameter
-  [verify:wrapix](../tests/tmux-mcp/e2e/test_profile_composition.sh)
+  [verify:wrapix](../tests/mcp/tmux/e2e/test_profile_composition.sh)
 - [ ] Tests pass: All unit, integration, and e2e tests pass
-  [verify:wrapix](../tests/tmux-mcp/run-integration.sh)
+  [verify:wrapix](../tests/mcp/tmux/run-integration.sh)
 
 ## Out of Scope
 

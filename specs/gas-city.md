@@ -528,8 +528,8 @@ Layered testing via `nix flake check` and pre-commit hooks:
 | 2. Unit tests | Shell syntax, gate exit codes, provider commands, scout parsing, config validation | `nix-flake-check` (pre-push) | On push |
 | 3. Integration | Full ops loop: gc → provider.sh → podman → container → mock claude | `city-integration` (pre-push) | On push (requires podman, skips gracefully if missing) |
 
-Unit tests live in `tests/city.nix` and run inside the Nix sandbox (no
-podman needed). The integration test lives in `tests/city-integration.nix`
+Unit tests live in `tests/city/unit.nix` and run inside the Nix sandbox (no
+podman needed). The integration test lives in `tests/city/integration.nix`
 and exercises the real stack end-to-end:
 
 - Phase 1 (happy path): gc starts scout + reviewer via podman, scout creates
@@ -594,8 +594,8 @@ No new commands. Existing tools compose:
 | Gate condition | `lib/city/gate.sh` | Convergence gate: nudge reviewer, wait for verdict |
 | Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
 | Entrypoint | `lib/city/entrypoint.sh` | Init bead check, podman events watcher, exec gc |
-| Unit tests | `tests/city.nix` | Nix-sandbox tests for all components |
-| Integration tests | `tests/city-integration.nix` | Full ops loop via podman |
+| Unit tests | `tests/city/unit.nix` | Nix-sandbox tests for all components |
+| Integration tests | `tests/city/integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
 | Sandbox | `lib/sandbox/default.nix` | No changes (mkCity uses mkSandbox) |
 | Ralph | `lib/ralph/cmd/sync.sh` | Extend `ralph sync` to detect mkCity and scaffold |
@@ -604,26 +604,26 @@ No new commands. Existing tools compose:
 ## Success Criteria
 
 - [x] `mkCity` evaluates with minimal config (`services.api.package = myApp`)
-  [verify](tests/city.nix::city-mkcity-eval)
+  [verify](tests/city/unit.nix::city-mkcity-eval)
 - [x] Generated `city.toml` is valid and references the wrapix provider script
-  [verify](tests/city.nix::city-city-toml), [verify](tests/city.nix::city-config-validate)
+  [verify](tests/city/unit.nix::city-city-toml), [verify](tests/city/unit.nix::city-config-validate)
 - [x] Provider script handles all gc provider methods
-  [verify](tests/city.nix::city-shell-syntax), [verify](tests/city.nix::city-provider-worker)
+  [verify](tests/city/unit.nix::city-shell-syntax), [verify](tests/city/unit.nix::city-provider-worker)
 - [x] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
-  [verify](tests/city-integration.nix::Phase 1 worker worktree)
+  [verify](tests/city/integration.nix::Phase 1 worker worktree)
 - [x] Persistent roles (scout, reviewer) start with tmux as PID 1
-  [verify](tests/city-integration.nix::Phase 1 scout/reviewer start)
+  [verify](tests/city/integration.nix::Phase 1 scout/reviewer start)
 - [x] gc convergence detects worker completion and triggers reviewer gate
-  [verify](tests/city-integration.nix::Phase 1 reviewer approval)
+  [verify](tests/city/integration.nix::Phase 1 reviewer approval)
 - [x] Secrets are injected at runtime, never baked into images
-  [verify](tests/city.nix::city-secrets)
+  [verify](tests/city/unit.nix::city-secrets)
 - [ ] `ralph run` still works standalone without gc
 - [x] NixOS module generates systemd units and podman network
-  [verify](tests/city.nix::city-nixos-module)
+  [verify](tests/city/unit.nix::city-nixos-module)
 - [ ] Crash recovery: gc container restarts, reconciles orphaned containers
 - [ ] `ralph sync` scaffolds missing docs files and creates review beads
 - [x] Service packages are built into OCI images via `dockerTools.buildLayeredImage`
-  [verify](tests/city.nix::city-service-images)
+  [verify](tests/city/unit.nix::city-service-images)
 - [ ] Cooldown pacing delays task dispatch by configured duration
 - [ ] Reviewer enforces `docs/style-guidelines.md` rules
   [judge]
@@ -633,22 +633,22 @@ No new commands. Existing tools compose:
   [judge]
 - [ ] P0 beads bypass cooldown and are dispatched immediately
 - [x] Merge uses fast-forward only; rebase + prek on divergence
-  [verify](tests/city-integration.nix::Phase 1 post-gate merge), [verify](tests/city-integration.nix::Phase 2 merge conflict)
+  [verify](tests/city/integration.nix::Phase 1 post-gate merge), [verify](tests/city/integration.nix::Phase 2 merge conflict)
 - [x] Post-gate order sends notifications via `wrapix-notify` for director events
-  [verify](tests/city-integration.nix::Phase 1 deploy bead)
+  [verify](tests/city/integration.nix::Phase 1 deploy bead)
 - [ ] Scout pauses bead creation when queue cap is reached
 - [x] Scout detects errors via log pattern regex matching
-  [verify](tests/city.nix::city-scout-parse-rules), [verify](tests/city.nix::city-scout-scan)
+  [verify](tests/city/unit.nix::city-scout-parse-rules), [verify](tests/city/unit.nix::city-scout-scan)
 - [x] Reviewer gate reads commit range from bead metadata
-  [verify](tests/city.nix::city-gate-functional)
+  [verify](tests/city/unit.nix::city-gate-functional)
 - [ ] Scout polling uses gc orders for scheduling
 - [ ] Worker→reviewer retry uses gc convergence with max 2 iterations
 - [x] Role behavior defined as gc formulas, overridable by consumers
-  [verify](tests/city.nix::city-formulas)
+  [verify](tests/city/unit.nix::city-formulas)
 - [x] Post-gate handles escalation path (non-approved convergence)
-  [verify](tests/city-integration.nix::Phase 3 escalation)
+  [verify](tests/city/integration.nix::Phase 3 escalation)
 - [x] Custom scale_check avoids gc's 30s timeout under dolt contention
-  [verify](tests/city.nix::city-config-validate)
+  [verify](tests/city/unit.nix::city-config-validate)
 
 ## Out of Scope
 

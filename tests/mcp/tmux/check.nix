@@ -18,7 +18,7 @@ let
   # This is impure - requires `nix flake check --impure`
   hasKvm = pathExists "/dev/kvm";
 
-  cratePath = ../lib/mcp/tmux/tmux-mcp;
+  cratePath = ../../../lib/mcp/tmux/tmux-mcp;
 
   # Build the tmux-mcp package using rustPlatform
   # This properly handles cargo dependency fetching in the nix sandbox
@@ -28,7 +28,7 @@ let
     src = cratePath;
 
     cargoLock = {
-      lockFile = ../lib/mcp/tmux/tmux-mcp/Cargo.lock;
+      lockFile = ../../../lib/mcp/tmux/tmux-mcp/Cargo.lock;
     };
 
     # Run tests as part of the build
@@ -42,7 +42,7 @@ let
   # Copy test directory to store for use in VM tests
   testDir = runCommandLocal "tmux-mcp-test-dir" { } ''
     mkdir -p $out
-    cp -r ${src}/tests/tmux-mcp/* $out/
+    cp -r ${src}/tests/mcp/tmux/* $out/
     chmod -R +x $out/*.sh $out/e2e/*.sh 2>/dev/null || true
   '';
 
@@ -198,12 +198,12 @@ let
                 system = "x86_64-linux";
                 config.allowUnfree = true;
               };
-              profiles = import ../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
-              debugImage = import ../lib/sandbox/image.nix {
+              profiles = import ../../../lib/sandbox/profiles.nix { pkgs = linuxPkgs; };
+              debugImage = import ../../../lib/sandbox/image.nix {
                 pkgs = linuxPkgs;
                 profile = profiles.debug;
                 entrypointPkg = linuxPkgs.hello; # Stand-in for claude-code
-                entrypointSh = ../lib/sandbox/linux/entrypoint.sh;
+                entrypointSh = ../../../lib/sandbox/linux/entrypoint.sh;
                 claudeConfig = { };
                 claudeSettings = { };
               };
@@ -292,7 +292,7 @@ in
         echo "Checking integration test script syntax..."
 
         # Check integration test scripts
-        INTEGRATION_DIR="${src}/tests/tmux-mcp"
+        INTEGRATION_DIR="${src}/tests/mcp/tmux"
         echo "Checking integration test scripts in $INTEGRATION_DIR..."
         for script in "$INTEGRATION_DIR"/*.sh; do
           if [ -f "$script" ]; then
@@ -308,7 +308,7 @@ in
         find "$INTEGRATION_DIR" -maxdepth 1 -name '*.sh' -exec shellcheck -x --exclude=SC1091,SC2034 {} +
 
         # Check E2E test scripts
-        E2E_DIR="${src}/tests/tmux-mcp/e2e"
+        E2E_DIR="${src}/tests/mcp/tmux/e2e"
         if [ -d "$E2E_DIR" ]; then
           echo "Checking E2E test scripts in $E2E_DIR..."
           for script in "$E2E_DIR"/*.sh; do

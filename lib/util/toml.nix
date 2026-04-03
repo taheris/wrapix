@@ -16,7 +16,6 @@ let
     isList
     isString
     length
-    map
     replaceStrings
     ;
   inherit (lib)

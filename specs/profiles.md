@@ -158,7 +158,7 @@ expose profile-specific configuration functions.
 - [ ] deriveProfile correctly merges packages and environment
   [judge](../tests/judges/profiles.sh#test_derive_profile_merge)
 - [ ] Profiles are composable (can extend extended profiles)
-  [verify:wrapix](../tests/tmux-mcp/e2e/test_profile_composition.sh)
+  [verify:wrapix](../tests/mcp/tmux/e2e/test_profile_composition.sh)
 
 ## Out of Scope
 

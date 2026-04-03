@@ -32,17 +32,17 @@ let
     else
       pkgs;
 
-  sandbox = import ../lib/sandbox {
+  sandbox = import ../../lib/sandbox {
     inherit pkgs system;
     inherit linuxPkgs;
   };
 
-  ralph = import ../lib/ralph {
+  ralph = import ../../lib/ralph {
     inherit pkgs;
     inherit (sandbox) mkSandbox;
   };
 
-  city = import ../lib/city {
+  city = import ../../lib/city {
     inherit pkgs linuxPkgs;
     inherit (sandbox) mkSandbox profiles;
     inherit (ralph) mkRalph;
@@ -245,13 +245,13 @@ in
         echo "Checking Gas City shell script syntax..."
 
         SCRIPTS=(
-          "${../lib/city/provider.sh}"
-          "${../lib/city/agent.sh}"
-          "${../lib/city/gate.sh}"
-          "${../lib/city/post-gate.sh}"
-          "${../lib/city/entrypoint.sh}"
-          "${../lib/city/recovery.sh}"
-          "${../lib/city/scout.sh}"
+          "${../../lib/city/provider.sh}"
+          "${../../lib/city/agent.sh}"
+          "${../../lib/city/gate.sh}"
+          "${../../lib/city/post-gate.sh}"
+          "${../../lib/city/entrypoint.sh}"
+          "${../../lib/city/recovery.sh}"
+          "${../../lib/city/scout.sh}"
         )
 
         for script in "''${SCRIPTS[@]}"; do
@@ -281,7 +281,7 @@ in
       }
       ''
                 set -euo pipefail
-                SCOUT="${../lib/city/scout.sh}"
+                SCOUT="${../../lib/city/scout.sh}"
 
                 echo "Testing scout.sh parse-rules..."
 
@@ -339,7 +339,7 @@ in
       }
       ''
                 set -euo pipefail
-                SCOUT="${../lib/city/scout.sh}"
+                SCOUT="${../../lib/city/scout.sh}"
                 TMPDIR=$(mktemp -d)
 
                 echo "Testing scout.sh scan with mock podman..."
@@ -398,7 +398,7 @@ in
       }
       ''
                 set -euo pipefail
-                GATE="${../lib/city/gate.sh}"
+                GATE="${../../lib/city/gate.sh}"
 
                 echo "Testing gate.sh with mock bd/gc..."
 
@@ -469,7 +469,7 @@ in
       }
       ''
                 set -euo pipefail
-                AGENT="${../lib/city/agent.sh}"
+                AGENT="${../../lib/city/agent.sh}"
 
                 echo "Testing agent.sh prompt construction..."
 
@@ -521,7 +521,7 @@ in
       }
       ''
                 set -euo pipefail
-                PROVIDER="${../lib/city/provider.sh}"
+                PROVIDER="${../../lib/city/provider.sh}"
 
                 echo "Testing provider.sh worker start..."
 
@@ -587,7 +587,7 @@ in
   # NixOS module: verifies env var plumbing via Nix evaluation
   city-nixos-module =
     let
-      moduleFile = builtins.readFile ../modules/city.nix;
+      moduleFile = builtins.readFile ../../modules/city.nix;
 
       # Structural checks — the module must define these
       hasServicesWrapix = builtins.match ".*services\\.wrapix.*" moduleFile != null;
@@ -625,7 +625,7 @@ in
       }
       ''
         set -euo pipefail
-        DIR="${../lib/city/formulas}"
+        DIR="${../../lib/city/formulas}"
 
         echo "Checking role formulas..."
 
@@ -738,7 +738,7 @@ in
       }
       ''
         set -euo pipefail
-        SCOUT="${../lib/city/scout.sh}"
+        SCOUT="${../../lib/city/scout.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing scout.sh create-beads..."
@@ -817,7 +817,7 @@ in
       }
       ''
         set -euo pipefail
-        SCOUT="${../lib/city/scout.sh}"
+        SCOUT="${../../lib/city/scout.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -864,7 +864,7 @@ in
       }
       ''
         set -euo pipefail
-        RECOVERY="${../lib/city/recovery.sh}"
+        RECOVERY="${../../lib/city/recovery.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing recovery.sh..."
@@ -932,7 +932,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/provider.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -981,7 +981,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/provider.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -1019,7 +1019,7 @@ in
       }
       ''
         set -euo pipefail
-        POST_GATE="${../lib/city/post-gate.sh}"
+        POST_GATE="${../../lib/city/post-gate.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing post-gate.sh auto-deploy path..."

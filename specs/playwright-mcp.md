@@ -139,20 +139,20 @@ All automatic Chromium flags (`--no-sandbox`, `--disable-dev-shm-usage`, `--disa
 | `lib/mcp/default.nix` | Edit | Add `playwright` to registry |
 | `specs/playwright-mcp.md` | Create | This spec |
 | `specs/README.md` | Edit | Add spec to table |
-| `tests/playwright-mcp/smoke-test.sh` | Create | Smoke test: MCP server starts, responds to initialize |
-| `tests/playwright-mcp/screenshot-test.sh` | Create | Screenshot test: navigate to page, capture base64 PNG |
-| `tests/playwright-mcp/build-test.sh` | Create | Nix build test: image contains chromium + MCP server |
+| `tests/mcp/playwright/smoke-test.sh` | Create | Smoke test: MCP server starts, responds to initialize |
+| `tests/mcp/playwright/screenshot-test.sh` | Create | Screenshot test: navigate to page, capture base64 PNG |
+| `tests/mcp/playwright/build-test.sh` | Create | Nix build test: image contains chromium + MCP server |
 
 ## Success Criteria
 
 - [ ] MCP server starts and responds to initialize request with tool list
-  [verify](tests/playwright-mcp/smoke-test.sh::test_mcp_initialize)
+  [verify](tests/mcp/playwright/smoke-test.sh::test_mcp_initialize)
 - [ ] Screenshot returns base64 PNG when navigating to a local HTTP server
-  [verify](tests/playwright-mcp/screenshot-test.sh::test_screenshot_returns_png)
+  [verify](tests/mcp/playwright/screenshot-test.sh::test_screenshot_returns_png)
 - [ ] Nix image builds with `mcp.playwright = {}` and contains chromium binary
-  [verify](tests/playwright-mcp/build-test.sh::test_image_contains_chromium)
+  [verify](tests/mcp/playwright/build-test.sh::test_image_contains_chromium)
 - [ ] Server runs fully offline (no network downloads at startup)
-  [verify](tests/playwright-mcp/smoke-test.sh::test_offline_startup)
+  [verify](tests/mcp/playwright/smoke-test.sh::test_offline_startup)
 - [ ] Chromium path is correctly derived from playwright-driver.browsers
   [judge](tests/judges/playwright-mcp.sh::test_chromium_path_derivation)
 - [ ] Container flags (--no-sandbox, --disable-dev-shm-usage, --disable-gpu) are always applied

@@ -89,6 +89,7 @@ let
     file
     findutils
     gawk
+    gc
     gh
     git
     gnugrep

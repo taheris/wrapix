@@ -6,7 +6,7 @@
 let
   inherit (pkgs) runCommandLocal;
 
-  shellUtils = import ../lib/util/shell.nix { };
+  shellUtils = import ../../lib/util/shell.nix { };
   inherit (shellUtils) expandPathFn;
 
 in

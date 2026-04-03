@@ -4,7 +4,7 @@
 # This script runs all integration tests for the tmux-mcp MCP server.
 # Tests exercise the MCP server directly (not inside containers) and require tmux.
 #
-# Prerequisites (provided by the NixOS VM in tests/tmux-mcp.nix):
+# Prerequisites (provided by the NixOS VM in tests/mcp/tmux/check.nix):
 # - tmux
 # - tmux-mcp binary
 # - jq (for JSON parsing)
