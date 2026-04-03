@@ -1767,4 +1767,332 @@ in
                 echo "PASS: entrypoint prints informational status without blocking"
                 mkdir $out
       '';
+
+  # =========================================================================
+  # Layer 5: Formula step commands — execute bash from formulas against known state
+  # =========================================================================
+
+  city-formula-steps =
+    runCommandLocal "city-formula-steps"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+        TMPDIR=$(mktemp -d)
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        # =====================================================================
+        # Mayor: check-specs — find last decomposition commit via git grep
+        # =====================================================================
+        echo "=== Mayor: check-specs ==="
+
+        WS="$TMPDIR/mayor-ws"
+        mkdir -p "$WS/specs" "$WS/docs"
+        git -C "$WS" init -q -b main
+        echo "# Project" > "$WS/docs/README.md"
+        git -C "$WS" add -A && git -C "$WS" commit -m "initial" -q
+
+        # Create a decomposition marker commit
+        git -C "$WS" commit --allow-empty -m "mayor: decompose specs 2026-04-01T00:00:00Z" -q
+        MARKER_HASH="$(git -C "$WS" rev-parse HEAD)"
+
+        # Add a post-marker commit
+        echo "new spec" > "$WS/specs/feature.md"
+        git -C "$WS" add -A && git -C "$WS" commit -m "add feature spec" -q
+
+        # Formula command: find last decomposition commit
+        LAST_DECOMPOSE=$(git -C "$WS" log --all --grep="mayor: decompose specs" --format="%H" -1 2>/dev/null || echo "")
+        [[ "$LAST_DECOMPOSE" == "$MARKER_HASH" ]] || { echo "FAIL: wrong decompose commit: $LAST_DECOMPOSE vs $MARKER_HASH"; exit 1; }
+        echo "  PASS: found last decomposition commit"
+
+        # Formula command: diff specs since last decomposition
+        SPEC_DIFF=$(git -C "$WS" diff "$LAST_DECOMPOSE"..HEAD -- specs/ docs/ 2>/dev/null)
+        echo "$SPEC_DIFF" | grep -q "new spec" || { echo "FAIL: spec diff missing changes"; exit 1; }
+        echo "  PASS: spec diff captures changes since decomposition"
+
+        # Formula command: no decomposition commit -> fallback
+        WS2="$TMPDIR/mayor-ws2"
+        mkdir -p "$WS2/specs"
+        git -C "$WS2" init -q -b main
+        echo "# Project" > "$WS2/specs/README.md"
+        git -C "$WS2" add -A && git -C "$WS2" commit -m "initial" -q
+        LAST_DECOMPOSE2=$(git -C "$WS2" log --all --grep="mayor: decompose specs" --format="%H" -1 2>/dev/null || echo "")
+        [[ -z "$LAST_DECOMPOSE2" ]] || { echo "FAIL: expected empty, got $LAST_DECOMPOSE2"; exit 1; }
+        echo "  PASS: no decomposition commit returns empty"
+
+        # =====================================================================
+        # Mayor: briefing — query pending reviews and escalated beads
+        # =====================================================================
+        echo "=== Mayor: briefing ==="
+
+        # Mock bd for mayor briefing
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        case "$1" in
+          human)
+            echo '[{"id":"wx-r1","title":"Review auth module"},{"id":"wx-r2","title":"Deploy approval"}]'
+            ;;
+          list)
+            echo '[{"id":"wx-e1","metadata":{"escalated":"true","escalation_reason":"max_rounds_exceeded"}},{"id":"wx-ok","metadata":{}}]'
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Formula command: get pending human reviews
+        PENDING=$(PATH="$MOCK_BIN:$PATH" bd human list --json 2>/dev/null) || PENDING="[]"
+        PENDING_COUNT=$(echo "$PENDING" | jq 'length')
+        [[ "$PENDING_COUNT" -eq 2 ]] || { echo "FAIL: expected 2 pending, got $PENDING_COUNT"; exit 1; }
+        echo "  PASS: pending human reviews queried (count=$PENDING_COUNT)"
+
+        # Formula command: find escalated beads
+        ESCALATED=$(PATH="$MOCK_BIN:$PATH" bd list --status=open --json --limit=0 | jq '[.[] | select(.metadata.escalated == "true")]')
+        ESC_COUNT=$(echo "$ESCALATED" | jq 'length')
+        [[ "$ESC_COUNT" -eq 1 ]] || { echo "FAIL: expected 1 escalated, got $ESC_COUNT"; exit 1; }
+        ESC_REASON=$(echo "$ESCALATED" | jq -r '.[0].metadata.escalation_reason')
+        [[ "$ESC_REASON" == "max_rounds_exceeded" ]] || { echo "FAIL: wrong reason: $ESC_REASON"; exit 1; }
+        echo "  PASS: escalated beads filtered correctly"
+
+        # =====================================================================
+        # Scout: load-context — cap check via bd list + jq length
+        # =====================================================================
+        echo "=== Scout: load-context (cap check) ==="
+
+        # Under cap
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo '[{"id":"b1"},{"id":"b2"},{"id":"b3"}]'
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Formula command: check bead count against cap
+        OPEN_COUNT=$(PATH="$MOCK_BIN:$PATH" bd list --status=open --status=in_progress --json --limit=0 | jq 'length')
+        MAX_BEADS=10
+        [[ "$OPEN_COUNT" -lt "$MAX_BEADS" ]] || { echo "FAIL: 3 < 10 should be under cap"; exit 1; }
+        echo "  PASS: under cap (3 < 10)"
+
+        # At cap
+        MAX_BEADS=3
+        [[ "$OPEN_COUNT" -ge "$MAX_BEADS" ]] || { echo "FAIL: 3 >= 3 should be at cap"; exit 1; }
+        echo "  PASS: at cap (3 >= 3)"
+
+        # =====================================================================
+        # Scout: housekeeping — cross-reference workers vs in-progress beads
+        # =====================================================================
+        echo "=== Scout: housekeeping (orphan detection) ==="
+
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        # Return in-progress bead IDs
+        echo '[{"id":"bead-active"},{"id":"bead-working"}]'
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        IN_PROGRESS=$(PATH="$MOCK_BIN:$PATH" bd list --status=in_progress --json --limit=0 | jq -r '.[].id')
+
+        # Simulate worker containers with bead labels
+        check_orphan() {
+          local bead_id="$1"
+          echo "$IN_PROGRESS" | grep -q "^''${bead_id}$" && echo "active" || echo "orphaned"
+        }
+
+        result=$(check_orphan "bead-active")
+        [[ "$result" == "active" ]] || { echo "FAIL: bead-active should be active"; exit 1; }
+        echo "  PASS: active worker recognized"
+
+        result=$(check_orphan "bead-gone")
+        [[ "$result" == "orphaned" ]] || { echo "FAIL: bead-gone should be orphaned"; exit 1; }
+        echo "  PASS: orphaned worker detected"
+
+        # =====================================================================
+        # Worker: self-review — git diff and status checks
+        # =====================================================================
+        echo "=== Worker: self-review ==="
+
+        WS_WORKER="$TMPDIR/worker-ws"
+        mkdir -p "$WS_WORKER"
+        git -C "$WS_WORKER" init -q -b main
+        echo "original" > "$WS_WORKER/file.txt"
+        git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "initial" -q
+
+        # Simulate worker branch with changes
+        git -C "$WS_WORKER" checkout -b gc-bead-42 -q
+        echo "fixed" > "$WS_WORKER/file.txt"
+        git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "fix: auth bug (bead-42)" -q
+        echo "more" > "$WS_WORKER/file2.txt"
+        git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "chore: cleanup (bead-42)" -q
+
+        # Formula command: review changes (diff against base branch)
+        DIFF_OUTPUT=$(git -C "$WS_WORKER" diff main...HEAD)
+        echo "$DIFF_OUTPUT" | grep -q "+fixed" || { echo "FAIL: diff missing fix"; exit 1; }
+        echo "$DIFF_OUTPUT" | grep -q "+more" || { echo "FAIL: diff missing file2"; exit 1; }
+        echo "  PASS: git diff main...HEAD shows worker changes"
+
+        # Formula command: log of commits
+        LOG_OUTPUT=$(git -C "$WS_WORKER" log --oneline main..HEAD)
+        echo "$LOG_OUTPUT" | grep -q "fix: auth bug" || { echo "FAIL: log missing fix commit"; exit 1; }
+        echo "$LOG_OUTPUT" | grep -q "chore: cleanup" || { echo "FAIL: log missing cleanup commit"; exit 1; }
+        COMMIT_COUNT=$(echo "$LOG_OUTPUT" | wc -l)
+        [[ "$COMMIT_COUNT" -eq 2 ]] || { echo "FAIL: expected 2 commits, got $COMMIT_COUNT"; exit 1; }
+        echo "  PASS: git log main..HEAD shows 2 worker commits"
+
+        # Formula command: working tree must be clean
+        STATUS=$(git -C "$WS_WORKER" status --porcelain)
+        [[ -z "$STATUS" ]] || { echo "FAIL: working tree not clean: $STATUS"; exit 1; }
+        echo "  PASS: working tree is clean after commits"
+
+        # Formula command: dirty working tree detected and captured
+        echo "uncommitted" > "$WS_WORKER/dirty.txt"
+        STATUS=$(git -C "$WS_WORKER" status --porcelain)
+        [[ -n "$STATUS" ]] || { echo "FAIL: should detect uncommitted file"; exit 1; }
+        git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "chore: capture remaining work (bead-42)" -q
+        STATUS=$(git -C "$WS_WORKER" status --porcelain)
+        [[ -z "$STATUS" ]] || { echo "FAIL: tree should be clean after capture"; exit 1; }
+        echo "  PASS: uncommitted changes captured by self-review"
+
+        # =====================================================================
+        # Judge: review-diff — set review verdict metadata
+        # =====================================================================
+        echo "=== Judge: review-diff ==="
+
+        BD_LOG="$TMPDIR/judge-bd.log"
+        cat > "$MOCK_BIN/bd" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$BD_LOG"
+        case "\$1" in
+          show)
+            echo '[{"id":"bead-42","title":"Fix auth","description":"Auth module broken"}]'
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+        rm -f "$BD_LOG"
+
+        # Formula command: approve
+        BEAD_ID="bead-42"
+        PATH="$MOCK_BIN:$PATH" bd update "$BEAD_ID" --set-metadata "review_verdict=approve"
+        PATH="$MOCK_BIN:$PATH" bd update "$BEAD_ID" --notes "Judge: approved — all style guidelines pass"
+        grep -q 'review_verdict=approve' "$BD_LOG" || { echo "FAIL: approve verdict not set"; exit 1; }
+        grep -q 'all style guidelines pass' "$BD_LOG" || { echo "FAIL: approve notes not set"; exit 1; }
+        echo "  PASS: approve verdict and notes set correctly"
+
+        # Formula command: reject with specific feedback
+        rm -f "$BD_LOG"
+        PATH="$MOCK_BIN:$PATH" bd update "$BEAD_ID" --set-metadata "review_verdict=reject"
+        PATH="$MOCK_BIN:$PATH" bd update "$BEAD_ID" --notes "Judge: rejected — SH-01 violated at line 42: missing set -euo pipefail"
+        grep -q 'review_verdict=reject' "$BD_LOG" || { echo "FAIL: reject verdict not set"; exit 1; }
+        grep -q 'SH-01 violated at line 42' "$BD_LOG" || { echo "FAIL: rejection details missing"; exit 1; }
+        echo "  PASS: reject verdict with rule reference and line number"
+
+        # Formula command: flag non-documented concern (approve + human label)
+        rm -f "$BD_LOG"
+        PATH="$MOCK_BIN:$PATH" bd update "$BEAD_ID" --set-metadata "review_verdict=approve"
+        PATH="$MOCK_BIN:$PATH" bd label add "$BEAD_ID" human
+        grep -q 'review_verdict=approve' "$BD_LOG" || { echo "FAIL: approve not set for flagged bead"; exit 1; }
+        grep -q 'label add bead-42 human' "$BD_LOG" || { echo "FAIL: human label not added"; exit 1; }
+        echo "  PASS: non-documented concern flagged with human label + approve"
+
+        # =====================================================================
+        # Judge: merge — fast-forward merge and worktree cleanup
+        # =====================================================================
+        echo "=== Judge: merge ==="
+
+        WS_JUDGE="$TMPDIR/judge-ws"
+        mkdir -p "$WS_JUDGE"
+        git -C "$WS_JUDGE" init -q -b main
+        echo "base" > "$WS_JUDGE/code.sh"
+        git -C "$WS_JUDGE" add -A && git -C "$WS_JUDGE" commit -m "initial" -q
+
+        # Create worker branch (simulate worker output)
+        git -C "$WS_JUDGE" checkout -b gc-bead-99 -q
+        echo "fixed code" > "$WS_JUDGE/code.sh"
+        git -C "$WS_JUDGE" add -A && git -C "$WS_JUDGE" commit -m "fix: resolve issue (bead-99)" -q
+        WORKER_HEAD=$(git -C "$WS_JUDGE" rev-parse HEAD)
+        git -C "$WS_JUDGE" checkout main -q
+
+        # Create a worktree directory to be cleaned
+        mkdir -p "$WS_JUDGE/.wrapix/worktree/gc-bead-99"
+        echo "worktree content" > "$WS_JUDGE/.wrapix/worktree/gc-bead-99/dummy"
+
+        # Formula command: fast-forward merge
+        git -C "$WS_JUDGE" merge --ff-only gc-bead-99 -q
+        MAIN_HEAD=$(git -C "$WS_JUDGE" rev-parse HEAD)
+        [[ "$MAIN_HEAD" == "$WORKER_HEAD" ]] || { echo "FAIL: ff merge didn't advance main"; exit 1; }
+        echo "  PASS: fast-forward merge succeeded"
+
+        # Formula command: cleanup worktree directory
+        rm -rf "$WS_JUDGE/.wrapix/worktree/gc-bead-99"
+        ! test -d "$WS_JUDGE/.wrapix/worktree/gc-bead-99" || { echo "FAIL: worktree not cleaned"; exit 1; }
+        echo "  PASS: worktree directory removed"
+
+        # Formula command: prune worktrees and delete branch
+        git -C "$WS_JUDGE" worktree prune
+        git -C "$WS_JUDGE" branch -d gc-bead-99 -q
+        ! git -C "$WS_JUDGE" rev-parse --verify gc-bead-99 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
+        echo "  PASS: branch deleted after merge"
+
+        # =====================================================================
+        # Judge: merge — rebase path when main has advanced
+        # =====================================================================
+        echo "=== Judge: merge (rebase path) ==="
+
+        WS_REBASE="$TMPDIR/judge-rebase"
+        mkdir -p "$WS_REBASE"
+        git -C "$WS_REBASE" init -q -b main
+        echo "base" > "$WS_REBASE/code.sh"
+        git -C "$WS_REBASE" add -A && git -C "$WS_REBASE" commit -m "initial" -q
+
+        # Worker branch
+        git -C "$WS_REBASE" checkout -b gc-bead-77 -q
+        echo "worker fix" > "$WS_REBASE/worker.txt"
+        git -C "$WS_REBASE" add -A && git -C "$WS_REBASE" commit -m "fix: worker (bead-77)" -q
+
+        # Main advances (another merge landed)
+        git -C "$WS_REBASE" checkout main -q
+        echo "other change" > "$WS_REBASE/other.txt"
+        git -C "$WS_REBASE" add -A && git -C "$WS_REBASE" commit -m "feat: other change" -q
+
+        # Formula command: ff fails, rebase then ff
+        ff_exit=0
+        git -C "$WS_REBASE" merge --ff-only gc-bead-77 -q 2>/dev/null || ff_exit=$?
+        [[ "$ff_exit" -ne 0 ]] || { echo "FAIL: ff should fail when main advanced"; exit 1; }
+        echo "  PASS: fast-forward correctly fails when main advanced"
+
+        # Formula command: rebase onto main
+        git -C "$WS_REBASE" checkout gc-bead-77 -q
+        git -C "$WS_REBASE" rebase main -q
+        git -C "$WS_REBASE" checkout main -q
+        git -C "$WS_REBASE" merge --ff-only gc-bead-77 -q
+
+        # Verify both changes present
+        test -f "$WS_REBASE/worker.txt" || { echo "FAIL: worker change missing after rebase+merge"; exit 1; }
+        test -f "$WS_REBASE/other.txt" || { echo "FAIL: other change missing after rebase+merge"; exit 1; }
+        echo "  PASS: rebase + fast-forward merge succeeded"
+
+        git -C "$WS_REBASE" branch -d gc-bead-77 -q
+        echo "  PASS: branch cleaned up after rebase merge"
+
+        # =====================================================================
+        # Summary
+        # =====================================================================
+
+        rm -rf "$TMPDIR"
+        echo ""
+        echo "PASS: All formula step commands produce expected results"
+        mkdir $out
+      '';
 }
