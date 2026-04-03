@@ -34,7 +34,7 @@ fi
 # Step 2: Nudge the reviewer session with the commit range
 # ---------------------------------------------------------------------------
 
-gc nudge reviewer --message "Review bead $BEAD_ID — commit range: $commit_range"
+gc session nudge reviewer "Review bead $BEAD_ID — commit range: $commit_range"
 
 # ---------------------------------------------------------------------------
 # Step 3: Poll bead metadata for review_verdict

@@ -83,7 +83,7 @@ start_events_watcher() {
       fi
 
       # Nudge the scout with event details
-      gc nudge scout --message "Service container event: ${container_name} ${event_type}" 2>/dev/null || true
+      gc session nudge scout "Service container event: ${container_name} ${event_type}" 2>/dev/null || true
     done
   ) &
 }

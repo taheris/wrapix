@@ -191,7 +191,10 @@ cleanup_stale_worktrees() {
     fi
 
     echo "recovery: removing stale worktree for bead $bead_id"
-    git -C "$WORKSPACE" worktree remove "$worktree_path" --force 2>/dev/null || true
+    # Use rm -rf + prune instead of git worktree remove, because provider.sh
+    # rewrites the .git file with a container-internal path that git can't resolve
+    rm -rf "$worktree_path"
+    git -C "$WORKSPACE" worktree prune 2>/dev/null || true
 
     # Also clean up the branch if it still exists
     local branch="gc-${bead_id}"

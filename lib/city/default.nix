@@ -228,13 +228,15 @@ let
         cp -f ${cityToml} city.toml
         mkdir -p .gc/formulas .gc/scripts
         for f in ${formulasDir}/*.formula.toml; do
-          cp -f "$f" .gc/formulas/
+          cp -f --remove-destination "$f" .gc/formulas/
         done
         # Copy orders (preserve directory structure)
-        cp -rf ${formulasDir}/orders .gc/formulas/
+        chmod -R u+w .gc/formulas/orders 2>/dev/null || true
+        rm -rf .gc/formulas/orders
+        cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
         # Copy scripts (gate, post-gate, recovery)
         for f in ${scriptsDir}/*; do
-          cp -f "$f" .gc/scripts/
+          cp -f --remove-destination "$f" .gc/scripts/
         done
 
         # gc creates beads with custom types (session, convoy, convergence, etc.);
@@ -286,11 +288,13 @@ let
           cp -f ${cityToml} city.toml
           mkdir -p .gc/formulas .gc/scripts
           for f in ${formulasDir}/*.formula.toml; do
-            cp -f "$f" .gc/formulas/
+            cp -f --remove-destination "$f" .gc/formulas/
           done
-          cp -rf ${formulasDir}/orders .gc/formulas/
+          chmod -R u+w .gc/formulas/orders 2>/dev/null || true
+          rm -rf .gc/formulas/orders
+          cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
           for f in ${scriptsDir}/*; do
-            cp -f "$f" .gc/scripts/
+            cp -f --remove-destination "$f" .gc/scripts/
           done
 
           exec ${./entrypoint.sh}

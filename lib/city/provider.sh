@@ -14,6 +14,13 @@ METHOD="${1:?missing method}"
 SESSION="${2:-}"
 shift 2 || shift $#
 
+# gc's exec provider sends data on stdin for some methods (start, nudge,
+# set-meta, process-alive). Read stdin once and store it.
+STDIN_DATA=""
+if [[ "$METHOD" == "start" || "$METHOD" == "nudge" || "$METHOD" == "set-meta" || "$METHOD" == "process-alive" ]]; then
+  STDIN_DATA="$(cat)"
+fi
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -259,15 +266,26 @@ case "$METHOD" in
         fi
         sleep 1
       done
-      persistent_exec tmux send-keys -t main "$@"
+      # gc sends nudge message on stdin; send it as tmux keys
+      if [[ -n "$STDIN_DATA" ]]; then
+        persistent_exec tmux send-keys -t main "$STDIN_DATA" Enter
+      elif [[ $# -gt 0 ]]; then
+        persistent_exec tmux send-keys -t main "$@"
+      fi
     fi
     ;;
 
   get-last-activity)
     if is_worker; then
-      echo "0"
+      echo ""
     else
-      persistent_exec tmux display-message -t main -p '#{pane_last_activity}' 2>/dev/null || echo "0"
+      # gc expects RFC3339 or empty; tmux returns Unix epoch
+      _gc_epoch="$(persistent_exec tmux display-message -t main -p '#{pane_last_activity}' 2>/dev/null)" || _gc_epoch=""
+      if [[ -n "$_gc_epoch" && "$_gc_epoch" != "0" ]]; then
+        date -u -d "@${_gc_epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo ""
+      else
+        echo ""
+      fi
     fi
     ;;
 
@@ -290,9 +308,9 @@ case "$METHOD" in
   set-meta)
     name="$(container_name)"
     key="${1:?set-meta requires key}"
-    value="${2:?set-meta requires value}"
-    # Store metadata as container labels via podman container rename is not
-    # supported — use a label file inside the container instead
+    # gc sends value on stdin; fall back to positional arg for direct calls
+    value="${STDIN_DATA:-${2:-}}"
+    # Store metadata as a file inside the container
     podman exec "$name" sh -c "mkdir -p /tmp/gc-meta && echo '${value}' > /tmp/gc-meta/${key}" 2>/dev/null
     ;;
 
@@ -317,11 +335,20 @@ case "$METHOD" in
 
   process-alive)
     name="$(container_name)"
-    if [[ -n "${1:-}" ]]; then
-      # Check for a specific process inside the container
-      podman exec "$name" pgrep -x "$1" >/dev/null 2>&1 && echo "true" || echo "false"
+    # gc sends process names on stdin (one per line); fall back to positional arg
+    _gc_proc_names="${STDIN_DATA:-${1:-}}"
+    if [[ -n "$_gc_proc_names" ]]; then
+      # Check each process name — return true if any is alive
+      while IFS= read -r pname; do
+        [[ -z "$pname" ]] && continue
+        if podman exec "$name" pgrep -x "$pname" >/dev/null 2>&1; then
+          echo "true"
+          exit 0
+        fi
+      done <<< "$_gc_proc_names"
+      echo "false"
     else
-      # No process name — check if the container itself is running
+      # No process names — check if the container itself is running
       podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false"
     fi
     ;;
@@ -340,7 +367,7 @@ case "$METHOD" in
     ;;
 
   *)
-    echo "unknown method: $METHOD" >&2
-    exit 1
+    # Exit 2 = unknown operation (forward-compatible no-op per gc exec protocol)
+    exit 2
     ;;
 esac

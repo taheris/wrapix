@@ -203,7 +203,7 @@ check_cap() {
 
 # Notify director that bead cap is reached.
 notify_cap_reached() {
-  wrapix-notifyd "Scout paused: ${SCOUT_MAX_BEADS} open beads reached" 2>/dev/null || true
+  wrapix-notify "Gas City" "Scout paused: ${SCOUT_MAX_BEADS} open beads reached" 2>/dev/null || true
 }
 
 # Extract the dominant error pattern from a log line for grouping.

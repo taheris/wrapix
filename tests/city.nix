@@ -721,4 +721,378 @@ in
         echo "PASS: All generated configs accepted by gc"
         mkdir $out
       '';
+
+  # =========================================================================
+  # Layer 4: Additional functional tests
+  # =========================================================================
+
+  # Scout: create-beads deduplication and cap enforcement
+  city-scout-create-beads =
+    runCommandLocal "city-scout-create-beads"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        SCOUT="${../lib/city/scout.sh}"
+        TMPDIR=$(mktemp -d)
+
+        echo "Testing scout.sh create-beads..."
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        # Track bd calls
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/scout-bd-calls.log
+        case "$1" in
+          list) echo "[]" ;;
+          create) echo "bead-new-1" ;;
+          update) ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Mock wrapix-notify (should not be called when under cap)
+        cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
+        #!/bin/sh
+        echo "NOTIFY: $*" >> /tmp/scout-notify.log
+        MOCK
+        chmod +x "$MOCK_BIN/wrapix-notify"
+
+        rm -f /tmp/scout-bd-calls.log /tmp/scout-notify.log
+
+        # Set up scan results with immediate and batched errors
+        mkdir -p "$TMPDIR/errors/my-api"
+        echo "FATAL|PANIC|panic:" > "$TMPDIR/errors/immediate.pat"
+        echo "ERROR|Exception" > "$TMPDIR/errors/batched.pat"
+        echo "" > "$TMPDIR/errors/ignore.pat"
+        echo "2026-04-01 FATAL: out of memory" > "$TMPDIR/errors/my-api/immediate.log"
+        echo "2026-04-01 ERROR: connection refused" > "$TMPDIR/errors/my-api/batched.log"
+
+        # Test 1: creates beads for immediate and batched
+        PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" SCOUT_MAX_BEADS=10 \
+          bash "$SCOUT" create-beads
+        grep -q "create" /tmp/scout-bd-calls.log || { echo "FAIL: no bead created"; exit 1; }
+        echo "  PASS: beads created for scan results"
+
+        # Test 2: cap enforcement — set cap to 0
+        rm -f /tmp/scout-bd-calls.log /tmp/scout-notify.log
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo "$@" >> /tmp/scout-bd-calls.log
+        case "$1" in
+          list) echo '[{"id":"b1"},{"id":"b2"},{"id":"b3"}]' ;;
+          create) echo "bead-new" ;;
+          update) ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" SCOUT_MAX_BEADS=2 \
+          bash "$SCOUT" create-beads || true
+        test -f /tmp/scout-notify.log || { echo "FAIL: notify not called when cap reached"; exit 1; }
+        grep -q "Scout paused" /tmp/scout-notify.log || { echo "FAIL: wrong notify message"; exit 1; }
+        echo "  PASS: cap enforcement triggers notification"
+
+        rm -rf "$TMPDIR" /tmp/scout-bd-calls.log /tmp/scout-notify.log
+        echo "PASS: scout create-beads works correctly"
+        mkdir $out
+      '';
+
+  # Scout: check-cap reports cap status
+  city-scout-check-cap =
+    runCommandLocal "city-scout-check-cap"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        SCOUT="${../lib/city/scout.sh}"
+        TMPDIR=$(mktemp -d)
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        echo "Testing scout.sh check-cap..."
+
+        # Under cap
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo '[{"id":"b1"}]'
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        result="$(PATH="$MOCK_BIN:$PATH" SCOUT_MAX_BEADS=5 bash "$SCOUT" check-cap)"
+        [[ "$result" == "false" ]] || { echo "FAIL: expected false, got $result"; exit 1; }
+        echo "  PASS: under cap returns false"
+
+        # At cap
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        echo '[{"id":"b1"},{"id":"b2"},{"id":"b3"}]'
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        result="$(PATH="$MOCK_BIN:$PATH" SCOUT_MAX_BEADS=2 bash "$SCOUT" check-cap)"
+        [[ "$result" == "true" ]] || { echo "FAIL: expected true, got $result"; exit 1; }
+        echo "  PASS: at cap returns true"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: scout check-cap works correctly"
+        mkdir $out
+      '';
+
+  # Recovery: stale worktree cleanup uses rm -rf, not git worktree remove
+  city-recovery-functional =
+    runCommandLocal "city-recovery-functional"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        RECOVERY="${../lib/city/recovery.sh}"
+        TMPDIR=$(mktemp -d)
+
+        echo "Testing recovery.sh..."
+
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+
+        # Set up workspace
+        WS="$TMPDIR/ws"
+        mkdir -p "$WS"
+        git -C "$WS" init -q -b main
+        git -C "$WS" commit --allow-empty -m "initial" -q
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        # Mock podman (no containers running)
+        cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/bin/sh
+        echo ""
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        # Mock bd — bead is closed
+        cat > "$MOCK_BIN/bd" << 'MOCK'
+        #!/bin/sh
+        if [ "$1" = "show" ]; then
+          echo '[{"status":"closed"}]'
+        fi
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        # Create a stale worktree
+        mkdir -p "$WS/.wrapix/worktree"
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-stale-bead" -b gc-stale-bead -q
+        test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
+
+        # Run recovery
+        PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" bash "$RECOVERY"
+
+        # Verify stale worktree was cleaned up
+        ! test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: stale worktree not cleaned"; exit 1; }
+        echo "  PASS: stale worktree cleaned up"
+
+        # Verify branch was cleaned up
+        ! git -C "$WS" rev-parse --verify gc-stale-bead 2>/dev/null || { echo "FAIL: stale branch not cleaned"; exit 1; }
+        echo "  PASS: stale branch cleaned up"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: recovery.sh works correctly"
+        mkdir $out
+      '';
+
+  # Provider: set-meta reads value from stdin
+  city-provider-set-meta =
+    runCommandLocal "city-provider-set-meta"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        PROVIDER="${../lib/city/provider.sh}"
+        TMPDIR=$(mktemp -d)
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        echo "Testing provider.sh set-meta/get-meta..."
+
+        # Mock podman exec that records what it receives
+        cat > "$MOCK_BIN/podman" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$TMPDIR/podman.log"
+        # For get-meta, simulate reading from a file
+        if echo "\$@" | grep -q "cat /tmp/gc-meta"; then
+          echo "test-value"
+        fi
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        # Test set-meta with stdin (gc protocol)
+        echo "my-value" | PATH="$MOCK_BIN:$PATH" \
+          GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" GC_AGENT_IMAGE=test:latest GC_PODMAN_NETWORK=test \
+          bash "$PROVIDER" set-meta scout my-key
+
+        grep -q "my-value" "$TMPDIR/podman.log" || { echo "FAIL: value not passed from stdin"; cat "$TMPDIR/podman.log"; exit 1; }
+        echo "  PASS: set-meta reads value from stdin"
+
+        # Test get-meta (no stdin, value on stdout)
+        result="$(PATH="$MOCK_BIN:$PATH" \
+          GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" GC_AGENT_IMAGE=test:latest GC_PODMAN_NETWORK=test \
+          bash "$PROVIDER" get-meta scout my-key)"
+        [[ "$result" == "test-value" ]] || { echo "FAIL: get-meta returned '$result'"; exit 1; }
+        echo "  PASS: get-meta returns value on stdout"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: provider metadata methods work"
+        mkdir $out
+      '';
+
+  # Provider: unknown methods exit 2 (forward-compatible no-op)
+  city-provider-unknown-method =
+    runCommandLocal "city-provider-unknown-method"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        PROVIDER="${../lib/city/provider.sh}"
+        TMPDIR=$(mktemp -d)
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        echo "Testing provider.sh unknown method exit code..."
+
+        cat > "$MOCK_BIN/podman" << 'MOCK'
+        #!/bin/sh
+        :
+        MOCK
+        chmod +x "$MOCK_BIN/podman"
+
+        exit_code=0
+        PATH="$MOCK_BIN:$PATH" \
+          GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" GC_AGENT_IMAGE=test:latest GC_PODMAN_NETWORK=test \
+          bash "$PROVIDER" future-method scout 2>/dev/null || exit_code=$?
+        [[ "$exit_code" -eq 2 ]] || { echo "FAIL: unknown method exited $exit_code (expected 2)"; exit 1; }
+        echo "  PASS: unknown method exits 2"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: provider unknown method handling correct"
+        mkdir $out
+      '';
+
+  # Post-gate: auto-deploy path (low-risk + auto-deploy configured)
+  city-post-gate-auto-deploy =
+    runCommandLocal "city-post-gate-auto-deploy"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        POST_GATE="${../lib/city/post-gate.sh}"
+        TMPDIR=$(mktemp -d)
+
+        echo "Testing post-gate.sh auto-deploy path..."
+
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+
+        WS="$TMPDIR/ws"
+        mkdir -p "$WS/docs"
+        git -C "$WS" init -q -b main
+        git -C "$WS" commit --allow-empty -m "initial" -q
+
+        # Set up auto-deploy docs
+        printf "## Auto-deploy\nLow-risk: docs only\n" > "$WS/docs/orchestration.md"
+        git -C "$WS" add -A && git -C "$WS" commit -m "add docs" -q
+
+        MOCK_BIN="$TMPDIR/bin"
+        mkdir -p "$MOCK_BIN"
+
+        # Create a branch with a commit
+        git -C "$WS" checkout -b gc-test-bead -q
+        echo "fix" > "$WS/fix.txt"
+        git -C "$WS" add fix.txt && git -C "$WS" commit -m "fix" -q
+        git -C "$WS" checkout main -q
+
+        # Mock bd — returns low risk classification and creates deploy bead
+        DEPLOY_ACTIONS="$TMPDIR/deploy-actions.log"
+        cat > "$MOCK_BIN/bd" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$DEPLOY_ACTIONS"
+        case "\$1" in
+          show)
+            echo '[{"metadata":{"risk_classification":"low"},"title":"Test fix"}]'
+            ;;
+          create)
+            echo "deploy-bead-1"
+            ;;
+          label|update)
+            ;;
+        esac
+        MOCK
+        chmod +x "$MOCK_BIN/bd"
+
+        cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
+        #!/bin/sh
+        :
+        MOCK
+        chmod +x "$MOCK_BIN/wrapix-notify"
+
+        cat > "$MOCK_BIN/prek" << 'MOCK'
+        #!/bin/sh
+        exit 0
+        MOCK
+        chmod +x "$MOCK_BIN/prek"
+
+        # Run post-gate
+        PATH="$MOCK_BIN:$PATH" \
+          GC_BEAD_ID=test-bead \
+          GC_TERMINAL_REASON=approved \
+          GC_WORKSPACE="$WS" \
+          GC_CITY_NAME=test \
+          bash "$POST_GATE" 2>&1
+
+        # Verify auto_deploy metadata was set (not human label)
+        grep -q "auto_deploy=true" "$DEPLOY_ACTIONS" || { echo "FAIL: auto_deploy not set"; cat "$DEPLOY_ACTIONS"; exit 1; }
+        ! grep -q "label add" "$DEPLOY_ACTIONS" || { echo "FAIL: human label was set for low-risk auto-deploy"; exit 1; }
+        echo "  PASS: low-risk auto-deploy skips human label"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: post-gate auto-deploy path works"
+        mkdir $out
+      '';
 }
