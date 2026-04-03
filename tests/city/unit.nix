@@ -1095,4 +1095,131 @@ in
         echo "PASS: post-gate auto-deploy path works"
         mkdir $out
       '';
+
+  # =========================================================================
+  # Entrypoint: informational pending-review status (no blocking)
+  # =========================================================================
+
+  city-entrypoint-no-block =
+    runCommandLocal "city-entrypoint-no-block"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+                set -euo pipefail
+                ENTRYPOINT="${../../lib/city/entrypoint.sh}"
+                TMPDIR=$(mktemp -d)
+                MOCK_BIN="$TMPDIR/bin"
+                mkdir -p "$MOCK_BIN"
+
+                # --- Mock dependencies ---
+
+                # bd human list --json: return scaffolding beads
+                cat > "$MOCK_BIN/bd" << 'MOCK'
+                #!/bin/sh
+                if [ "$1" = "human" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+                  echo '[{"id":"wx-test1","title":"Scaffold docs/README.md"},{"id":"wx-test2","title":"Scaffold docs/architecture.md"}]'
+                fi
+                exit 0
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+
+                # recovery.sh: no-op
+                cat > "$TMPDIR/recovery.sh" << 'MOCK'
+                #!/bin/sh
+                exit 0
+        MOCK
+                chmod +x "$TMPDIR/recovery.sh"
+
+                # podman: no-op (events watcher will background and be harmless)
+                cat > "$MOCK_BIN/podman" << 'MOCK'
+                #!/bin/sh
+                exit 0
+        MOCK
+                chmod +x "$MOCK_BIN/podman"
+
+                # gc: capture that we reach gc start --foreground (proves no blocking)
+                cat > "$MOCK_BIN/gc" << 'MOCK'
+                #!/bin/sh
+                echo "GC_STARTED $*" >> /tmp/gc_actions
+                exit 0
+        MOCK
+                chmod +x "$MOCK_BIN/gc"
+
+                # --- Prepare entrypoint with mocked SCRIPT_DIR ---
+                # Copy entrypoint and patch SCRIPT_DIR to use our mock recovery.sh
+                cp "$ENTRYPOINT" "$TMPDIR/entrypoint.sh"
+                chmod +x "$TMPDIR/entrypoint.sh"
+                # Replace the SCRIPT_DIR line so recovery.sh is found in TMPDIR
+                sed -i "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$TMPDIR\"|" "$TMPDIR/entrypoint.sh"
+                # Replace exec gc with just gc (exec would replace process, preventing checks)
+                sed -i 's|^exec gc|gc|' "$TMPDIR/entrypoint.sh"
+
+                export GC_CITY_NAME=test-city
+                export GC_WORKSPACE=/tmp/ws
+                export GC_PODMAN_NETWORK=test-net
+                export PATH="$MOCK_BIN:$PATH"
+
+                # --- Test 1: with pending beads, entrypoint prints info and continues ---
+                OUTPUT=$(bash "$TMPDIR/entrypoint.sh" 2>&1) || {
+                  echo "FAIL: entrypoint exited non-zero with pending beads (should be informational)"
+                  echo "Output: $OUTPUT"
+                  exit 1
+                }
+                echo "$OUTPUT" | grep -q "Pending review items (2)" || {
+                  echo "FAIL: expected pending review summary"
+                  echo "Output: $OUTPUT"
+                  exit 1
+                }
+                echo "$OUTPUT" | grep -q "wx-test1" || {
+                  echo "FAIL: expected bead ID in output"
+                  echo "Output: $OUTPUT"
+                  exit 1
+                }
+                echo "$OUTPUT" | grep -q "mayor will present" || {
+                  echo "FAIL: expected mayor reference in output"
+                  echo "Output: $OUTPUT"
+                  exit 1
+                }
+                grep -q "GC_STARTED" /tmp/gc_actions || {
+                  echo "FAIL: gc start was never called — entrypoint blocked"
+                  exit 1
+                }
+                echo "  PASS: pending beads are informational, gc starts"
+
+                # --- Test 2: with no pending beads, no review output ---
+                rm -f /tmp/gc_actions
+                cat > "$MOCK_BIN/bd" << 'MOCK'
+                #!/bin/sh
+                if [ "$1" = "human" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+                  echo '[]'
+                fi
+                exit 0
+        MOCK
+                chmod +x "$MOCK_BIN/bd"
+
+                OUTPUT=$(bash "$TMPDIR/entrypoint.sh" 2>&1) || {
+                  echo "FAIL: entrypoint exited non-zero with no pending beads"
+                  exit 1
+                }
+                # Should NOT contain pending review text
+                if echo "$OUTPUT" | grep -q "Pending review"; then
+                  echo "FAIL: should not print review summary when no beads pending"
+                  exit 1
+                fi
+                grep -q "GC_STARTED" /tmp/gc_actions || {
+                  echo "FAIL: gc start was never called"
+                  exit 1
+                }
+                echo "  PASS: no beads, no review output, gc starts"
+
+                rm -rf "$TMPDIR" /tmp/gc_actions
+                echo ""
+                echo "PASS: entrypoint prints informational status without blocking"
+                mkdir $out
+      '';
 }

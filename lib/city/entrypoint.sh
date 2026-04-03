@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Gas City container entrypoint — init checks, event watcher, then exec gc.
 #
-# 1. Checks for unresolved scaffolding beads (created by ralph sync).
-#    If any exist, prints warning listing pending reviews and exits.
+# 1. Prints informational summary of pending reviews (including scaffolding
+#    beads created by ralph sync). Does not block — the mayor presents these
+#    items to the human on attach.
 # 2. Runs crash recovery — reconciles orphaned containers and worktrees.
 # 3. Starts a background process watching podman events for service container
 #    lifecycle events (die, oom, restart) and wakes the scout via gc nudge.
@@ -19,40 +20,25 @@ CITY_NAME="${GC_CITY_NAME:?entrypoint.sh requires GC_CITY_NAME}"
 : "${GC_WORKSPACE:?entrypoint.sh requires GC_WORKSPACE}"
 
 # ---------------------------------------------------------------------------
-# Step 1: Check for unresolved scaffolding beads
+# Step 1: Print informational summary of pending reviews
 # ---------------------------------------------------------------------------
 
-check_scaffolding_beads() {
+print_pending_reviews() {
   local pending
   pending="$(bd human list --json 2>/dev/null)" || pending="[]"
 
-  # Filter for scaffolding-related beads (created by ralph sync)
-  local scaffolding
-  scaffolding="$(echo "$pending" | jq -r '
-    [.[] | select(.title | test("scaffol|docs/|Scaffol"; "i"))]
-  ' 2>/dev/null)" || scaffolding="[]"
-
   local count
-  count="$(echo "$scaffolding" | jq 'length' 2>/dev/null)" || count="0"
+  count="$(echo "$pending" | jq 'length' 2>/dev/null)" || count="0"
 
   if [[ "$count" -gt 0 ]]; then
-    echo "ERROR: ${count} unresolved scaffolding bead(s) require director review before starting gc." >&2
-    echo "" >&2
-    echo "Pending reviews:" >&2
-    echo "$scaffolding" | jq -r '.[] | "  - \(.id): \(.title)"' 2>/dev/null >&2
-    echo "" >&2
-    echo "Review and resolve these beads, then restart:" >&2
-    echo "  bd human respond <id>    # review each bead" >&2
-    echo "  bd human dismiss <id>    # dismiss after review" >&2
-    return 1
+    echo "Pending review items (${count}):"
+    echo "$pending" | jq -r '.[] | "  - \(.id): \(.title)"' 2>/dev/null
+    echo ""
+    echo "The mayor will present these on attach."
   fi
-
-  return 0
 }
 
-if ! check_scaffolding_beads; then
-  exit 1
-fi
+print_pending_reviews
 
 # ---------------------------------------------------------------------------
 # Step 2: Crash recovery — reconcile orphaned containers and worktrees
