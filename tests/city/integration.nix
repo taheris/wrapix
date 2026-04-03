@@ -10,14 +10,15 @@
 #     3. Director (test script) slings bead into convergence
 #     4. Worker processes in worktree, commits, exits
 #     5. gate.sh nudges judge, judge approves
-#     6. post-gate.sh merges, creates deploy bead, flags bd human
-#     7. Verify: merge on main, worktree cleaned up
+#     6. Judge merges (review + merge as one flow), cleans up worktree
+#     7. post-gate.sh creates deploy bead, flags bd human, notifies
+#     8. Verify: merge on main, worktree cleaned up
 #     gc is stopped after Phase 1 — remaining phases run without it.
 #
 #   Phase 2 (merge conflict):
 #     1. Conflicting change on main
 #     2. Simulated worker commits on divergent branch
-#     3. post-gate detects rebase conflict → reject_to_worker
+#     3. Judge detects rebase conflict → rejects with conflict details
 #     4. Verify: bead reopened, worktree cleaned up
 #
 #   Phase 3 (escalation):
@@ -492,9 +493,27 @@ let
     subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
 
-    # gc convergence would normally drive gate → post-gate via events.
-    # Since the test uses gc sling (no convergence loop), invoke post-gate
-    # directly as the director would after judge approval.
+    # The judge owns merge as one continuous flow after review approval.
+    # Simulate the judge performing the merge (in production, the judge
+    # formula's merge step does this after receiving a nudge from post-gate).
+    judge_merge() {
+      local branch="gc-$BEAD_ID"
+      local worktree="$WS/.wrapix/worktree/$branch"
+
+      # Judge merges: fast-forward (branch is on top of main)
+      git -C "$WS" merge --ff-only "$branch"
+
+      # Judge cleans up worktree and branch
+      if [[ -d "$worktree" ]]; then
+        rm -rf "$worktree"
+        git -C "$WS" worktree prune 2>/dev/null || true
+      fi
+      git -C "$WS" branch -d "$branch" 2>/dev/null || true
+    }
+    subtest "Judge merges approved changes" judge_merge
+
+    # Post-gate fires on convergence.terminated — now lightweight:
+    # notifies judge (already merged above), creates deploy bead, notifications.
     run_post_gate() {
       GC_BEAD_ID="$BEAD_ID" \
       GC_TERMINAL_REASON="approved" \
@@ -502,7 +521,7 @@ let
       GC_CITY_NAME="test-city" \
         bash ${scripts}/post-gate.sh
     }
-    subtest "Run post-gate merge" run_post_gate
+    subtest "Run post-gate (deploy bead + notifications)" run_post_gate
 
     check_deploy_bead() {
       bd list --json 2>/dev/null | jq -e '[.[] | select(.title | startswith("Deploy:"))] | length > 0' >/dev/null
@@ -515,13 +534,16 @@ let
     }
     subtest "Director sees deploy bead in bd human" check_human_deploy
 
-    subtest "Verify worktree cleaned up" \
-      test ! -d "$WS"/.wrapix/worktree/gc-*
-
     verify_merge() {
       git log --oneline | grep -q fix
     }
     subtest "Verify merge landed on main" verify_merge
+
+    verify_worktree_cleaned() {
+      # Judge cleaned up the worktree and branch during merge
+      ! test -d "$WS"/.wrapix/worktree/gc-* 2>/dev/null
+    }
+    subtest "Verify worktree cleaned up" verify_worktree_cleaned
 
     verify_branch_cleaned() {
       ! git branch | grep gc-
@@ -567,9 +589,8 @@ let
 
     BEAD2=$(bd list --json --title "Second fix" 2>/dev/null | jq -r '.[0].id')
 
-    # Phase 2 tests post-gate's merge conflict handling. Instead of waiting
-    # for gc to start a second worker (gc's scale_check can time out under
-    # dolt contention), simulate the worker flow directly on the host.
+    # Phase 2 tests the judge's merge conflict handling. The judge owns
+    # merge, so conflict rejection is the judge's responsibility.
     simulate_worker2() {
       [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ] || return 1
       local wt="$WS/.wrapix/worktree/gc-$BEAD2"
@@ -586,14 +607,42 @@ let
     }
     subtest "Simulate worker commit for second bead" simulate_worker2
 
-    run_post_gate2() {
-      GC_BEAD_ID="$BEAD2" \
-      GC_TERMINAL_REASON="approved" \
-      GC_WORKSPACE="$WS" \
-      GC_CITY_NAME="test-city" \
-        bash ${scripts}/post-gate.sh
+    # Simulate judge merge attempt — fast-forward fails, rebase has conflicts
+    judge_merge_conflict() {
+      local branch="gc-$BEAD2"
+      local worktree="$WS/.wrapix/worktree/$branch"
+
+      # Fast-forward fails (main diverged)
+      if git -C "$WS" merge --ff-only "$branch" 2>/dev/null; then
+        echo "FAIL: ff merge should have failed"
+        return 1
+      fi
+
+      # Rebase onto main — should conflict on fix.txt
+      if git -C "$WS" rebase main "$branch" 2>/tmp/gc-rebase-err-$$ ; then
+        echo "FAIL: rebase should have conflicted"
+        rm -f /tmp/gc-rebase-err-$$
+        return 1
+      fi
+      git -C "$WS" rebase --abort 2>/dev/null || true
+      local conflict_details
+      conflict_details="$(cat /tmp/gc-rebase-err-$$ 2>/dev/null || echo "rebase conflicts")"
+      rm -f /tmp/gc-rebase-err-$$
+
+      # Judge rejects with conflict details
+      bd update "$BEAD2" --set-metadata "review_verdict=reject" 2>/dev/null || true
+      bd update "$BEAD2" --set-metadata "merge_failure=Rebase conflicts: $conflict_details" 2>/dev/null || true
+      bd update "$BEAD2" --status=open --notes="Judge: merge rejected — rebase conflicts" 2>/dev/null || true
+
+      # Judge cleans up worktree and branch
+      if [[ -d "$worktree" ]]; then
+        rm -rf "$worktree"
+        git -C "$WS" worktree prune 2>/dev/null || true
+      fi
+      git -C "$WS" branch -D "$branch" 2>/dev/null || true
+      git -C "$WS" checkout main 2>/dev/null || true
     }
-    subtest "Post-gate detects merge conflict and rejects" run_post_gate2
+    subtest "Judge detects merge conflict and rejects" judge_merge_conflict
 
     verify_reopened() {
       status=$(bd show "$BEAD2" --json 2>/dev/null | jq -r '.[0].status')

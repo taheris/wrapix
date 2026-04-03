@@ -69,12 +69,14 @@ needs = ["load-context"]
 description = """
 If no review assignment from load-context, skip to sweep step.
 
-**1. Read the bead and diff:**
+**1. Read the bead from .beads/ and diff the commits:**
 ```bash
 bd show $BEAD_ID
 git diff $COMMIT_RANGE
 git log --oneline $COMMIT_RANGE
 ```
+The bead ID is available via the `$GC_BEAD_ID` environment variable
+(injected by the formula env, not runtime.Config).
 
 **2. Review mechanically against docs/style-guidelines.md:**
 
@@ -94,8 +96,11 @@ bd update $BEAD_ID --notes "Judge: approved — all style guidelines pass"
 bd update $BEAD_ID --set-metadata "review_verdict=reject"
 bd update $BEAD_ID --notes "Judge: rejected — $VIOLATION_DETAILS"
 ```
-Include specific rule references and line numbers so the next worker
-iteration can address them precisely.
+Include specific rule IDs (e.g. SH-1, NX-2, GIT-1) and line numbers
+from docs/style-guidelines.md so the next worker iteration can address
+them precisely. Example rejection note:
+  "Judge: rejected — SH-1 violated at line 15: missing set -euo pipefail;
+   SH-2 violated at line 23: unquoted variable $foo"
 
 **If issues found outside documented rules → flag for director:**
 Do NOT reject based on undocumented opinions. Flag for human review:
@@ -114,6 +119,9 @@ needs = ["review-diff"]
 description = """
 If the review verdict was reject, skip this step — convergence handles retry.
 
+The judge owns both review and merge as one continuous flow. After approving,
+merge immediately — no handoff to another script.
+
 **1. Fast-forward merge:**
 ```bash
 git checkout main
@@ -125,24 +133,44 @@ Rebase the branch onto main, run prek, then fast-forward:
 ```bash
 git checkout gc-$BEAD_ID
 git rebase main
-prek
+```
+If rebase has conflicts, abort and reject back to a new worker with the
+conflict details as context — no automatic conflict resolution:
+```bash
+git rebase --abort
+bd update $BEAD_ID --set-metadata "review_verdict=reject"
+bd update $BEAD_ID --set-metadata "merge_failure=Rebase conflicts: $CONFLICT_DETAILS"
+bd update $BEAD_ID --status=open --notes="Judge: merge rejected — rebase conflicts. $CONFLICT_DETAILS"
+```
+
+After successful rebase, run prek (pre-commit checks):
+```bash
+prek run --stage pre-commit
+```
+If prek fails, reject back to a new worker with the failure output:
+```bash
+git checkout main
+bd update $BEAD_ID --set-metadata "review_verdict=reject"
+bd update $BEAD_ID --set-metadata "merge_failure=Tests failed after rebase: $PREK_OUTPUT"
+bd update $BEAD_ID --status=open --notes="Judge: merge rejected — tests failed after rebase. $PREK_OUTPUT"
+```
+
+If prek passes, fast-forward merge:
+```bash
 git checkout main
 git merge --ff-only gc-$BEAD_ID
 ```
-If tests fail after rebase, reject back to a new worker with the failure
-details — set review_verdict=reject and include the failure output.
 
-If rebase has conflicts, reject back to a new worker with conflict details
-as context — no automatic conflict resolution.
-
-**3. Clean up worktree and branch:**
+**3. Clean up worktree and branch (after merge OR rejection):**
 ```bash
 rm -rf .wrapix/worktree/gc-$BEAD_ID
 git worktree prune
 git branch -d gc-$BEAD_ID
 ```
+On rejection the old branch is also deleted — the new worker creates a fresh one.
 
-**Exit criteria:** Changes merged to main via fast-forward, worktree and branch cleaned up."""
+**Exit criteria:** Changes merged to main via fast-forward (or rejected with
+specific failure details), worktree and branch cleaned up."""
 
 [[steps]]
 id = "sweep-stale"

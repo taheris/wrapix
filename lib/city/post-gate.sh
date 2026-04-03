@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Post-gate order — event-gated order triggered by convergence.terminated.
 #
-# Handles merge, branch cleanup, deploy bead creation, and director
-# notifications after the worker→judge convergence loop completes.
+# Lightweight coordinator: notifies judge to merge (for approved convergences),
+# handles deploy bead creation, escalation routing, and notifications.
+# The judge owns the actual git operations (merge, rebase, cleanup).
 #
 # Exit codes:
 #   0 — post-gate actions completed successfully
@@ -31,7 +32,8 @@ notify() {
   wrapix-notify "Gas City" "$1" 2>/dev/null || true
 }
 
-# Clean up worktree and branch for a bead. Called after merge or rejection.
+# Clean up worktree and branch for a bead. Used by escalation path only —
+# for approved convergences, the judge handles cleanup after merge.
 cleanup_branch() {
   local branch="$1" worktree="$2"
 
@@ -46,22 +48,6 @@ cleanup_branch() {
     git -C "$WORKSPACE" branch -d "$branch" 2>/dev/null || \
       git -C "$WORKSPACE" branch -D "$branch" 2>/dev/null || true
   fi
-}
-
-# Reject back to a new worker — clean up old branch, create a failure bead note.
-reject_to_worker() {
-  local reason="$1"
-
-  echo "post-gate: rejecting bead $BEAD_ID back to worker: $reason" >&2
-
-  # Record failure context on the bead so the next worker sees it
-  bd update "$BEAD_ID" --set-metadata "merge_failure=$reason" 2>/dev/null || true
-  bd update "$BEAD_ID" --status=open --notes="Merge rejected: $reason" 2>/dev/null || true
-
-  # Clean up old branch — new worker creates a fresh one
-  cleanup_branch "$BRANCH" "${WORKSPACE}/${WORKTREE_PATH}"
-
-  notify "[${CITY_NAME}] Merge rejected for ${BEAD_ID}: ${reason}"
 }
 
 # Check if docs/orchestration.md has an Auto-deploy section.
@@ -105,64 +91,24 @@ handle_escalation() {
 }
 
 # ---------------------------------------------------------------------------
-# Merge (terminal_reason == approved)
+# Approved (terminal_reason == approved)
 # ---------------------------------------------------------------------------
 
 handle_approved() {
-  echo "post-gate: merging bead $BEAD_ID (branch $BRANCH)"
+  echo "post-gate: convergence approved for bead $BEAD_ID"
 
-  # Verify the branch exists
-  if ! git -C "$WORKSPACE" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
-    echo "post-gate: branch $BRANCH does not exist — nothing to merge" >&2
-    return 1
-  fi
+  # Notify judge to merge — judge owns the actual git operations
+  # (fast-forward, rebase, worktree cleanup). This nudge includes the
+  # bead ID so the judge can look up the branch and perform merge.
+  gc session nudge judge \
+    "Merge approved bead $BEAD_ID — branch gc-${BEAD_ID}. Run merge step now." \
+    2>/dev/null || true
 
-  # --- Attempt fast-forward merge ---
-  if git -C "$WORKSPACE" merge --ff-only "$BRANCH" 2>/dev/null; then
-    echo "post-gate: fast-forward merge succeeded for $BRANCH"
-  else
-    echo "post-gate: fast-forward failed, attempting rebase onto main"
-
-    # --- Rebase onto main ---
-    if ! git -C "$WORKSPACE" rebase main "$BRANCH" 2>/tmp/gc-rebase-err-$$; then
-      # Rebase conflicts — abort and reject
-      git -C "$WORKSPACE" rebase --abort 2>/dev/null || true
-      local conflict_details
-      conflict_details="$(cat /tmp/gc-rebase-err-$$ 2>/dev/null || echo "rebase conflicts")"
-      rm -f /tmp/gc-rebase-err-$$
-      reject_to_worker "Rebase conflicts: ${conflict_details}"
-      return 0
-    fi
-    rm -f /tmp/gc-rebase-err-$$
-
-    # --- Run prek (pre-commit checks) after rebase ---
-    if ! (cd "$WORKSPACE" && prek run --stage pre-commit 2>/tmp/gc-prek-err-$$); then
-      local prek_details
-      prek_details="$(cat /tmp/gc-prek-err-$$ 2>/dev/null || echo "pre-commit checks failed")"
-      rm -f /tmp/gc-prek-err-$$
-
-      # Reset the branch to pre-rebase state and reject
-      git -C "$WORKSPACE" checkout main 2>/dev/null || true
-      reject_to_worker "Tests failed after rebase: ${prek_details}"
-      return 0
-    fi
-    rm -f /tmp/gc-prek-err-$$
-
-    # --- Fast-forward merge after successful rebase ---
-    git -C "$WORKSPACE" checkout main 2>/dev/null
-    if ! git -C "$WORKSPACE" merge --ff-only "$BRANCH" 2>/dev/null; then
-      reject_to_worker "Fast-forward merge failed after rebase"
-      return 0
-    fi
-
-    echo "post-gate: rebase + merge succeeded for $BRANCH"
-  fi
-
-  # --- Cleanup worktree and branch ---
-  cleanup_branch "$BRANCH" "${WORKSPACE}/${WORKTREE_PATH}"
-
-  # --- Create deploy bead ---
+  # Create deploy bead
   create_deploy_bead
+
+  # Notification
+  notify "[${CITY_NAME}] Convergence approved: bead ${BEAD_ID} — judge notified to merge"
 }
 
 # ---------------------------------------------------------------------------

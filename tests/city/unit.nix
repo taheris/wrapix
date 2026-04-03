@@ -1272,6 +1272,7 @@ in
       '';
 
   # Post-gate: auto-deploy path (low-risk + auto-deploy configured)
+  # Post-gate no longer merges — it nudges the judge and creates deploy beads.
   city-post-gate-auto-deploy =
     runCommandLocal "city-post-gate-auto-deploy"
       {
@@ -1307,12 +1308,6 @@ in
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
 
-        # Create a branch with a commit
-        git -C "$WS" checkout -b gc-test-bead -q
-        echo "fix" > "$WS/fix.txt"
-        git -C "$WS" add fix.txt && git -C "$WS" commit -m "fix" -q
-        git -C "$WS" checkout main -q
-
         # Mock bd — returns low risk classification and creates deploy bead
         DEPLOY_ACTIONS="$TMPDIR/deploy-actions.log"
         cat > "$MOCK_BIN/bd" << MOCK
@@ -1331,25 +1326,32 @@ in
         MOCK
         chmod +x "$MOCK_BIN/bd"
 
+        # Mock gc — record nudge calls
+        GC_LOG="$TMPDIR/gc.log"
+        cat > "$MOCK_BIN/gc" << MOCK
+        #!/bin/sh
+        echo "\$@" >> "$GC_LOG"
+        MOCK
+        chmod +x "$MOCK_BIN/gc"
+
         cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
         #!/bin/sh
         :
         MOCK
         chmod +x "$MOCK_BIN/wrapix-notify"
 
-        cat > "$MOCK_BIN/prek" << 'MOCK'
-        #!/bin/sh
-        exit 0
-        MOCK
-        chmod +x "$MOCK_BIN/prek"
-
-        # Run post-gate
+        # Run post-gate (no merge — just nudge judge + deploy bead)
         PATH="$MOCK_BIN:$PATH" \
           GC_BEAD_ID=test-bead \
           GC_TERMINAL_REASON=approved \
           GC_WORKSPACE="$WS" \
           GC_CITY_NAME=test \
           bash "$POST_GATE" 2>&1
+
+        # Verify judge was nudged to merge
+        grep -q 'session nudge judge' "$GC_LOG" || { echo "FAIL: judge not nudged"; cat "$GC_LOG"; exit 1; }
+        grep -q 'test-bead' "$GC_LOG" || { echo "FAIL: nudge missing bead ID"; cat "$GC_LOG"; exit 1; }
+        echo "  PASS: judge nudged with bead ID"
 
         # Verify auto_deploy metadata was set (not human label)
         grep -q "auto_deploy=true" "$DEPLOY_ACTIONS" || { echo "FAIL: auto_deploy not set"; cat "$DEPLOY_ACTIONS"; exit 1; }
@@ -2167,6 +2169,52 @@ in
 
         git -C "$WS_REBASE" branch -d gc-bead-77 -q
         echo "  PASS: branch cleaned up after rebase merge"
+
+        # =====================================================================
+        # Judge: merge — rebase conflict rejection path
+        # =====================================================================
+        echo "=== Judge: merge (rebase conflict rejection) ==="
+
+        WS_CONFLICT="$TMPDIR/judge-conflict"
+        mkdir -p "$WS_CONFLICT"
+        git -C "$WS_CONFLICT" init -q -b main
+        echo "original" > "$WS_CONFLICT/shared.txt"
+        git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "initial" -q
+
+        # Worker branch modifies shared.txt
+        git -C "$WS_CONFLICT" checkout -b gc-bead-55 -q
+        echo "worker version" > "$WS_CONFLICT/shared.txt"
+        git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "fix: worker (bead-55)" -q
+
+        # Main also modifies shared.txt — creates conflict
+        git -C "$WS_CONFLICT" checkout main -q
+        echo "main version" > "$WS_CONFLICT/shared.txt"
+        git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "feat: main change" -q
+
+        # Create worktree directory to verify cleanup
+        mkdir -p "$WS_CONFLICT/.wrapix/worktree/gc-bead-55"
+        echo "worktree" > "$WS_CONFLICT/.wrapix/worktree/gc-bead-55/dummy"
+
+        # Formula command: ff fails
+        ff_exit=0
+        git -C "$WS_CONFLICT" merge --ff-only gc-bead-55 -q 2>/dev/null || ff_exit=$?
+        [[ "$ff_exit" -ne 0 ]] || { echo "FAIL: ff should fail"; exit 1; }
+
+        # Formula command: rebase conflicts — abort and reject
+        rebase_exit=0
+        git -C "$WS_CONFLICT" rebase main gc-bead-55 2>/dev/null || rebase_exit=$?
+        [[ "$rebase_exit" -ne 0 ]] || { echo "FAIL: rebase should conflict"; exit 1; }
+        git -C "$WS_CONFLICT" rebase --abort 2>/dev/null
+        echo "  PASS: rebase conflict detected and aborted"
+
+        # Formula command: cleanup after rejection
+        rm -rf "$WS_CONFLICT/.wrapix/worktree/gc-bead-55"
+        git -C "$WS_CONFLICT" worktree prune 2>/dev/null || true
+        git -C "$WS_CONFLICT" checkout main -q
+        git -C "$WS_CONFLICT" branch -D gc-bead-55 -q
+        ! test -d "$WS_CONFLICT/.wrapix/worktree/gc-bead-55" || { echo "FAIL: worktree not cleaned"; exit 1; }
+        ! git -C "$WS_CONFLICT" rev-parse --verify gc-bead-55 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
+        echo "  PASS: worktree and branch cleaned up after rejection"
 
         # =====================================================================
         # Summary
