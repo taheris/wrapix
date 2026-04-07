@@ -239,9 +239,25 @@ let
         else
           throw "Unsupported system: ${system}";
 
+      # Expose the image derivation for consumers that manage containers
+      # themselves (e.g. mkCity's provider runs podman directly).
+      image = mkImage {
+        profile = finalProfile;
+        entrypointSh =
+          if isLinux then
+            ./linux/entrypoint.sh
+          else if isDarwin then
+            ./darwin/entrypoint.sh
+          else
+            null;
+        krunSupport = isLinux;
+        claudeSettings = finalClaudeSettings;
+        inherit mcpServerConfigs;
+      };
+
     in
     {
-      inherit package;
+      inherit package image;
       profile = finalProfile;
     };
 

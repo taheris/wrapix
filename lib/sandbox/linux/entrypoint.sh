@@ -104,7 +104,12 @@ for item in projects plans todos file-history paste-cache backups \
 done
 
 # Initialize container-local beads database
-if [ -f /workspace/.beads/config.yaml ]; then
+# Skip when running as a Gas City agent — gc containers share the host's
+# dolt server via the port in metadata.json.  Starting dolt inside gc
+# containers causes concurrent writes to the same noms store, corrupting it.
+if [ -n "${GC_ROLE:-}" ]; then
+  : # gc agent — skip dolt init entirely
+elif [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
   BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 

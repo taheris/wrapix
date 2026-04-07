@@ -88,9 +88,13 @@ let
       ralphInstance = mkRalph { sandbox = agentSandbox; };
 
       imageName = "wrapix-${agentSandbox.profile.name}:latest";
+      profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
 
-      # Provider script — copies lib/city/provider.sh into the Nix store
+      # Prompt file for sandbox entrypoint (same as mkSandbox mounts)
+      prompt = pkgs.writeText "wrapix-prompt" (builtins.readFile ../sandbox/prompt.txt);
+
+      # Provider script — reads GC_WRAPIX_PROMPT from env (set by app/shellHook)
       providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
 
       # Dispatch check script — cooldown-aware scale_check for workers
@@ -131,10 +135,15 @@ let
         chmod +x $out/*.sh
       '';
 
+      # Prefix for scale_check commands: read dolt port from the live port
+      # file so bd connects to the running server.  gc injects its own
+      # BEADS_DOLT_PORT from metadata.json (often stale/0) — override it.
+      bdEnv = "BEADS_DOLT_PORT=$(cat .beads/dolt-server.port 2>/dev/null) BEADS_DOLT_HOST=127.0.0.1";
+
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
         if cooldown == "0" then
-          "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
+          "${bdEnv} bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
         else
           "GC_COOLDOWN=${cooldown} GC_WORKSPACE=\"$(pwd)\" ${dispatchScript}";
 
@@ -182,7 +191,7 @@ let
           {
             name = "scout";
             scope = "city";
-            scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "${bdEnv} bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
           {
             name = "worker";
@@ -193,7 +202,7 @@ let
           {
             name = "judge";
             scope = "city";
-            scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "${bdEnv} bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
         ];
 
@@ -243,7 +252,8 @@ let
       cityScripts = pkgs.runCommand "wrapix-city-scripts" { } ''
         mkdir -p $out/bin
         cp ${./agent.sh} $out/bin/wrapix-agent
-        chmod +x $out/bin/wrapix-agent
+        cp ${../../scripts/beads-push} $out/bin/beads-push
+        chmod +x $out/bin/wrapix-agent $out/bin/beads-push
       '';
 
       # Shell hook: copies config and exports env vars for provider
@@ -254,11 +264,26 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
+        export GC_WRAPIX_PROMPT="${prompt}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
+
+        # Ensure sandbox image is loaded (reload when Nix store path changes)
+        XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
+        _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
+        mkdir -p "$XDG_CACHE_HOME/wrapix/images"
+        if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
+          echo "Loading sandbox image..."
+          podman load -q -i ${profileImage} >/dev/null
+          echo "${profileImage}" > "$_img_version"
+        elif ! podman image exists "${imageName}" 2>/dev/null; then
+          echo "Reloading sandbox image (missing from podman store)..."
+          podman load -q -i ${profileImage} >/dev/null
+          echo "${profileImage}" > "$_img_version"
+        fi
 
         # Copy Nix-generated config so gc finds it
         # (files must be real, not store symlinks, for container mounts)
-        cp -f ${cityToml} city.toml
+        cp -f --remove-destination ${cityToml} city.toml
         mkdir -p .gc/formulas .gc/scripts
         for f in ${formulasDir}/*.formula.toml; do
           cp -f --remove-destination "$f" .gc/formulas/
@@ -272,13 +297,21 @@ let
           cp -f --remove-destination "$f" .gc/scripts/
         done
 
+        # Ensure podman network exists (NixOS module creates via systemd)
+        if command -v podman >/dev/null 2>&1; then
+          if ! podman network exists "${networkName}" 2>/dev/null; then
+            podman network create "${networkName}" >/dev/null 2>&1 || true
+          fi
+        fi
+
         # gc creates beads with custom types (session, convoy, convergence, etc.);
         # register the gc default set plus convergence (used by gc converge create).
+        # Timeout: bd commands hang if dolt is unhealthy — never block the shell.
         if [ -d .beads ]; then
           _gc_types="molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
-          _existing=$(bd config get types.custom 2>/dev/null || echo "")
+          _existing=$(timeout 5 bd config get types.custom 2>/dev/null || echo "")
           if [ -z "$_existing" ] || [ "$_existing" != "$_gc_types" ]; then
-            bd config set types.custom "$_gc_types" 2>/dev/null || true
+            timeout 5 bd config set types.custom "$_gc_types" 2>/dev/null || true
           fi
           unset _gc_types _existing
         fi
@@ -317,9 +350,45 @@ let
           export GC_WORKSPACE="$(pwd)"
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
+          export GC_WRAPIX_PROMPT="${prompt}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
-          cp -f ${cityToml} city.toml
+          # Ensure sandbox image is loaded (reload when Nix store path changes)
+          XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
+          _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
+          mkdir -p "$XDG_CACHE_HOME/wrapix/images"
+          if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
+            echo "Loading sandbox image..."
+            podman load -q -i ${profileImage} >/dev/null
+            echo "${profileImage}" > "$_img_version"
+          elif ! podman image exists "${imageName}" 2>/dev/null; then
+            echo "Reloading sandbox image (missing from podman store)..."
+            podman load -q -i ${profileImage} >/dev/null
+            echo "${profileImage}" > "$_img_version"
+          fi
+
+          cp -f --remove-destination ${cityToml} city.toml
+
+          # --- Beads protection ---
+          # GC_DOLT=skip tells gc to skip its dolt lifecycle entirely.
+          # Scale_check commands read the port from dolt-server.port directly,
+          # so we don't need to maintain metadata.json.dolt_server_port.
+          export GC_DOLT=skip
+          if [ -d .beads ] && [ -f .beads/dolt-server.port ]; then
+            _dolt_port="$(cat .beads/dolt-server.port)"
+            export GC_DOLT_HOST=127.0.0.1
+            export GC_DOLT_PORT="$_dolt_port"
+            export BEADS_DOLT_HOST=127.0.0.1
+            export BEADS_DOLT_PORT="$_dolt_port"
+          fi
+
+          # --- gc scaffold ---
+          # Pre-create the .gc/ layout so gc start never runs auto-init
+          # (which scaffolds unwanted root-level dirs and overwrites beads).
+          mkdir -p .gc/cache .gc/system .gc/runtime
+          touch .gc/events.jsonl
+
+          # Overlay our formulas and scripts
           mkdir -p .gc/formulas .gc/scripts
           for f in ${formulasDir}/*.formula.toml; do
             cp -f --remove-destination "$f" .gc/formulas/
@@ -330,6 +399,12 @@ let
           for f in ${scriptsDir}/*; do
             cp -f --remove-destination "$f" .gc/scripts/
           done
+
+          # Ensure the podman network exists (NixOS module creates it via
+          # systemd; nix run needs to do it here).
+          if ! podman network exists "${networkName}" 2>/dev/null; then
+            podman network create "${networkName}" >/dev/null
+          fi
 
           exec ${./entrypoint.sh}
         ''}/bin/wrapix-city";

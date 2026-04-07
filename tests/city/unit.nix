@@ -581,6 +581,7 @@ in
                   GC_WORKSPACE="$TMPDIR" \
                   GC_AGENT_IMAGE="test-image:latest" \
                   GC_PODMAN_NETWORK="wrapix-test" \
+                  GC_WRAPIX_PROMPT="/etc/wrapix-prompt" \
                   GC_BEAD_ID="bead-123" \
                   bash "$PROVIDER" start worker-1 > "$TMPDIR/out" 2>&1 || true
 
@@ -1477,7 +1478,7 @@ in
         a: a.name == "worker"
       ) minimalCity.configAttrs.agent) 0;
       minimalScaleCheck = minimalWorker.scale_check;
-      hasInlineBd = builtins.substring 0 7 minimalScaleCheck == "bd list";
+      hasInlineBd = builtins.match ".*bd list.*" minimalScaleCheck != null;
 
       # Full city cooldown (2h) — dispatch script reference
       fullWorker = builtins.elemAt (builtins.filter (a: a.name == "worker") fullCity.configAttrs.agent) 0;

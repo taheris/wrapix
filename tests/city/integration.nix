@@ -356,20 +356,24 @@ let
       dolt config --global --add user.name test
       git commit --allow-empty -m initial
 
-      # --- Step 1: Let gc init handle everything (bd init, prefix, scaffold) ---
+      # Directories the provider mounts into containers
+      mkdir -p .wrapix .claude docs
+
+      # --- gc init: live code path (dolt + beads + scaffold) ---
       # gc init creates .gc/ scaffold AND .beads/ (via gc-beads-bd) with gc's
-      # preferred prefix. It then auto-starts the supervisor and blocks — we
-      # kill it after the scaffold appears, then replace the embedded dolt
-      # with a shared container serving the same database.
-      # Use setsid so we can kill the entire process group (gc spawns dolt
-      # as a child that would otherwise become orphaned).
+      # preferred prefix. It auto-starts the supervisor and blocks — we kill it
+      # after initialization completes, then replace the embedded dolt with a
+      # shared container serving the same database.
       setsid gc init --file ${cityToml} --skip-provider-readiness </dev/null &
       _GC_INIT_PID=$!
-      # Wait for bd init to complete (indicated by .beads/metadata.json)
       for _i in $(seq 1 60); do
         [ -f .beads/metadata.json ] && break
         sleep 0.5
       done
+      if [ ! -f .beads/metadata.json ]; then
+        echo "FATAL: gc init did not create .beads/metadata.json after 30s"
+        return 1
+      fi
       # Kill the entire gc init process group (includes embedded dolt)
       kill -TERM -"$_GC_INIT_PID" 2>/dev/null || true
       for _i in $(seq 1 30); do
@@ -381,40 +385,35 @@ let
       gc supervisor stop 2>&1 || true
       gc unregister "$WS" 2>&1 || true
 
-      # Kill gc's embedded dolt — belt and suspenders
+      # Kill gc's embedded dolt and wait for it to release file handles
       if [ -f .beads/dolt-server.pid ]; then
         kill "$(cat .beads/dolt-server.pid)" 2>/dev/null || true
       fi
-      # Kill anything still listening on the embedded dolt port
       if [ -f .beads/dolt-server.port ]; then
         _EDOLT_PORT=$(cat .beads/dolt-server.port)
         fuser -k "$_EDOLT_PORT/tcp" 2>/dev/null || true
+        # Wait for port to be released
+        for _i in $(seq 1 20); do
+          bash -c "echo > /dev/tcp/127.0.0.1/$_EDOLT_PORT" 2>/dev/null || break
+          sleep 0.2
+        done
       fi
-      # Wait for processes to fully release and remove all lock files
-      sleep 1
       find .beads -name LOCK -delete 2>/dev/null || true
       rm -f .beads/dolt-server.pid .beads/dolt-server.lock
-      # Rewrite dolt_server_port in metadata.json to point at the shared
-      # dolt container.  gc init wrote the embedded dolt's (now dead) port
-      # here.  gc's reconciliation loop deletes the port file, so metadata.json
-      # is the only reliable fallback for bd to discover the server.
-      if [ -f .beads/metadata.json ]; then
-        jq --argjson p "$DOLT_PORT" '.dolt_server_port = $p' \
-          .beads/metadata.json > .beads/metadata.json.tmp \
-          && mv .beads/metadata.json.tmp .beads/metadata.json
-      fi
       chmod 700 .beads
 
-      # --- Step 2: Start shared dolt container serving gc's database ---
-      # Mount gc's .beads/dolt/ so all participants share the same data
-      # and prefix. --network=host means 127.0.0.1 works everywhere.
+      # Clear circuit breaker state — killing dolt may have tripped it.
+      # bd stores breaker state in /tmp/beads-circuit/ keyed by host:port.
+      rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"$DOLT_PORT".json 2>/dev/null || true
+      rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"''${_EDOLT_PORT:-0}".json 2>/dev/null || true
+
+      # --- Start shared dolt container serving gc's database ---
       podman run -d \
         --name "$DOLT_CONTAINER" \
         --network host \
         -v "$WS/.beads/dolt:/doltdb:rw" \
         localhost/wrapix-test:latest \
         bash -c "dolt config --global --add user.email test@test && dolt config --global --add user.name test && cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P $DOLT_PORT"
-      # Wait for dolt to be ready
       for _i in $(seq 1 50); do
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
@@ -424,23 +423,22 @@ let
         podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 || true
         return 1
       fi
-      echo "  > shared dolt server ready on 127.0.0.1:$DOLT_PORT"
 
-      # --- Step 3: Point gc and bd at the shared server ---
+      # --- Point gc/bd at the shared server ---
       echo "$DOLT_PORT" > .beads/dolt-server.port
       export GC_DOLT=skip
       export GC_DOLT_HOST="127.0.0.1"
       export GC_DOLT_PORT="$DOLT_PORT"
+      export BEADS_DOLT_HOST="127.0.0.1"
+      export BEADS_DOLT_PORT="$DOLT_PORT"
       export BEADS_DOLT_AUTO_START=0
 
       bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
-
-      # Verify bd can reach the shared dolt server
       bd list >/dev/null 2>&1 || {
         echo "FATAL: bd cannot connect to dolt server"
         return 1
       }
-      echo "  > bd connectivity verified"
+      echo "  > workspace ready (dolt on 127.0.0.1:$DOLT_PORT)"
 
       git add -A && git commit -m "workspace setup"
 
@@ -450,7 +448,6 @@ let
       cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
       for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
 
-      mkdir -p docs .wrapix
       printf "## Scout Rules\nimmediate: FATAL|PANIC\nbatched: ERROR\n## Auto-deploy\nLow-risk: docs only\n" > docs/orchestration.md
       printf "# Style Guidelines\nSH-1: Use set -euo pipefail\n" > docs/style-guidelines.md
       printf "<!-- expires: 2025-01-01 -->\nTemporary: freeze deploys during migration\n" > .wrapix/orchestration.md
@@ -473,9 +470,10 @@ let
       export GC_WORKSPACE="$WS"
       export GC_AGENT_IMAGE=localhost/wrapix-test:latest
       export GC_PODMAN_NETWORK="host"
+      export GC_WRAPIX_PROMPT="${../../lib/sandbox/prompt.txt}"
       # Pass dolt config into containers so bd/gc inside them find the
       # shared server rather than starting embedded dolt instances.
-      export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
+      export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e BEADS_DOLT_HOST=127.0.0.1 -e BEADS_DOLT_PORT=$DOLT_PORT -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
       # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
       setsid gc start --foreground > "$WS/gc.log" 2>&1 &

@@ -27,19 +27,26 @@ fi
 # ---------------------------------------------------------------------------
 
 container_name() {
-  echo "gc-${GC_CITY_NAME:?}-${SESSION:?}"
+  local prefix="gc-${GC_CITY_NAME:?}-"
+  # Avoid double-prefixing: gc passes bare names on first start
+  # ("mayor") but fully-qualified names after config reload ("gc-dev-mayor").
+  if [[ "${SESSION:?}" == "${prefix}"* ]]; then
+    echo "${SESSION}"
+  else
+    echo "${prefix}${SESSION}"
+  fi
 }
 
 is_worker() {
-  [[ "${SESSION}" == worker* ]]
+  [[ "${SESSION}" == worker* || "${SESSION}" == *-worker* ]]
 }
 
 is_judge() {
-  [[ "${SESSION}" == judge* ]]
+  [[ "${SESSION}" == judge* || "${SESSION}" == *-judge* ]]
 }
 
 is_mayor() {
-  [[ "${SESSION}" == mayor* ]]
+  [[ "${SESSION}" == mayor* || "${SESSION}" == *-mayor* ]]
 }
 
 # Standard labels applied to every container
@@ -47,11 +54,11 @@ container_labels() {
   local role
   if is_worker; then
     role="worker"
-  elif [[ "${SESSION}" == scout* ]]; then
+  elif [[ "${SESSION}" == scout* || "${SESSION}" == *-scout* ]]; then
     role="scout"
-  elif [[ "${SESSION}" == judge* ]]; then
+  elif is_judge; then
     role="judge"
-  elif [[ "${SESSION}" == mayor* ]]; then
+  elif is_mayor; then
     role="mayor"
   else
     role="${SESSION}"
@@ -93,19 +100,31 @@ persistent_start() {
     ws_mode="ro"
   fi
 
+  # Nix-substituted path to system prompt (mounted by mkSandbox normally)
+  WRAPIX_PROMPT="${GC_WRAPIX_PROMPT:?provider requires GC_WRAPIX_PROMPT}"
+
   # shellcheck disable=SC2046
   podman run -d \
     --replace \
     --name "$name" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --userns=keep-id \
+    --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
+    --mount type=tmpfs,destination=/home/wrapix,U=true \
+    --mount type=tmpfs,destination=/tmp,U=true \
     --workdir /workspace \
     $(container_labels) \
     $(resource_flags "${SESSION}") \
     -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
-    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:rw" \
+    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
+    -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
+    -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
+    -v "${WRAPIX_PROMPT}:/etc/wrapix-prompt:ro" \
     ${GC_SECRET_FLAGS:-} \
+    -e "HOME=/home/wrapix" \
     -e "GC_ROLE=${SESSION}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "TERM=xterm" \
     "${GC_AGENT_IMAGE:?}" \
     bash -c 'tmux new-session -d -s main "claude --dangerously-skip-permissions" && exec tmux wait-for gc-shutdown'
@@ -178,11 +197,18 @@ worker_start() {
   mkdir -p "$state_dir"
   date +%s > "$state_dir/last-dispatch"
 
+  # Nix-substituted path to system prompt
+  WRAPIX_PROMPT="${GC_WRAPIX_PROMPT:?provider requires GC_WRAPIX_PROMPT}"
+
   # shellcheck disable=SC2046
   podman run -d \
     --replace \
     --name "$name" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --userns=keep-id \
+    --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
+    --mount type=tmpfs,destination=/home/wrapix,U=true \
+    --mount type=tmpfs,destination=/tmp,U=true \
     --workdir /workspace \
     $(container_labels) \
     $(resource_flags worker) \
@@ -190,10 +216,13 @@ worker_start() {
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
     -v "${task_file}:/workspace/.task:ro" \
+    -v "${WRAPIX_PROMPT}:/etc/wrapix-prompt:ro" \
     ${GC_SECRET_FLAGS:-} \
+    -e "HOME=/home/wrapix" \
     -e "GC_ROLE=worker" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run

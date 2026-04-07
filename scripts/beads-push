@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# beads-push — bd dolt push + git push beads branch to GitHub
+set -euo pipefail
+
+bd dolt push "$@"
+
+BRANCH="$(grep '^sync-branch:' .beads/config.yaml 2>/dev/null | awk '{print $2}' | tr -d '"' || echo beads)"
+BRANCH="${BRANCH:-beads}"
+WT="$(git rev-parse --show-toplevel)/.git/beads-worktrees/$BRANCH"
+
+if [ ! -d "$WT" ]; then
+  echo "beads-push: worktree not found at $WT" >&2
+  exit 1
+fi
+
+cd "$WT"
+
+# Commit if there are changes
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  PREK_ALLOW_NO_CONFIG=1 git add -A
+  PREK_ALLOW_NO_CONFIG=1 git commit -m "bd sync" --quiet
+fi
+
+# Always push if local is ahead of remote
+PREK_ALLOW_NO_CONFIG=1 git push -u origin "$BRANCH" --quiet
+echo "beads-push: synced to GitHub"
