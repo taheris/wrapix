@@ -89,6 +89,7 @@ let
       claudePkg ? linuxPkgs.claude-code,
       claudeSettings ? baseClaudeSettings,
       mcpServerConfigs ? { },
+      asTarball ? false,
     }:
     import ./image.nix {
       pkgs = linuxPkgs;
@@ -99,6 +100,7 @@ let
         claudeConfig
         claudeSettings
         mcpServerConfigs
+        asTarball
         ;
       entrypointPkg = claudePkg;
     };
@@ -234,6 +236,7 @@ let
               profile = finalProfile;
               entrypointSh = ./darwin/entrypoint.sh;
               claudeSettings = finalClaudeSettings;
+              asTarball = true;
               inherit mcpServerConfigs;
             };
           }
@@ -242,6 +245,9 @@ let
 
       # Expose the image derivation for consumers that manage containers
       # themselves (e.g. mkCity's provider runs podman directly).
+      # On Linux this is a streamLayeredImage (executable script that pipes tar).
+      # On Darwin this is a buildLayeredImage (tar file in store) since the
+      # stream script's Linux Python shebang can't execute on macOS.
       image = mkImage {
         profile = finalProfile;
         entrypointSh =
@@ -252,6 +258,7 @@ let
           else
             null;
         krunSupport = isLinux;
+        asTarball = isDarwin;
         claudeSettings = finalClaudeSettings;
         inherit mcpServerConfigs;
       };

@@ -17,6 +17,9 @@
   claudeConfig,
   claudeSettings,
   mcpServerConfigs ? { },
+  # Use buildLayeredImage (tar in store) instead of streamLayeredImage (script).
+  # Required on Darwin where the stream script's Linux Python shebang won't execute.
+  asTarball ? false,
 }:
 
 let
@@ -95,8 +98,10 @@ let
       "/lib"
     ];
   };
+  buildImage =
+    if asTarball then pkgs.dockerTools.buildLayeredImage else pkgs.dockerTools.streamLayeredImage;
 in
-pkgs.dockerTools.streamLayeredImage {
+buildImage {
   name = "wrapix-${profile.name}";
   tag = "latest";
   maxLayers = 100;

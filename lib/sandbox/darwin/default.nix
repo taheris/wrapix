@@ -80,16 +80,13 @@ in
               echo "Loading profile image..."
               # Delete old image if exists
               container image delete "$PROFILE_IMAGE" 2>/dev/null || true
-              # Stream image from Nix, convert to OCI-archive for Apple container CLI.
+              # Convert Docker-format tar to OCI-archive for Apple container CLI.
               # Note: --insecure-policy bypasses signature verification, which is safe here
               # because images are built locally from Nix derivations (trusted source with
               # cryptographic hashes), not pulled from untrusted registries.
-              DOCKER_TAR="$WRAPIX_CACHE/profile-image-docker.tar"
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
               mkdir -p "$WRAPIX_CACHE"
-              ${profileImage} > "$DOCKER_TAR"
-              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:$DOCKER_TAR" "oci-archive:$OCI_TAR"
-              rm -f "$DOCKER_TAR"
+              ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
               # Load and capture the digest from output (format: "untagged@sha256:...")
               LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
               LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)

@@ -97,6 +97,10 @@ let
       profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
 
+      # Load image into podman: stream script on Linux, tarball on Darwin.
+      # On Darwin, the image is a buildLayeredImage tar (Linux shebang won't run).
+      loadImageCmd = if pkgs.stdenv.isDarwin then "cat ${profileImage}" else "${profileImage}";
+
       # Shared image loading snippet — used by both shellHook and app
       loadImageSnippet = ''
         XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -104,11 +108,11 @@ let
         mkdir -p "$XDG_CACHE_HOME/wrapix/images"
         if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
           echo "Loading sandbox image..."
-          ${profileImage} | podman load -q >/dev/null
+          ${loadImageCmd} | podman load -q >/dev/null
           echo "${profileImage}" > "$_img_version"
         elif ! podman image exists "${imageName}" 2>/dev/null; then
           echo "Reloading sandbox image (missing from podman store)..."
-          ${profileImage} | podman load -q >/dev/null
+          ${loadImageCmd} | podman load -q >/dev/null
           echo "${profileImage}" > "$_img_version"
         fi
       '';
