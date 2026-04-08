@@ -50,10 +50,12 @@ let
     inherit (ralph) mkRalph;
   };
 
-  # Call mkCity to get live provider, scripts, formulas, config
+  # Call mkCity to get live provider, scripts, formulas, config.
+  # Use port 3307 so tests don't collide with a live city on 3306.
   liveCity = cityMod.mkCity {
     name = "test-city";
     workers = 2;
+    doltPort = 3307;
   };
 
   # Live outputs — no duplication
@@ -126,21 +128,14 @@ let
     esac
   '';
 
-  # Port for the shared dolt server (fixed — known at Nix eval time)
-  doltPort = 3306;
-
   # Test city.toml: live config with test-specific overrides
-  # (shorter intervals for fast testing, [dolt] section for shared server)
+  # (shorter patrol interval for fast testing).
+  # Deliberately inherits [dolt] from live config — if someone removes it
+  # from cityConfig, this test will fail with port-0 connection errors.
   cityToml = pkgs.writeText "city.toml" (
     toTOML (
       liveCity.configAttrs
       // {
-        # External dolt server — gc reads this via its [dolt] config support.
-        # gc runs on the host; dolt container publishes port to 127.0.0.1.
-        dolt = {
-          host = "127.0.0.1";
-          port = doltPort;
-        };
         daemon = liveCity.configAttrs.daemon // {
           patrol_interval = "5s";
           max_restarts = 3;
@@ -153,6 +148,7 @@ let
   # Uses the shared mkImage so entrypoint, /etc/wrapix/ config, and image
   # structure are identical to production — only the LLM binary differs.
   testProfile = sandbox.profiles.base // {
+    name = "test";
     packages = (sandbox.profiles.base.packages or [ ]) ++ liveCity.packages;
   };
 
@@ -183,7 +179,7 @@ let
     WS=""
     TEST_NETWORK="wrapix-test-$$"
     DOLT_CONTAINER="gc-test-city-dolt"
-    DOLT_PORT=${toString doltPort}
+    DOLT_PORT=${toString liveCity.configAttrs.dolt.port}
     # Pass --no-fail-fast to run all tests even after failures
     FAIL_FAST=true
     if [ "''${1:-}" = "--no-fail-fast" ]; then
@@ -241,7 +237,7 @@ let
       podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
       podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       podman network rm "$TEST_NETWORK" 2>/dev/null || true
-      podman rmi wrapix-base:latest 2>/dev/null || true
+      podman rmi wrapix-test:latest 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
       fi
@@ -383,7 +379,7 @@ let
         done
       fi
       find .beads -name LOCK -delete 2>/dev/null || true
-      rm -f .beads/dolt-server.pid .beads/dolt-server.lock
+      rm -f .beads/dolt-server.pid .beads/dolt-server.lock .beads/dolt-server.port
       chmod 700 .beads
 
       # Clear circuit breaker state — killing dolt may have tripped it.
@@ -426,26 +422,28 @@ let
     start_gc() {
       export GC_CITY_NAME=test-city
       export GC_WORKSPACE="$WS"
-      export GC_AGENT_IMAGE=localhost/wrapix-base:latest
+      export GC_AGENT_IMAGE=localhost/wrapix-test:latest
       export GC_PODMAN_NETWORK="$TEST_NETWORK"
       export GC_WRAPIX_PROMPT="${../../lib/sandbox/prompt.txt}"
-      export GC_SECRET_FLAGS="-e GC_DOLT=skip"
-      export GC_DOLT=skip
+      export GC_DOLT_PORT="$DOLT_PORT"
       export BEADS_DOLT_AUTO_START=0
       # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
       # Use the entrypoint — same path as live (nix run .#city).
       # Entrypoint starts dolt container, runs recovery, then gc start.
-      setsid ${./../../lib/city/entrypoint.sh} > "$WS/gc.log" 2>&1 &
+      setsid ${scripts}/entrypoint.sh > "$WS/gc.log" 2>&1 &
       GC_PID=$!
       # Wait for dolt container to be ready (entrypoint starts it)
       for _i in $(seq 1 50); do
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
       done
-      # Point host-side bd at the published port
+      # Point host-side bd at the published port.
+      # Also write the port file — gc reads GC_WORKSPACE/.beads/dolt-server.port
+      # for its internal bd calls regardless of gc home isolation.
       export BEADS_DOLT_SERVER_HOST="127.0.0.1"
       export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+      echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
       sleep 3
       if ! kill -0 "$GC_PID" 2>/dev/null; then
         echo "gc exited prematurely:"

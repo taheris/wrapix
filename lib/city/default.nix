@@ -71,6 +71,7 @@ let
       mayor ? { },
       resources ? { },
       secrets ? { },
+      doltPort ? 3306,
       name ? "dev",
     }:
     let
@@ -146,14 +147,16 @@ let
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
-      # City scripts — gate, post-gate, recovery, dispatch, provider bundled for .gc/scripts/
+      # City scripts — gate, post-gate, recovery, dispatch, provider, staging bundled for .gc/scripts/
       scriptsDir = pkgs.runCommand "wrapix-city-scripts-dir" { } ''
         mkdir -p $out
+        cp ${./entrypoint.sh} $out/entrypoint.sh
         cp ${./gate.sh} $out/gate.sh
         cp ${./post-gate.sh} $out/post-gate.sh
         cp ${./recovery.sh} $out/recovery.sh
         cp ${./dispatch.sh} $out/dispatch.sh
         cp ${./provider.sh} $out/provider.sh
+        cp ${./stage-gc-home.sh} $out/stage-gc-home.sh
         chmod +x $out/*.sh
       '';
 
@@ -166,9 +169,9 @@ let
         cp ${./prompts/worker.md} $out/worker.md
       '';
 
-      # Prefix for scale_check commands: the dolt container publishes port
-      # 3306 to localhost.  Override gc's stale metadata.json values.
-      bdEnv = "BEADS_DOLT_SERVER_PORT=3306 BEADS_DOLT_SERVER_HOST=127.0.0.1";
+      # Prefix for scale_check commands: the dolt container publishes
+      # doltPort to localhost.  Override gc's stale metadata.json values.
+      bdEnv = "BEADS_DOLT_SERVER_PORT=${toString doltPort} BEADS_DOLT_SERVER_HOST=127.0.0.1";
 
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
@@ -197,8 +200,16 @@ let
           provider = "bd";
         };
 
+        # Dolt connection — the entrypoint starts a dolt container that
+        # publishes this port to localhost.  gc reads this section for
+        # its internal bd calls; without it, bd defaults to port 0.
+        dolt = {
+          host = "127.0.0.1";
+          port = doltPort;
+        };
+
         daemon = {
-          patrol_interval = "30s";
+          patrol_interval = "10s";
           max_restarts = 5;
           restart_window = "1h";
         };
@@ -294,6 +305,7 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
+        export GC_DOLT_PORT="${toString doltPort}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
         ${loadImageSnippet}
@@ -338,6 +350,14 @@ let
           fi
           unset _gc_types _existing
         fi
+
+        # Stage gc home: isolates gc from the host's .beads/ so gc's writes
+        # (dolt.auto-start, dolt-server.port) go to .gc/home/.beads/ instead.
+        # All gc commands (gc stop, gc session attach, etc.) use this via GC_CITY.
+        if [ -d .beads ]; then
+          export GC_CITY
+          GC_CITY="$(.gc/scripts/stage-gc-home.sh)"
+        fi
       '';
 
       # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox
@@ -373,17 +393,12 @@ let
           export GC_WORKSPACE="$(pwd)"
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
+          export GC_DOLT_PORT="${toString doltPort}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
           ${loadImageSnippet}
 
           cp -f --remove-destination ${cityToml} city.toml
-
-          # --- Beads protection ---
-          # GC_DOLT=skip tells gc to skip its dolt lifecycle entirely.
-          # Scale_check commands read the port from dolt-server.port directly,
-          # so we don't need to maintain metadata.json.dolt_server_port.
-          export GC_DOLT=skip
 
           # --- gc scaffold ---
           # Pre-create the .gc/ layout so gc start never runs auto-init
@@ -415,7 +430,7 @@ let
             podman network create "${networkName}" >/dev/null
           fi
 
-          exec ${./entrypoint.sh}
+          exec ${scriptsDir}/entrypoint.sh
         ''}/bin/wrapix-city";
       };
 
@@ -469,6 +484,7 @@ let
         agent
         workers
         cooldown
+        doltPort
         resources
         ;
       scoutConfig = {

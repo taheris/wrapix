@@ -115,11 +115,15 @@
               settings.formatter.shellcheck.excludes = [ ".envrc" ];
             };
 
-            wrapix = import ./lib { inherit pkgs system linuxPkgs; };
-            city = wrapix.mkCity { profile = wrapix.profiles.base; };
             test = import ./tests {
               inherit pkgs system;
               src = self;
+            };
+
+            wrapix = import ./lib { inherit pkgs system linuxPkgs; };
+            city = wrapix.mkCity {
+              name = "wx";
+              profile = wrapix.profiles.base;
             };
 
           in

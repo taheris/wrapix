@@ -7,7 +7,7 @@
 # 2. Runs crash recovery — reconciles orphaned containers and worktrees.
 # 3. Starts a background process watching podman events for service container
 #    lifecycle events (die, oom, restart) and wakes the scout via gc nudge.
-# 4. Execs gc start --foreground
+# 4. Stages gc home (via stage-gc-home.sh) and execs gc start --foreground.
 #
 # Environment variables (set by mkCity / systemd unit):
 #   GC_CITY_NAME       — city name (required)
@@ -24,7 +24,7 @@ CITY_NAME="${GC_CITY_NAME:?entrypoint.sh requires GC_CITY_NAME}"
 # ---------------------------------------------------------------------------
 
 DOLT_CONTAINER="gc-${CITY_NAME}-dolt"
-DOLT_PORT=3306
+DOLT_PORT="${GC_DOLT_PORT:-3306}"
 
 start_dolt_container() {
   local beads_dir="${GC_WORKSPACE}/.beads"
@@ -52,6 +52,14 @@ start_dolt_container() {
 
   # Remove any stopped dolt container from a previous run
   podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+
+  # If port is already responding (stale container, host dolt, etc.), reuse it
+  if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
+    echo "Port ${DOLT_PORT} already in use — reusing existing dolt server"
+    export BEADS_DOLT_SERVER_HOST="127.0.0.1"
+    export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+    return 0
+  fi
 
   # Grant root@% so agent containers on the podman network can connect.
   # Default dolt only creates root@localhost; containers appear as 10.89.x.x.
@@ -90,6 +98,9 @@ start_dolt_container() {
 
 start_dolt_container
 
+# Pin the workspace port file so host-side bd commands (run from the
+# workspace, not gc home) connect to the city dolt container.
+echo "$DOLT_PORT" > "${GC_WORKSPACE}/.beads/dolt-server.port"
 
 # ---------------------------------------------------------------------------
 # Step 1: Print informational summary of pending reviews
@@ -116,15 +127,10 @@ print_pending_reviews
 # Step 2: Crash recovery — reconcile orphaned containers and worktrees
 # ---------------------------------------------------------------------------
 
-# recovery.sh lives alongside the other city scripts in .gc/scripts/ —
-# the app and shellHook copy them there from the Nix store.  Fall back to
-# SCRIPT_DIR for the integration test which patches this line.
+# All city scripts (recovery, stage-gc-home, etc.) are co-located in the
+# same Nix derivation (scriptsDir), so SCRIPT_DIR always has siblings.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RECOVERY="${GC_WORKSPACE:-.}/.gc/scripts/recovery.sh"
-if [[ ! -x "$RECOVERY" ]]; then
-  RECOVERY="${SCRIPT_DIR}/recovery.sh"
-fi
-"$RECOVERY"
+"${SCRIPT_DIR}/recovery.sh"
 
 # ---------------------------------------------------------------------------
 # Step 3: Start podman events watcher (background)
@@ -156,7 +162,12 @@ start_events_watcher() {
 start_events_watcher
 
 # ---------------------------------------------------------------------------
-# Step 4: Exec gc start --foreground
+# Step 4: exec gc start
 # ---------------------------------------------------------------------------
 
+# City dolt is managed by the container started in step 0.
+# GC_DOLT=skip prevents gc's embedded dolt pack from starting a duplicate
+# and from writing dolt.auto-start / dolt-server.port to .beads/.
+export GC_DOLT=skip
+cd "${GC_WORKSPACE}"
 exec gc start --foreground
