@@ -58,6 +58,20 @@ role_name() {
   fi
 }
 
+# Stage .beads config files for container-local database isolation.
+# Each container gets its own .beads with just config — no host mount.
+stage_beads() {
+  local staging
+  staging="${GC_WORKSPACE}/.gc/beads-staging/$(container_name)"
+  rm -rf "$staging"
+  mkdir -p "$staging"
+  local beads="${GC_WORKSPACE}/.beads"
+  [ -f "$beads/config.yaml" ] && cp "$beads/config.yaml" "$staging/"
+  [ -f "$beads/metadata.json" ] && cp "$beads/metadata.json" "$staging/"
+  [ -f "$beads/issues.jsonl" ] && cp "$beads/issues.jsonl" "$staging/"
+  echo "$staging"
+}
+
 # Standard labels applied to every container
 container_labels() {
   local role
@@ -109,16 +123,15 @@ persistent_start() {
     ws_mode="ro"
   fi
 
-  # Read host dolt port so bd inside the container connects to the host server
-  local dolt_port
-  dolt_port="$(cat "${GC_WORKSPACE}/.beads/dolt-server.port" 2>/dev/null || echo "")"
+  # Always use the container name — containers reach dolt via the podman
+  # network, not localhost. The host's BEADS_DOLT_SERVER_HOST=127.0.0.1
+  # is for gc itself, not for containers.
+  local dolt_host="gc-${GC_CITY_NAME}-dolt"
+  local dolt_port="${BEADS_DOLT_SERVER_PORT:-3306}"
 
-  # Read session ID for crash-resilient resume within this city lifecycle
-  local role
+  local role beads_staging
   role="$(role_name)"
-  local session_id=""
-  local session_file="${GC_WORKSPACE}/.gc/sessions/${role}.session-id"
-  [[ -f "$session_file" ]] && session_id="$(cat "$session_file" 2>/dev/null)"
+  beads_staging="$(stage_beads)"
 
   # shellcheck disable=SC2046
   podman run -d \
@@ -126,7 +139,6 @@ persistent_start() {
     --name "$name" \
     --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
-    --add-host=host.containers.internal:host-gateway \
     --userns=keep-id \
     --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
     --mount type=tmpfs,destination=/home/wrapix,U=true \
@@ -135,15 +147,14 @@ persistent_start() {
     $(container_labels) \
     $(resource_flags "${SESSION}") \
     -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
-    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:rw" \
+    -v "${beads_staging}:/workspace/.beads" \
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
     -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
     ${GC_SECRET_FLAGS:-} \
     -e "BEADS_DOLT_AUTO_START=0" \
-    -e "BEADS_DOLT_HOST=host.containers.internal" \
-    -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
+    -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
+    -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-    -e "CLAUDE_SESSION_ID=${session_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
     -e "GC_ROLE=${SESSION}" \
     -e "GC_ROLE_NAME=${role}" \
@@ -155,9 +166,6 @@ persistent_start() {
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
       CLAUDE_CMD="claude --dangerously-skip-permissions"
-      if [[ -n "${CLAUDE_SESSION_ID:-}" ]]; then
-        CLAUDE_CMD+=" --resume $CLAUDE_SESSION_ID"
-      fi
       if [[ -f "/workspace/.gc/prompts/${GC_ROLE_NAME}.md" ]]; then
         CLAUDE_CMD+=" --append-system-prompt-file /workspace/.gc/prompts/${GC_ROLE_NAME}.md"
       fi
@@ -233,9 +241,15 @@ worker_start() {
   mkdir -p "$state_dir"
   date +%s > "$state_dir/last-dispatch"
 
-  # Read host dolt port so bd inside the container connects to the host server
-  local dolt_port
-  dolt_port="$(cat "${GC_WORKSPACE}/.beads/dolt-server.port" 2>/dev/null || echo "")"
+  # Prefer env var (set by entrypoint) over port file (can be corrupted by
+  # agents running bd dolt start inside containers with .beads mounted rw).
+  # Always use the container name — containers reach dolt via the podman
+  # network, not localhost. The host's BEADS_DOLT_SERVER_HOST=127.0.0.1
+  # is for gc itself, not for containers.
+  local dolt_host="gc-${GC_CITY_NAME}-dolt"
+  local dolt_port="${BEADS_DOLT_SERVER_PORT:-3306}"
+  local beads_staging
+  beads_staging="$(stage_beads)"
 
   # shellcheck disable=SC2046
   podman run -d \
@@ -243,7 +257,6 @@ worker_start() {
     --name "$name" \
     --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
-    --add-host=host.containers.internal:host-gateway \
     --userns=keep-id \
     --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
     --mount type=tmpfs,destination=/home/wrapix,U=true \
@@ -253,13 +266,13 @@ worker_start() {
     $(resource_flags worker) \
     -v "${GC_WORKSPACE}/${worktree_path}:/workspace:rw" \
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
-    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
+    -v "${beads_staging}:/workspace/.beads" \
     -v "${task_file}:/workspace/.task:ro" \
     -v "${GC_WORKSPACE}/.gc/prompts/worker.md:/etc/wrapix/role-prompt.md:ro" \
     ${GC_SECRET_FLAGS:-} \
     -e "BEADS_DOLT_AUTO_START=0" \
-    -e "BEADS_DOLT_HOST=host.containers.internal" \
-    -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
+    -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
+    -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \

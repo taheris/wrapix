@@ -116,6 +116,7 @@ pkgs.dockerTools.buildLayeredImage {
   extraCommands = ''
     mkdir -p tmp home/wrapix root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
     chmod 1777 tmp var/cache
+    chmod 777 home/wrapix
 
     mkdir -p etc/wrapix
     echo "127.0.0.1 localhost" > etc/hosts

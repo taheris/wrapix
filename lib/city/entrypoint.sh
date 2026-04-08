@@ -20,91 +20,75 @@ CITY_NAME="${GC_CITY_NAME:?entrypoint.sh requires GC_CITY_NAME}"
 : "${GC_WORKSPACE:?entrypoint.sh requires GC_WORKSPACE}"
 
 # ---------------------------------------------------------------------------
-# Step 0: Ensure dolt is healthy (clean stale locks, verify connectivity)
+# Step 0: Start dolt container on the city network
 # ---------------------------------------------------------------------------
 
-ensure_dolt_healthy() {
+DOLT_CONTAINER="gc-${CITY_NAME}-dolt"
+DOLT_PORT=3306
+
+start_dolt_container() {
   local beads_dir="${GC_WORKSPACE}/.beads"
+  local city_dolt="${GC_WORKSPACE}/.gc/dolt"
   [[ -d "$beads_dir/dolt" ]] || return 0
 
-  local port_file="$beads_dir/dolt-server.port"
-  local host_file="$beads_dir/dolt-server.host"
-  local config="$beads_dir/dolt/config.yaml"
-  local port=""
-  [[ -f "$port_file" ]] && port="$(cat "$port_file" 2>/dev/null)"
-
-  # Discover podman bridge gateway — containers reach the host via this IP.
-  # Falls back to 127.0.0.1 when running outside a city (no podman network).
-  local gateway="127.0.0.1"
-  if [[ -n "${GC_PODMAN_NETWORK:-}" ]]; then
-    gateway="$(podman network inspect "${GC_PODMAN_NETWORK}" 2>/dev/null \
-      | jq -r '.[0].subnets[0].gateway // empty' 2>/dev/null)" || gateway=""
-    gateway="${gateway:-127.0.0.1}"
+  # If the dolt container is already running, use it
+  if podman inspect --format '{{.State.Running}}' "$DOLT_CONTAINER" 2>/dev/null | grep -q true; then
+    echo "Dolt container already running (${DOLT_CONTAINER}:${DOLT_PORT})"
+    export BEADS_DOLT_SERVER_HOST="127.0.0.1"
+    export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+    return 0
   fi
 
-  # Persist gateway for scale_check commands and other host-side consumers
-  echo "$gateway" > "$host_file"
-
-  # Check if dolt config needs a bind address update
-  local needs_restart=false
-  if [[ -f "$config" ]]; then
-    local current_host
-    current_host="$(awk '/^  host:/ {print $2}' "$config" 2>/dev/null)" || current_host=""
-    if [[ "$current_host" != "$gateway" ]]; then
-      sed -i "s/^  host: .*/  host: ${gateway}/" "$config"
-      needs_restart=true
-    fi
+  # Initialize city dolt from host on first start (one-time copy).
+  # City dolt is completely separate from the host's — no conflicts.
+  if [[ ! -d "$city_dolt/beads" ]]; then
+    echo "Initializing city dolt from host .beads/dolt..."
+    mkdir -p "$city_dolt"
+    cp -a "$beads_dir/dolt/." "$city_dolt/"
   fi
 
-  # If a dolt process is already running and bind address hasn't changed, trust it
-  if pgrep -f "dolt sql-server" &>/dev/null; then
-    if [[ "$needs_restart" == "true" ]]; then
-      echo "Dolt bind address changed → restarting on ${gateway}..."
-      bd dolt stop 2>/dev/null || true
-      sleep 1
-    else
-      if [[ -n "$port" ]]; then
-        export BEADS_DOLT_PORT="$port"
-        export BEADS_DOLT_HOST="$gateway"
-      fi
+  # Clean stale state in city's dolt dir (not host's)
+  find "$city_dolt" -name "LOCK" -delete 2>/dev/null || true
+
+  # Remove any stopped dolt container from a previous run
+  podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+
+  # Grant root@% so agent containers on the podman network can connect.
+  # Default dolt only creates root@localhost; containers appear as 10.89.x.x.
+  (cd "$city_dolt" && \
+    dolt sql -q 'CREATE USER IF NOT EXISTS root@"%"; GRANT ALL ON *.* TO root@"%" WITH GRANT OPTION' \
+  ) 2>/dev/null || true
+
+  echo "Starting dolt container on ${GC_PODMAN_NETWORK}..."
+  podman run -d \
+    --name "$DOLT_CONTAINER" \
+    --network "${GC_PODMAN_NETWORK:?}" \
+    --userns=keep-id \
+    -p "127.0.0.1:${DOLT_PORT}:${DOLT_PORT}" \
+    -v "${city_dolt}:/doltdb:rw" \
+    "${GC_AGENT_IMAGE:?}" \
+    bash -c 'cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P "$1"' -- "${DOLT_PORT}"
+
+  # Wait for readiness — check from host via published port
+  local retries=50
+  while [[ $retries -gt 0 ]]; do
+    if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
+      echo "Dolt container ready (${DOLT_CONTAINER}:${DOLT_PORT})"
+      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
+      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
       return 0
     fi
-  fi
-
-  # Clean stale locks and start fresh
-  echo "Starting dolt server on ${gateway}..."
-  find "$beads_dir/dolt" -name "LOCK" -delete 2>/dev/null || true
-  rm -f "$beads_dir/dolt-server.lock" "$beads_dir/dolt-server.pid" 2>/dev/null || true
-
-  if bd dolt start 2>/dev/null; then
-    [[ -f "$port_file" ]] && port="$(cat "$port_file" 2>/dev/null)"
-    if [[ -n "$port" ]]; then
-      export BEADS_DOLT_PORT="$port"
-      export BEADS_DOLT_HOST="$gateway"
-      echo "Dolt server started on ${gateway}:${port}"
-    fi
-  else
-    echo "Warning: could not start dolt server — bd commands may fail"
-  fi
-}
-
-ensure_dolt_healthy
-
-# ---------------------------------------------------------------------------
-# Step 0.5: Generate fresh session IDs for persistent roles
-# ---------------------------------------------------------------------------
-
-generate_session_ids() {
-  local sessions_dir="${GC_WORKSPACE}/.gc/sessions"
-  mkdir -p "$sessions_dir"
-
-  for role in mayor scout judge; do
-    cat /proc/sys/kernel/random/uuid > "$sessions_dir/${role}.session-id"
+    sleep 0.2
+    retries=$((retries - 1))
   done
-  echo "Generated fresh session IDs for persistent roles"
+
+  echo "Error: dolt container did not become ready" >&2
+  podman logs "$DOLT_CONTAINER" 2>&1 | tail -5 >&2
+  exit 1
 }
 
-generate_session_ids
+start_dolt_container
+
 
 # ---------------------------------------------------------------------------
 # Step 1: Print informational summary of pending reviews

@@ -39,6 +39,22 @@ _:
     trap 'rm -rf "$STAGING_ROOT"' EXIT
   '';
 
+  # Stage .beads config files for container-local database isolation.
+  # Copies config.yaml, metadata.json, and issues.jsonl to a staging directory
+  # so containers get their own .beads without mounting the host's.
+  # Sets $BEADS_STAGING to the staging path (empty if no .beads found).
+  # Expects $PROJECT_DIR and $STAGING_ROOT to be set.
+  stageBeads = ''
+    BEADS_STAGING=""
+    if [ -d "$PROJECT_DIR/.beads" ]; then
+      BEADS_STAGING="$STAGING_ROOT/beads"
+      mkdir -p "$BEADS_STAGING"
+      [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
+      [ -f "$PROJECT_DIR/.beads/metadata.json" ] && cp "$PROJECT_DIR/.beads/metadata.json" "$BEADS_STAGING/"
+      [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
+    fi
+  '';
+
   # Generate deploy key name expression
   # If deployKey is provided, uses that; otherwise generates repo-hostname format at runtime
   mkDeployKeyExpr =

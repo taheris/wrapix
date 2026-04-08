@@ -145,10 +145,9 @@ let
         cp ${./prompts/worker.md} $out/worker.md
       '';
 
-      # Prefix for scale_check commands: read dolt port from the live port
-      # file so bd connects to the running server.  gc injects its own
-      # BEADS_DOLT_PORT from metadata.json (often stale/0) — override it.
-      bdEnv = "BEADS_DOLT_PORT=$(cat .beads/dolt-server.port 2>/dev/null) BEADS_DOLT_HOST=$(cat .beads/dolt-server.host 2>/dev/null || echo 127.0.0.1)";
+      # Prefix for scale_check commands: the dolt container publishes port
+      # 3306 to localhost.  Override gc's stale metadata.json values.
+      bdEnv = "BEADS_DOLT_SERVER_PORT=3306 BEADS_DOLT_SERVER_HOST=127.0.0.1";
 
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
@@ -388,14 +387,6 @@ let
           # Scale_check commands read the port from dolt-server.port directly,
           # so we don't need to maintain metadata.json.dolt_server_port.
           export GC_DOLT=skip
-          if [ -d .beads ] && [ -f .beads/dolt-server.port ]; then
-            _dolt_port="$(cat .beads/dolt-server.port)"
-            _dolt_host="$(cat .beads/dolt-server.host 2>/dev/null || echo 127.0.0.1)"
-            export GC_DOLT_HOST="$_dolt_host"
-            export GC_DOLT_PORT="$_dolt_port"
-            export BEADS_DOLT_HOST="$_dolt_host"
-            export BEADS_DOLT_PORT="$_dolt_port"
-          fi
 
           # --- gc scaffold ---
           # Pre-create the .gc/ layout so gc start never runs auto-init

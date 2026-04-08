@@ -127,7 +127,7 @@ let
   '';
 
   # Port for the shared dolt server (fixed — known at Nix eval time)
-  doltPort = 3307;
+  doltPort = 3306;
 
   # Test city.toml: live config with test-specific overrides
   # (shorter intervals for fast testing, [dolt] section for shared server)
@@ -136,7 +136,7 @@ let
       liveCity.configAttrs
       // {
         # External dolt server — gc reads this via its [dolt] config support.
-        # With --network=host, 127.0.0.1 is the same namespace everywhere.
+        # gc runs on the host; dolt container publishes port to 127.0.0.1.
         dolt = {
           host = "127.0.0.1";
           port = doltPort;
@@ -180,6 +180,7 @@ let
     # /usr/bin/env needed for live script shebangs (#!/usr/bin/env bash)
     fakeRootCommands = ''
       mkdir -p ./usr/bin ./home/wrapix ./tmp
+      chmod 777 ./home/wrapix ./tmp
       ln -s ${pkgs.coreutils}/bin/env ./usr/bin/env
     '';
   };
@@ -203,7 +204,8 @@ let
     FAILED=0
     GC_PID=""
     WS=""
-    DOLT_CONTAINER="dolt-server-$$"
+    TEST_NETWORK="wrapix-test-$$"
+    DOLT_CONTAINER="gc-test-city-dolt"
     DOLT_PORT=${toString doltPort}
     # Pass --no-fail-fast to run all tests even after failures
     FAIL_FAST=true
@@ -261,6 +263,7 @@ let
       podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
       podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
       podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+      podman network rm "$TEST_NETWORK" 2>/dev/null || true
       podman rmi wrapix-test:latest 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
@@ -374,6 +377,10 @@ let
         echo "FATAL: gc init did not create .beads/metadata.json after 30s"
         return 1
       fi
+
+      # Configure bd while gc init's embedded dolt is still running
+      bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
+
       # Kill the entire gc init process group (includes embedded dolt)
       kill -TERM -"$_GC_INIT_PID" 2>/dev/null || true
       for _i in $(seq 1 30); do
@@ -407,38 +414,10 @@ let
       rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"$DOLT_PORT".json 2>/dev/null || true
       rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"''${_EDOLT_PORT:-0}".json 2>/dev/null || true
 
-      # --- Start shared dolt container serving gc's database ---
-      podman run -d \
-        --name "$DOLT_CONTAINER" \
-        --network host \
-        -v "$WS/.beads/dolt:/doltdb:rw" \
-        localhost/wrapix-test:latest \
-        bash -c "dolt config --global --add user.email test@test && dolt config --global --add user.name test && cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P $DOLT_PORT"
-      for _i in $(seq 1 50); do
-        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
-        sleep 0.2
-      done
-      if ! bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null; then
-        echo "FATAL: dolt server not reachable on 127.0.0.1:$DOLT_PORT"
-        podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 || true
-        return 1
-      fi
+      # --- Create test podman network (matches live topology) ---
+      podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
 
-      # --- Point gc/bd at the shared server ---
-      echo "$DOLT_PORT" > .beads/dolt-server.port
-      export GC_DOLT=skip
-      export GC_DOLT_HOST="127.0.0.1"
-      export GC_DOLT_PORT="$DOLT_PORT"
-      export BEADS_DOLT_HOST="127.0.0.1"
-      export BEADS_DOLT_PORT="$DOLT_PORT"
-      export BEADS_DOLT_AUTO_START=0
-
-      bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
-      bd list >/dev/null 2>&1 || {
-        echo "FATAL: bd cannot connect to dolt server"
-        return 1
-      }
-      echo "  > workspace ready (dolt on 127.0.0.1:$DOLT_PORT)"
+      echo "  > workspace ready"
 
       git add -A && git commit -m "workspace setup"
 
@@ -471,25 +450,31 @@ let
       export GC_CITY_NAME=test-city
       export GC_WORKSPACE="$WS"
       export GC_AGENT_IMAGE=localhost/wrapix-test:latest
-      export GC_PODMAN_NETWORK="host"
+      export GC_PODMAN_NETWORK="$TEST_NETWORK"
       export GC_WRAPIX_PROMPT="${../../lib/sandbox/prompt.txt}"
-      # Pass dolt config into containers so bd/gc inside them find the
-      # shared server rather than starting embedded dolt instances.
-      export GC_SECRET_FLAGS="-e BEADS_DOLT_AUTO_START=0 -e BEADS_DOLT_HOST=127.0.0.1 -e BEADS_DOLT_PORT=$DOLT_PORT -e GC_DOLT_HOST=127.0.0.1 -e GC_DOLT_PORT=$DOLT_PORT -e GC_DOLT=skip"
+      export GC_SECRET_FLAGS="-e GC_DOLT=skip"
+      export GC_DOLT=skip
+      export BEADS_DOLT_AUTO_START=0
       # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
-      setsid gc start --foreground > "$WS/gc.log" 2>&1 &
+      # Use the entrypoint — same path as live (nix run .#city).
+      # Entrypoint starts dolt container, runs recovery, then gc start.
+      setsid ${./../../lib/city/entrypoint.sh} > "$WS/gc.log" 2>&1 &
       GC_PID=$!
+      # Wait for dolt container to be ready (entrypoint starts it)
+      for _i in $(seq 1 50); do
+        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        sleep 0.2
+      done
+      # Point host-side bd at the published port
+      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
+      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
       sleep 3
       if ! kill -0 "$GC_PID" 2>/dev/null; then
         echo "gc exited prematurely:"
         cat "$WS/gc.log" 2>/dev/null | sed 's/^/  /' || true
         return 1
       fi
-      # Re-create the port file — gc removes it during startup when
-      # GC_DOLT=skip is set.  Belt-and-suspenders: metadata.json also has
-      # the correct port as a fallback for bd.
-      echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
     }
     subtest "Start gc daemon" start_gc
 
@@ -586,9 +571,13 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      # Stop and remove gc containers
-      podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
-      podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+      # Stop and remove gc agent containers (keep dolt for Phase 2+)
+      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+        cname=$(podman inspect --format '{{.Name}}' "$cid" 2>/dev/null) || continue
+        [ "$cname" = "$DOLT_CONTAINER" ] && continue
+        podman stop -t 3 "$cid" 2>/dev/null || true
+        podman rm -f "$cid" 2>/dev/null || true
+      done
       GC_PID=""
     }
     subtest "Stop gc after Phase 1" stop_gc

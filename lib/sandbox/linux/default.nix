@@ -14,6 +14,7 @@ let
     cleanStaleStagingDirs
     createStagingDir
     mkDeployKeyExpr
+    stageBeads
     ;
 
   prompt = writeText "wrapix-prompt" (readFile ../prompt.txt);
@@ -155,18 +156,9 @@ in
           DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         fi
 
-        # Stage .beads config files for container-local database isolation
-        # Copy to staging (like Darwin) so atomic renames work inside the mount
-        # bd init creates fresh database inside container from staged source
+        ${stageBeads}
         BEADS_ARGS=""
-        BEADS_STAGING=""
-        if [ -d "$PROJECT_DIR/.beads" ]; then
-          BEADS_STAGING="$STAGING_ROOT/beads"
-          mkdir -p "$BEADS_STAGING"
-          [ -f "$PROJECT_DIR/.beads/config.yaml" ] && cp "$PROJECT_DIR/.beads/config.yaml" "$BEADS_STAGING/"
-          [ -f "$PROJECT_DIR/.beads/metadata.json" ] && cp "$PROJECT_DIR/.beads/metadata.json" "$BEADS_STAGING/"
-          # Stage issues.jsonl as fallback (dolt-remote accessed via beads worktree in workspace mount)
-          [ -f "$PROJECT_DIR/.beads/issues.jsonl" ] && cp "$PROJECT_DIR/.beads/issues.jsonl" "$BEADS_STAGING/"
+        if [ -n "$BEADS_STAGING" ]; then
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
         fi
 
