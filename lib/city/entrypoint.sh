@@ -7,7 +7,8 @@
 # 2. Runs crash recovery — reconciles orphaned containers and worktrees.
 # 3. Starts a background process watching podman events for service container
 #    lifecycle events (die, oom, restart) and wakes the scout via gc nudge.
-# 4. Stages gc home (via stage-gc-home.sh) and execs gc start --foreground.
+# 4. Stages gc home (via stage-gc-home.sh) and runs gc start --foreground
+#    in the background with a trap to clean up dolt on exit.
 #
 # Environment variables (set by mkCity / systemd unit):
 #   GC_CITY_NAME       — city name (required)
@@ -180,6 +181,15 @@ GC_CITY="$("${SCRIPT_DIR}/stage-gc-home.sh")"
 export GC_CITY
 cd "$GC_CITY"
 
+# Symlink controller socket from workspace .gc/ so host-side `gc stop`
+# (which resolves cityPath to the workspace, not gc home) can find it.
+# The daemon creates the socket at gc_home/.gc/controller.sock; this
+# symlink lets the workspace path reach it.
+mkdir -p "${GC_WORKSPACE}/.gc"
+ln -sfn "$GC_CITY/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.sock"
+ln -sfn "$GC_CITY/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.lock"
+ln -sfn "$GC_CITY/.gc/controller.token" "${GC_WORKSPACE}/.gc/controller.token"
+
 # Run gc in background + wait so the shell stays alive for the trap.
 # On exit (signal or natural), forward SIGTERM to gc and stop dolt.
 _gc_cleanup() {
@@ -187,6 +197,8 @@ _gc_cleanup() {
   [ -n "${_GC_PID:-}" ] && wait "$_GC_PID" 2>/dev/null || true
   podman stop -t 5 "$DOLT_CONTAINER" 2>/dev/null || true
   podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+  # Clean up controller symlinks
+  rm -f "${GC_WORKSPACE}/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.token"
 }
 trap _gc_cleanup EXIT INT TERM
 

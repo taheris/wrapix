@@ -552,7 +552,8 @@ let
     stop_gc() {
       if [ -n "$GC_PID" ] && kill -0 "$GC_PID" 2>/dev/null; then
         # gc runs in its own session (setsid) — kill the entire process group
-        # so bd/dolt grandchildren don't orphan and hold dolt locks
+        # so bd/dolt grandchildren don't orphan and hold dolt locks.
+        # The entrypoint's exit trap also stops the dolt container.
         kill -TERM -"$GC_PID" 2>/dev/null || true
         for _ in $(seq 1 100); do
           kill -0 "$GC_PID" 2>/dev/null || break
@@ -561,14 +562,30 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      # Stop and remove gc agent containers (keep dolt for Phase 2+)
+      # Stop and remove all gc containers (entrypoint trap already killed dolt)
       for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
-        cname=$(podman inspect --format '{{.Name}}' "$cid" 2>/dev/null) || continue
-        [ "$cname" = "$DOLT_CONTAINER" ] && continue
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
       GC_PID=""
+
+      # Restart dolt for Phase 2+ — the entrypoint's exit trap killed it.
+      find "$WS/.gc/dolt" -name "LOCK" -delete 2>/dev/null || true
+      podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+      podman run -d \
+        --name "$DOLT_CONTAINER" \
+        --entrypoint "" \
+        --network "$TEST_NETWORK" \
+        --userns=keep-id \
+        -p "127.0.0.1:''${DOLT_PORT}:''${DOLT_PORT}" \
+        -v "$WS/.gc/dolt:/doltdb:rw" \
+        localhost/wrapix-test:latest \
+        bash -c 'cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P "$1"' -- "$DOLT_PORT"
+      # Wait for dolt to be ready
+      for _i in $(seq 1 50); do
+        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        sleep 0.2
+      done
     }
     subtest "Stop gc after Phase 1" stop_gc
 

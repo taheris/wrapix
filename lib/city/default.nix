@@ -339,24 +339,11 @@ let
           fi
         fi
 
-        # gc creates beads with custom types (session, convoy, convergence, etc.);
-        # register the gc default set plus convergence (used by gc converge create).
-        # Timeout: bd commands hang if dolt is unhealthy — never block the shell.
-        if [ -d .beads ]; then
-          _gc_types="molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
-          _existing=$(timeout 5 bd config get types.custom 2>/dev/null || echo "")
-          if [ -z "$_existing" ] || [ "$_existing" != "$_gc_types" ]; then
-            timeout 5 bd config set types.custom "$_gc_types" 2>/dev/null || true
-          fi
-          unset _gc_types _existing
-        fi
-
-        # Stage gc home: isolates gc from the host's .beads/ so gc's writes
-        # (dolt.auto-start, dolt-server.port) go to .gc/home/.beads/ instead.
-        # All gc commands (gc stop, gc session attach, etc.) use this via GC_CITY.
-        if [ -d .beads ]; then
-          export GC_CITY
-          GC_CITY="$(.gc/scripts/stage-gc-home.sh)"
+        # Point gc commands at gc home so they don't touch host .beads/.
+        # The entrypoint stages gc home (rm -rf + recreate); here we only
+        # set the env var if gc home already exists — no re-staging.
+        if [ -d .gc/home/.gc ]; then
+          export GC_CITY="$(pwd)/.gc/home"
         fi
       '';
 
