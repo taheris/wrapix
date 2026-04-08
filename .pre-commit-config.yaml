@@ -5,6 +5,7 @@ repos:
         stages: [pre-commit]
       - id: end-of-file-fixer
         stages: [pre-commit]
+        exclude: ^\.beads/config\.yaml$
       - id: check-merge-conflict
         stages: [pre-commit]
 
