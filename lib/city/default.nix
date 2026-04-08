@@ -71,7 +71,7 @@ let
       mayor ? { },
       resources ? { },
       secrets ? { },
-      doltPort ? 3306,
+      doltPort ? 13306, # non-default to avoid colliding with bd auto-start (3306)
       name ? "dev",
     }:
     let

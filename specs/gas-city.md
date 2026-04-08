@@ -44,7 +44,7 @@ ops pipeline with good defaults and minimal configuration.
 | Provider script | Translates gc commands to podman operations, manages worktrees, mounts bead context |
 | Post-gate order | Event-gated order triggered by `convergence.terminated` — notifies judge, deploy bead creation |
 | Gate condition script | Bridges convergence gate and judge session — nudges judge, waits for verdict |
-| Entrypoint wrapper | Prints pending review status, starts `podman events` watcher, then exec's `gc start --foreground` |
+| Entrypoint wrapper | Starts dolt container, prints pending reviews, runs recovery, starts events watcher, stages gc home, runs `gc start --foreground` with trap-based cleanup |
 
 ### Deployment Model
 
@@ -54,10 +54,20 @@ ops pipeline with good defaults and minimal configuration.
 - The gc container has no direct host access beyond the podman socket and
   workspace mount
 - All containers (services, agents) share a podman network per city
-- Service containers are built from Nix packages via `dockerTools.buildLayeredImage`
+- Service containers are built from Nix packages via `dockerTools.streamLayeredImage`
 - NixOS module generates systemd units, a podman network
   (`wrapix-<city-name>`), and invokes `mkCity` to produce `city.toml` and
   container images
+
+- The city must not corrupt the host's `.beads/` directory — gc discovers
+  `.beads/` by walking up from its cwd and writes config (dolt.auto-start,
+  dolt-server.port) that conflicts with host-side bd
+- The city manages its own dolt instance on a non-default port (`doltPort`,
+  default 13306) to avoid colliding with the host's bd auto-start
+- `gc stop` from the host shell must work — the controller socket must be
+  reachable from the workspace directory
+- Dolt container lifecycle is tied to the entrypoint — started on entry,
+  cleaned up on exit
 
 ### Roles
 
@@ -679,7 +689,9 @@ No new commands. Existing tools compose:
 | Orders | `lib/city/orders/post-gate/order.toml` | gc order definition for post-gate event trigger |
 | Gate condition | `lib/city/gate.sh` | Convergence gate: nudge judge, wait for verdict |
 | Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
-| Entrypoint | `lib/city/entrypoint.sh` | Print pending review status, podman events watcher, exec gc |
+| Dispatch | `lib/city/dispatch.sh` | Cooldown-aware worker scale_check for gc |
+| gc home staging | `lib/city/stage-gc-home.sh` | Isolate gc from host `.beads/` |
+| Entrypoint | `lib/city/entrypoint.sh` | Dolt container, pending reviews, recovery, events watcher, gc home staging, gc start with trap cleanup |
 | Unit tests | `tests/city/unit.nix` | Nix-sandbox tests for all components |
 | Integration tests | `tests/city/integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
@@ -708,7 +720,7 @@ No new commands. Existing tools compose:
   [verify](tests/city/unit.nix::city-nixos-module)
 - [ ] Crash recovery: gc container restarts, reconciles orphaned containers
 - [ ] `ralph sync` scaffolds missing docs files and creates review beads
-- [x] Service packages are built into OCI images via `dockerTools.buildLayeredImage`
+- [x] Service packages are built into OCI images via `dockerTools.streamLayeredImage`
   [verify](tests/city/unit.nix::city-service-images)
 - [ ] Cooldown pacing delays task dispatch by configured duration
 - [ ] Judge enforces `docs/style-guidelines.md` rules

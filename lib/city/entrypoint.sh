@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Gas City container entrypoint — init checks, event watcher, then exec gc.
+# Gas City entrypoint — dolt, recovery, events, gc home, then gc start.
 #
+# 0. Starts dolt container on the city network.
 # 1. Prints informational summary of pending reviews (including scaffolding
 #    beads created by ralph sync). Does not block — the mayor presents these
 #    items to the human on attach.
@@ -169,7 +170,7 @@ start_events_watcher() {
 start_events_watcher
 
 # ---------------------------------------------------------------------------
-# Step 4: exec gc start
+# Step 4: stage gc home and run gc start
 # ---------------------------------------------------------------------------
 
 # City dolt is managed by the container started in step 0.
