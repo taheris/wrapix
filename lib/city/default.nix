@@ -91,13 +91,11 @@ let
       profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
 
-      # Provider stub — a Nix store script that delegates to .gc/scripts/provider.sh.
-      # gc caches the provider path from city.toml and reverts changes, so the
-      # city.toml reference must be a stable Nix store path.  The actual logic
-      # lives in .gc/scripts/provider.sh which can be hot-updated.
-      providerScript = pkgs.writeShellScript "wrapix-provider" ''
-        exec "''${GC_WORKSPACE:-.}/.gc/scripts/provider.sh" "$@"
-      '';
+      # Provider path — references the live script in .gc/scripts/, which the
+      # shellHook and app copy from the Nix store on every entry/run.
+      # This MUST be a stable filesystem path, not a Nix store path — gc
+      # caches the provider and Nix store paths change on every rebuild.
+      providerScript = ".gc/scripts/provider.sh";
 
       # Dispatch check script — cooldown-aware scale_check for workers
       dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (builtins.readFile ./dispatch.sh);

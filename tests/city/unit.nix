@@ -137,7 +137,7 @@ in
       # Session section with exec provider
       sessionProvider = configAttrs.session.provider;
       hasExecPrefix = builtins.substring 0 5 sessionProvider == "exec:";
-      hasNixStore = builtins.substring 5 10 sessionProvider == "/nix/store";
+      hasStablePath = builtins.substring 5 4 sessionProvider == ".gc/";
 
       # Required sections
       hasFormulas = builtins.hasAttr "formulas" configAttrs;
@@ -173,7 +173,7 @@ in
     assert workspaceName == "dev";
     assert workspaceProvider == "claude";
     assert hasExecPrefix;
-    assert hasNixStore;
+    assert hasStablePath;
     assert hasFormulas;
     assert hasBeads;
     assert hasDaemon;
