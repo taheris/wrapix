@@ -49,6 +49,15 @@ is_mayor() {
   [[ "${SESSION}" == mayor* || "${SESSION}" == *-mayor* ]]
 }
 
+# Base role name (mayor, scout, judge, worker) regardless of session prefix
+role_name() {
+  if is_worker; then echo "worker"
+  elif is_mayor; then echo "mayor"
+  elif is_judge; then echo "judge"
+  else echo "scout"
+  fi
+}
+
 # Standard labels applied to every container
 container_labels() {
   local role
@@ -104,6 +113,13 @@ persistent_start() {
   local dolt_port
   dolt_port="$(cat "${GC_WORKSPACE}/.beads/dolt-server.port" 2>/dev/null || echo "")"
 
+  # Read session ID for crash-resilient resume within this city lifecycle
+  local role
+  role="$(role_name)"
+  local session_id=""
+  local session_file="${GC_WORKSPACE}/.gc/sessions/${role}.session-id"
+  [[ -f "$session_file" ]] && session_id="$(cat "$session_file" 2>/dev/null)"
+
   # shellcheck disable=SC2046
   podman run -d \
     --replace \
@@ -119,15 +135,18 @@ persistent_start() {
     $(container_labels) \
     $(resource_flags "${SESSION}") \
     -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
-    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
+    -v "${GC_WORKSPACE}/.beads:/workspace/.beads:rw" \
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
     -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
     ${GC_SECRET_FLAGS:-} \
+    -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_HOST=host.containers.internal" \
     -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+    -e "CLAUDE_SESSION_ID=${session_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
     -e "GC_ROLE=${SESSION}" \
+    -e "GC_ROLE_NAME=${role}" \
     -e "HOME=/home/wrapix" \
     -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
@@ -135,7 +154,14 @@ persistent_start() {
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
-      tmux new-session -d -s main "claude --dangerously-skip-permissions"
+      CLAUDE_CMD="claude --dangerously-skip-permissions"
+      if [[ -n "${CLAUDE_SESSION_ID:-}" ]]; then
+        CLAUDE_CMD+=" --resume $CLAUDE_SESSION_ID"
+      fi
+      if [[ -f "/workspace/.gc/prompts/${GC_ROLE_NAME}.md" ]]; then
+        CLAUDE_CMD+=" --append-system-prompt-file /workspace/.gc/prompts/${GC_ROLE_NAME}.md"
+      fi
+      tmux new-session -d -s main "$CLAUDE_CMD"
       exec tmux wait-for gc-shutdown
     '
 }
@@ -229,7 +255,9 @@ worker_start() {
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
     -v "${task_file}:/workspace/.task:ro" \
+    -v "${GC_WORKSPACE}/.gc/prompts/worker.md:/etc/wrapix/role-prompt.md:ro" \
     ${GC_SECRET_FLAGS:-} \
+    -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_HOST=host.containers.internal" \
     -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
@@ -238,6 +266,7 @@ worker_start() {
     -e "GC_ROLE=worker" \
     -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
+    -e "WRAPIX_SYSTEM_PROMPT_FILE=/etc/wrapix/role-prompt.md" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 
@@ -296,6 +325,9 @@ case "$METHOD" in
     else
       name="$(container_name)"
       podman exec -it "$name" tmux attach -t main
+      # Restore terminal state after detach (cursor, alternate screen)
+      printf '\033[?25h\033[?1049l' 2>/dev/null
+      stty sane 2>/dev/null || true
     fi
     ;;
 

@@ -20,6 +20,93 @@ CITY_NAME="${GC_CITY_NAME:?entrypoint.sh requires GC_CITY_NAME}"
 : "${GC_WORKSPACE:?entrypoint.sh requires GC_WORKSPACE}"
 
 # ---------------------------------------------------------------------------
+# Step 0: Ensure dolt is healthy (clean stale locks, verify connectivity)
+# ---------------------------------------------------------------------------
+
+ensure_dolt_healthy() {
+  local beads_dir="${GC_WORKSPACE}/.beads"
+  [[ -d "$beads_dir/dolt" ]] || return 0
+
+  local port_file="$beads_dir/dolt-server.port"
+  local host_file="$beads_dir/dolt-server.host"
+  local config="$beads_dir/dolt/config.yaml"
+  local port=""
+  [[ -f "$port_file" ]] && port="$(cat "$port_file" 2>/dev/null)"
+
+  # Discover podman bridge gateway — containers reach the host via this IP.
+  # Falls back to 127.0.0.1 when running outside a city (no podman network).
+  local gateway="127.0.0.1"
+  if [[ -n "${GC_PODMAN_NETWORK:-}" ]]; then
+    gateway="$(podman network inspect "${GC_PODMAN_NETWORK}" 2>/dev/null \
+      | jq -r '.[0].subnets[0].gateway // empty' 2>/dev/null)" || gateway=""
+    gateway="${gateway:-127.0.0.1}"
+  fi
+
+  # Persist gateway for scale_check commands and other host-side consumers
+  echo "$gateway" > "$host_file"
+
+  # Check if dolt config needs a bind address update
+  local needs_restart=false
+  if [[ -f "$config" ]]; then
+    local current_host
+    current_host="$(awk '/^  host:/ {print $2}' "$config" 2>/dev/null)" || current_host=""
+    if [[ "$current_host" != "$gateway" ]]; then
+      sed -i "s/^  host: .*/  host: ${gateway}/" "$config"
+      needs_restart=true
+    fi
+  fi
+
+  # If a dolt process is already running and bind address hasn't changed, trust it
+  if pgrep -f "dolt sql-server" &>/dev/null; then
+    if [[ "$needs_restart" == "true" ]]; then
+      echo "Dolt bind address changed → restarting on ${gateway}..."
+      bd dolt stop 2>/dev/null || true
+      sleep 1
+    else
+      if [[ -n "$port" ]]; then
+        export BEADS_DOLT_PORT="$port"
+        export BEADS_DOLT_HOST="$gateway"
+      fi
+      return 0
+    fi
+  fi
+
+  # Clean stale locks and start fresh
+  echo "Starting dolt server on ${gateway}..."
+  find "$beads_dir/dolt" -name "LOCK" -delete 2>/dev/null || true
+  rm -f "$beads_dir/dolt-server.lock" "$beads_dir/dolt-server.pid" 2>/dev/null || true
+
+  if bd dolt start 2>/dev/null; then
+    [[ -f "$port_file" ]] && port="$(cat "$port_file" 2>/dev/null)"
+    if [[ -n "$port" ]]; then
+      export BEADS_DOLT_PORT="$port"
+      export BEADS_DOLT_HOST="$gateway"
+      echo "Dolt server started on ${gateway}:${port}"
+    fi
+  else
+    echo "Warning: could not start dolt server — bd commands may fail"
+  fi
+}
+
+ensure_dolt_healthy
+
+# ---------------------------------------------------------------------------
+# Step 0.5: Generate fresh session IDs for persistent roles
+# ---------------------------------------------------------------------------
+
+generate_session_ids() {
+  local sessions_dir="${GC_WORKSPACE}/.gc/sessions"
+  mkdir -p "$sessions_dir"
+
+  for role in mayor scout judge; do
+    cat /proc/sys/kernel/random/uuid > "$sessions_dir/${role}.session-id"
+  done
+  echo "Generated fresh session IDs for persistent roles"
+}
+
+generate_session_ids
+
+# ---------------------------------------------------------------------------
 # Step 1: Print informational summary of pending reviews
 # ---------------------------------------------------------------------------
 

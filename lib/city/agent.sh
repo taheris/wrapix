@@ -60,10 +60,15 @@ claude_run() {
   local prompt
   prompt="$(build_prompt)"
 
+  local -a claude_flags=(-p)
+  if [[ -f "${WRAPIX_SYSTEM_PROMPT_FILE:-}" ]]; then
+    claude_flags+=(--append-system-prompt-file "${WRAPIX_SYSTEM_PROMPT_FILE}")
+  fi
+
   if [[ -n "${WRAPIX_OUTPUT_FILE:-}" ]]; then
-    claude -p "$prompt" 2>&1 | tee "${WRAPIX_OUTPUT_FILE}"
+    claude "${claude_flags[@]}" "$prompt" 2>&1 | tee "${WRAPIX_OUTPUT_FILE}"
   else
-    claude -p "$prompt"
+    claude "${claude_flags[@]}" "$prompt"
   fi
 }
 

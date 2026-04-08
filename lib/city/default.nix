@@ -91,9 +91,13 @@ let
       profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
 
-      # Provider script — gc containers bypass the image entrypoint via
-      # --entrypoint "" and do their own minimal init inline.
-      providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
+      # Provider stub — a Nix store script that delegates to .gc/scripts/provider.sh.
+      # gc caches the provider path from city.toml and reverts changes, so the
+      # city.toml reference must be a stable Nix store path.  The actual logic
+      # lives in .gc/scripts/provider.sh which can be hot-updated.
+      providerScript = pkgs.writeShellScript "wrapix-provider" ''
+        exec "''${GC_WORKSPACE:-.}/.gc/scripts/provider.sh" "$@"
+      '';
 
       # Dispatch check script — cooldown-aware scale_check for workers
       dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (builtins.readFile ./dispatch.sh);
@@ -123,20 +127,30 @@ let
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
-      # City scripts — gate, post-gate, recovery, dispatch bundled for .gc/scripts/
+      # City scripts — gate, post-gate, recovery, dispatch, provider bundled for .gc/scripts/
       scriptsDir = pkgs.runCommand "wrapix-city-scripts-dir" { } ''
         mkdir -p $out
         cp ${./gate.sh} $out/gate.sh
         cp ${./post-gate.sh} $out/post-gate.sh
         cp ${./recovery.sh} $out/recovery.sh
         cp ${./dispatch.sh} $out/dispatch.sh
+        cp ${./provider.sh} $out/provider.sh
         chmod +x $out/*.sh
+      '';
+
+      # Role prompts — identity context injected via --append-system-prompt-file
+      promptsDir = pkgs.runCommand "wrapix-city-prompts-dir" { } ''
+        mkdir -p $out
+        cp ${./prompts/mayor.md} $out/mayor.md
+        cp ${./prompts/scout.md} $out/scout.md
+        cp ${./prompts/judge.md} $out/judge.md
+        cp ${./prompts/worker.md} $out/worker.md
       '';
 
       # Prefix for scale_check commands: read dolt port from the live port
       # file so bd connects to the running server.  gc injects its own
       # BEADS_DOLT_PORT from metadata.json (often stale/0) — override it.
-      bdEnv = "BEADS_DOLT_PORT=$(cat .beads/dolt-server.port 2>/dev/null) BEADS_DOLT_HOST=127.0.0.1";
+      bdEnv = "BEADS_DOLT_PORT=$(cat .beads/dolt-server.port 2>/dev/null) BEADS_DOLT_HOST=$(cat .beads/dolt-server.host 2>/dev/null || echo 127.0.0.1)";
 
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
@@ -289,9 +303,15 @@ let
         chmod -R u+w .gc/formulas/orders 2>/dev/null || true
         rm -rf .gc/formulas/orders
         cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-        # Copy scripts (gate, post-gate, recovery)
+        # Copy scripts (gate, post-gate, recovery, provider)
         for f in ${scriptsDir}/*; do
           cp -f --remove-destination "$f" .gc/scripts/
+        done
+        chmod u+w .gc/scripts/*.sh 2>/dev/null || true
+        # Copy role prompts
+        mkdir -p .gc/prompts
+        for f in ${promptsDir}/*; do
+          cp -f --remove-destination "$f" .gc/prompts/
         done
 
         # Ensure podman network exists (NixOS module creates via systemd)
@@ -372,9 +392,10 @@ let
           export GC_DOLT=skip
           if [ -d .beads ] && [ -f .beads/dolt-server.port ]; then
             _dolt_port="$(cat .beads/dolt-server.port)"
-            export GC_DOLT_HOST=127.0.0.1
+            _dolt_host="$(cat .beads/dolt-server.host 2>/dev/null || echo 127.0.0.1)"
+            export GC_DOLT_HOST="$_dolt_host"
             export GC_DOLT_PORT="$_dolt_port"
-            export BEADS_DOLT_HOST=127.0.0.1
+            export BEADS_DOLT_HOST="$_dolt_host"
             export BEADS_DOLT_PORT="$_dolt_port"
           fi
 
@@ -394,6 +415,12 @@ let
           cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
           for f in ${scriptsDir}/*; do
             cp -f --remove-destination "$f" .gc/scripts/
+          done
+          chmod u+w .gc/scripts/*.sh 2>/dev/null || true
+          # Copy role prompts
+          mkdir -p .gc/prompts
+          for f in ${promptsDir}/*; do
+            cp -f --remove-destination "$f" .gc/prompts/
           done
 
           # Ensure the podman network exists (NixOS module creates it via
@@ -444,6 +471,9 @@ let
 
       # City scripts (gate, post-gate, recovery) for .gc/scripts/
       scripts = scriptsDir;
+
+      # Role prompts for .gc/prompts/
+      prompts = promptsDir;
 
       # Individual formula paths for selective override
       inherit defaultFormulas;

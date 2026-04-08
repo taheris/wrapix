@@ -57,7 +57,7 @@ let
   };
 
   # Live outputs — no duplication
-  inherit (liveCity) scripts formulas;
+  inherit (liveCity) scripts formulas prompts;
 
   toTOML = import ../../lib/util/toml.nix { inherit lib; };
 
@@ -447,6 +447,8 @@ let
       for f in ${formulas}/*.formula.toml; do cp -f "$f" .gc/formulas/; done
       cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
       for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
+      mkdir -p .gc/prompts
+      for f in ${prompts}/*; do cp -f "$f" .gc/prompts/; done
 
       printf "## Scout Rules\nimmediate: FATAL|PANIC\nbatched: ERROR\n## Auto-deploy\nLow-risk: docs only\n" > docs/orchestration.md
       printf "# Style Guidelines\nSH-1: Use set -euo pipefail\n" > docs/style-guidelines.md

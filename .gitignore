@@ -12,7 +12,7 @@ target/
 formulas/
 hooks/
 orders/
-prompts/
+/prompts/
 
 # Gas City pack symlinks (gc start creates these in scripts/)
 scripts/cross-rig-deps.sh
