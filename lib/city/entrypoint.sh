@@ -31,12 +31,17 @@ start_dolt_container() {
   local city_dolt="${GC_WORKSPACE}/.gc/dolt"
   [[ -d "$beads_dir/dolt" ]] || return 0
 
-  # If the dolt container is already running, use it
+  # If the dolt container is already running, verify the port is actually responding.
+  # A container can report Running=true while dolt inside has crashed.
   if podman inspect --format '{{.State.Running}}' "$DOLT_CONTAINER" 2>/dev/null | grep -q true; then
-    echo "Dolt container already running (${DOLT_CONTAINER}:${DOLT_PORT})"
-    export BEADS_DOLT_SERVER_HOST="127.0.0.1"
-    export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
-    return 0
+    if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
+      echo "Dolt container already running (${DOLT_CONTAINER}:${DOLT_PORT})"
+      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
+      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+      return 0
+    fi
+    echo "Dolt container exists but port ${DOLT_PORT} not responding — restarting..."
+    podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
   fi
 
   # Initialize city dolt from host on first start (one-time copy).
@@ -98,9 +103,10 @@ start_dolt_container() {
 
 start_dolt_container
 
-# Pin the workspace port file so host-side bd commands (run from the
-# workspace, not gc home) connect to the city dolt container.
-echo "$DOLT_PORT" > "${GC_WORKSPACE}/.beads/dolt-server.port"
+# NOTE: Do NOT write dolt-server.port to the host's .beads/ — that
+# hijacks host-side bd to the city container, which can't pull/push
+# (the file remote isn't mounted). gc home has its own port file
+# via stage-gc-home.sh; host bd uses its own auto-started dolt.
 
 # ---------------------------------------------------------------------------
 # Step 1: Print informational summary of pending reviews
@@ -166,8 +172,24 @@ start_events_watcher
 # ---------------------------------------------------------------------------
 
 # City dolt is managed by the container started in step 0.
-# GC_DOLT=skip prevents gc's embedded dolt pack from starting a duplicate
-# and from writing dolt.auto-start / dolt-server.port to .beads/.
+# GC_DOLT=skip prevents gc's embedded dolt pack from starting a duplicate.
+# gc home isolates gc from the host's .beads/ — gc writes dolt.auto-start
+# and dolt-server.port to .gc/home/.beads/ instead of corrupting the host.
 export GC_DOLT=skip
-cd "${GC_WORKSPACE}"
-exec gc start --foreground
+GC_CITY="$("${SCRIPT_DIR}/stage-gc-home.sh")"
+export GC_CITY
+cd "$GC_CITY"
+
+# Run gc in background + wait so the shell stays alive for the trap.
+# On exit (signal or natural), forward SIGTERM to gc and stop dolt.
+_gc_cleanup() {
+  [ -n "${_GC_PID:-}" ] && kill -TERM "$_GC_PID" 2>/dev/null || true
+  [ -n "${_GC_PID:-}" ] && wait "$_GC_PID" 2>/dev/null || true
+  podman stop -t 5 "$DOLT_CONTAINER" 2>/dev/null || true
+  podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+}
+trap _gc_cleanup EXIT INT TERM
+
+gc start --foreground &
+_GC_PID=$!
+wait "$_GC_PID"

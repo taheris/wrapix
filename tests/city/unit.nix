@@ -1683,6 +1683,15 @@ in
         MOCK
                 chmod +x "$TMPDIR/recovery.sh"
 
+                # stage-gc-home.sh: return a temp gc home dir
+                GC_HOME="$TMPDIR/gc-home"
+                mkdir -p "$GC_HOME"
+                cat > "$TMPDIR/stage-gc-home.sh" << MOCK
+                #!/bin/sh
+                echo "$GC_HOME"
+        MOCK
+                chmod +x "$TMPDIR/stage-gc-home.sh"
+
                 # podman: no-op (events watcher will background and be harmless)
                 cat > "$MOCK_BIN/podman" << 'MOCK'
                 #!/bin/sh
@@ -1709,6 +1718,7 @@ in
 
                 export GC_CITY_NAME=test-city
                 export GC_WORKSPACE=/tmp/ws
+                mkdir -p /tmp/ws/.beads
                 export GC_PODMAN_NETWORK=test-net
                 export PATH="$MOCK_BIN:$PATH"
 
@@ -1765,7 +1775,7 @@ in
                 }
                 echo "  PASS: no beads, no review output, gc starts"
 
-                rm -rf "$TMPDIR" /tmp/gc_actions
+                rm -rf "$TMPDIR" /tmp/gc_actions /tmp/ws
                 echo ""
                 echo "PASS: entrypoint prints informational status without blocking"
                 mkdir $out

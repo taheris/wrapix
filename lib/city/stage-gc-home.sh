@@ -28,7 +28,9 @@ DOLT_PORT="${GC_DOLT_PORT:-3306}"
 
 GC_HOME="${GC_WORKSPACE}/.gc/home"
 rm -rf "$GC_HOME"
-mkdir -p "$GC_HOME/.beads" "$GC_HOME/.gc"
+mkdir -p "$GC_HOME/.gc"
+mkdir -p "$GC_HOME/.beads"
+chmod 700 "$GC_HOME/.beads"
 
 # Copy beads config files
 for f in config.yaml metadata.json issues.jsonl; do

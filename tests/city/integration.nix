@@ -313,6 +313,18 @@ let
     echo "=== Gas City Integration Test ==="
 
     # ================================================================
+    # Pre-cleanup: remove stale state from previous runs
+    # ================================================================
+
+    podman stop -t 3 "$DOLT_CONTAINER" 2>/dev/null || true
+    podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+    podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+    podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+    podman network rm "$TEST_NETWORK" 2>/dev/null || true
+    # Kill any stale dolt on the test port
+    fuser -k "$DOLT_PORT/tcp" 2>/dev/null || true
+
+    # ================================================================
     # Setup: workspace, config, image
     # ================================================================
 
@@ -463,9 +475,12 @@ let
 
     sling_bead() {
       [ -n "$BEAD_ID" ] && [ "$BEAD_ID" != "null" ] || return 1
-      gc sling worker "$BEAD_ID" --on wrapix-worker
+      # Use the gc home already staged by the entrypoint.
+      # Do NOT re-run stage-gc-home.sh here — it rm -rf's the directory,
+      # which destroys gc's cwd (the running daemon holds the old inode).
+      GC_CITY="$WS/.gc/home" gc sling worker "$BEAD_ID" --on wrapix-worker
     }
-    subtest "Director slings bead into convergence" sling_bead
+    subtest "Director slings bead into convergence (from gc home)" sling_bead
 
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
