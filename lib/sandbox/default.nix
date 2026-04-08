@@ -86,6 +86,7 @@ let
       profile,
       entrypointSh,
       krunSupport ? false,
+      claudePkg ? linuxPkgs.claude-code,
       claudeSettings ? baseClaudeSettings,
       mcpServerConfigs ? { },
     }:
@@ -99,7 +100,7 @@ let
         claudeSettings
         mcpServerConfigs
         ;
-      entrypointPkg = linuxPkgs.claude-code;
+      entrypointPkg = claudePkg;
     };
 
   # Merge extra packages/mounts/env/networkAllowlist into a profile
@@ -263,5 +264,5 @@ let
 
 in
 {
-  inherit mkSandbox profiles;
+  inherit mkSandbox mkImage profiles;
 }

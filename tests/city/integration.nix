@@ -149,40 +149,17 @@ let
     )
   );
 
-  # Packages included in the test container:
-  # - Base profile: all standard dev tools (bash, git, dolt, beads, gc, jq, ...)
-  # - liveCity.packages: wrapix-agent, ralph scripts (live city code)
-  # - tmux: required by provider.sh persistent sessions (not in base profile)
-  # - mockClaude: the only test-specific binary
-  testImagePkgs =
-    sandbox.profiles.base.packages
-    ++ liveCity.packages
-    ++ [
-      pkgs.tmux
-      mockClaude
-    ];
+  # Test image: real sandbox image with mock claude replacing claude-code.
+  # Uses the shared mkImage so entrypoint, /etc/wrapix/ config, and image
+  # structure are identical to production — only the LLM binary differs.
+  testProfile = sandbox.profiles.base // {
+    packages = (sandbox.profiles.base.packages or [ ]) ++ liveCity.packages;
+  };
 
-  # Test container image with mock claude (streamed for fast loading)
-  testImageStream = pkgs.dockerTools.streamLayeredImage {
-    name = "wrapix-test";
-    tag = "latest";
-    maxLayers = 50;
-
-    contents = testImagePkgs;
-
-    config = {
-      Env = [
-        "PATH=${lib.makeBinPath testImagePkgs}:/bin:/usr/bin"
-        "HOME=/home/wrapix"
-      ];
-    };
-
-    # /usr/bin/env needed for live script shebangs (#!/usr/bin/env bash)
-    fakeRootCommands = ''
-      mkdir -p ./usr/bin ./home/wrapix ./tmp
-      chmod 777 ./home/wrapix ./tmp
-      ln -s ${pkgs.coreutils}/bin/env ./usr/bin/env
-    '';
+  testImage = sandbox.mkImage {
+    profile = testProfile;
+    entrypointSh = ../../lib/sandbox/linux/entrypoint.sh;
+    claudePkg = mockClaude;
   };
 
   # Runtime dependencies for the test script (host-side)
@@ -264,7 +241,7 @@ let
       podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
       podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       podman network rm "$TEST_NETWORK" 2>/dev/null || true
-      podman rmi wrapix-test:latest 2>/dev/null || true
+      podman rmi wrapix-base:latest 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
       fi
@@ -344,7 +321,7 @@ let
     # ================================================================
 
     subtest "Load test container image" \
-      sh -c '${testImageStream} | podman load'
+      sh -c '${testImage} | podman load'
 
     WS=$(mktemp -d -t citytest-XXXXXX)
     echo "  > workspace: $WS"
@@ -449,7 +426,7 @@ let
     start_gc() {
       export GC_CITY_NAME=test-city
       export GC_WORKSPACE="$WS"
-      export GC_AGENT_IMAGE=localhost/wrapix-test:latest
+      export GC_AGENT_IMAGE=localhost/wrapix-base:latest
       export GC_PODMAN_NETWORK="$TEST_NETWORK"
       export GC_WRAPIX_PROMPT="${../../lib/sandbox/prompt.txt}"
       export GC_SECRET_FLAGS="-e GC_DOLT=skip"

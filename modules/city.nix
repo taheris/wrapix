@@ -282,11 +282,11 @@ let
       loadImages = pkgs.writeShellScript "load-images-${name}" (
         ''
           set -euo pipefail
-          ${pkgs.podman}/bin/podman load < ${city.sandbox.package}
+          ${city.sandbox.image} | ${pkgs.podman}/bin/podman load
         ''
         + builtins.concatStringsSep "" (
           mapAttrsToList (svcName: _svc: ''
-            ${pkgs.podman}/bin/podman load < ${city.serviceImages.${svcName}}
+            ${city.serviceImages.${svcName}} | ${pkgs.podman}/bin/podman load
           '') cityCfg.services
         )
       );

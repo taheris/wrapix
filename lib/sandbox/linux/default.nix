@@ -234,7 +234,7 @@ in
         fi
         if [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
           verbose "Loading image from ${profileImage}..."
-          IMAGE_ID=$(podman load -q -i ${profileImage} | sed 's/Loaded image: //')
+          IMAGE_ID=$(${profileImage} | podman load -q | sed 's/Loaded image: //')
           echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
           verbose "Loaded image $IMAGE_ID"
         fi

@@ -77,14 +77,15 @@ if [[ ! -d "${PACKAGE_PATH}" ]]; then
     exit 1
 fi
 
-# Extract the image tarball path from the wrapper script
-IMAGE_PATH=$(grep -oP '(?<=podman load -q -i )\S+' "${PACKAGE_PATH}/bin/wrapix") || {
-    log_error "Could not find image path in wrapper script"
+# Extract the image stream path from the wrapper script
+# The launcher pipes the stream script to podman: /nix/store/xxx | podman load -q
+IMAGE_PATH=$(grep -oP '/nix/store/\S+(?= \| podman load)' "${PACKAGE_PATH}/bin/wrapix" | head -1) || {
+    log_error "Could not find image stream path in wrapper script"
     exit 1
 }
 
-if [[ ! -f "${IMAGE_PATH}" ]]; then
-    log_error "Image tarball not found at ${IMAGE_PATH}"
+if [[ ! -e "${IMAGE_PATH}" ]]; then
+    log_error "Image stream not found at ${IMAGE_PATH}"
     exit 1
 fi
 

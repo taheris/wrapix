@@ -96,7 +96,7 @@ let
     ];
   };
 in
-pkgs.dockerTools.buildLayeredImage {
+pkgs.dockerTools.streamLayeredImage {
   name = "wrapix-${profile.name}";
   tag = "latest";
   maxLayers = 100;

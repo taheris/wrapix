@@ -59,9 +59,9 @@ in
       ''
     else
       runCommandLocal "smoke-image-builds" { } ''
-        echo "Checking base image..."
-        test -f ${baseImage}
-        tar -tf ${baseImage} >/dev/null
+        echo "Checking base image stream..."
+        test -x ${baseImage}
+        ${baseImage} | tar -tf - >/dev/null
 
         echo "Image built successfully"
         mkdir $out

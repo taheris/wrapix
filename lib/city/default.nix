@@ -36,7 +36,7 @@ let
 
       envList = mapAttrsToList (k: v: "${k}=${v}") environment;
     in
-    linuxPkgs.dockerTools.buildLayeredImage {
+    linuxPkgs.dockerTools.streamLayeredImage {
       name = "wrapix-svc-${name}";
       tag = "latest";
       maxLayers = 50;
@@ -81,8 +81,13 @@ let
       # Build service container images
       serviceImages = mapAttrs mkServiceImage services;
 
-      # One sandbox shared by ad-hoc container, ralph, and gc agents
-      agentSandbox = if sandbox != null then sandbox else mkSandbox { inherit profile; };
+      # One sandbox shared by ad-hoc container, ralph, and gc agents.
+      # Include city scripts (wrapix-agent, beads-push) in the profile so
+      # they're available inside agent containers (worker runs wrapix-agent).
+      cityProfile = profile // {
+        packages = (profile.packages or [ ]) ++ [ cityScripts ];
+      };
+      agentSandbox = if sandbox != null then sandbox else mkSandbox { profile = cityProfile; };
 
       # Ralph wired to the same sandbox
       ralphInstance = mkRalph { sandbox = agentSandbox; };
@@ -90,6 +95,22 @@ let
       imageName = "wrapix-${agentSandbox.profile.name}:latest";
       profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
+
+      # Shared image loading snippet — used by both shellHook and app
+      loadImageSnippet = ''
+        XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
+        _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
+        mkdir -p "$XDG_CACHE_HOME/wrapix/images"
+        if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
+          echo "Loading sandbox image..."
+          ${profileImage} | podman load -q >/dev/null
+          echo "${profileImage}" > "$_img_version"
+        elif ! podman image exists "${imageName}" 2>/dev/null; then
+          echo "Reloading sandbox image (missing from podman store)..."
+          ${profileImage} | podman load -q >/dev/null
+          echo "${profileImage}" > "$_img_version"
+        fi
+      '';
 
       # Provider path — references the live script in .gc/scripts/, which the
       # shellHook and app copy from the Nix store on every entry/run.
@@ -275,19 +296,7 @@ let
         export GC_COOLDOWN="${cooldown}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
-        # Ensure sandbox image is loaded (reload when Nix store path changes)
-        XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
-        _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
-        mkdir -p "$XDG_CACHE_HOME/wrapix/images"
-        if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
-          echo "Loading sandbox image..."
-          podman load -q -i ${profileImage} >/dev/null
-          echo "${profileImage}" > "$_img_version"
-        elif ! podman image exists "${imageName}" 2>/dev/null; then
-          echo "Reloading sandbox image (missing from podman store)..."
-          podman load -q -i ${profileImage} >/dev/null
-          echo "${profileImage}" > "$_img_version"
-        fi
+        ${loadImageSnippet}
 
         # Copy Nix-generated config so gc finds it
         # (files must be real, not store symlinks, for container mounts)
@@ -366,19 +375,7 @@ let
           export GC_PODMAN_NETWORK="${networkName}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
-          # Ensure sandbox image is loaded (reload when Nix store path changes)
-          XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
-          _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
-          mkdir -p "$XDG_CACHE_HOME/wrapix/images"
-          if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
-            echo "Loading sandbox image..."
-            podman load -q -i ${profileImage} >/dev/null
-            echo "${profileImage}" > "$_img_version"
-          elif ! podman image exists "${imageName}" 2>/dev/null; then
-            echo "Reloading sandbox image (missing from podman store)..."
-            podman load -q -i ${profileImage} >/dev/null
-            echo "${profileImage}" > "$_img_version"
-          fi
+          ${loadImageSnippet}
 
           cp -f --remove-destination ${cityToml} city.toml
 

@@ -59,7 +59,7 @@ in
       machine.wait_for_unit("multi-user.target")
 
       # Load the test image
-      machine.succeed("podman load < ${testImage}")
+      machine.succeed("${testImage} | podman load")
 
       # Create a test workspace directory
       machine.succeed("mkdir -p /tmp/workspace && chown testuser:users /tmp/workspace")
@@ -103,7 +103,7 @@ in
       machine.wait_for_unit("multi-user.target")
 
       # Load the test image
-      machine.succeed("podman load < ${testImage}")
+      machine.succeed("${testImage} | podman load")
 
       # Create test workspace
       machine.succeed("mkdir -p /tmp/workspace && chown testuser:users /tmp/workspace")
@@ -164,7 +164,7 @@ in
       machine.wait_for_unit("multi-user.target")
 
       # Load the test image
-      machine.succeed("podman load < ${testImage}")
+      machine.succeed("${testImage} | podman load")
 
       # Create test workspace owned by testuser
       machine.succeed("mkdir -p /tmp/workspace && chown testuser:users /tmp/workspace")

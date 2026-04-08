@@ -216,7 +216,7 @@ let
 
               # Load the debug profile image
               print("Loading debug profile image...")
-              machine.succeed("podman load < ${debugImage}")
+              machine.succeed("${debugImage} | podman load")
 
               # Verify tmux is present in the container
               print("Verifying tmux is present...")

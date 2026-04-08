@@ -62,6 +62,7 @@ start_dolt_container() {
   echo "Starting dolt container on ${GC_PODMAN_NETWORK}..."
   podman run -d \
     --name "$DOLT_CONTAINER" \
+    --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
     --userns=keep-id \
     -p "127.0.0.1:${DOLT_PORT}:${DOLT_PORT}" \

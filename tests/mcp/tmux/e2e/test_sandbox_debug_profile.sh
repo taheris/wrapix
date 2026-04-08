@@ -77,15 +77,15 @@ if ! nix build "${REPO_ROOT}#wrapix-mcp" --out-link "${IMAGE_FILE%.tar}" 2>&1; t
     exit 1
 fi
 
-# The nix build creates a result symlink; get the actual image path
-IMAGE_PATH=$(readlink -f "${IMAGE_FILE%.tar}")
-if [[ ! -f "${IMAGE_PATH}" ]]; then
-    log_error "Built image not found at ${IMAGE_PATH}"
+# The nix build creates a result symlink to a stream script
+IMAGE_STREAM=$(readlink -f "${IMAGE_FILE%.tar}")
+if [[ ! -x "${IMAGE_STREAM}" ]]; then
+    log_error "Built image stream not found at ${IMAGE_STREAM}"
     exit 1
 fi
 
 log_info "Loading image into podman..."
-IMAGE_NAME=$(podman load < "${IMAGE_PATH}" | grep -oP 'Loaded image: \K.*')
+IMAGE_NAME=$("${IMAGE_STREAM}" | podman load | grep -oP 'Loaded image: \K.*')
 if [[ -z "${IMAGE_NAME}" ]]; then
     log_error "Failed to load image into podman"
     exit 1

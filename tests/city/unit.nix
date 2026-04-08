@@ -211,7 +211,7 @@ in
   city-service-images =
     let
       apiImage = minimalCity.serviceImages.api;
-      imageName = apiImage.name;
+      inherit (apiImage) imageName;
       nameCorrect = builtins.substring 0 14 imageName == "wrapix-svc-api";
 
       # Full city has multiple service images
@@ -222,11 +222,11 @@ in
     assert fullHasApi;
     assert fullHasDb;
     runCommandLocal "city-service-images" { } ''
-      echo "Checking service image is a valid tar archive..."
-      test -f ${apiImage}
-      tar -tf ${apiImage} >/dev/null
-      echo "PASS: Service images build via dockerTools.buildLayeredImage"
-      echo "  - wrapix-svc-api image is a valid tar"
+      echo "Checking service image stream..."
+      test -x ${apiImage}
+      ${apiImage} | tar -tf - >/dev/null
+      echo "PASS: Service images build via dockerTools.streamLayeredImage"
+      echo "  - wrapix-svc-api image streams valid tar"
       echo "  - Multiple services supported"
       mkdir $out
     '';
