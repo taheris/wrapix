@@ -100,14 +100,17 @@ persistent_start() {
     ws_mode="ro"
   fi
 
-  # Nix-substituted path to system prompt (mounted by mkSandbox normally)
-  WRAPIX_PROMPT="${GC_WRAPIX_PROMPT:?provider requires GC_WRAPIX_PROMPT}"
+  # Read host dolt port so bd inside the container connects to the host server
+  local dolt_port
+  dolt_port="$(cat "${GC_WORKSPACE}/.beads/dolt-server.port" 2>/dev/null || echo "")"
 
   # shellcheck disable=SC2046
   podman run -d \
     --replace \
     --name "$name" \
+    --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --add-host=host.containers.internal:host-gateway \
     --userns=keep-id \
     --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
     --mount type=tmpfs,destination=/home/wrapix,U=true \
@@ -119,15 +122,22 @@ persistent_start() {
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
     -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
-    -v "${WRAPIX_PROMPT}:/etc/wrapix-prompt:ro" \
     ${GC_SECRET_FLAGS:-} \
-    -e "HOME=/home/wrapix" \
-    -e "GC_ROLE=${SESSION}" \
-    -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    -e "BEADS_DOLT_HOST=host.containers.internal" \
+    -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-    -e "TERM=xterm" \
+    -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    -e "GC_ROLE=${SESSION}" \
+    -e "HOME=/home/wrapix" \
+    -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
-    bash -c 'tmux new-session -d -s main "claude --dangerously-skip-permissions" && exec tmux wait-for gc-shutdown'
+    bash -c '
+      mkdir -p "$HOME/.claude"
+      cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
+      cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
+      tmux new-session -d -s main "claude --dangerously-skip-permissions"
+      exec tmux wait-for gc-shutdown
+    '
 }
 
 persistent_exec() {
@@ -197,14 +207,17 @@ worker_start() {
   mkdir -p "$state_dir"
   date +%s > "$state_dir/last-dispatch"
 
-  # Nix-substituted path to system prompt
-  WRAPIX_PROMPT="${GC_WRAPIX_PROMPT:?provider requires GC_WRAPIX_PROMPT}"
+  # Read host dolt port so bd inside the container connects to the host server
+  local dolt_port
+  dolt_port="$(cat "${GC_WORKSPACE}/.beads/dolt-server.port" 2>/dev/null || echo "")"
 
   # shellcheck disable=SC2046
   podman run -d \
     --replace \
     --name "$name" \
+    --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
+    --add-host=host.containers.internal:host-gateway \
     --userns=keep-id \
     --passwd-entry "wrapix:*:$(id -u):$(id -g)::/home/wrapix:/bin/bash" \
     --mount type=tmpfs,destination=/home/wrapix,U=true \
@@ -216,13 +229,14 @@ worker_start() {
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
     -v "${GC_WORKSPACE}/.beads:/workspace/.beads:ro" \
     -v "${task_file}:/workspace/.task:ro" \
-    -v "${WRAPIX_PROMPT}:/etc/wrapix-prompt:ro" \
     ${GC_SECRET_FLAGS:-} \
-    -e "HOME=/home/wrapix" \
-    -e "GC_ROLE=worker" \
+    -e "BEADS_DOLT_HOST=host.containers.internal" \
+    -e "BEADS_DOLT_PORT=${dolt_port:-3307}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
-    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+    -e "GC_ROLE=worker" \
+    -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run

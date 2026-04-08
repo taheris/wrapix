@@ -91,10 +91,8 @@ let
       profileImage = agentSandbox.image;
       networkName = "wrapix-${name}";
 
-      # Prompt file for sandbox entrypoint (same as mkSandbox mounts)
-      prompt = pkgs.writeText "wrapix-prompt" (builtins.readFile ../sandbox/prompt.txt);
-
-      # Provider script — reads GC_WRAPIX_PROMPT from env (set by app/shellHook)
+      # Provider script — gc containers bypass the image entrypoint via
+      # --entrypoint "" and do their own minimal init inline.
       providerScript = pkgs.writeShellScript "wrapix-provider" (builtins.readFile ./provider.sh);
 
       # Dispatch check script — cooldown-aware scale_check for workers
@@ -264,7 +262,6 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
-        export GC_WRAPIX_PROMPT="${prompt}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
         # Ensure sandbox image is loaded (reload when Nix store path changes)
@@ -350,7 +347,6 @@ let
           export GC_WORKSPACE="$(pwd)"
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
-          export GC_WRAPIX_PROMPT="${prompt}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
           # Ensure sandbox image is loaded (reload when Nix store path changes)

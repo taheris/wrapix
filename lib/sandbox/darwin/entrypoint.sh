@@ -228,6 +228,9 @@ if [ -f /workspace/.beads/config.yaml ]; then
       mkdir -p /workspace/.beads/dolt
       if [ -d "$DOLT_REMOTE" ]; then
         dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone failed" >&2
+      else
+        echo "Error: dolt-remote not found at $DOLT_REMOTE" >&2
+        echo "Run 'mkdir -p $DOLT_REMOTE && cd .beads/dolt/$DOLT_DB_NAME && dolt push origin main' on the host to initialize it." >&2
       fi
     fi
 
@@ -246,18 +249,6 @@ if [ -f /workspace/.beads/config.yaml ]; then
   fi
 
   git checkout -- .beads/.gitignore AGENTS.md 2>/dev/null || true
-fi
-
-# Build system prompt with optional context pinning
-SYSTEM_PROMPT=$(cat /etc/wrapix-prompts/wrapix-prompt)
-
-# Context pinning: append specs/README.md if it exists
-if [ -f /workspace/specs/README.md ]; then
-  SYSTEM_PROMPT="$SYSTEM_PROMPT
-
-## Project Context (from specs/README.md)
-
-$(cat /workspace/specs/README.md)"
 fi
 
 # Apply network filtering when WRAPIX_NETWORK=limit
@@ -378,6 +369,16 @@ elif [ "${RALPH_MODE:-}" = "1" ]; then
   unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
     ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-} || MAIN_EXIT=$?
 else
+  # Build system prompt only for interactive claude (not needed for command
+  # overrides or ralph mode).  Requires /etc/wrapix-prompts/wrapix-prompt.
+  SYSTEM_PROMPT=$(cat /etc/wrapix-prompts/wrapix-prompt)
+  if [ -f /workspace/specs/README.md ]; then
+    SYSTEM_PROMPT="$SYSTEM_PROMPT
+
+## Project Context (from specs/README.md)
+
+$(cat /workspace/specs/README.md)"
+  fi
   unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
     claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT" || MAIN_EXIT=$?
 fi

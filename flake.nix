@@ -65,15 +65,11 @@
             beadsFor =
               pkgs':
               (pkgs'.callPackage "${inputs.beads}/default.nix" {
-                pkgs = pkgs';
                 self = inputs.beads;
-                buildGoModule = pkgs'.buildGo126Module;
               }).overrideAttrs
                 (old: {
-                  nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs'.pkg-config ];
-                  buildInputs = (old.buildInputs or [ ]) ++ [ pkgs'.icu ];
                   goModules = old.goModules.overrideAttrs {
-                    outputHash = "sha256-7DJgqJX2HDa9gcGD8fLNHLIXvGAEivYeDYx3snCUyCE=";
+                    outputHash = "sha256-UCODmlavmZc2/4ltA2g71UvjjNLxEG+g82IFUjNtpdI=";
                   };
                 });
 

@@ -104,12 +104,7 @@ for item in projects plans todos file-history paste-cache backups \
 done
 
 # Initialize container-local beads database
-# Skip when running as a Gas City agent — gc containers share the host's
-# dolt server via the port in metadata.json.  Starting dolt inside gc
-# containers causes concurrent writes to the same noms store, corrupting it.
-if [ -n "${GC_ROLE:-}" ]; then
-  : # gc agent — skip dolt init entirely
-elif [ -f /workspace/.beads/config.yaml ]; then
+if [ -f /workspace/.beads/config.yaml ]; then
   PREFIX=$(yq -r '.["issue-prefix"] // ""' /workspace/.beads/config.yaml 2>/dev/null || echo "")
   BACKEND=$(jq -r '.backend // "sqlite"' /workspace/.beads/metadata.json 2>/dev/null || echo "sqlite")
 
@@ -153,18 +148,6 @@ elif [ -f /workspace/.beads/config.yaml ]; then
   fi
 
   git checkout -- .beads/.gitignore AGENTS.md 2>/dev/null || true
-fi
-
-# Build system prompt with optional context pinning
-SYSTEM_PROMPT=$(cat /etc/wrapix-prompt)
-
-# Context pinning: append specs/README.md if it exists
-if [ -f /workspace/specs/README.md ]; then
-  SYSTEM_PROMPT="$SYSTEM_PROMPT
-
-## Project Context (from specs/README.md)
-
-$(cat /workspace/specs/README.md)"
 fi
 
 # Apply network filtering when WRAPIX_NETWORK=limit
@@ -282,6 +265,16 @@ elif [ "${RALPH_MODE:-}" = "1" ]; then
   # shellcheck disable=SC2086 # Intentional word splitting for RALPH_ARGS
   ralph "${RALPH_CMD:-help}" ${RALPH_ARGS:-} || MAIN_EXIT=$?
 else
+  # Build system prompt only for interactive claude (not needed for command
+  # overrides or ralph mode).  Requires /etc/wrapix-prompt to be mounted.
+  SYSTEM_PROMPT=$(cat /etc/wrapix-prompt)
+  if [ -f /workspace/specs/README.md ]; then
+    SYSTEM_PROMPT="$SYSTEM_PROMPT
+
+## Project Context (from specs/README.md)
+
+$(cat /workspace/specs/README.md)"
+  fi
   claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT" || MAIN_EXIT=$?
 fi
 

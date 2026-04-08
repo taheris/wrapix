@@ -7,10 +7,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1775194149,
-        "narHash": "sha256-D2jShGpkOWKx9aRmRvV5bmV8t0/Y2eAE8q0m54QrRN0=",
+        "lastModified": 1775619690,
+        "narHash": "sha256-O1GuogEtQ3Zq5tc9j7YQ+VKT/ik/tvSZJv36FxrmZGg=",
         "ref": "main",
-        "rev": "72170267e00a96ec888f68a3279ddf0173b7adc7",
+        "rev": "afbfcbe81da47ca391bf0f1d641136a096562106",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
@@ -47,10 +47,10 @@
     "gascity": {
       "flake": false,
       "locked": {
-        "lastModified": 1775205468,
-        "narHash": "sha256-AQ5MAB7t3No84JV+Z+tuC8sNha993dMkvZQPpurW4pk=",
+        "lastModified": 1775626914,
+        "narHash": "sha256-Y50z4da5vpHT8lfz6+HSao2HAvYuiSt219t13hXa9rs=",
         "ref": "main",
-        "rev": "cdb46e9b4e0ccf9cd15a3d90371fbea585204095",
+        "rev": "00a8c4239f531cd111fcfa6b5490e15305504e02",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/gastownhall/gascity.git"
@@ -64,10 +64,10 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1774709303,
-        "narHash": "sha256-D3Q07BbIA2KnTcSXIqqu9P586uWxN74zNoCH3h2ESHg=",
+        "lastModified": 1775423009,
+        "narHash": "sha256-vPKLpjhIVWdDrfiUM8atW6YkIggCEKdSAlJPzzhkQlw=",
         "ref": "nixos-unstable",
-        "rev": "8110df5ad7abf5d4c0f6fb0f8f978390e77f9685",
+        "rev": "68d8aa3d661f0e6bd5862291b5bb263b2a6595c9",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/NixOS/nixpkgs.git"
@@ -96,10 +96,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1775185947,
-        "narHash": "sha256-8ctPmj6RME4q4ELeg+BuY9lV/34M4AG1CNc0Im9PDDk=",
+        "lastModified": 1775617983,
+        "narHash": "sha256-2NWGA/I4j/qlx6qbg86QvJiK1/GyH9gnf0hFiARWVwE=",
         "ref": "master",
-        "rev": "199eeb6748116f7da4fbd3a680bc854e99d9132b",
+        "rev": "d98b91b1feae7ef07fa2ccb3aa3f83f11abfae54",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/oxalica/rust-overlay.git"
@@ -118,10 +118,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1775125835,
-        "narHash": "sha256-2qYcPgzFhnQWchHo0SlqLHrXpux5i6ay6UHA+v2iH4U=",
+        "lastModified": 1775636079,
+        "narHash": "sha256-pc20NRoMdiar8oPQceQT47UUZMBTiMdUuWrYu2obUP0=",
         "ref": "main",
-        "rev": "75925962939880974e3ab417879daffcba36c4a3",
+        "rev": "790751ff7fd3801feeaf96d7dc416a8d581265ba",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/numtide/treefmt-nix.git"

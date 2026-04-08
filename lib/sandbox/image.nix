@@ -165,6 +165,7 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     Env = [
       # GIT_AUTHOR_*/GIT_COMMITTER_* set at runtime by launcher (from host git config)
+      "LANG=C.UTF-8"
       "PATH=${profileEnv}/bin:/bin:/usr/bin"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
       "XDG_CACHE_HOME=/var/cache"
