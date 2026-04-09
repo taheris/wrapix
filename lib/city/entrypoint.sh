@@ -80,6 +80,7 @@ start_dolt_container() {
     --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
     --userns=keep-id \
+    -e HOME=/doltdb \
     -p "127.0.0.1:${DOLT_PORT}:${DOLT_PORT}" \
     -v "${city_dolt}:/doltdb:rw" \
     "${GC_AGENT_IMAGE:?}" \

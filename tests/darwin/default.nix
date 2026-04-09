@@ -2,11 +2,10 @@
 # Use with: nix run .#test-darwin
 {
   pkgs,
-  system,
 }:
 
 let
-  isDarwin = system == "aarch64-darwin";
+  inherit (pkgs.stdenv) isDarwin;
 
   # Use Linux packages for building the container image (requires remote builder on Darwin)
   linuxPkgs =

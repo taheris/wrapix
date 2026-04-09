@@ -9,13 +9,12 @@
 #   container system start    # Start container system first
 {
   pkgs,
-  system,
 }:
 
 let
   inherit (pkgs) runCommandLocal;
 
-  isDarwin = system == "aarch64-darwin";
+  inherit (pkgs.stdenv) isDarwin;
 
   # Use Linux packages for image building (requires remote builder on Darwin)
   linuxPkgs =

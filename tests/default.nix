@@ -2,6 +2,7 @@
 {
   pkgs,
   system,
+  linuxPkgs,
   src,
 }:
 
@@ -33,13 +34,13 @@ let
   shellTests = import ./sandbox/shell.nix { inherit pkgs; };
 
   # Darwin mount tests run on all platforms (test logic, not VM)
-  darwinMountTests = import ./darwin/mounts.nix { inherit pkgs system; };
+  darwinMountTests = import ./darwin/mounts.nix { inherit pkgs; };
 
   # Darwin network tests run on all platforms (test logic, not VM)
-  darwinNetworkTests = import ./darwin/network.nix { inherit pkgs system; };
+  darwinNetworkTests = import ./darwin/network.nix { inherit pkgs; };
 
   # Darwin UID mapping tests (verify unshare-based VirtioFS ownership fix)
-  darwinUidTests = import ./darwin/uid.nix { inherit pkgs system; };
+  darwinUidTests = import ./darwin/uid.nix { inherit pkgs; };
 
   # Ralph utility function tests run on all platforms
   ralphTests = import ./ralph { inherit pkgs; };
@@ -67,7 +68,7 @@ let
   cityTests = import ./city/unit.nix { inherit pkgs system; };
 
   # Gas City integration test (shell-based, requires podman at runtime)
-  cityIntegration = import ./city/integration.nix { inherit pkgs system; };
+  cityIntegration = import ./city/integration.nix { inherit pkgs system linuxPkgs; };
 
   # README example verification
   readmeTest = {

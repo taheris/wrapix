@@ -23,7 +23,7 @@ let
   inherit (pkgs) bash runCommandLocal;
 
   linuxPkgs =
-    if system == "aarch64-darwin" then
+    if pkgs.stdenv.isDarwin then
       import pkgs.path {
         system = "aarch64-linux";
         config.allowUnfree = true;
@@ -222,11 +222,21 @@ in
     assert fullHasApi;
     assert fullHasDb;
     runCommandLocal "city-service-images" { } ''
-      echo "Checking service image stream..."
-      test -x ${apiImage}
-      ${apiImage} | tar -tf - >/dev/null
-      echo "PASS: Service images build via dockerTools.streamLayeredImage"
-      echo "  - wrapix-svc-api image streams valid tar"
+      echo "Checking service image..."
+      ${
+        if pkgs.stdenv.isDarwin then
+          ''
+            test -f ${apiImage}
+            tar -tf ${apiImage} >/dev/null
+          ''
+        else
+          ''
+            test -x ${apiImage}
+            ${apiImage} | tar -tf - >/dev/null
+          ''
+      }
+      echo "PASS: Service images build correctly"
+      echo "  - wrapix-svc-api image is valid tar"
       echo "  - Multiple services supported"
       mkdir $out
     '';
@@ -836,7 +846,7 @@ in
         # Track bd calls
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/scout-bd-calls.log
+        echo "$@" >> $TMPDIR/scout-bd-calls.log
         case "$1" in
           list) echo "[]" ;;
           create) echo "bead-new-1" ;;
@@ -848,11 +858,11 @@ in
         # Mock wrapix-notify (should not be called when under cap)
         cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
         #!/bin/sh
-        echo "NOTIFY: $*" >> /tmp/scout-notify.log
+        echo "NOTIFY: $*" >> $TMPDIR/scout-notify.log
         MOCK
         chmod +x "$MOCK_BIN/wrapix-notify"
 
-        rm -f /tmp/scout-bd-calls.log /tmp/scout-notify.log
+        rm -f $TMPDIR/scout-bd-calls.log $TMPDIR/scout-notify.log
 
         # Set up scan results with immediate and batched errors
         mkdir -p "$TMPDIR/errors/my-api"
@@ -865,14 +875,14 @@ in
         # Test 1: creates beads for immediate and batched
         PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" SCOUT_MAX_BEADS=10 \
           bash "$SCOUT" create-beads
-        grep -q "create" /tmp/scout-bd-calls.log || { echo "FAIL: no bead created"; exit 1; }
+        grep -q "create" $TMPDIR/scout-bd-calls.log || { echo "FAIL: no bead created"; exit 1; }
         echo "  PASS: beads created for scan results"
 
         # Test 2: cap enforcement — set cap to 0
-        rm -f /tmp/scout-bd-calls.log /tmp/scout-notify.log
+        rm -f $TMPDIR/scout-bd-calls.log $TMPDIR/scout-notify.log
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/scout-bd-calls.log
+        echo "$@" >> $TMPDIR/scout-bd-calls.log
         case "$1" in
           list) echo '[{"id":"b1"},{"id":"b2"},{"id":"b3"}]' ;;
           create) echo "bead-new" ;;
@@ -883,11 +893,11 @@ in
 
         PATH="$MOCK_BIN:$PATH" SCOUT_ERRORS_DIR="$TMPDIR/errors" SCOUT_MAX_BEADS=2 \
           bash "$SCOUT" create-beads || true
-        test -f /tmp/scout-notify.log || { echo "FAIL: notify not called when cap reached"; exit 1; }
-        grep -q "Scout paused" /tmp/scout-notify.log || { echo "FAIL: wrong notify message"; exit 1; }
+        test -f $TMPDIR/scout-notify.log || { echo "FAIL: notify not called when cap reached"; exit 1; }
+        grep -q "Scout paused" $TMPDIR/scout-notify.log || { echo "FAIL: wrong notify message"; exit 1; }
         echo "  PASS: cap enforcement triggers notification"
 
-        rm -rf "$TMPDIR" /tmp/scout-bd-calls.log /tmp/scout-notify.log
+        rm -rf "$TMPDIR" $TMPDIR/scout-bd-calls.log $TMPDIR/scout-notify.log
         echo "PASS: scout create-beads works correctly"
         mkdir $out
       '';
@@ -1039,7 +1049,7 @@ in
 
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/scout-hk-bd.log
+        echo "$@" >> $TMPDIR/scout-hk-bd.log
         case "$1" in
           stale)
             echo '[{"id":"stale-1"},{"id":"stale-2"}]'
@@ -1060,30 +1070,30 @@ in
         # Mock wrapix-notify
         cat > "$MOCK_BIN/wrapix-notify" << 'MOCK'
         #!/bin/sh
-        echo "NOTIFY: $*" >> /tmp/scout-hk-notify.log
+        echo "NOTIFY: $*" >> $TMPDIR/scout-hk-notify.log
         MOCK
         chmod +x "$MOCK_BIN/wrapix-notify"
 
-        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-notify.log
+        rm -f $TMPDIR/scout-hk-bd.log $TMPDIR/scout-hk-notify.log
 
         PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" \
           bash "$SCOUT" housekeeping-stale
 
-        grep -c "label add" /tmp/scout-hk-bd.log | grep -q "2" || \
-          { echo "FAIL: expected 2 label add calls"; cat /tmp/scout-hk-bd.log; exit 1; }
-        grep -q "stale-1" /tmp/scout-hk-bd.log || { echo "FAIL: stale-1 not flagged"; exit 1; }
-        grep -q "stale-2" /tmp/scout-hk-bd.log || { echo "FAIL: stale-2 not flagged"; exit 1; }
-        grep -q "flagged stale by scout housekeeping" /tmp/scout-hk-bd.log || \
+        grep -c "label add" $TMPDIR/scout-hk-bd.log | grep -q "2" || \
+          { echo "FAIL: expected 2 label add calls"; cat $TMPDIR/scout-hk-bd.log; exit 1; }
+        grep -q "stale-1" $TMPDIR/scout-hk-bd.log || { echo "FAIL: stale-1 not flagged"; exit 1; }
+        grep -q "stale-2" $TMPDIR/scout-hk-bd.log || { echo "FAIL: stale-2 not flagged"; exit 1; }
+        grep -q "flagged stale by scout housekeeping" $TMPDIR/scout-hk-bd.log || \
           { echo "FAIL: notes not added"; exit 1; }
         echo "  PASS: stale beads flagged for human review"
 
         # ---- Test 2: orphaned workers detected and stopped ----
 
-        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-notify.log
+        rm -f $TMPDIR/scout-hk-bd.log $TMPDIR/scout-hk-notify.log
 
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/scout-hk-bd.log
+        echo "$@" >> $TMPDIR/scout-hk-bd.log
         case "$1" in
           stale) echo "[]" ;;
           list) echo '[{"id":"bead-active"}]' ;;
@@ -1093,7 +1103,7 @@ in
 
         cat > "$MOCK_BIN/podman" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/scout-hk-podman.log
+        echo "$@" >> $TMPDIR/scout-hk-podman.log
         case "$1" in
           ps)
             # Check if filtering by gc-bead (worktree cleanup check)
@@ -1112,20 +1122,20 @@ in
         MOCK
         chmod +x "$MOCK_BIN/podman"
 
-        rm -f /tmp/scout-hk-podman.log
+        rm -f $TMPDIR/scout-hk-podman.log
 
         PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$TMPDIR" \
           bash "$SCOUT" housekeeping-orphans
 
-        grep -q "stop worker-orphan-1" /tmp/scout-hk-podman.log || \
-          { echo "FAIL: orphaned worker not stopped"; cat /tmp/scout-hk-podman.log; exit 1; }
-        grep -q "rm worker-orphan-1" /tmp/scout-hk-podman.log || \
-          { echo "FAIL: orphaned worker not removed"; cat /tmp/scout-hk-podman.log; exit 1; }
+        grep -q "stop worker-orphan-1" $TMPDIR/scout-hk-podman.log || \
+          { echo "FAIL: orphaned worker not stopped"; cat $TMPDIR/scout-hk-podman.log; exit 1; }
+        grep -q "rm worker-orphan-1" $TMPDIR/scout-hk-podman.log || \
+          { echo "FAIL: orphaned worker not removed"; cat $TMPDIR/scout-hk-podman.log; exit 1; }
         echo "  PASS: orphaned workers stopped and removed"
 
         # ---- Test 3: stale worktrees cleaned up ----
 
-        rm -f /tmp/scout-hk-bd.log /tmp/scout-hk-podman.log /tmp/scout-hk-notify.log
+        rm -f $TMPDIR/scout-hk-bd.log $TMPDIR/scout-hk-podman.log $TMPDIR/scout-hk-notify.log
 
         # Set up a git repo with a stale worktree
         WS="$TMPDIR/ws"
@@ -1182,7 +1192,7 @@ in
           { echo "FAIL: in-progress worktree was removed"; exit 1; }
         echo "  PASS: in-progress worktrees preserved"
 
-        rm -rf "$TMPDIR" /tmp/scout-hk-bd.log /tmp/scout-hk-podman.log /tmp/scout-hk-notify.log
+        rm -rf "$TMPDIR" $TMPDIR/scout-hk-bd.log $TMPDIR/scout-hk-podman.log $TMPDIR/scout-hk-notify.log
         echo "PASS: scout housekeeping works correctly"
         mkdir $out
       '';
@@ -1702,7 +1712,7 @@ in
                 # gc: capture that we reach gc start --foreground (proves no blocking)
                 cat > "$MOCK_BIN/gc" << 'MOCK'
                 #!/bin/sh
-                echo "GC_STARTED $*" >> /tmp/gc_actions
+                echo "GC_STARTED $*" >> $TMPDIR/gc_actions
                 exit 0
         MOCK
                 chmod +x "$MOCK_BIN/gc"
@@ -1717,8 +1727,8 @@ in
                 sed -i 's|^exec gc|gc|' "$TMPDIR/entrypoint.sh"
 
                 export GC_CITY_NAME=test-city
-                export GC_WORKSPACE=/tmp/ws
-                mkdir -p /tmp/ws/.beads
+                export GC_WORKSPACE=$TMPDIR/ws
+                mkdir -p $TMPDIR/ws/.beads
                 export GC_PODMAN_NETWORK=test-net
                 export PATH="$MOCK_BIN:$PATH"
 
@@ -1743,14 +1753,14 @@ in
                   echo "Output: $OUTPUT"
                   exit 1
                 }
-                grep -q "GC_STARTED" /tmp/gc_actions || {
+                grep -q "GC_STARTED" $TMPDIR/gc_actions || {
                   echo "FAIL: gc start was never called — entrypoint blocked"
                   exit 1
                 }
                 echo "  PASS: pending beads are informational, gc starts"
 
                 # --- Test 2: with no pending beads, no review output ---
-                rm -f /tmp/gc_actions
+                rm -f $TMPDIR/gc_actions
                 cat > "$MOCK_BIN/bd" << 'MOCK'
                 #!/bin/sh
                 if [ "$1" = "human" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
@@ -1769,13 +1779,13 @@ in
                   echo "FAIL: should not print review summary when no beads pending"
                   exit 1
                 fi
-                grep -q "GC_STARTED" /tmp/gc_actions || {
+                grep -q "GC_STARTED" $TMPDIR/gc_actions || {
                   echo "FAIL: gc start was never called"
                   exit 1
                 }
                 echo "  PASS: no beads, no review output, gc starts"
 
-                rm -rf "$TMPDIR" /tmp/gc_actions /tmp/ws
+                rm -rf "$TMPDIR" $TMPDIR/gc_actions $TMPDIR/ws
                 echo ""
                 echo "PASS: entrypoint prints informational status without blocking"
                 mkdir $out
@@ -1898,11 +1908,12 @@ in
         echo "=== Mayor: triage ==="
 
         # Mock bd and gc for triage action testing
-        TRIAGE_LOG="/tmp/gc-triage.log"
+        TRIAGE_LOG="$TMPDIR/gc-triage.log"
+        export TRIAGE_LOG
         rm -f "$TRIAGE_LOG"
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/gc-triage.log
+        echo "$@" >> "$TRIAGE_LOG"
         case "$1" in
           human)
             echo '{"status":"dismissed"}'
@@ -1922,7 +1933,7 @@ in
 
         cat > "$MOCK_BIN/gc" << 'MOCK'
         #!/bin/sh
-        echo "$@" >> /tmp/gc-triage.log
+        echo "$@" >> "$TRIAGE_LOG"
         MOCK
         chmod +x "$MOCK_BIN/gc"
 

@@ -27,16 +27,14 @@
 #     3. Verify: worktree and branch cleaned up
 #
 # Requires podman. Run via: nix run .#test-city
-{ pkgs, system }:
+{
+  pkgs,
+  system,
+  linuxPkgs,
+}:
 
 let
   inherit (pkgs) lib;
-
-  # ================================================================
-  # Reuse live city module — only the LLM binary is substituted
-  # ================================================================
-
-  linuxPkgs = pkgs; # integration test runs on Linux only
   sandbox = import ../../lib/sandbox {
     inherit pkgs system linuxPkgs;
   };
@@ -147,21 +145,34 @@ let
   # Test image: real sandbox image with mock claude replacing claude-code.
   # Uses the shared mkImage so entrypoint, /etc/wrapix/ config, and image
   # structure are identical to production — only the LLM binary differs.
-  testProfile = sandbox.profiles.base // {
+  testProfile = liveCity.sandbox.profile // {
     name = "test";
-    packages = (sandbox.profiles.base.packages or [ ]) ++ liveCity.packages;
   };
+
+  inherit (pkgs.stdenv) isDarwin;
 
   testImage = sandbox.mkImage {
     profile = testProfile;
     entrypointSh = ../../lib/sandbox/linux/entrypoint.sh;
     claudePkg = mockClaude;
+    asTarball = isDarwin;
   };
 
-  # Runtime dependencies for the test script (host-side)
-  testDeps = sandbox.profiles.base.packages ++ [
-    pkgs.tmux
-    pkgs.lsof
+  # Runtime dependencies for the test script (host-side, must be native packages)
+  testDeps = with pkgs; [
+    bash
+    beads
+    coreutils
+    dolt
+    gc
+    git
+    gnugrep
+    gnused
+    gnutar
+    jq
+    lsof
+    tmux
+    util-linux
   ];
 
   testScript = pkgs.writeShellScriptBin "test-city" ''
@@ -322,16 +333,18 @@ let
     podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
     podman network rm "$TEST_NETWORK" 2>/dev/null || true
     # Kill any stale dolt on the test port
-    fuser -k "$DOLT_PORT/tcp" 2>/dev/null || true
+    lsof -ti :"$DOLT_PORT" | xargs kill 2>/dev/null || true
 
     # ================================================================
     # Setup: workspace, config, image
     # ================================================================
 
     subtest "Load test container image" \
-      sh -c '${testImage} | podman load'
+      sh -c '${if isDarwin then "cat ${testImage}" else "${testImage}"} | podman load'
 
     WS=$(mktemp -d -t citytest-XXXXXX)
+    # Resolve symlinks (macOS /tmp -> /private/tmp) so podman VM can mount paths
+    WS=$(cd "$WS" && pwd -P)
     echo "  > workspace: $WS"
     cd "$WS"
 
@@ -383,7 +396,7 @@ let
       fi
       if [ -f .beads/dolt-server.port ]; then
         _EDOLT_PORT=$(cat .beads/dolt-server.port)
-        fuser -k "$_EDOLT_PORT/tcp" 2>/dev/null || true
+        lsof -ti :"$_EDOLT_PORT" | xargs kill 2>/dev/null || true
         # Wait for port to be released
         for _i in $(seq 1 20); do
           bash -c "echo > /dev/tcp/127.0.0.1/$_EDOLT_PORT" 2>/dev/null || break
@@ -577,6 +590,7 @@ let
         --entrypoint "" \
         --network "$TEST_NETWORK" \
         --userns=keep-id \
+        -e HOME=/doltdb \
         -p "127.0.0.1:''${DOLT_PORT}:''${DOLT_PORT}" \
         -v "$WS/.gc/dolt:/doltdb:rw" \
         localhost/wrapix-test:latest \

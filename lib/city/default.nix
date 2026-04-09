@@ -36,27 +36,33 @@ let
 
       envList = mapAttrsToList (k: v: "${k}=${v}") environment;
     in
-    linuxPkgs.dockerTools.streamLayeredImage {
-      name = "wrapix-svc-${name}";
-      tag = "latest";
-      maxLayers = 50;
+    (
+      if pkgs.stdenv.isDarwin then
+        linuxPkgs.dockerTools.buildLayeredImage
+      else
+        linuxPkgs.dockerTools.streamLayeredImage
+    )
+      {
+        name = "wrapix-svc-${name}";
+        tag = "latest";
+        maxLayers = 50;
 
-      contents = [
-        linuxPkgs.dockerTools.caCertificates
-        package
-      ];
+        contents = [
+          linuxPkgs.dockerTools.caCertificates
+          package
+        ];
 
-      config = {
-        Cmd = cmd;
-        Env = [ "PATH=${package}/bin:/bin:/usr/bin" ] ++ envList;
-        ExposedPorts = builtins.listToAttrs (
-          map (p: {
-            name = "${toString p}/tcp";
-            value = { };
-          }) ports
-        );
+        config = {
+          Cmd = cmd;
+          Env = [ "PATH=${package}/bin:/bin:/usr/bin" ] ++ envList;
+          ExposedPorts = builtins.listToAttrs (
+            map (p: {
+              name = "${toString p}/tcp";
+              value = { };
+            }) ports
+          );
+        };
       };
-    };
 
   # The main mkCity function
   mkCity =

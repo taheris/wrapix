@@ -116,7 +116,7 @@
             };
 
             test = import ./tests {
-              inherit pkgs system;
+              inherit pkgs system linuxPkgs;
               src = self;
             };
 

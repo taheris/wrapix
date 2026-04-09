@@ -12,7 +12,7 @@ let
     "x86_64-linux"
     "aarch64-linux"
   ];
-  isDarwin = system == "aarch64-darwin";
+  inherit (pkgs.stdenv) isDarwin;
 
   # Skip heavy image tests when SKIP_IMAGE_TEST=1 (saves ~20s)
   skipImageTest = getEnv "SKIP_IMAGE_TEST" != "";
@@ -39,6 +39,7 @@ let
       if isDarwin then ../../lib/sandbox/darwin/entrypoint.sh else ../../lib/sandbox/linux/entrypoint.sh;
     claudeConfig = { };
     claudeSettings = { };
+    asTarball = isDarwin;
   };
 
   sandboxLib = import ../../lib { inherit pkgs system linuxPkgs; };
@@ -59,9 +60,19 @@ in
       ''
     else
       runCommandLocal "smoke-image-builds" { } ''
-        echo "Checking base image stream..."
-        test -x ${baseImage}
-        ${baseImage} | tar -tf - >/dev/null
+        echo "Checking base image..."
+        ${
+          if isDarwin then
+            ''
+              test -f ${baseImage}
+              tar -tf ${baseImage} >/dev/null
+            ''
+          else
+            ''
+              test -x ${baseImage}
+              ${baseImage} | tar -tf - >/dev/null
+            ''
+        }
 
         echo "Image built successfully"
         mkdir $out
