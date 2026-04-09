@@ -40,9 +40,9 @@
         ];
 
         systems = [
-          "x86_64-linux"
-          "aarch64-linux"
           "aarch64-darwin"
+          "aarch64-linux"
+          "x86_64-linux"
         ];
 
         flake.nixosModules.city = ./modules/city.nix;
@@ -98,9 +98,14 @@
               config.allowUnfree = true;
             };
 
-            sandboxPackages = [ (inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmtConfig) ];
+            sandboxPackages = [ (inputs.treefmt-nix.lib.mkWrapper linuxPkgs treefmt) ];
 
-            treefmtConfig = {
+            test = import ./tests {
+              inherit pkgs system linuxPkgs;
+              src = self;
+            };
+
+            treefmt = {
               projectRootFile = "flake.nix";
               programs = {
                 deadnix.enable = true;
@@ -115,11 +120,6 @@
               settings.formatter.shellcheck.excludes = [ ".envrc" ];
             };
 
-            test = import ./tests {
-              inherit pkgs system linuxPkgs;
-              src = self;
-            };
-
             wrapix = import ./lib { inherit pkgs system linuxPkgs; };
             city = wrapix.mkCity {
               name = "wx";
@@ -128,6 +128,9 @@
 
           in
           {
+            inherit treefmt;
+            inherit (test) checks;
+
             _module.args.pkgs = import nixpkgs {
               inherit system;
               overlays = [
@@ -148,8 +151,6 @@
                 ;
             };
 
-            inherit (test) checks;
-
             apps = {
               city = city.app;
               ralph = city.ralph.app;
@@ -160,11 +161,11 @@
 
             packages =
               let
+                inherit (builtins) mapAttrs;
                 inherit (wrapix) profiles;
 
                 mkSandboxPkg = cfg: (wrapix.mkSandbox (cfg // { packages = sandboxPackages; })).package;
-
-                sandboxPkgs = builtins.mapAttrs (_: mkSandboxPkg) {
+                sandboxPkgs = mapAttrs (_: mkSandboxPkg) {
                   wrapix = {
                     profile = profiles.base;
                   };
@@ -187,14 +188,15 @@
                     mcpRuntime = true;
                   };
                 };
+
               in
               sandboxPkgs
               // {
                 inherit (pkgs) beads gc;
                 default = sandboxPkgs.wrapix;
+                tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
                 wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
                 wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
-                tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
               };
 
             devShells.default = wrapix.mkDevShell {
@@ -206,8 +208,6 @@
                 self'.packages.wrapix-notifyd
               ];
             };
-
-            treefmt = treefmtConfig;
           };
       }
     );

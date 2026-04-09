@@ -1,8 +1,6 @@
 { pkgs }:
 
 let
-  ralph = import ../ralph { inherit pkgs; };
-
   # Build a Rust toolchain from rust-overlay with required extensions
   mkRustToolchain =
     base:
@@ -97,6 +95,7 @@ let
     gnutar
     gzip
     iproute2
+    iptables
     iputils
     jq
     less
@@ -107,11 +106,13 @@ let
     patch
     prek
     procps
-    ralph.scripts
     ripgrep
     rsync
+    shellcheck
+    tmux
     tree
     unzip
+    util-linux
     vim
     whichQuiet
     yq

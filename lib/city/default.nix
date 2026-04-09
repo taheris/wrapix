@@ -14,9 +14,14 @@
 
 let
   inherit (builtins)
+    concatStringsSep
+    elem
     hasAttr
     isString
+    listToAttrs
     mapAttrs
+    path
+    readFile
     substring
     ;
   inherit (pkgs.lib)
@@ -55,7 +60,7 @@ let
         config = {
           Cmd = cmd;
           Env = [ "PATH=${package}/bin:/bin:/usr/bin" ] ++ envList;
-          ExposedPorts = builtins.listToAttrs (
+          ExposedPorts = listToAttrs (
             map (p: {
               name = "${toString p}/tcp";
               value = { };
@@ -130,7 +135,7 @@ let
       providerScript = ".gc/scripts/provider.sh";
 
       # Dispatch check script — cooldown-aware scale_check for workers
-      dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (builtins.readFile ./dispatch.sh);
+      dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (readFile ./dispatch.sh);
 
       # Default role formulas — consumers can override by placing files in formulas/
       defaultFormulas = {
@@ -157,27 +162,37 @@ let
         cp ${./orders/post-gate/order.toml} $out/orders/post-gate/order.toml
       '';
 
-      # City scripts — gate, post-gate, recovery, dispatch, provider, staging bundled for .gc/scripts/
-      scriptsDir = pkgs.runCommand "wrapix-city-scripts-dir" { } ''
-        mkdir -p $out
-        cp ${./entrypoint.sh} $out/entrypoint.sh
-        cp ${./gate.sh} $out/gate.sh
-        cp ${./post-gate.sh} $out/post-gate.sh
-        cp ${./recovery.sh} $out/recovery.sh
-        cp ${./dispatch.sh} $out/dispatch.sh
-        cp ${./provider.sh} $out/provider.sh
-        cp ${./stage-gc-home.sh} $out/stage-gc-home.sh
-        chmod +x $out/*.sh
-      '';
+      # Source-relative paths for live symlinks (no direnv reload needed)
+      scriptNames = [
+        "dispatch.sh"
+        "entrypoint.sh"
+        "gate.sh"
+        "post-gate.sh"
+        "provider.sh"
+        "recovery.sh"
+        "stage-gc-home.sh"
+      ];
+      promptNames = [
+        "judge.md"
+        "mayor.md"
+        "scout.md"
+        "worker.md"
+      ];
 
-      # Role prompts — identity context injected via --append-system-prompt-file
-      promptsDir = pkgs.runCommand "wrapix-city-prompts-dir" { } ''
-        mkdir -p $out
-        cp ${./prompts/mayor.md} $out/mayor.md
-        cp ${./prompts/scout.md} $out/scout.md
-        cp ${./prompts/judge.md} $out/judge.md
-        cp ${./prompts/worker.md} $out/worker.md
-      '';
+      # Content-addressed store copies for integration tests (Nix sandbox
+      # can't reach the source tree, so tests need real store paths).
+      # builtins.path with a name ensures the hash depends only on file
+      # content, not on the position within self.
+      scriptsStore = path {
+        name = "city-scripts";
+        path = ./.;
+        filter = path: _type: elem (baseNameOf path) scriptNames;
+      };
+      promptsStore = path {
+        name = "city-prompts";
+        path = ./prompts;
+        filter = path: _type: elem (baseNameOf path) promptNames;
+      };
 
       # Prefix for scale_check commands: the dolt container publishes
       # doltPort to localhost.  Override gc's stale metadata.json values.
@@ -299,13 +314,15 @@ let
           }
       ) secrets;
 
-      # City helper scripts bundled for PATH
-      cityScripts = pkgs.runCommand "wrapix-city-scripts" { } ''
-        mkdir -p $out/bin
-        cp ${./agent.sh} $out/bin/wrapix-agent
-        cp ${../../scripts/beads-push} $out/bin/beads-push
-        chmod +x $out/bin/wrapix-agent $out/bin/beads-push
-      '';
+      # City helper scripts bundled for PATH (content-addressed — only
+      # rebuilds when script text changes, not when unrelated files change)
+      cityScripts = pkgs.symlinkJoin {
+        name = "wrapix-city-scripts";
+        paths = [
+          (pkgs.writeShellScriptBin "wrapix-agent" (readFile ./agent.sh))
+          (pkgs.writeShellScriptBin "beads-push" (readFile ../../scripts/beads-push))
+        ];
+      };
 
       # Shell hook: copies config and exports env vars for provider
       shellHook = ''
@@ -320,10 +337,9 @@ let
 
         ${loadImageSnippet}
 
-        # Copy Nix-generated config so gc finds it
-        # (files must be real, not store symlinks, for container mounts)
+        # Copy Nix-generated config so gc finds it (formulas have sed substitutions)
         cp -f --remove-destination ${cityToml} city.toml
-        mkdir -p .gc/formulas .gc/scripts
+        mkdir -p .gc/formulas .gc/scripts .gc/prompts
         for f in ${formulasDir}/*.formula.toml; do
           cp -f --remove-destination "$f" .gc/formulas/
         done
@@ -331,15 +347,14 @@ let
         chmod -R u+w .gc/formulas/orders 2>/dev/null || true
         rm -rf .gc/formulas/orders
         cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-        # Copy scripts (gate, post-gate, recovery, provider)
-        for f in ${scriptsDir}/*; do
-          cp -f --remove-destination "$f" .gc/scripts/
+        # Symlink scripts to source tree (live — no direnv reload needed)
+        _city_src="$GC_WORKSPACE/lib/city"
+        for f in ${concatStringsSep " " scriptNames}; do
+          ln -sf "$_city_src/$f" .gc/scripts/"$f"
         done
-        chmod u+w .gc/scripts/*.sh 2>/dev/null || true
-        # Copy role prompts
-        mkdir -p .gc/prompts
-        for f in ${promptsDir}/*; do
-          cp -f --remove-destination "$f" .gc/prompts/
+        # Symlink role prompts to source tree
+        for f in ${concatStringsSep " " promptNames}; do
+          ln -sf "$_city_src/prompts/$f" .gc/prompts/"$f"
         done
 
         # Ensure podman network exists (NixOS module creates via systemd)
@@ -404,21 +419,21 @@ let
           touch .gc/events.jsonl
 
           # Overlay our formulas and scripts
-          mkdir -p .gc/formulas .gc/scripts
+          mkdir -p .gc/formulas .gc/scripts .gc/prompts
           for f in ${formulasDir}/*.formula.toml; do
             cp -f --remove-destination "$f" .gc/formulas/
           done
           chmod -R u+w .gc/formulas/orders 2>/dev/null || true
           rm -rf .gc/formulas/orders
           cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-          for f in ${scriptsDir}/*; do
-            cp -f --remove-destination "$f" .gc/scripts/
+          # Symlink scripts to source tree (live)
+          _city_src="$GC_WORKSPACE/lib/city"
+          for f in ${concatStringsSep " " scriptNames}; do
+            ln -sf "$_city_src/$f" .gc/scripts/"$f"
           done
-          chmod u+w .gc/scripts/*.sh 2>/dev/null || true
-          # Copy role prompts
-          mkdir -p .gc/prompts
-          for f in ${promptsDir}/*; do
-            cp -f --remove-destination "$f" .gc/prompts/
+          # Symlink role prompts to source tree
+          for f in ${concatStringsSep " " promptNames}; do
+            ln -sf "$_city_src/prompts/$f" .gc/prompts/"$f"
           done
 
           # Ensure the podman network exists (NixOS module creates it via
@@ -427,7 +442,7 @@ let
             podman network create "${networkName}" >/dev/null
           fi
 
-          exec ${scriptsDir}/entrypoint.sh
+          exec "$GC_WORKSPACE/lib/city/entrypoint.sh"
         ''}/bin/wrapix-city";
       };
 
@@ -467,11 +482,12 @@ let
       # Default role formulas (directory of .formula.toml files)
       formulas = formulasDir;
 
-      # City scripts (gate, post-gate, recovery) for .gc/scripts/
-      scripts = scriptsDir;
+      # City script and prompt file names (symlinked to source tree at runtime)
+      inherit scriptNames promptNames;
 
-      # Role prompts for .gc/prompts/
-      prompts = promptsDir;
+      # Content-addressed store copies (for integration tests in Nix sandbox)
+      scripts = scriptsStore;
+      prompts = promptsStore;
 
       # Individual formula paths for selective override
       inherit defaultFormulas;

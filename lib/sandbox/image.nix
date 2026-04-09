@@ -78,13 +78,9 @@ let
 
   # Create a merged environment with all packages for proper PATH
   allPackages = [
-    pkgs.coreutils
-    pkgs.bash
-    pkgs.util-linux
-    pkgs.tmux # Gas City provider uses tmux for persistent agent sessions
-    pkgs.iptables # Network filtering for WRAPIX_NETWORK=limit mode
     entrypointPkg
     notifyClient
+    ralph.scripts
   ]
   ++ (profile.packages or [ ]);
 

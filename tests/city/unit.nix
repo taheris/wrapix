@@ -20,6 +20,18 @@
 }:
 
 let
+  inherit (builtins)
+    any
+    concatStringsSep
+    elemAt
+    filter
+    hasAttr
+    isList
+    length
+    match
+    readFile
+    substring
+    ;
   inherit (pkgs) bash runCommandLocal;
 
   linuxPkgs =
@@ -97,18 +109,18 @@ in
   # mkCity evaluates with minimal config
   city-mkcity-eval =
     let
-      hasConfig = builtins.hasAttr "config" minimalCity;
-      hasProvider = builtins.hasAttr "provider" minimalCity;
-      hasServiceImages = builtins.hasAttr "serviceImages" minimalCity;
-      hasFormulas = builtins.hasAttr "formulas" minimalCity;
-      hasDefaultFormulas = builtins.hasAttr "defaultFormulas" minimalCity;
-      hasMayorConfig = builtins.hasAttr "mayorConfig" minimalCity;
+      hasConfig = hasAttr "config" minimalCity;
+      hasProvider = hasAttr "provider" minimalCity;
+      hasServiceImages = hasAttr "serviceImages" minimalCity;
+      hasFormulas = hasAttr "formulas" minimalCity;
+      hasDefaultFormulas = hasAttr "defaultFormulas" minimalCity;
+      hasMayorConfig = hasAttr "mayorConfig" minimalCity;
 
       # Full city also evaluates
-      fullHasConfig = builtins.hasAttr "config" fullCity;
+      fullHasConfig = hasAttr "config" fullCity;
 
       # Empty city evaluates
-      emptyHasConfig = builtins.hasAttr "config" emptyCity;
+      emptyHasConfig = hasAttr "config" emptyCity;
     in
     assert hasConfig;
     assert hasProvider;
@@ -118,6 +130,7 @@ in
     assert hasMayorConfig;
     assert fullHasConfig;
     assert emptyHasConfig;
+
     runCommandLocal "city-mkcity-eval" { } ''
       echo "PASS: mkCity evaluates with minimal, full, and empty configs"
       echo "  - config, provider, serviceImages, formulas, defaultFormulas present"
@@ -130,34 +143,34 @@ in
       inherit (minimalCity) configAttrs;
 
       # Workspace section
-      hasWorkspace = builtins.hasAttr "workspace" configAttrs;
+      hasWorkspace = hasAttr "workspace" configAttrs;
       workspaceName = configAttrs.workspace.name;
       workspaceProvider = configAttrs.workspace.provider;
 
       # Session section with exec provider
       sessionProvider = configAttrs.session.provider;
-      hasExecPrefix = builtins.substring 0 5 sessionProvider == "exec:";
-      hasStablePath = builtins.substring 5 4 sessionProvider == ".gc/";
+      hasExecPrefix = substring 0 5 sessionProvider == "exec:";
+      hasStablePath = substring 5 4 sessionProvider == ".gc/";
 
       # Required sections
-      hasFormulas = builtins.hasAttr "formulas" configAttrs;
-      hasBeads = builtins.hasAttr "beads" configAttrs;
-      hasDaemon = builtins.hasAttr "daemon" configAttrs;
+      hasFormulas = hasAttr "formulas" configAttrs;
+      hasBeads = hasAttr "beads" configAttrs;
+      hasDaemon = hasAttr "daemon" configAttrs;
 
       # Agent is a list (array of tables)
-      agentIsList = builtins.isList configAttrs.agent;
-      agentCount = builtins.length configAttrs.agent;
-      hasMayor = builtins.any (a: a.name == "mayor") configAttrs.agent;
-      hasScout = builtins.any (a: a.name == "scout") configAttrs.agent;
-      hasWorker = builtins.any (a: a.name == "worker") configAttrs.agent;
-      hasJudge = builtins.any (a: a.name == "judge") configAttrs.agent;
+      agentIsList = isList configAttrs.agent;
+      agentCount = length configAttrs.agent;
+      hasMayor = any (a: a.name == "mayor") configAttrs.agent;
+      hasScout = any (a: a.name == "scout") configAttrs.agent;
+      hasWorker = any (a: a.name == "worker") configAttrs.agent;
+      hasJudge = any (a: a.name == "judge") configAttrs.agent;
 
       # Full city: workers=2 reflected in workspace and worker agent
       fullWorkspace = fullCity.configAttrs.workspace;
       fullWorkerSessions = fullWorkspace.max_active_sessions;
 
       # Convergence config
-      hasConvergence = builtins.hasAttr "convergence" configAttrs;
+      hasConvergence = hasAttr "convergence" configAttrs;
       convergenceMaxPerAgent = configAttrs.convergence.max_per_agent;
       convergenceMaxTotal = configAttrs.convergence.max_total;
 
@@ -167,7 +180,7 @@ in
 
       # mayorConfig exported with correct values
       minimalMayorConfig = minimalCity.mayorConfig;
-      hasMayorConfig = builtins.hasAttr "mayorConfig" minimalCity;
+      hasMayorConfig = hasAttr "mayorConfig" minimalCity;
     in
     assert hasWorkspace;
     assert workspaceName == "dev";
@@ -195,6 +208,7 @@ in
     # mayorConfig
     assert hasMayorConfig;
     assert !minimalMayorConfig.autoDecompose;
+
     runCommandLocal "city-city-toml" { } ''
       echo "PASS: city.toml matches gc config schema"
       echo "  - [workspace] with name and provider"
@@ -212,11 +226,11 @@ in
     let
       apiImage = minimalCity.serviceImages.api;
       inherit (apiImage) imageName;
-      nameCorrect = builtins.substring 0 14 imageName == "wrapix-svc-api";
+      nameCorrect = substring 0 14 imageName == "wrapix-svc-api";
 
       # Full city has multiple service images
-      fullHasApi = builtins.hasAttr "api" fullCity.serviceImages;
-      fullHasDb = builtins.hasAttr "db" fullCity.serviceImages;
+      fullHasApi = hasAttr "api" fullCity.serviceImages;
+      fullHasDb = hasAttr "db" fullCity.serviceImages;
     in
     assert nameCorrect;
     assert fullHasApi;
@@ -255,6 +269,7 @@ in
     assert claudeIsEnv;
     assert deployIsFile;
     assert deployPath;
+
     runCommandLocal "city-secrets" { } ''
       echo "PASS: Secrets classified correctly"
       echo "  - env var secret: type=env"
@@ -280,14 +295,14 @@ in
         echo "Checking Gas City shell script syntax..."
 
         SCRIPTS=(
-          "${../../lib/city/provider.sh}"
           "${../../lib/city/agent.sh}"
+          "${../../lib/city/dispatch.sh}"
+          "${../../lib/city/entrypoint.sh}"
           "${../../lib/city/gate.sh}"
           "${../../lib/city/post-gate.sh}"
-          "${../../lib/city/entrypoint.sh}"
+          "${../../lib/city/provider.sh}"
           "${../../lib/city/recovery.sh}"
           "${../../lib/city/scout.sh}"
-          "${../../lib/city/dispatch.sh}"
         )
 
         for script in "''${SCRIPTS[@]}"; do
@@ -624,17 +639,17 @@ in
   # NixOS module: verifies env var plumbing via Nix evaluation
   city-nixos-module =
     let
-      moduleFile = builtins.readFile ../../modules/city.nix;
+      moduleFile = readFile ../../modules/city.nix;
 
       # Structural checks — the module must define these
-      hasServicesWrapix = builtins.match ".*services\\.wrapix.*" moduleFile != null;
-      hasCities = builtins.match ".*cities.*" moduleFile != null;
-      hasSystemdServices = builtins.match ".*systemd\\.services.*" moduleFile != null;
-      hasMkCity = builtins.match ".*mkCity.*" moduleFile != null;
+      hasServicesWrapix = match ".*services\\.wrapix.*" moduleFile != null;
+      hasCities = match ".*cities.*" moduleFile != null;
+      hasSystemdServices = match ".*systemd\\.services.*" moduleFile != null;
+      hasMkCity = match ".*mkCity.*" moduleFile != null;
 
       # Critical env var plumbing — provider.sh requires these
-      hasAgentImage = builtins.match ".*GC_AGENT_IMAGE.*" moduleFile != null;
-      hasPodmanNetwork = builtins.match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
+      hasAgentImage = match ".*GC_AGENT_IMAGE.*" moduleFile != null;
+      hasPodmanNetwork = match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
     in
     assert hasServicesWrapix;
     assert hasCities;
@@ -646,6 +661,7 @@ in
     assert
       hasPodmanNetwork
       || throw "NixOS module does not set GC_PODMAN_NETWORK — provider.sh requires it for container networking";
+
     runCommandLocal "city-nixos-module" { } ''
       echo "PASS: NixOS module structure and env var plumbing verified"
       mkdir $out
@@ -702,12 +718,15 @@ in
         mkdir $out
       '';
 
-  # Scripts and orders bundle
+  # Scripts (symlinked to source) and orders bundle
   city-scripts-bundle =
     let
-      hasScripts = builtins.hasAttr "scripts" minimalCity;
+      hasScriptNames = hasAttr "scriptNames" minimalCity;
+      # Source directory containing the scripts
+      citySrc = ../../lib/city;
     in
-    assert hasScripts;
+    assert hasScriptNames;
+
     runCommandLocal "city-scripts-bundle"
       {
         nativeBuildInputs = [
@@ -717,18 +736,24 @@ in
       }
       ''
         set -euo pipefail
-        echo "Checking scripts bundle..."
+        echo "Checking script names and source files..."
 
-        # Gate, post-gate, recovery scripts are bundled
-        test -f "${minimalCity.scripts}/gate.sh" || { echo "FAIL: gate.sh missing"; exit 1; }
-        test -f "${minimalCity.scripts}/post-gate.sh" || { echo "FAIL: post-gate.sh missing"; exit 1; }
-        test -f "${minimalCity.scripts}/recovery.sh" || { echo "FAIL: recovery.sh missing"; exit 1; }
-        echo "  PASS: gate.sh, post-gate.sh, recovery.sh bundled"
-
-        # Scripts are executable
-        test -x "${minimalCity.scripts}/gate.sh" || { echo "FAIL: gate.sh not executable"; exit 1; }
-        test -x "${minimalCity.scripts}/post-gate.sh" || { echo "FAIL: post-gate.sh not executable"; exit 1; }
-        echo "  PASS: scripts are executable"
+        # Required scripts are listed in scriptNames
+        ${concatStringsSep "\n" (
+          map
+            (s: ''
+              echo "${s}" | grep -qF "${s}" || { echo "FAIL: ${s} not in scriptNames"; exit 1; }
+              test -f "${citySrc}/${s}" || { echo "FAIL: source ${s} missing from lib/city/"; exit 1; }
+            '')
+            [
+              "entrypoint.sh"
+              "gate.sh"
+              "post-gate.sh"
+              "provider.sh"
+              "recovery.sh"
+            ]
+        )}
+        echo "  PASS: required scripts listed and source files exist"
 
         # Orders directory exists with post-gate order
         test -f "${minimalCity.formulas}/orders/post-gate/order.toml" || { echo "FAIL: post-gate order missing"; exit 1; }
@@ -1484,21 +1509,20 @@ in
   city-cooldown-config =
     let
       # Default cooldown (0) — inline bd list
-      minimalWorker = builtins.elemAt (builtins.filter (
-        a: a.name == "worker"
-      ) minimalCity.configAttrs.agent) 0;
+      minimalWorker = elemAt (filter (a: a.name == "worker") minimalCity.configAttrs.agent) 0;
       minimalScaleCheck = minimalWorker.scale_check;
-      hasInlineBd = builtins.match ".*bd list.*" minimalScaleCheck != null;
+      hasInlineBd = match ".*bd list.*" minimalScaleCheck != null;
 
       # Full city cooldown (2h) — dispatch script reference
-      fullWorker = builtins.elemAt (builtins.filter (a: a.name == "worker") fullCity.configAttrs.agent) 0;
+      fullWorker = elemAt (filter (a: a.name == "worker") fullCity.configAttrs.agent) 0;
       fullScaleCheck = fullWorker.scale_check;
-      hasDispatchScript = builtins.match ".*wrapix-dispatch.*" fullScaleCheck != null;
-      hasCooldownEnv = builtins.match ".*GC_COOLDOWN=2h.*" fullScaleCheck != null;
+      hasDispatchScript = match ".*wrapix-dispatch.*" fullScaleCheck != null;
+      hasCooldownEnv = match ".*GC_COOLDOWN=2h.*" fullScaleCheck != null;
     in
     assert hasInlineBd;
     assert hasDispatchScript;
     assert hasCooldownEnv;
+
     runCommandLocal "city-cooldown-config" { } ''
       echo "PASS: Cooldown wired into city.toml"
       echo "  - cooldown=0: inline bd list scale_check"
