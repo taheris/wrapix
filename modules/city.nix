@@ -271,7 +271,7 @@ let
       city = mkCityForConfig name cityCfg;
       resolvedProfile = resolveProfile cityCfg.profile;
       imageName = "wrapix-${resolvedProfile.name}:latest";
-      networkName = "wrapix-${name}";
+      networkName = "gc-${name}";
       containerName = "gc-${name}";
       secretArgs = mkSecretArgs cityCfg;
       entrypoint = pkgs.writeShellScript "gc-entrypoint-${name}" (
@@ -339,7 +339,7 @@ let
   networkServices = mapAttrs' (
     name: _cityCfg:
     let
-      networkName = "wrapix-${name}";
+      networkName = "gc-${name}";
     in
     nameValuePair "wrapix-city-${name}-network" {
       description = "Podman network for wrapix city: ${name}";

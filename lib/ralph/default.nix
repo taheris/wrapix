@@ -114,17 +114,7 @@ in
       # live editing (no direnv reload needed).  Metadata stays in the
       # store since it's computed at build time.
       shellHook = ''
-        mkdir -p .ralph/bin
-        _ralph_src="$PWD/lib/ralph/cmd"
-        ln -sf "$_ralph_src/ralph.sh" .ralph/bin/ralph
-        ln -sf "$_ralph_src/util.sh" .ralph/bin/util.sh
-        for _f in "$_ralph_src"/*.sh; do
-          _name=$(basename "$_f" .sh)
-          [ "$_name" = "util" ] || [ "$_name" = "ralph" ] && continue
-          ln -sf "$_f" .ralph/bin/ralph-"$_name"
-        done
-        chmod +x .ralph/bin/ralph .ralph/bin/ralph-* 2>/dev/null || true
-        export PATH="$PWD/.ralph/bin:${wrapixBin}/bin:$PATH"
+        export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
         export RALPH_TEMPLATE_DIR="$PWD/lib/ralph/template"
         export RALPH_METADATA_DIR="${scripts}/share/ralph"
         export WRAPIX_PROFILE="${effectiveSandbox.profile.name}"

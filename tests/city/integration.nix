@@ -348,6 +348,9 @@ let
     echo "  > workspace: $WS"
     cd "$WS"
 
+    # Isolate dolt global config so tests don't clobber the host's ~/.dolt/
+    export HOME="$WS"
+
     setup_workspace() {
       git init -b main
       git config user.email test@test

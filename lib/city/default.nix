@@ -106,7 +106,7 @@ let
 
       imageName = "wrapix-${agentSandbox.profile.name}:latest";
       profileImage = agentSandbox.image;
-      networkName = "wrapix-${name}";
+      networkName = "gc-${name}";
 
       # Load image into podman: stream script on Linux, tarball on Darwin.
       # On Darwin, the image is a buildLayeredImage tar (Linux shebang won't run).
@@ -332,7 +332,6 @@ let
         export GC_AGENT_IMAGE="${imageName}"
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
-        export GC_DOLT_PORT="${toString doltPort}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
 
         ${loadImageSnippet}
