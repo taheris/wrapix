@@ -997,10 +997,9 @@ if [ "$RUN_CHECK" = "true" ] && [ "$FINAL_EXIT_CODE" -eq 0 ] && [ "$RUN_ONCE" !=
   fi
 fi
 
-# Final bead sync: push all state to Dolt remote before exiting
+# Final bead sync: push all state to Dolt remote and github before exiting
 echo "Pushing beads to Dolt remote..."
-bd dolt commit >/dev/null 2>&1 || true
-bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
+beads-push 2>/dev/null || echo "Warning: beads-push failed"
 
 # Run post-loop hook (even in --once mode, for consistency)
 run_hook "post-loop" "$HOOK_POST_LOOP"

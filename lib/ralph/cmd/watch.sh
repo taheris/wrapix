@@ -308,8 +308,7 @@ done
 
 # Final sync
 echo "Pushing beads to Dolt remote..."
-bd dolt commit >/dev/null 2>&1 || true
-bd dolt push 2>/dev/null || echo "Warning: bd dolt push failed"
+beads-push 2>/dev/null || echo "Warning: beads-push failed"
 
 echo ""
 echo "Watch stopped after $cycle cycle(s)."

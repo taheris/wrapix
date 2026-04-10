@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
-# beads-push — bd dolt push + git push beads branch to GitHub
+# beads-push — bd dolt commit + push to Dolt remote + git push beads branch
+#              to the GitHub mirror (if the worktree is reachable).
+#
+# Safe to call from contexts where the beads git worktree is not mounted
+# (e.g. container-side ralph runs): the dolt push still happens, the
+# github sync is skipped with a notice.
 set -euo pipefail
 
+bd dolt commit >/dev/null 2>&1 || true
 bd dolt push "$@"
 
 BRANCH="$(grep '^sync-branch:' .beads/config.yaml 2>/dev/null | awk '{print $2}' | tr -d '"' || echo beads)"
 BRANCH="${BRANCH:-beads}"
-WT="$(git rev-parse --show-toplevel)/.git/beads-worktrees/$BRANCH"
+WT="$(git rev-parse --show-toplevel 2>/dev/null)/.git/beads-worktrees/$BRANCH"
 
 if [ ! -d "$WT" ]; then
-  echo "beads-push: worktree not found at $WT" >&2
-  exit 1
+  echo "beads-push: worktree $WT not present — skipping github sync" >&2
+  exit 0
 fi
 
 cd "$WT"
 
-# Commit if there are changes
 if ! git diff --quiet || ! git diff --cached --quiet; then
   PREK_ALLOW_NO_CONFIG=1 git add -A
   PREK_ALLOW_NO_CONFIG=1 git commit -m "bd sync" --quiet
 fi
 
-# Always push if local is ahead of remote
 PREK_ALLOW_NO_CONFIG=1 git push -u origin "$BRANCH" --quiet
 echo "beads-push: synced to GitHub"
