@@ -323,6 +323,63 @@ in
   # Layer 3: Functional tests (execute scripts with mock dependencies)
   # =========================================================================
 
+  # git-ssh-setup.sh: sets GIT_SSH_COMMAND from WRAPIX_DEPLOY_KEY and
+  # configures commit signing from WRAPIX_SIGNING_KEY.
+  city-git-ssh-setup =
+    runCommandLocal "city-git-ssh-setup"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.git
+          pkgs.openssh
+        ];
+      }
+      ''
+        set -euo pipefail
+        FRAGMENT="${../../lib/sandbox/linux/git-ssh-setup.sh}"
+
+        TMPDIR=$(mktemp -d)
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email test@wrapix.dev
+        git config --global user.name test
+
+        # Case 1: no env vars — source must be a no-op
+        unset WRAPIX_DEPLOY_KEY WRAPIX_SIGNING_KEY GIT_SSH_COMMAND
+        # shellcheck disable=SC1090
+        bash -c '. '"$FRAGMENT"'; [ -z "''${GIT_SSH_COMMAND:-}" ] || { echo "FAIL: GIT_SSH_COMMAND set when no deploy key"; exit 1; }'
+        echo "  PASS: no-op when no env vars"
+
+        # Case 2: WRAPIX_DEPLOY_KEY points at a file — GIT_SSH_COMMAND exported
+        KEY="$TMPDIR/deploy.key"
+        ssh-keygen -t ed25519 -f "$KEY" -N "" -q
+        WRAPIX_DEPLOY_KEY="$KEY" bash -c '. '"$FRAGMENT"'; \
+          [[ "$GIT_SSH_COMMAND" == "ssh -i '"$KEY"' -o IdentitiesOnly=yes" ]] || { \
+          echo "FAIL: GIT_SSH_COMMAND=$GIT_SSH_COMMAND"; exit 1; }'
+        echo "  PASS: GIT_SSH_COMMAND set from deploy key"
+
+        # Case 3: WRAPIX_SIGNING_KEY configures commit signing
+        SKEY="$TMPDIR/signing.key"
+        ssh-keygen -t ed25519 -f "$SKEY" -N "" -q
+        HOME="$TMPDIR/home2" GIT_AUTHOR_EMAIL=sig@wrapix.dev WRAPIX_SIGNING_KEY="$SKEY" \
+          bash -c 'mkdir -p "$HOME" && git config --global user.email x && git config --global user.name x && . '"$FRAGMENT"'
+                   [[ "$(git config --global gpg.format)" == "ssh" ]] || { echo "FAIL: gpg.format"; exit 1; }
+                   [[ "$(git config --global user.signingkey)" == "'"$SKEY"'" ]] || { echo "FAIL: signingkey"; exit 1; }
+                   [[ "$(git config --global commit.gpgsign)" == "true" ]] || { echo "FAIL: commit.gpgsign"; exit 1; }
+                   grep -q sig@wrapix.dev "$HOME/.config/git/allowed_signers" || { echo "FAIL: allowed_signers"; exit 1; }'
+        echo "  PASS: signing key configures git signing"
+
+        # Case 4: WRAPIX_GIT_SIGN=0 disables auto-signing
+        HOME="$TMPDIR/home3" WRAPIX_SIGNING_KEY="$SKEY" WRAPIX_GIT_SIGN=0 \
+          bash -c 'mkdir -p "$HOME" && git config --global user.email x && git config --global user.name x && . '"$FRAGMENT"'
+                   [[ -z "$(git config --global --get commit.gpgsign 2>/dev/null)" ]] || { echo "FAIL: auto-sign not disabled"; exit 1; }'
+        echo "  PASS: WRAPIX_GIT_SIGN=0 skips auto-signing"
+
+        echo ""
+        echo "PASS: git-ssh-setup.sh all cases"
+        mkdir $out
+      '';
+
   # Scout: parse-rules extracts patterns from orchestration.md
   city-scout-parse-rules =
     runCommandLocal "city-scout-parse-rules"
@@ -654,6 +711,10 @@ in
       # Critical env var plumbing — provider.sh requires these in the daemon env
       hasAgentImage = match ".*GC_AGENT_IMAGE.*" moduleFile != null;
       hasPodmanNetwork = match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
+
+      # Well-known secret env plumbing — git-ssh-setup.sh reads these
+      hasDeployKeyEnv = match ".*WRAPIX_DEPLOY_KEY.*" moduleFile != null;
+      hasSigningKeyEnv = match ".*WRAPIX_SIGNING_KEY.*" moduleFile != null;
     in
     assert hasServicesWrapix;
     assert hasCities;
@@ -665,6 +726,12 @@ in
     assert
       hasPodmanNetwork
       || throw "NixOS module does not set GC_PODMAN_NETWORK — provider.sh requires it for container networking";
+    assert
+      hasDeployKeyEnv
+      || throw "NixOS module does not emit WRAPIX_DEPLOY_KEY — role containers won't wire the deploy key into GIT_SSH_COMMAND";
+    assert
+      hasSigningKeyEnv
+      || throw "NixOS module does not emit WRAPIX_SIGNING_KEY — role containers won't configure commit signing";
 
     runCommandLocal "city-nixos-module" { } ''
       echo "PASS: NixOS module structure and env var plumbing verified"

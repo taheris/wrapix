@@ -162,6 +162,8 @@ persistent_start() {
     -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
     bash -c '
+      # shellcheck disable=SC1091
+      [[ -f /git-ssh-setup.sh ]] && . /git-ssh-setup.sh
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"

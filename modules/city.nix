@@ -258,8 +258,18 @@ let
 
       # File secrets: mount as read-only volumes
       fileLines = mapAttrsToList (name: s: ''--volume="${s.path}:/run/secrets/${name}:ro"'') fileSecrets;
+
+      # Well-known file secrets that git-ssh-setup.sh reads as env vars.
+      wellKnownEnv = {
+        deployKey = "WRAPIX_DEPLOY_KEY";
+        signingKey = "WRAPIX_SIGNING_KEY";
+      };
+
+      wellKnownLines = mapAttrsToList (name: _s: "--env=${wellKnownEnv.${name}}=/run/secrets/${name}") (
+        filterAttrs (n: _: builtins.hasAttr n wellKnownEnv) fileSecrets
+      );
     in
-    envLines ++ fileLines;
+    envLines ++ fileLines ++ wellKnownLines;
 
   # All enabled cities
   enabledCities = filterAttrs (_: cityCfg: cityCfg.enable) cfg.cities;

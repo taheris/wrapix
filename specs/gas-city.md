@@ -219,6 +219,11 @@ one at a time.
   because the provider rewrites the worktree's `.git` file with a
   container-internal path. On rejection, old branch is also deleted — the
   new worker creates a fresh one.
+- After a successful merge the judge pushes to the github mirror with
+  `git push` from inside its container. Authentication uses
+  `secrets.deployKey` — see Secrets. If no deploy key is configured the
+  judge falls back to leaving the commit local; the human lands it from
+  the host.
 
 The post-gate order still fires on `convergence.terminated` events but is
 lighter — it notifies the judge to merge (for approved convergences),
@@ -574,6 +579,13 @@ images.
 - Any other string = host environment variable name
 - gc runs on the host and inherits secrets from the systemd unit
   environment; the provider script passes them to agent containers at start
+- Two secret names are **well-known**: `deployKey` and `signingKey`. When
+  set as file paths, they are mounted at `/run/secrets/<name>:ro` and
+  additionally exported into role containers as `WRAPIX_DEPLOY_KEY` and
+  `WRAPIX_SIGNING_KEY`. The shared `git-ssh-setup.sh` fragment sourced by
+  the persistent-role startup translates them into `GIT_SSH_COMMAND` and
+  commit-signing config — so the judge can `git push` to the github
+  mirror after merge without host SSH forwarding (see Merge)
 
 ```nix
 # Option A: env var (no leading /)
@@ -584,6 +596,7 @@ secrets.claude = config.sops.secrets.claude-api-key.path;  # resolves to /run/se
 
 # Additional secrets (optional)
 secrets.deployKey = config.sops.secrets.deploy-key.path;
+secrets.signingKey = config.sops.secrets.signing-key.path;
 ```
 
 ### Resource Limits and Pacing

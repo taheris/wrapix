@@ -125,6 +125,9 @@ buildImage {
     cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
 
+    cp ${./linux/git-ssh-setup.sh} git-ssh-setup.sh
+    chmod 0644 git-ssh-setup.sh
+
     ${pkgs.lib.optionalString krunSupport ''
       cp ${./linux/krun-init.sh} krun-init.sh
       chmod +x krun-init.sh
