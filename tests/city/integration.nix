@@ -191,6 +191,14 @@ let
 
     export PATH="${lib.makeBinPath testDeps}:$PATH"
 
+    # Isolate from the caller's environment. The wrapix devShell shellHook
+    # exports BEADS_DOLT_SERVER_* pointing at the host workspace's dolt
+    # container; inheriting those sends the test's `bd` calls to the host
+    # db and breaks types.custom setup (gc then rejects its own "session"
+    # beads with "invalid issue type"). Strip every BEADS_*/BD_* var so
+    # the test only sees state it sets itself.
+    for _v in ''${!BEADS_@} ''${!BD_@}; do unset "$_v"; done
+
     PASSED=0
     FAILED=0
     GC_PID=""
