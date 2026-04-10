@@ -159,6 +159,12 @@ let
       # $HOME/.dolt. Co-locating that with the data dir made dolt observe a
       # spurious incomplete .dolt/ at the data-dir root and abort database
       # discovery. --data-dir makes the mount unambiguously the multi-db root.
+      #
+      # The workspace is also bind-mounted at its host-matching absolute
+      # path so that `bd dolt push` to a `file://$ws/...` remote (e.g. the
+      # beads git worktree under $ws/.git/beads-worktrees/beads/.beads/dolt-remote)
+      # resolves inside the server's namespace. Without this, sync to the
+      # beads git worktree — and therefore the github mirror — fails.
       podman run -d \
         --name "$name" \
         --entrypoint "" \
@@ -170,6 +176,7 @@ let
         --tmpfs /tmp:rw,mode=1777 \
         -p "127.0.0.1:$port:$port" \
         -v "$data_dir:/data:rw" \
+        -v "$ws:$ws:rw" \
         "$IMAGE" \
         bash -c '
           set -e

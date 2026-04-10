@@ -36,38 +36,44 @@ ops pipeline with good defaults and minimal configuration.
   of gc's default two-query check, which times out under dolt contention
   (gc hardcodes a 30s timeout for scale_check that cannot be configured)
 
-**Components inside the gc container:**
+**Components running on the host (per-city systemd unit):**
 
 | Component | Role |
 |-----------|------|
-| `gc start --foreground` | Controller — reconciliation loop, convergence, orders, scheduling |
+| `gc start --foreground` | Controller — reconciliation loop, convergence, orders, scheduling. Runs on the host, not in a container |
 | Provider script | Translates gc commands to podman operations, manages worktrees, mounts bead context |
 | Post-gate order | Event-gated order triggered by `convergence.terminated` — notifies judge, deploy bead creation |
 | Gate condition script | Bridges convergence gate and judge session — nudges judge, waits for verdict |
-| Entrypoint wrapper | Starts dolt container, prints pending reviews, runs recovery, starts events watcher, stages gc home, runs `gc start --foreground` with trap-based cleanup |
+| Entrypoint wrapper | Ensures `beads-dolt` is running and attached to the city network, prints pending reviews, runs recovery, starts events watcher, stages gc home, runs `gc start --foreground` with trap-based cleanup (of city-owned resources only — `beads-dolt` persists) |
 
 ### Deployment Model
 
-- gc runs in a container with the podman socket mounted (sibling container
-  pattern), using `gc start --foreground` for per-city controller mode (gc
-  defaults to a machine-wide supervisor since v0.13+)
-- The gc container has no direct host access beyond the podman socket and
-  workspace mount
-- All containers (services, agents) share a podman network per city
+- gc runs **on the host** as a per-city systemd service invoking
+  `gc start --foreground`. It is not itself containerized. Agent role
+  containers (mayor, scout, judge, workers) are spawned as siblings by
+  `provider.sh` via the local podman socket
+- All agent/service containers share a per-city podman network
+  (`wrapix-<city-name>`)
 - Service containers are built from Nix packages via `dockerTools.streamLayeredImage`
-- NixOS module generates systemd units, a podman network
-  (`wrapix-<city-name>`), and invokes `mkCity` to produce `city.toml` and
-  container images
+- NixOS module generates the systemd unit, the per-city podman network, and
+  invokes `mkCity` to produce `city.toml` and container images
 
+- Dolt is provided by `beads-dolt`, a separate per-workspace container
+  managed by `lib/beads` and shared between host-side `bd` and the city.
+  Its name and published port are derived from `sha256(workspace_path)`,
+  so one workspace has exactly one dolt container regardless of how many
+  tools use it
+- The entrypoint ensures `beads-dolt` is running and runs
+  `beads-dolt attach <city-network>` so role containers can reach it by
+  container hostname. The city does not own the dolt lifecycle —
+  `beads-dolt` persists across city restarts and host shell sessions
 - The city must not corrupt the host's `.beads/` directory — gc discovers
-  `.beads/` by walking up from its cwd and writes config (dolt.auto-start,
-  dolt-server.port) that conflicts with host-side bd
-- The city manages its own dolt instance on a non-default port (`doltPort`,
-  default 13306) to avoid colliding with the host's bd auto-start
+  `.beads/` by walking up from its cwd, so the entrypoint stages an
+  isolated `.gc/` scaffold and points gc's beads access at the shared
+  `beads-dolt` container instead of letting gc auto-start its own dolt
 - `gc stop` from the host shell must work — the controller socket must be
-  reachable from the workspace directory
-- Dolt container lifecycle is tied to the entrypoint — started on entry,
-  cleaned up on exit
+  reachable from the workspace directory (symlinked from the staged gc
+  home into the workspace `.gc/`)
 
 ### Roles
 
@@ -262,7 +268,8 @@ is not attached to the mayor. The post-gate order and entrypoint wrapper call
 must not be called directly (it blocks).
 - Periodic digest (hot spots, fix counts, rejection rates) — generated
   by a cooldown-gated digest order on a configurable interval
-- The gc container mounts the notify socket (same pattern as podman socket)
+- gc (on the host) and role containers reach `wrapix-notify` via the
+  notify socket — role containers get it mounted in by the provider
 - Future: migrate to beads hooks when available, so standalone `ralph run`
   users also get notifications
 
@@ -281,8 +288,8 @@ must not be called directly (it blocks).
   skips the human label. A cooldown-gated deploy order polls for
   unflagged deploy beads and restarts containers automatically (still
   requires the human or CI to have pre-built the images).
-- The gc container does not run Nix builds. Rolling restarts and database
-  migrations are out of scope for v1.
+- The city does not run Nix builds (gc and role containers alike).
+  Rolling restarts and database migrations are out of scope for v1.
 
 ### Build-to-Ops Transition
 
@@ -481,7 +488,8 @@ Container labeling convention:
   `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
 
 **Crash recovery:**
-- The gc container runs as a systemd service with `Restart=always`
+- gc runs on the host as a systemd service with `Restart=always`; agent
+  role containers are spawned by the provider as siblings
 - On restart: scan `podman ps --filter label=gc-city=<name>` for running containers
 - Reconcile against beads state (desired vs actual)
 - Orphaned workers (no matching in-progress bead): stop and remove
@@ -495,11 +503,12 @@ Two modes depending on execution path:
 | Mode | Beads access | Sync mechanism |
 |------|-------------|----------------|
 | `ralph run` (standalone) | Container has bd + dolt, does its own pull/push | Existing behavior, unchanged |
-| `gc start` (orchestrated) | gc container, mayor, scout, and judge have bd | Ephemeral workers have no bd/dolt access |
+| `gc start` (orchestrated) | Host-side gc, mayor, scout, and judge have bd pointed at the shared `beads-dolt` container | Ephemeral workers have no bd/dolt access |
 
-In gc mode, the gc container (provider script, gate script, post-gate order),
-mayor, scout, and judge all have bd access for bead creation, metadata, and
-status updates. Only ephemeral workers are isolated — they receive their task
+In gc mode, gc itself (on the host: provider script, gate script, post-gate
+order), mayor, scout, and judge all have bd access — all of them talk to the
+same shared `beads-dolt` container attached to the city network. Only
+ephemeral workers are isolated — they receive their task
 via environment variables and a mounted task file, with no direct bd access.
 
 The provider script's `Start` handler passes the bead ID, task
@@ -563,8 +572,8 @@ images.
 - `secrets.claude` is required — city fails to start if not set
 - String starting with `/` = file path (works with sops-nix, agenix, or plain files)
 - Any other string = host environment variable name
-- The gc container receives secrets from the host; the provider script passes
-  them to agent containers at start
+- gc runs on the host and inherits secrets from the systemd unit
+  environment; the provider script passes them to agent containers at start
 
 ```nix
 # Option A: env var (no leading /)
@@ -681,6 +690,7 @@ No new commands. Existing tools compose:
 | Area | Files | Change |
 |------|-------|--------|
 | Nix API | `lib/city/default.nix` | `mkCity` function |
+| Shared dolt | `lib/beads/default.nix` | Per-workspace `beads-dolt` container + CLI, shared between host `bd` and the city |
 | Provider | `lib/city/provider.sh` | Shell script for `exec:<script>` |
 | NixOS module | `modules/city.nix` | `services.wrapix.cities` |
 | Agent wrapper | `lib/city/agent.sh` | `wrapix-agent` CLI abstraction |
@@ -691,7 +701,7 @@ No new commands. Existing tools compose:
 | Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
 | Dispatch | `lib/city/dispatch.sh` | Cooldown-aware worker scale_check for gc |
 | gc home staging | `lib/city/stage-gc-home.sh` | Isolate gc from host `.beads/` |
-| Entrypoint | `lib/city/entrypoint.sh` | Dolt container, pending reviews, recovery, events watcher, gc home staging, gc start with trap cleanup |
+| Entrypoint | `lib/city/entrypoint.sh` | `beads-dolt` start+attach, pending reviews, recovery, events watcher, gc home staging, gc start with trap cleanup |
 | Unit tests | `tests/city/unit.nix` | Nix-sandbox tests for all components |
 | Integration tests | `tests/city/integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
@@ -718,7 +728,7 @@ No new commands. Existing tools compose:
 - [ ] `ralph run` still works standalone without gc
 - [x] NixOS module generates systemd units and podman network
   [verify](tests/city/unit.nix::city-nixos-module)
-- [ ] Crash recovery: gc container restarts, reconciles orphaned containers
+- [ ] Crash recovery: gc systemd service restarts, reconciles orphaned containers
 - [ ] `ralph sync` scaffolds missing docs files and creates review beads
 - [x] Service packages are built into OCI images via `dockerTools.streamLayeredImage`
   [verify](tests/city/unit.nix::city-service-images)
