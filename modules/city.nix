@@ -264,21 +264,31 @@ let
   # All enabled cities
   enabledCities = filterAttrs (_: cityCfg: cityCfg.enable) cfg.cities;
 
-  # Systemd service units for gc containers
+  # Host-side tools the daemon shells out to (entrypoint.sh + provider.sh + gc)
+  daemonTools = with pkgs; [
+    bash
+    beads
+    wrapix.beads.cli
+    wrapix.beads.push
+    coreutils
+    dolt
+    findutils
+    gc
+    gnugrep
+    gnused
+    jq
+    podman
+    util-linux
+  ];
+
+  # Systemd service units — runs entrypoint.sh on the host (not inside a container).
+  # Agent role containers are spawned as siblings by provider.sh via local podman.
   cityServices = mapAttrs' (
     name: cityCfg:
     let
       city = mkCityForConfig name cityCfg;
-      resolvedProfile = resolveProfile cityCfg.profile;
-      imageName = "wrapix-${resolvedProfile.name}:latest";
-      networkName = "gc-${name}";
-      containerName = "gc-${name}";
       secretArgs = mkSecretArgs cityCfg;
-      entrypoint = pkgs.writeShellScript "gc-entrypoint-${name}" (
-        builtins.readFile ../lib/city/entrypoint.sh
-      );
 
-      # Script to load all container images into podman
       loadImages = pkgs.writeShellScript "load-images-${name}" (
         ''
           set -euo pipefail
@@ -291,25 +301,34 @@ let
         )
       );
 
-      # Script to run the gc container — shell script so env vars expand
       startScript = pkgs.writeShellScript "start-city-${name}" ''
         set -euo pipefail
-        exec ${pkgs.podman}/bin/podman run \
-          --rm \
-          --name="${containerName}" \
-          --network="${networkName}" \
-          --volume=/run/podman/podman.sock:/run/podman/podman.sock \
-          --volume="${toString cityCfg.workspace}:/workspace" \
-          --volume="${city.config}:/etc/gc/city.toml:ro" \
-          --volume="${city.formulas}:/etc/gc/formulas:ro" \
-          --label=gc-city="${name}" \
-          --env=GC_CITY_NAME="${name}" \
-          --env=GC_WORKSPACE=/workspace \
-          --env=GC_AGENT_IMAGE="${imageName}" \
-          --env=GC_PODMAN_NETWORK="${networkName}" \
-          ${builtins.concatStringsSep " \\\n      " secretArgs} \
-          "${imageName}" \
-          "${entrypoint}"
+        export GC_CITY_NAME="${name}"
+        export GC_WORKSPACE="${toString cityCfg.workspace}"
+        export GC_AGENT_IMAGE="${city.imageName}"
+        export GC_PODMAN_NETWORK="${city.networkName}"
+        export GC_SECRET_FLAGS=${lib.escapeShellArg (builtins.concatStringsSep " " secretArgs)}
+
+        cd "$GC_WORKSPACE"
+
+        # Stage gc scaffold (config, formulas, scripts, prompts) from the store
+        cp -f --remove-destination ${city.config} city.toml
+        mkdir -p .gc/formulas .gc/scripts .gc/prompts .gc/cache .gc/system .gc/runtime
+        touch .gc/events.jsonl
+        for f in ${city.formulas}/*.formula.toml; do
+          cp -f --remove-destination "$f" .gc/formulas/
+        done
+        chmod -R u+w .gc/formulas/orders 2>/dev/null || true
+        rm -rf .gc/formulas/orders
+        cp -r --no-preserve=mode ${city.formulas}/orders .gc/formulas/
+        for f in ${city.scripts}/*; do
+          ln -sf "$f" .gc/scripts/"$(basename "$f")"
+        done
+        for f in ${city.prompts}/*; do
+          ln -sf "$f" .gc/prompts/"$(basename "$f")"
+        done
+
+        exec .gc/scripts/entrypoint.sh
       '';
     in
     nameValuePair "wrapix-city-${name}" {
@@ -324,13 +343,14 @@ let
       ];
       wantedBy = [ "multi-user.target" ];
 
+      path = daemonTools;
+
       serviceConfig = {
         Type = "exec";
         Restart = "always";
         RestartSec = 10;
         ExecStartPre = [ "${loadImages}" ];
         ExecStart = "${startScript}";
-        ExecStop = "${pkgs.podman}/bin/podman stop ${containerName}";
       };
     }
   ) enabledCities;

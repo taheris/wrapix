@@ -10,10 +10,12 @@ let
     inherit pkgs;
     inherit (sandbox) mkSandbox;
   };
+  beads = import ./beads { inherit pkgs linuxPkgs; };
   city = import ./city {
     inherit pkgs linuxPkgs;
     inherit (sandbox) mkSandbox profiles;
     inherit (ralph) mkRalph;
+    inherit beads;
   };
 
 in
@@ -21,6 +23,7 @@ in
   inherit (sandbox) profiles mkSandbox;
   inherit (city) mkCity;
   inherit (ralph) mkRalph scripts;
+  inherit beads;
 
   deriveProfile =
     baseProfile: extensions:
@@ -42,7 +45,9 @@ in
       packages =
         with pkgs;
         [
-          beads
+          beads.cli
+          beads.push
+          pkgs.beads
           dolt
           prek
         ]
@@ -54,6 +59,10 @@ in
           _dolt_remote="file://$PWD/.git/beads-worktrees/beads/.beads/dolt-remote"
           (cd .beads/dolt/beads && dolt remote add origin "$_dolt_remote" 2>/dev/null || true)
         fi
+
+        # Start per-workspace dolt container and export env vars suppressing
+        # bd's embedded autostart. See lib/beads/default.nix.
+        ${beads.shellHook}
 
         # Ensure prek owns .git/hooks/ — bd hooks install can overwrite the shim
         if [ -d .git ] && [ -f .pre-commit-config.yaml ] && ! grep -q 'prek' .git/hooks/pre-commit 2>/dev/null; then

@@ -42,18 +42,26 @@ let
     inherit pkgs;
     inherit (sandbox) mkSandbox;
   };
+  beadsLib = import ../../lib/beads { inherit pkgs linuxPkgs; };
   cityMod = import ../../lib/city {
     inherit pkgs linuxPkgs;
+    beads = beadsLib;
     inherit (sandbox) mkSandbox profiles;
     inherit (ralph) mkRalph;
   };
 
-  # Call mkCity to get live provider, scripts, formulas, config.
-  # Use port 3307 so tests don't collide with a live city on 3306.
+  # Name the input profile so liveCity.sandbox.profile ends up as
+  # "gc-test" and mkCity's imageName is "wrapix-gc-test:latest". The test
+  # builds testImage below from liveCity.sandbox.profile, guaranteeing the
+  # loaded image tag matches what gc asks podman to run.
+  testProfile = sandbox.profiles.base // {
+    name = "test";
+  };
+
   liveCity = cityMod.mkCity {
     name = "test-city";
     workers = 2;
-    doltPort = 3307;
+    profile = testProfile;
   };
 
   # Live outputs — no duplication
@@ -142,38 +150,37 @@ let
     )
   );
 
-  # Test image: real sandbox image with mock claude replacing claude-code.
-  # Uses the shared mkImage so entrypoint, /etc/wrapix/ config, and image
-  # structure are identical to production — only the LLM binary differs.
-  testProfile = liveCity.sandbox.profile // {
-    name = "test";
-  };
-
   inherit (pkgs.stdenv) isDarwin;
 
+  # Reuse liveCity's computed profile (name = "gc-test") so the image tag
+  # matches liveCity.imageName ("wrapix-gc-test:latest") that gc requests.
   testImage = sandbox.mkImage {
-    profile = testProfile;
+    inherit (liveCity.sandbox) profile;
     entrypointSh = ../../lib/sandbox/linux/entrypoint.sh;
     claudePkg = mockClaude;
     asTarball = isDarwin;
   };
 
-  # Runtime dependencies for the test script (host-side, must be native packages)
-  testDeps = with pkgs; [
-    bash
-    beads
-    coreutils
-    dolt
-    gc
-    git
-    gnugrep
-    gnused
-    gnutar
-    jq
-    lsof
-    tmux
-    util-linux
-  ];
+  # Runtime dependencies for the test script. Starts from the same packages
+  # live city ships (gc, beads-dolt, ralph tooling, ...) so this test exercises
+  # the real invocation closure, not a parallel declaration. Extras below are
+  # test-driver-only tools that live does not need on the host.
+  testDeps =
+    liveCity.packages
+    ++ (with pkgs; [
+      bash
+      beads # bd CLI — test driver calls it directly
+      coreutils
+      dolt # ad-hoc SQL/config from test driver
+      git
+      gnugrep
+      gnused
+      gnutar
+      jq
+      lsof # diagnostics
+      tmux # cleanup
+      util-linux
+    ]);
 
   testScript = pkgs.writeShellScriptBin "test-city" ''
     set -euo pipefail
@@ -188,9 +195,9 @@ let
     FAILED=0
     GC_PID=""
     WS=""
-    TEST_NETWORK="wrapix-test-$$"
-    DOLT_CONTAINER="gc-test-city-dolt"
-    DOLT_PORT=${toString liveCity.configAttrs.dolt.port}
+    TEST_NETWORK="${liveCity.networkName}"
+    DOLT_CONTAINER=""
+    DOLT_PORT=""
     # Pass --no-fail-fast to run all tests even after failures
     FAIL_FAST=true
     if [ "''${1:-}" = "--no-fail-fast" ]; then
@@ -200,12 +207,10 @@ let
     dump_diagnostics() {
       echo ""
       echo "--- Diagnostics ---"
-      # Dolt server state
       echo "  dolt server:"
       echo "    container: $(podman inspect --format '{{.State.Status}}' "$DOLT_CONTAINER" 2>/dev/null || echo 'not found')"
-      echo "    port file: $(cat "$WS/.beads/dolt-server.port" 2>/dev/null || echo 'missing')"
       echo "    reachable: $(bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && echo yes || echo no)"
-      echo "    GC_DOLT_HOST=''${GC_DOLT_HOST:-unset} GC_DOLT_PORT=''${GC_DOLT_PORT:-unset}"
+      echo "    GC_DOLT_PORT=''${GC_DOLT_PORT:-unset}"
       if [ -n "$WS" ] && [ -f "$WS/gc.log" ]; then
         echo "  gc.log (last 40 lines):"
         tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
@@ -219,6 +224,15 @@ let
       done
       echo "  dolt container logs:"
       podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 | sed 's/^/    /' || true
+      if [ -n "$WS" ] && [ -d "$WS/.beads/dolt" ]; then
+        echo "  .beads/dolt tree:"
+        find "$WS/.beads/dolt" -maxdepth 4 2>/dev/null | sed 's/^/    /'
+        echo "  files referencing /tmp/:"
+        grep -rl "/tmp/" "$WS/.beads/dolt" 2>/dev/null | while IFS= read -r f; do
+          echo "    $f:"
+          grep -o "/tmp/[A-Za-z0-9_/.-]*" "$f" 2>/dev/null | sort -u | sed 's/^/      /'
+        done
+      fi
       # Mock claude logs written to host-visible .beads/ dir
       for logf in "$WS"/.beads/mock-claude-*.log; do
         [ -f "$logf" ] || continue
@@ -243,12 +257,13 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      podman stop -t 3 "$DOLT_CONTAINER" 2>/dev/null || true
-      podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
+      if [ -n "$WS" ]; then
+        beads-dolt stop "$WS" 2>/dev/null || true
+      fi
       podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
       podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       podman network rm "$TEST_NETWORK" 2>/dev/null || true
-      podman rmi wrapix-test:latest 2>/dev/null || true
+      podman rmi "${liveCity.imageName}" 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
       fi
@@ -327,13 +342,9 @@ let
     # Pre-cleanup: remove stale state from previous runs
     # ================================================================
 
-    podman stop -t 3 "$DOLT_CONTAINER" 2>/dev/null || true
-    podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
     podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
     podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
     podman network rm "$TEST_NETWORK" 2>/dev/null || true
-    # Kill any stale dolt on the test port
-    lsof -ti :"$DOLT_PORT" | xargs kill 2>/dev/null || true
 
     # ================================================================
     # Setup: workspace, config, image
@@ -363,11 +374,10 @@ let
       # Directories the provider mounts into containers
       mkdir -p .wrapix .claude docs
 
-      # --- gc init: live code path (dolt + beads + scaffold) ---
-      # gc init creates .gc/ scaffold AND .beads/ (via gc-beads-bd) with gc's
-      # preferred prefix. It auto-starts the supervisor and blocks — we kill it
-      # after initialization completes, then replace the embedded dolt with a
-      # shared container serving the same database.
+      # --- gc init: scaffolds .beads/ and .gc/ ---
+      # gc init auto-starts its supervisor and blocks; kill the process group
+      # once .beads/metadata.json exists. beads-dolt will then serve the same
+      # data dir as a shared podman container.
       setsid gc init --file ${cityToml} --skip-provider-readiness </dev/null &
       _GC_INIT_PID=$!
       for _i in $(seq 1 60); do
@@ -379,10 +389,8 @@ let
         return 1
       fi
 
-      # Configure bd while gc init's embedded dolt is still running
       bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
 
-      # Kill the entire gc init process group (includes embedded dolt)
       kill -TERM -"$_GC_INIT_PID" 2>/dev/null || true
       for _i in $(seq 1 30); do
         kill -0 "$_GC_INIT_PID" 2>/dev/null || break
@@ -393,30 +401,27 @@ let
       gc supervisor stop 2>&1 || true
       gc unregister "$WS" 2>&1 || true
 
-      # Kill gc's embedded dolt and wait for it to release file handles
+      # Stop gc's embedded dolt (entrypoint will start beads-dolt on the same dir).
       if [ -f .beads/dolt-server.pid ]; then
         kill "$(cat .beads/dolt-server.pid)" 2>/dev/null || true
       fi
       if [ -f .beads/dolt-server.port ]; then
         _EDOLT_PORT=$(cat .beads/dolt-server.port)
-        lsof -ti :"$_EDOLT_PORT" | xargs kill 2>/dev/null || true
-        # Wait for port to be released
         for _i in $(seq 1 20); do
           bash -c "echo > /dev/tcp/127.0.0.1/$_EDOLT_PORT" 2>/dev/null || break
           sleep 0.2
         done
       fi
-      find .beads -name LOCK -delete 2>/dev/null || true
       rm -f .beads/dolt-server.pid .beads/dolt-server.lock .beads/dolt-server.port
       chmod 700 .beads
 
-      # Clear circuit breaker state — killing dolt may have tripped it.
-      # bd stores breaker state in /tmp/beads-circuit/ keyed by host:port.
-      rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"$DOLT_PORT".json 2>/dev/null || true
-      rm -f /tmp/beads-circuit/beads-dolt-circuit-*-"''${_EDOLT_PORT:-0}".json 2>/dev/null || true
-
-      # --- Create test podman network (matches live topology) ---
       podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
+
+      # Copy city.toml to workspace root — entrypoint.sh sed-replaces the
+      # dolt port sentinel here, and stage-gc-home.sh copies it into the
+      # staged gc home. Matches live (city.app and modules/city.nix).
+      cp -f ${cityToml} city.toml
+      chmod u+w city.toml
 
       echo "  > workspace ready"
 
@@ -448,36 +453,34 @@ let
     subtest "Validate gc accepts config" validate_config
 
     start_gc() {
-      export GC_CITY_NAME=test-city
-      export GC_WORKSPACE="$WS"
-      export GC_AGENT_IMAGE=localhost/wrapix-test:latest
-      export GC_PODMAN_NETWORK="$TEST_NETWORK"
-      export GC_WRAPIX_PROMPT="${../../lib/sandbox/prompt.txt}"
-      export GC_DOLT_PORT="$DOLT_PORT"
-      export BEADS_DOLT_AUTO_START=0
-      # Clean up any containers left by gc rig add's auto-start
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
-      # Use the entrypoint — same path as live (nix run .#city).
-      # Entrypoint starts dolt container, runs recovery, then gc start.
-      setsid ${scripts}/entrypoint.sh > "$WS/gc.log" 2>&1 &
+
+      DOLT_CONTAINER="$(beads-dolt name "$WS")"
+      DOLT_PORT="$(beads-dolt port "$WS")"
+
+      export GC_CITY_NAME="test-city"
+      export GC_WORKSPACE="$WS"
+      export GC_AGENT_IMAGE="${liveCity.imageName}"
+      export GC_PODMAN_NETWORK="$TEST_NETWORK"
+
+      setsid "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc.log" 2>&1 &
       GC_PID=$!
-      # Wait for dolt container to be ready (entrypoint starts it)
-      for _i in $(seq 1 50); do
+
+      for _i in $(seq 1 100); do
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
       done
-      # Point host-side bd at the published port.
-      # Also write the port file — gc reads GC_WORKSPACE/.beads/dolt-server.port
-      # for its internal bd calls regardless of gc home isolation.
-      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
-      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
-      echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
+
       sleep 3
       if ! kill -0 "$GC_PID" 2>/dev/null; then
-        echo "gc exited prematurely:"
-        cat "$WS/gc.log" 2>/dev/null | sed 's/^/  /' || true
+        echo "gc daemon died:"
+        tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/  /' || true
         return 1
       fi
+
+      export BEADS_DOLT_SERVER_HOST=127.0.0.1
+      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+      export BEADS_DOLT_AUTO_START=0
     }
     subtest "Start gc daemon" start_gc
 
@@ -578,27 +581,17 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      # Stop and remove all gc containers (entrypoint trap already killed dolt)
+      # Stop and remove all gc containers. The beads-dolt container is
+      # shared across phases and kept running (entrypoint only disconnects
+      # it from the network on exit).
       for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
       GC_PID=""
 
-      # Restart dolt for Phase 2+ — the entrypoint's exit trap killed it.
-      find "$WS/.gc/dolt" -name "LOCK" -delete 2>/dev/null || true
-      podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
-      podman run -d \
-        --name "$DOLT_CONTAINER" \
-        --entrypoint "" \
-        --network "$TEST_NETWORK" \
-        --userns=keep-id \
-        -e HOME=/doltdb \
-        -p "127.0.0.1:''${DOLT_PORT}:''${DOLT_PORT}" \
-        -v "$WS/.gc/dolt:/doltdb:rw" \
-        localhost/wrapix-test:latest \
-        bash -c 'cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P "$1"' -- "$DOLT_PORT"
-      # Wait for dolt to be ready
+      # Ensure beads-dolt is still running for Phase 2+ assertions
+      beads-dolt start "$WS" >/dev/null 2>&1 || true
       for _i in $(seq 1 50); do
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2

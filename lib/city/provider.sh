@@ -123,11 +123,11 @@ persistent_start() {
     ws_mode="ro"
   fi
 
-  # Always use the container name — containers reach dolt via the podman
-  # network, not localhost. The host's BEADS_DOLT_SERVER_HOST=127.0.0.1
-  # is for gc itself, not for containers.
-  local dolt_host="gc-${GC_CITY_NAME}-dolt"
-  local dolt_port="${BEADS_DOLT_SERVER_PORT:-3306}"
+  # Containers reach dolt via podman network DNS (container name), not
+  # localhost. The entrypoint sets GC_BEADS_DOLT_CONTAINER to the
+  # beads-dolt container name and attaches it to the city network.
+  local dolt_host="${GC_BEADS_DOLT_CONTAINER:?provider requires GC_BEADS_DOLT_CONTAINER}"
+  local dolt_port="${BEADS_DOLT_SERVER_PORT:?provider requires BEADS_DOLT_SERVER_PORT}"
 
   local role beads_staging
   role="$(role_name)"
@@ -243,11 +243,11 @@ worker_start() {
 
   # Prefer env var (set by entrypoint) over port file (can be corrupted by
   # agents running bd dolt start inside containers with .beads mounted rw).
-  # Always use the container name — containers reach dolt via the podman
-  # network, not localhost. The host's BEADS_DOLT_SERVER_HOST=127.0.0.1
-  # is for gc itself, not for containers.
-  local dolt_host="gc-${GC_CITY_NAME}-dolt"
-  local dolt_port="${BEADS_DOLT_SERVER_PORT:-3306}"
+  # Containers reach dolt via podman network DNS (container name), not
+  # localhost. The entrypoint sets GC_BEADS_DOLT_CONTAINER to the
+  # beads-dolt container name and attaches it to the city network.
+  local dolt_host="${GC_BEADS_DOLT_CONTAINER:?provider requires GC_BEADS_DOLT_CONTAINER}"
+  local dolt_port="${BEADS_DOLT_SERVER_PORT:?provider requires BEADS_DOLT_SERVER_PORT}"
   local beads_staging
   beads_staging="$(stage_beads)"
 

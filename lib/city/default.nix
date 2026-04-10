@@ -10,6 +10,7 @@
   mkSandbox,
   mkRalph,
   profiles,
+  beads,
 }:
 
 let
@@ -82,7 +83,6 @@ let
       mayor ? { },
       resources ? { },
       secrets ? { },
-      doltPort ? 13306, # non-default to avoid colliding with bd auto-start (3306)
       name ? "dev",
     }:
     let
@@ -96,8 +96,13 @@ let
       # One sandbox shared by ad-hoc container, ralph, and gc agents.
       # Include city scripts (wrapix-agent, beads-push) in the profile so
       # they're available inside agent containers (worker runs wrapix-agent).
+      imagePackages = [
+        cityScripts
+      ];
+
       cityProfile = profile // {
-        packages = (profile.packages or [ ]) ++ [ cityScripts ];
+        name = "gc-${profile.name}";
+        packages = (profile.packages or [ ]) ++ imagePackages;
       };
       agentSandbox = if sandbox != null then sandbox else mkSandbox { profile = cityProfile; };
 
@@ -194,14 +199,10 @@ let
         filter = path: _type: elem (baseNameOf path) promptNames;
       };
 
-      # Prefix for scale_check commands: the dolt container publishes
-      # doltPort to localhost.  Override gc's stale metadata.json values.
-      bdEnv = "BEADS_DOLT_SERVER_PORT=${toString doltPort} BEADS_DOLT_SERVER_HOST=127.0.0.1";
-
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
         if cooldown == "0" then
-          "${bdEnv} bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
+          "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
         else
           "GC_COOLDOWN=${cooldown} GC_WORKSPACE=\"$(pwd)\" ${dispatchScript}";
 
@@ -225,12 +226,13 @@ let
           provider = "bd";
         };
 
-        # Dolt connection — the entrypoint starts a dolt container that
-        # publishes this port to localhost.  gc reads this section for
-        # its internal bd calls; without it, bd defaults to port 0.
+        # Host-side gc daemon talks to dolt over the published port on
+        # 127.0.0.1. Role containers reach dolt by container hostname; the
+        # provider script injects BEADS_DOLT_SERVER_HOST=$GC_BEADS_DOLT_CONTAINER
+        # into each container's env, overriding this value.
         dolt = {
           host = "127.0.0.1";
-          port = doltPort;
+          port = 99999;
         };
 
         daemon = {
@@ -257,18 +259,19 @@ let
           {
             name = "scout";
             scope = "city";
-            scale_check = "${bdEnv} bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
           {
             name = "worker";
             scope = "city";
-            max_active_sessions = workers;
+            # No agent-level max_active_sessions: gc treats max==1 as
+            # single-session (not a pool). Cap is inherited from workspace.
             scale_check = workerScaleCheck;
           }
           {
             name = "judge";
             scope = "city";
-            scale_check = "${bdEnv} bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
           }
         ];
 
@@ -372,14 +375,16 @@ let
       '';
 
       # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox
-      cityPackages = ralphInstance.packages ++ [
+      shellPackages = ralphInstance.packages ++ [
         pkgs.gc
         cityScripts
+        beads.cli
+        beads.push
       ];
 
       # Pre-built devShell with everything on PATH
       devShell = pkgs.mkShell {
-        packages = cityPackages;
+        packages = shellPackages;
         inherit shellHook;
       };
 
@@ -387,14 +392,14 @@ let
       cityMkDevShell =
         extra:
         pkgs.mkShell {
-          packages = cityPackages ++ (extra.packages or [ ]);
+          packages = shellPackages ++ (extra.packages or [ ]);
           shellHook = ''
             ${shellHook}
             ${extra.shellHook or ""}
           '';
         };
 
-      # App for `nix run .#city` — sets up env and runs gc via entrypoint
+      # App for `nix run .#city` — sets up env and execs entrypoint.sh on the host
       app = {
         meta.description = "Gas City orchestration loop";
         type = "app";
@@ -404,20 +409,25 @@ let
           export GC_WORKSPACE="$(pwd)"
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
-          export GC_DOLT_PORT="${toString doltPort}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
+
+          # Ensure the per-workspace beads dolt container is running
+          # and propagate its host/port to child processes (gc → bd).
+          ${beads.cli}/bin/beads-dolt start "$GC_WORKSPACE"
+          export BEADS_DOLT_SERVER_HOST=127.0.0.1
+          BEADS_DOLT_SERVER_PORT="$(${beads.cli}/bin/beads-dolt port "$GC_WORKSPACE")"
+          export BEADS_DOLT_SERVER_PORT
+          export BEADS_DOLT_AUTO_START=0
 
           ${loadImageSnippet}
 
           cp -f --remove-destination ${cityToml} city.toml
 
-          # --- gc scaffold ---
           # Pre-create the .gc/ layout so gc start never runs auto-init
           # (which scaffolds unwanted root-level dirs and overwrites beads).
           mkdir -p .gc/cache .gc/system .gc/runtime
           touch .gc/events.jsonl
 
-          # Overlay our formulas and scripts
           mkdir -p .gc/formulas .gc/scripts .gc/prompts
           for f in ${formulasDir}/*.formula.toml; do
             cp -f --remove-destination "$f" .gc/formulas/
@@ -425,23 +435,19 @@ let
           chmod -R u+w .gc/formulas/orders 2>/dev/null || true
           rm -rf .gc/formulas/orders
           cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-          # Symlink scripts to source tree (live)
           _city_src="$GC_WORKSPACE/lib/city"
           for f in ${concatStringsSep " " scriptNames}; do
             ln -sf "$_city_src/$f" .gc/scripts/"$f"
           done
-          # Symlink role prompts to source tree
           for f in ${concatStringsSep " " promptNames}; do
             ln -sf "$_city_src/prompts/$f" .gc/prompts/"$f"
           done
 
-          # Ensure the podman network exists (NixOS module creates it via
-          # systemd; nix run needs to do it here).
           if ! podman network exists "${networkName}" 2>/dev/null; then
             podman network create "${networkName}" >/dev/null
           fi
 
-          exec "$GC_WORKSPACE/lib/city/entrypoint.sh"
+          exec .gc/scripts/entrypoint.sh
         ''}/bin/wrapix-city";
       };
 
@@ -454,7 +460,7 @@ let
         devShell
         shellHook
         ;
-      packages = cityPackages;
+      packages = shellPackages;
       mkDevShell = cityMkDevShell;
 
       # Shared sandbox (ad-hoc container via sandbox.package)
@@ -491,12 +497,13 @@ let
       # Individual formula paths for selective override
       inherit defaultFormulas;
 
+      inherit imageName networkName;
+
       # Re-export inputs for downstream consumers (NixOS module, etc.)
       inherit
         agent
         workers
         cooldown
-        doltPort
         resources
         ;
       scoutConfig = {

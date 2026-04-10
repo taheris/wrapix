@@ -54,8 +54,10 @@ let
     inherit (sandbox) mkSandbox;
   };
 
+  beads = import ../../lib/beads { inherit pkgs linuxPkgs; };
+
   city = import ../../lib/city {
-    inherit pkgs linuxPkgs;
+    inherit pkgs linuxPkgs beads;
     inherit (sandbox) mkSandbox profiles;
     inherit (ralph) mkRalph;
   };
@@ -608,6 +610,8 @@ in
                   GC_PODMAN_NETWORK="wrapix-test" \
                   GC_WRAPIX_PROMPT="/etc/wrapix-prompt" \
                   GC_BEAD_ID="bead-123" \
+                  GC_BEADS_DOLT_CONTAINER="beads-test" \
+                  BEADS_DOLT_SERVER_PORT="13306" \
                   bash "$PROVIDER" start worker-1 > "$TMPDIR/out" 2>&1 || true
 
                 # Worktree should exist
@@ -647,7 +651,7 @@ in
       hasSystemdServices = match ".*systemd\\.services.*" moduleFile != null;
       hasMkCity = match ".*mkCity.*" moduleFile != null;
 
-      # Critical env var plumbing — provider.sh requires these
+      # Critical env var plumbing — provider.sh requires these in the daemon env
       hasAgentImage = match ".*GC_AGENT_IMAGE.*" moduleFile != null;
       hasPodmanNetwork = match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
     in
@@ -1732,6 +1736,18 @@ in
                 exit 0
         MOCK
                 chmod +x "$MOCK_BIN/podman"
+
+                # beads-dolt: deterministic name/port, no-op for start/attach
+                cat > "$MOCK_BIN/beads-dolt" << 'MOCK'
+                #!/bin/sh
+                case "$1" in
+                  start|attach|stop) exit 0 ;;
+                  name)  echo "beads-test" ;;
+                  port)  echo "13306" ;;
+                  *) exit 0 ;;
+                esac
+        MOCK
+                chmod +x "$MOCK_BIN/beads-dolt"
 
                 # gc: capture that we reach gc start --foreground (proves no blocking)
                 cat > "$MOCK_BIN/gc" << 'MOCK'

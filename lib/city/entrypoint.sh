@@ -22,94 +22,37 @@ CITY_NAME="${GC_CITY_NAME:?entrypoint.sh requires GC_CITY_NAME}"
 : "${GC_WORKSPACE:?entrypoint.sh requires GC_WORKSPACE}"
 
 # ---------------------------------------------------------------------------
-# Step 0: Start dolt container on the city network
+# Step 0: Ensure the per-workspace beads-dolt container is running and
+#         attach it to the city podman network so role containers can
+#         reach it by container hostname.
 # ---------------------------------------------------------------------------
 
-DOLT_CONTAINER="gc-${CITY_NAME}-dolt"
-DOLT_PORT="${GC_DOLT_PORT:-3306}"
-
-start_dolt_container() {
-  local beads_dir="${GC_WORKSPACE}/.beads"
-  local city_dolt="${GC_WORKSPACE}/.gc/dolt"
-  [[ -d "$beads_dir/dolt" ]] || return 0
-
-  # If the dolt container is already running, verify the port is actually responding.
-  # A container can report Running=true while dolt inside has crashed.
-  if podman inspect --format '{{.State.Running}}' "$DOLT_CONTAINER" 2>/dev/null | grep -q true; then
-    if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
-      echo "Dolt container already running (${DOLT_CONTAINER}:${DOLT_PORT})"
-      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
-      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
-      return 0
-    fi
-    echo "Dolt container exists but port ${DOLT_PORT} not responding — restarting..."
-    podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
-  fi
-
-  # Initialize city dolt from host on first start (one-time copy).
-  # City dolt is completely separate from the host's — no conflicts.
-  if [[ ! -d "$city_dolt/beads" ]]; then
-    echo "Initializing city dolt from host .beads/dolt..."
-    mkdir -p "$city_dolt"
-    cp -a "$beads_dir/dolt/." "$city_dolt/"
-  fi
-
-  # Clean stale state in city's dolt dir (not host's)
-  find "$city_dolt" -name "LOCK" -delete 2>/dev/null || true
-
-  # Remove any stopped dolt container from a previous run
-  podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
-
-  # If port is already responding (stale container, host dolt, etc.), reuse it
-  if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
-    echo "Port ${DOLT_PORT} already in use — reusing existing dolt server"
-    export BEADS_DOLT_SERVER_HOST="127.0.0.1"
-    export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
-    return 0
-  fi
-
-  # Grant root@% so agent containers on the podman network can connect.
-  # Default dolt only creates root@localhost; containers appear as 10.89.x.x.
-  (cd "$city_dolt" && \
-    dolt sql -q 'CREATE USER IF NOT EXISTS root@"%"; GRANT ALL ON *.* TO root@"%" WITH GRANT OPTION' \
-  ) 2>/dev/null || true
-
-  echo "Starting dolt container on ${GC_PODMAN_NETWORK}..."
-  podman run -d \
-    --name "$DOLT_CONTAINER" \
-    --entrypoint "" \
-    --network "${GC_PODMAN_NETWORK:?}" \
-    --userns=keep-id \
-    -e HOME=/doltdb \
-    -p "127.0.0.1:${DOLT_PORT}:${DOLT_PORT}" \
-    -v "${city_dolt}:/doltdb:rw" \
-    "${GC_AGENT_IMAGE:?}" \
-    bash -c 'cd /doltdb && exec dolt sql-server -H 0.0.0.0 -P "$1"' -- "${DOLT_PORT}"
-
-  # Wait for readiness — check from host via published port
-  local retries=50
-  while [[ $retries -gt 0 ]]; do
-    if bash -c "echo > /dev/tcp/127.0.0.1/${DOLT_PORT}" 2>/dev/null; then
-      echo "Dolt container ready (${DOLT_CONTAINER}:${DOLT_PORT})"
-      export BEADS_DOLT_SERVER_HOST="127.0.0.1"
-      export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
-      return 0
-    fi
-    sleep 0.2
-    retries=$((retries - 1))
-  done
-
-  echo "Error: dolt container did not become ready" >&2
-  podman logs "$DOLT_CONTAINER" 2>&1 | tail -5 >&2
+if ! command -v beads-dolt >/dev/null 2>&1; then
+  echo "Error: beads-dolt not on PATH" >&2
   exit 1
-}
+fi
 
-start_dolt_container
+beads-dolt start "$GC_WORKSPACE"
+DOLT_CONTAINER="$(beads-dolt name "$GC_WORKSPACE")"
+DOLT_PORT="$(beads-dolt port "$GC_WORKSPACE")"
+DOLT_HOST="127.0.0.1"
 
-# NOTE: Do NOT write dolt-server.port to the host's .beads/ — that
-# hijacks host-side bd to the city container, which can't pull/push
-# (the file remote isn't mounted). gc home has its own port file
-# via stage-gc-home.sh; host bd uses its own auto-started dolt.
+beads-dolt attach "${GC_PODMAN_NETWORK:?}" "$GC_WORKSPACE"
+
+export BEADS_DOLT_SERVER_HOST="$DOLT_HOST"
+export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
+export BEADS_DOLT_AUTO_START=0
+export GC_DOLT_PORT="$DOLT_PORT"
+export GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER"
+
+# Substitute the dolt port sentinel in city.toml. The host field is
+# already 127.0.0.1 (host gc daemon needs that); the provider script
+# overrides BEADS_DOLT_SERVER_HOST per-container with $DOLT_CONTAINER.
+if [[ -f "${GC_WORKSPACE}/city.toml" ]]; then
+  sed -i \
+    -e "s|port = 99999|port = ${DOLT_PORT}|" \
+    "${GC_WORKSPACE}/city.toml"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1: Print informational summary of pending reviews
@@ -193,13 +136,13 @@ ln -sfn "$GC_CITY/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.lock"
 ln -sfn "$GC_CITY/.gc/controller.token" "${GC_WORKSPACE}/.gc/controller.token"
 
 # Run gc in background + wait so the shell stays alive for the trap.
-# On exit (signal or natural), forward SIGTERM to gc and stop dolt.
+# On exit (signal or natural), forward SIGTERM to gc. The beads-dolt
+# container is shared with the devShell and persists across city runs.
 _gc_cleanup() {
   [ -n "${_GC_PID:-}" ] && kill -TERM "$_GC_PID" 2>/dev/null || true
   [ -n "${_GC_PID:-}" ] && wait "$_GC_PID" 2>/dev/null || true
-  podman stop -t 5 "$DOLT_CONTAINER" 2>/dev/null || true
-  podman rm -f "$DOLT_CONTAINER" 2>/dev/null || true
-  # Clean up controller symlinks
+  # Detach (but don't stop) the beads-dolt container from this city's network.
+  podman network disconnect "${GC_PODMAN_NETWORK}" "$DOLT_CONTAINER" 2>/dev/null || true
   rm -f "${GC_WORKSPACE}/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.token"
 }
 trap _gc_cleanup EXIT INT TERM
