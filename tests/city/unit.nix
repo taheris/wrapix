@@ -911,6 +911,128 @@ in
         mkdir $out
       '';
 
+  # End-to-end env contract: provider.sh -> gc -> bd.
+  #
+  # gc's bdRuntimeEnv strips BEADS_DOLT_SERVER_* from the inherited env
+  # and rebuilds them from GC_DOLT_HOST/GC_DOLT_PORT via mirrorBeadsDoltEnv.
+  # If provider.sh only sets BEADS_DOLT_SERVER_* (which bd reads directly),
+  # then gc subprocesses of bd hit "127.0.0.1:0" because gc strips and
+  # doesn't replace them.
+  #
+  # This test runs provider.sh with a stubbed podman to capture the exact
+  # -e flags, parses them into an env, runs gc with that env against a
+  # stubbed bd that dumps its env, and asserts BEADS_DOLT_SERVER_HOST/PORT
+  # still reach bd after gc's round-trip.
+  city-gc-bd-env-passthrough =
+    runCommandLocal "city-gc-bd-env-passthrough"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gc
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        PROVIDER="${../../lib/city/provider.sh}"
+        TMPDIR=$(mktemp -d)
+        STUB_BIN="$TMPDIR/bin"
+        mkdir -p "$STUB_BIN"
+
+        # Stub podman: record argv, then exit 0
+        cat > "$STUB_BIN/podman" << 'STUB'
+        #!/bin/sh
+        printf '%s\n' "$@" > "$PODMAN_ARGS"
+        STUB
+        chmod +x "$STUB_BIN/podman"
+        export PODMAN_ARGS="$TMPDIR/podman.args"
+
+        # Step 1: run provider.sh start mayor — capture the env flags it
+        # passes to podman. This is the real live path; no shortcut.
+        PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$TMPDIR" \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" start mayor > "$TMPDIR/out" 2>&1 || {
+            echo "FAIL: provider start mayor exited non-zero"
+            cat "$TMPDIR/out"
+            exit 1
+          }
+
+        # Step 2: parse -e KEY=VALUE flags from captured podman args.
+        # Each arg is on its own line in PODMAN_ARGS.
+        : > "$TMPDIR/container.env"
+        next_is_env=0
+        while IFS= read -r arg; do
+          if [[ "$next_is_env" == "1" ]]; then
+            echo "$arg" >> "$TMPDIR/container.env"
+            next_is_env=0
+          elif [[ "$arg" == "-e" ]]; then
+            next_is_env=1
+          fi
+        done < "$PODMAN_ARGS"
+
+        # Sanity: both env families must be set by provider.sh
+        grep -qE '^BEADS_DOLT_SERVER_HOST=' "$TMPDIR/container.env" \
+          || { echo "FAIL: provider did not set BEADS_DOLT_SERVER_HOST"; cat "$TMPDIR/container.env"; exit 1; }
+        grep -qE '^BEADS_DOLT_SERVER_PORT=' "$TMPDIR/container.env" \
+          || { echo "FAIL: provider did not set BEADS_DOLT_SERVER_PORT"; exit 1; }
+        grep -qE '^GC_DOLT_HOST=' "$TMPDIR/container.env" \
+          || { echo "FAIL: provider did not set GC_DOLT_HOST (gc won't find dolt)"; cat "$TMPDIR/container.env"; exit 1; }
+        grep -qE '^GC_DOLT_PORT=' "$TMPDIR/container.env" \
+          || { echo "FAIL: provider did not set GC_DOLT_PORT (gc won't find dolt)"; exit 1; }
+        echo "  PASS: provider.sh sets both env var families"
+
+        # Step 3: stage a minimal city so gc can find city.toml / provider
+        cp ${minimalCity.config} "$TMPDIR/city.toml"
+
+        # Step 4: stub bd that dumps its received env to a file
+        cat > "$STUB_BIN/bd" << 'STUB'
+        #!/bin/sh
+        env > "$BD_ENV_DUMP"
+        # Minimal JSON response so gc doesn't choke
+        if [ "$1" = "list" ] || [ "$2" = "list" ]; then
+          echo "[]"
+        fi
+        exit 0
+        STUB
+        chmod +x "$STUB_BIN/bd"
+        export BD_ENV_DUMP="$TMPDIR/bd.env"
+
+        # Step 5: run gc mail send with ONLY the env provider.sh would
+        # have placed in the container. This mirrors live: a process
+        # inside the mayor container inherits only those vars.
+        cd "$TMPDIR"
+        env -i \
+          PATH="$STUB_BIN:${pkgs.gc}/bin:${pkgs.coreutils}/bin:${pkgs.bash}/bin" \
+          HOME="$TMPDIR" \
+          BD_ENV_DUMP="$BD_ENV_DUMP" \
+          $(while IFS= read -r line; do printf ' %q' "$line"; done < "$TMPDIR/container.env") \
+          gc mail send --to human -s test -m test > "$TMPDIR/gc.out" 2>&1 || true
+
+        # Step 6: assert bd was invoked AND it received the dolt env vars.
+        # gc may or may not call bd depending on the code path; the critical
+        # test is: IF bd is called, it must see the dolt env.
+        if [[ -f "$BD_ENV_DUMP" ]]; then
+          grep -qE '^BEADS_DOLT_SERVER_HOST=' "$BD_ENV_DUMP" \
+            || { echo "FAIL: gc->bd subprocess is missing BEADS_DOLT_SERVER_HOST"; cat "$BD_ENV_DUMP"; exit 1; }
+          grep -qE '^BEADS_DOLT_SERVER_PORT=13306' "$BD_ENV_DUMP" \
+            || { echo "FAIL: gc->bd subprocess is missing or wrong BEADS_DOLT_SERVER_PORT"; grep BEADS_ "$BD_ENV_DUMP" || true; exit 1; }
+          echo "  PASS: gc propagates dolt endpoint to bd subprocesses"
+        else
+          echo "FAIL: gc did not invoke bd at all (test cannot verify env passthrough)"
+          cat "$TMPDIR/gc.out"
+          exit 1
+        fi
+
+        rm -rf "$TMPDIR"
+        echo "PASS: provider.sh -> gc -> bd env chain is intact"
+        mkdir $out
+      '';
+
   # NixOS module: verifies env var plumbing via Nix evaluation
   city-nixos-module =
     let

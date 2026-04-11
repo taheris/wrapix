@@ -155,6 +155,8 @@ persistent_start() {
     -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
     -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
+    -e "GC_DOLT_HOST=${dolt_host}" \
+    -e "GC_DOLT_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
     -e "GC_SESSION=${SESSION}" \
@@ -277,6 +279,8 @@ worker_start() {
     -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
     -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
+    -e "GC_DOLT_HOST=${dolt_host}" \
+    -e "GC_DOLT_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
