@@ -30,16 +30,23 @@ lib/
 │   ├── image.nix        # OCI image builder
 │   ├── linux/           # Podman implementation + krun microVM support
 │   └── darwin/          # Apple container implementation
+├── beads/               # Per-workspace beads-dolt container management
 ├── city/                # Gas City orchestration
 │   ├── default.nix      # mkCity — generates city.toml, provider, images
 │   ├── provider.sh      # exec:<script> provider — gc commands → podman ops
 │   ├── agent.sh         # wrapix-agent wrapper (claude abstraction)
 │   ├── scout.sh         # Scout helpers: parse-rules, scan
-│   ├── gate.sh          # Convergence gate: nudge reviewer, poll verdict
+│   ├── gate.sh          # Convergence gate: nudge Judge, poll verdict
 │   ├── post-gate.sh     # Post-convergence: merge, cleanup, deploy bead
-│   ├── entrypoint.sh    # Init checks, podman events watcher, exec gc
+│   ├── dispatch.sh      # Cooldown-aware Worker scale_check for gc
+│   ├── entrypoint.sh    # beads-dolt attach, pending reviews, recovery,
+│   │                    # events watcher, gc home staging, gc start
+│   ├── stage-gc-home.sh # Isolate gc from host .beads/
+│   ├── prime-hook.sh    # SessionStart/PreCompact role prompt loader
 │   ├── recovery.sh      # Crash recovery: reconcile orphaned containers
-│   └── formulas/        # Default role formulas (scout, worker, reviewer)
+│   ├── prompts/         # Per-role system prompts (mayor, scout, judge, worker)
+│   ├── formulas/        # Default role formulas (mayor, scout, worker, judge)
+│   └── orders/          # gc orders (post-gate)
 ├── mcp/                 # MCP server registry
 │   ├── default.nix      # Server registry: { tmux, playwright }
 │   ├── tmux/            # tmux MCP server
@@ -55,8 +62,8 @@ modules/
 docs/
 ├── README.md            # Project overview, terminology (always pinned)
 ├── architecture.md      # This file (on demand)
-├── orchestration.md     # Ops config, scout rules (on demand)
-└── style-guidelines.md  # Code standards the reviewer enforces (on demand)
+├── orchestration.md     # Ops config, Scout rules, deploy commands (on demand)
+└── style-guidelines.md  # Code standards the Judge enforces (on demand)
 ```
 
 ## Component Overview
@@ -87,26 +94,35 @@ On Linux with KVM, containers can optionally run inside a [libkrun](https://gith
 Gas City adds multi-agent orchestration on top of the sandbox. It runs four roles in an autonomous ops loop:
 
 ```
-Scout (watching) → creates bead → Worker (fixes) → Reviewer (reviews)
+Scout (watching) → creates bead → Worker (fixes) → Judge (reviews)
                                                          |
                                                merge or reject → retry
+                                                         |
+                                                  escalation → Mayor
 ```
 
 | Role | Job | Lifetime |
 |------|-----|----------|
-| Scout | Watches services, detects errors, creates beads | Persistent |
+| Mayor | Human's conversational interface, triage, approved actions | Persistent |
+| Scout | Watches services, detects errors, creates beads, housekeeping | Persistent |
 | Worker | Picks up a bead, writes the fix in a git worktree | Ephemeral |
-| Reviewer | Reviews diffs against `docs/style-guidelines.md` | Persistent |
-| Director | Human operator, structural decisions | Always |
+| Judge | Reviews diffs against `docs/style-guidelines.md`, owns merge | Persistent |
 
 **Key design decisions:**
 
-- gc runs inside a container with the podman socket mounted (sibling container pattern)
+- gc runs on the host as a per-city systemd service; agent role containers are spawned as siblings by the provider script via the local podman socket
 - Workers get isolated git worktrees at `.wrapix/worktree/gc-<bead-id>`
 - The provider script (`lib/city/provider.sh`) translates gc commands to podman operations
-- Convergence manages the worker→reviewer loop (max 2 iterations before director escalation)
+- Convergence manages the Worker→Judge loop (max 2 iterations before escalation to the Mayor)
 - Merge is fast-forward only; rebase + prek on divergence
-- `ralph sync` scaffolds the docs/ context hierarchy; the entrypoint blocks until the director reviews them
+- `ralph sync` scaffolds the docs/ context hierarchy; scaffolded files are flagged for human review via `bd label add <id> human` and presented by the Mayor on attach
+
+### gc Primitives
+
+- **Convergence** — bounded Worker-Judge retry loop with a gate condition script; terminates on approve or max iterations (default 2), then escalates to the Mayor.
+- **Orders** — event- or time-triggered workflow dispatchers defined in TOML under `lib/city/orders/`; fire formulas on conditions like `convergence.terminated`.
+- **Formulas** — role-behavior definitions under `lib/city/formulas/`; each role's formula is a sequence of steps executed per session iteration.
+- **Sling** — gc's routing primitive; sets `gc.routed_to=<role>` metadata on a bead so the target role's scale_check picks it up.
 
 ### Context Hierarchy
 
@@ -114,8 +130,9 @@ Scout (watching) → creates bead → Worker (fixes) → Reviewer (reviews)
 |------|--------|---------|
 | `docs/README.md` | Always | Project overview, terminology |
 | `docs/architecture.md` | On demand | System design |
-| `docs/orchestration.md` | On demand | Ops config, scout rules |
-| `docs/style-guidelines.md` | On demand | Code standards the reviewer enforces |
+| `docs/orchestration.md` | On demand | Ops config, Scout rules, deploy commands |
+| `docs/style-guidelines.md` | On demand | Code standards the Judge enforces |
+| `.wrapix/orchestration.md` | On demand | Dynamic/temporal overrides (local, tool-managed) |
 
 ## MCP Integration
 

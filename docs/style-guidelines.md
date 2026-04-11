@@ -1,8 +1,8 @@
 # Style Guidelines
 
-Rules the reviewer enforces mechanically. Every rejection must cite a rule by ID.
+Rules the Judge enforces mechanically. Every rejection must cite a rule by ID.
 Rules not listed here cannot be used to reject — flag unlisted concerns for
-the director via `bd human` instead.
+the Mayor via `bd human` instead.
 
 ## Shell (SH-)
 

@@ -1,12 +1,23 @@
 # Orchestration
 
+Ops config for the wrapix dogfooding city. This repo runs its own Gas City
+(`wrapix.mkCity { name = "wx"; ... }` in `flake.nix`) for bead-driven work
+but defines no service containers - the Scout's log-watching role is inactive
+until services are added; only housekeeping applies.
+
 ## Deploy Commands
 
-Describe how to deploy changes (e.g., `nix build`, `podman restart`).
+"Deploy" for this repo means the Judge pushing merged commits to the GitHub
+mirror from inside its container via `git push`. This is handled automatically
+by the Judge after merge using `secrets.deployKey` - no manual step required.
+There are no service containers to restart, migrate, or roll.
 
 ## Scout Rules
 
-Error patterns the scout watches for in service container logs.
+Error patterns the Scout watches for in service container logs. These patterns
+are defined and spec-compliant but **currently inactive** because no services
+are configured in `flake.nix`. They will take effect automatically when
+services are added.
 
 ### Immediate (P0 bead)
 
@@ -28,5 +39,9 @@ ERROR|Exception
 
 ## Auto-deploy
 
-<!-- Define criteria for changes that can be deployed without director approval -->
-<!-- Remove this section or leave empty to require director approval for all deploys -->
+<!--
+  Intentionally empty: all merges require human approval. The Judge gate and
+  convergence pipeline are still being hardened (see unchecked success criteria
+  in specs/gas-city.md). Revisit once the Worker -> Judge -> merge flow has
+  run cleanly in production for a reasonable period.
+-->
