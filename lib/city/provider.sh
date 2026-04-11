@@ -65,6 +65,7 @@ stage_beads() {
   staging="${GC_WORKSPACE}/.gc/beads-staging/$(container_name)"
   rm -rf "$staging"
   mkdir -p "$staging"
+  chmod 700 "$staging"
   local beads="${GC_WORKSPACE}/.beads"
   [ -f "$beads/config.yaml" ] && cp "$beads/config.yaml" "$staging/"
   [ -f "$beads/metadata.json" ] && cp "$beads/metadata.json" "$staging/"
@@ -158,6 +159,9 @@ persistent_start() {
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
     -e "GC_ROLE=${SESSION}" \
     -e "GC_ROLE_NAME=${role}" \
+    -e "GC_AGENT=${role}" \
+    -e "GC_ALIAS=${role}" \
+    -e "GC_SESSION_NAME=${SESSION}" \
     -e "HOME=/home/wrapix" \
     -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
@@ -167,11 +171,9 @@ persistent_start() {
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
-      CLAUDE_CMD="claude --dangerously-skip-permissions"
-      if [[ -f "/workspace/.gc/prompts/${GC_ROLE_NAME}.md" ]]; then
-        CLAUDE_CMD+=" --append-system-prompt-file /workspace/.gc/prompts/${GC_ROLE_NAME}.md"
-      fi
-      tmux new-session -d -s main "$CLAUDE_CMD"
+      # Role prime comes from gc prime --hook (SessionStart / PreCompact),
+      # sourced from prompt_template in city.toml.
+      tmux new-session -d -s main "claude --dangerously-skip-permissions"
       exec tmux wait-for gc-shutdown
     '
 }
@@ -190,11 +192,11 @@ worker_start() {
   local name bead_id worktree_path
   name="$(container_name)"
 
-  # gc does not pass GC_BEAD_ID — discover the bead via gc's pull model:
-  # claim the first unassigned bead routed to worker.
+  # Must match worker scale_check in city.toml: `bd ready` excludes
+  # in_progress, which would let orphaned beads spin the reconciler.
   bead_id="${GC_BEAD_ID:-}"
   if [[ -z "$bead_id" ]]; then
-    bead_id="$(cd "${GC_WORKSPACE}" && bd ready --metadata-field gc.routed_to=worker --unassigned --json 2>/dev/null \
+    bead_id="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null \
       | jq -r '.[0].id // empty' 2>/dev/null)" || bead_id=""
   fi
   if [[ -z "$bead_id" ]]; then
@@ -238,6 +240,11 @@ worker_start() {
     fi
   } > "$task_file" 2>/dev/null || true
 
+  # Render the worker role prime on the host where gc can read city.toml;
+  # the worker container is ephemeral and has no gc binary.
+  local prime_file="${GC_WORKSPACE}/${worktree_path}/.role-prompt"
+  (cd "${GC_WORKSPACE}" && gc prime worker) > "$prime_file"
+
   # Record dispatch timestamp for cooldown pacing
   local state_dir="${GC_WORKSPACE}/.wrapix/state"
   mkdir -p "$state_dir"
@@ -270,7 +277,6 @@ worker_start() {
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
     -v "${beads_staging}:/workspace/.beads" \
     -v "${task_file}:/workspace/.task:ro" \
-    -v "${GC_WORKSPACE}/.gc/prompts/worker.md:/etc/wrapix/role-prompt.md:ro" \
     ${GC_SECRET_FLAGS:-} \
     -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
@@ -281,7 +287,7 @@ worker_start() {
     -e "GC_ROLE=worker" \
     -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
-    -e "WRAPIX_SYSTEM_PROMPT_FILE=/etc/wrapix/role-prompt.md" \
+    -e "WRAPIX_SYSTEM_PROMPT_FILE=/workspace/.role-prompt" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 

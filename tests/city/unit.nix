@@ -21,6 +21,7 @@
 
 let
   inherit (builtins)
+    all
     any
     concatStringsSep
     elemAt
@@ -167,6 +168,12 @@ in
       hasWorker = any (a: a.name == "worker") configAttrs.agent;
       hasJudge = any (a: a.name == "judge") configAttrs.agent;
 
+      # Every agent has a prompt_template pointing into .gc/prompts/
+      # so `gc prime` emits role content instead of the generic fallback.
+      allHavePromptTemplate = all (
+        a: (a.prompt_template or "") == ".gc/prompts/${a.name}.md"
+      ) configAttrs.agent;
+
       # Full city: workers=2 reflected in workspace and worker agent
       fullWorkspace = fullCity.configAttrs.workspace;
       fullWorkerSessions = fullWorkspace.max_active_sessions;
@@ -201,6 +208,7 @@ in
     assert hasScout;
     assert hasWorker;
     assert hasJudge;
+    assert allHavePromptTemplate;
     assert fullWorkerSessions == 2;
     # scoutConfig reflects configured values
     assert minimalScoutConfig.maxBeads == 10;
@@ -222,6 +230,57 @@ in
       echo "  - mayorConfig exports correct autoDecompose"
       mkdir $out
     '';
+
+  # Live test: `gc prime <role>` reads prompt_template from city.toml,
+  # resolves it against the city dir, and emits the role's markdown
+  # content instead of the generic fallback. Exercises the real gc
+  # binary against the real mkCity output — no mocks.
+  city-gc-prime-live =
+    runCommandLocal "city-gc-prime-live"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gc
+        ];
+      }
+      ''
+        set -euo pipefail
+        TMPDIR="$(mktemp -d)"
+        cp ${minimalCity.config} "$TMPDIR/city.toml"
+        mkdir -p "$TMPDIR/.gc/prompts"
+        for f in ${minimalCity.prompts}/*; do
+          cp "$f" "$TMPDIR/.gc/prompts/$(basename "$f")"
+        done
+        cd "$TMPDIR"
+
+        declare -A MARKER=(
+          [mayor]="conversational interface"
+          [scout]="eyes and ears"
+          [worker]="ephemeral task executor"
+          [judge]="quality gate"
+        )
+        declare -A HEADER=(
+          [mayor]="Role: Mayor"
+          [scout]="Role: Scout"
+          [worker]="Role: Worker"
+          [judge]="Role: Judge"
+        )
+
+        for role in mayor scout worker judge; do
+          got="$(gc prime "$role")"
+          echo "--- gc prime $role ---"
+          echo "$got" | head -3
+          echo "$got" | grep -q "''${HEADER[$role]}" \
+            || { echo "FAIL: $role prime missing role header"; exit 1; }
+          echo "$got" | grep -q "''${MARKER[$role]}" \
+            || { echo "FAIL: $role prime is fallback, not prompt_template"; exit 1; }
+          echo "  PASS: $role"
+        done
+
+        rm -rf "$TMPDIR"
+        echo "PASS: gc prime emits prompt_template for every agent"
+        mkdir $out
+      '';
 
   # Service packages build into OCI images
   city-service-images =
@@ -620,87 +679,114 @@ in
                 mkdir $out
       '';
 
-  # Provider: worker creates worktree (functional with mock podman)
+  # Provider: worker_start creates a worktree, renders the role prime
+  # via live `gc prime worker`, and invokes podman with the expected
+  # mounts. Only podman and bd are stubbed (can't run inside Nix
+  # sandbox); git and gc are exercised live.
   city-provider-worker =
     runCommandLocal "city-provider-worker"
       {
         nativeBuildInputs = [
           bash
           pkgs.git
+          pkgs.gc
         ];
       }
       ''
-                set -euo pipefail
-                PROVIDER="${../../lib/city/provider.sh}"
+        set -euo pipefail
+        PROVIDER="${../../lib/city/provider.sh}"
 
-                echo "Testing provider.sh worker start..."
+        echo "Testing provider.sh worker start..."
 
-                TMPDIR=$(mktemp -d)
-                MOCK_BIN="$TMPDIR/bin"
-                mkdir -p "$MOCK_BIN"
+        TMPDIR=$(mktemp -d)
+        STUB_BIN="$TMPDIR/bin"
+        mkdir -p "$STUB_BIN"
 
-                # Set up git repo (HOME override for Nix sandbox)
-                export HOME="$TMPDIR/home"
-                mkdir -p "$HOME"
-                git config --global user.email "test@test"
-                git config --global user.name "test"
-                git config --global init.defaultBranch main
-                git -C "$TMPDIR" init -q -b main
-                git -C "$TMPDIR" commit --allow-empty -m "initial" -q
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        git config --global user.email "test@test"
+        git config --global user.name "test"
+        git config --global init.defaultBranch main
+        git -C "$TMPDIR" init -q -b main
+        git -C "$TMPDIR" commit --allow-empty -m "initial" -q
 
-                # Mock podman (record calls, succeed)
-                cat > "$MOCK_BIN/podman" << MOCK
+        # Stage the real city.toml and prompt files so `gc prime worker`
+        # can resolve `.gc/prompts/worker.md` against the city dir.
+        cp ${minimalCity.config} "$TMPDIR/city.toml"
+        mkdir -p "$TMPDIR/.gc/prompts"
+        for f in ${minimalCity.prompts}/*; do
+          cp "$f" "$TMPDIR/.gc/prompts/$(basename "$f")"
+        done
+
+        # podman and bd have no usable in-sandbox equivalent — stub them.
+        cat > "$STUB_BIN/podman" << 'STUB'
         #!/bin/sh
-        echo "\$@" >> "$TMPDIR/podman.log"
-        MOCK
-                chmod +x "$MOCK_BIN/podman"
-                cat > "$MOCK_BIN/bd" << MOCK
+        echo "$@" >> "$PODMAN_LOG"
+        STUB
+        chmod +x "$STUB_BIN/podman"
+        cat > "$STUB_BIN/bd" << 'STUB'
         #!/bin/sh
-        echo "\$@" >> "$TMPDIR/bd.log"
-        MOCK
-                chmod +x "$MOCK_BIN/bd"
+        echo "$@" >> "$BD_LOG"
+        STUB
+        chmod +x "$STUB_BIN/bd"
 
-                PATH="$MOCK_BIN:$PATH" \
-                  GC_CITY_NAME="test" \
-                  GC_WORKSPACE="$TMPDIR" \
-                  GC_AGENT_IMAGE="test-image:latest" \
-                  GC_PODMAN_NETWORK="wrapix-test" \
-                  GC_WRAPIX_PROMPT="/etc/wrapix-prompt" \
-                  GC_BEAD_ID="bead-123" \
-                  GC_BEADS_DOLT_CONTAINER="beads-test" \
-                  BEADS_DOLT_SERVER_PORT="13306" \
-                  bash "$PROVIDER" start worker-1 > "$TMPDIR/out" 2>&1 || true
+        export PODMAN_LOG="$TMPDIR/podman.log"
+        export BD_LOG="$TMPDIR/bd.log"
 
-                # Worktree should exist
-                test -d "$TMPDIR/.wrapix/worktree/gc-bead-123" || { echo "FAIL: worktree not created"; exit 1; }
-                echo "  PASS: worktree created"
+        PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME="test" \
+          GC_WORKSPACE="$TMPDIR" \
+          GC_AGENT_IMAGE="test-image:latest" \
+          GC_PODMAN_NETWORK="wrapix-test" \
+          GC_BEAD_ID="bead-123" \
+          GC_BEADS_DOLT_CONTAINER="beads-test" \
+          BEADS_DOLT_SERVER_PORT="13306" \
+          bash "$PROVIDER" start worker-1 > "$TMPDIR/out" 2>&1 || {
+            echo "FAIL: provider start exited non-zero"
+            cat "$TMPDIR/out"
+            exit 1
+          }
 
-                # Git branch should exist
-                git -C "$TMPDIR" rev-parse --verify gc-bead-123 > /dev/null 2>&1 || { echo "FAIL: branch not created"; exit 1; }
-                echo "  PASS: git branch created"
+        test -d "$TMPDIR/.wrapix/worktree/gc-bead-123" \
+          || { echo "FAIL: worktree not created"; exit 1; }
+        echo "  PASS: worktree created"
 
-                # Podman should mount the worktree
-                grep -q "worktree/gc-bead-123:/workspace" "$TMPDIR/podman.log" || { echo "FAIL: worktree not mounted"; exit 1; }
-                echo "  PASS: worktree mounted in container"
+        git -C "$TMPDIR" rev-parse --verify gc-bead-123 > /dev/null 2>&1 \
+          || { echo "FAIL: branch not created"; exit 1; }
+        echo "  PASS: git branch created"
 
-                # Provider should set up task file or WRAPIX_PROMPT_FILE for the worker
-                # The spec says: "provider script mounts task file at /workspace/.task"
-                if ! grep -qE '\.task|WRAPIX_PROMPT_FILE' "$TMPDIR/podman.log"; then
-                  echo "FAIL: worker has no task file or WRAPIX_PROMPT_FILE — workers would crash"
-                  echo "  podman was called with: $(cat "$TMPDIR/podman.log")"
-                  exit 1
-                fi
-                echo "  PASS: task file set up for worker"
+        # The role prompt file must exist and contain real template
+        # content emitted by the live gc binary (not the generic fallback).
+        prime="$TMPDIR/.wrapix/worktree/gc-bead-123/.role-prompt"
+        test -f "$prime" || { echo "FAIL: .role-prompt not rendered"; exit 1; }
+        grep -q "Role: Worker" "$prime" \
+          || { echo "FAIL: .role-prompt missing worker header"; cat "$prime"; exit 1; }
+        grep -q "ephemeral task executor" "$prime" \
+          || { echo "FAIL: .role-prompt is fallback, not prompt_template"; cat "$prime"; exit 1; }
+        echo "  PASS: live gc prime rendered role prompt"
 
-                rm -rf "$TMPDIR"
-                echo "PASS: provider worker lifecycle works"
-                mkdir $out
+        grep -q "worktree/gc-bead-123:/workspace" "$TMPDIR/podman.log" \
+          || { echo "FAIL: worktree not mounted"; exit 1; }
+        echo "  PASS: worktree mounted in container"
+
+        grep -q "WRAPIX_SYSTEM_PROMPT_FILE=/workspace/.role-prompt" "$TMPDIR/podman.log" \
+          || { echo "FAIL: WRAPIX_SYSTEM_PROMPT_FILE not wired"; exit 1; }
+        echo "  PASS: WRAPIX_SYSTEM_PROMPT_FILE wired to .role-prompt"
+
+        grep -q "\.task" "$TMPDIR/podman.log" \
+          || { echo "FAIL: task file not mounted"; exit 1; }
+        echo "  PASS: task file mounted"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: provider worker lifecycle works"
+        mkdir $out
       '';
 
   # NixOS module: verifies env var plumbing via Nix evaluation
   city-nixos-module =
     let
       moduleFile = readFile ../../modules/city.nix;
+      cityFile = readFile ../../lib/city/default.nix;
 
       # Structural checks — the module must define these
       hasServicesWrapix = match ".*services\\.wrapix.*" moduleFile != null;
@@ -712,9 +798,14 @@ in
       hasAgentImage = match ".*GC_AGENT_IMAGE.*" moduleFile != null;
       hasPodmanNetwork = match ".*GC_PODMAN_NETWORK.*" moduleFile != null;
 
-      # Well-known secret env plumbing — git-ssh-setup.sh reads these
-      hasDeployKeyEnv = match ".*WRAPIX_DEPLOY_KEY.*" moduleFile != null;
-      hasSigningKeyEnv = match ".*WRAPIX_SIGNING_KEY.*" moduleFile != null;
+      # Module must consume secretFlags from mkCity (single source of truth)
+      moduleUsesSecretFlags = match ".*city\\.secretFlags.*" moduleFile != null;
+
+      # Well-known secret env plumbing — git-ssh-setup.sh reads these.
+      # Definition lives in lib/city/default.nix, consumed by the module
+      # via city.secretFlags.
+      hasDeployKeyEnv = match ".*WRAPIX_DEPLOY_KEY.*" cityFile != null;
+      hasSigningKeyEnv = match ".*WRAPIX_SIGNING_KEY.*" cityFile != null;
     in
     assert hasServicesWrapix;
     assert hasCities;
@@ -727,11 +818,14 @@ in
       hasPodmanNetwork
       || throw "NixOS module does not set GC_PODMAN_NETWORK — provider.sh requires it for container networking";
     assert
+      moduleUsesSecretFlags
+      || throw "NixOS module does not consume city.secretFlags — deploy/signing key plumbing will drift from mkCity";
+    assert
       hasDeployKeyEnv
-      || throw "NixOS module does not emit WRAPIX_DEPLOY_KEY — role containers won't wire the deploy key into GIT_SSH_COMMAND";
+      || throw "lib/city/default.nix does not emit WRAPIX_DEPLOY_KEY — role containers won't wire the deploy key into GIT_SSH_COMMAND";
     assert
       hasSigningKeyEnv
-      || throw "NixOS module does not emit WRAPIX_SIGNING_KEY — role containers won't configure commit signing";
+      || throw "lib/city/default.nix does not emit WRAPIX_SIGNING_KEY — role containers won't configure commit signing";
 
     runCommandLocal "city-nixos-module" { } ''
       echo "PASS: NixOS module structure and env var plumbing verified"

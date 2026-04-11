@@ -227,50 +227,6 @@ let
     };
 
   # Build secret flags for podman run — returns a list of shell-escaped args
-  mkSecretArgs =
-    cityCfg:
-    let
-      classified = mapAttrs (
-        _name: value:
-        if builtins.substring 0 1 value == "/" then
-          {
-            type = "file";
-            path = value;
-          }
-        else
-          {
-            type = "env";
-            var = value;
-          }
-      ) cityCfg.secrets;
-
-      envSecrets = filterAttrs (_: s: s.type == "env") classified;
-      fileSecrets = filterAttrs (_: s: s.type == "file") classified;
-
-      # Env var secrets: read host env var and pass to container
-      envLines = mapAttrsToList (
-        name: s:
-        let
-          upperName = lib.strings.toUpper name;
-        in
-        ''--env="${upperName}=''${${s.var}}"''
-      ) envSecrets;
-
-      # File secrets: mount as read-only volumes
-      fileLines = mapAttrsToList (name: s: ''--volume="${s.path}:/run/secrets/${name}:ro"'') fileSecrets;
-
-      # Well-known file secrets that git-ssh-setup.sh reads as env vars.
-      wellKnownEnv = {
-        deployKey = "WRAPIX_DEPLOY_KEY";
-        signingKey = "WRAPIX_SIGNING_KEY";
-      };
-
-      wellKnownLines = mapAttrsToList (name: _s: "--env=${wellKnownEnv.${name}}=/run/secrets/${name}") (
-        filterAttrs (n: _: builtins.hasAttr n wellKnownEnv) fileSecrets
-      );
-    in
-    envLines ++ fileLines ++ wellKnownLines;
-
   # All enabled cities
   enabledCities = filterAttrs (_: cityCfg: cityCfg.enable) cfg.cities;
 
@@ -297,7 +253,6 @@ let
     name: cityCfg:
     let
       city = mkCityForConfig name cityCfg;
-      secretArgs = mkSecretArgs cityCfg;
 
       loadImages = pkgs.writeShellScript "load-images-${name}" (
         ''
@@ -317,7 +272,7 @@ let
         export GC_WORKSPACE="${toString cityCfg.workspace}"
         export GC_AGENT_IMAGE="${city.imageName}"
         export GC_PODMAN_NETWORK="${city.networkName}"
-        export GC_SECRET_FLAGS=${lib.escapeShellArg (builtins.concatStringsSep " " secretArgs)}
+        export GC_SECRET_FLAGS=${lib.escapeShellArg city.secretFlags}
 
         cd "$GC_WORKSPACE"
 
@@ -334,8 +289,11 @@ let
         for f in ${city.scripts}/*; do
           ln -sf "$f" .gc/scripts/"$(basename "$f")"
         done
+        # Copy prompts rather than symlink: /nix/store isn't mounted into
+        # agent containers (only /workspace is), so symlinks would break
+        # the `gc prime` file read inside containers.
         for f in ${city.prompts}/*; do
-          ln -sf "$f" .gc/prompts/"$(basename "$f")"
+          cp -f --remove-destination "$f" .gc/prompts/"$(basename "$f")"
         done
 
         exec .gc/scripts/entrypoint.sh

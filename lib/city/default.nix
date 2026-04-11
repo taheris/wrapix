@@ -26,8 +26,11 @@ let
     substring
     ;
   inherit (pkgs.lib)
+    escapeShellArg
+    filterAttrs
     mapAttrsToList
     ;
+  inherit (pkgs.lib.strings) toUpper;
 
   toTOML = import ../util/toml.nix { inherit (pkgs) lib; };
 
@@ -250,16 +253,22 @@ let
         # Custom scale_check: gc's default runs two bd queries which can
         # timeout under dolt contention (gc hardcodes 30s). A single
         # bd list query is ~2x faster and avoids the timeout.
+        #
+        # prompt_template is a workspace-relative path gc resolves against
+        # the city dir. The `.gc/prompts/<role>.md` files are scaffolded
+        # (symlinks/copies) by the shellHook, app, and module below.
         agent = [
           {
             name = "mayor";
             scope = "city";
             scale_check = "echo 0";
+            prompt_template = ".gc/prompts/mayor.md";
           }
           {
             name = "scout";
             scope = "city";
             scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            prompt_template = ".gc/prompts/scout.md";
           }
           {
             name = "worker";
@@ -267,11 +276,13 @@ let
             # No agent-level max_active_sessions: gc treats max==1 as
             # single-session (not a pool). Cap is inherited from workspace.
             scale_check = workerScaleCheck;
+            prompt_template = ".gc/prompts/worker.md";
           }
           {
             name = "judge";
             scope = "city";
             scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            prompt_template = ".gc/prompts/judge.md";
           }
         ];
 
@@ -302,7 +313,7 @@ let
         else
           true;
 
-      # Classify each secret: starts with "/" = file path, else = env var name
+      # Classify each secret: starts with "/" = file path, else = env var name.
       classifiedSecrets = mapAttrs (
         _name: value:
         if isString value && substring 0 1 value == "/" then
@@ -316,6 +327,31 @@ let
             var = value;
           }
       ) secrets;
+
+      envSecrets = filterAttrs (_: s: s.type == "env") classifiedSecrets;
+      fileSecrets = filterAttrs (_: s: s.type == "file") classifiedSecrets;
+
+      # Env-var secrets: read host env var at shellHook/app runtime, pass to
+      # container. The ''${…} escape keeps the expansion in the emitted
+      # bash rather than evaluating it in Nix.
+      secretEnvLines = mapAttrsToList (name: s: ''--env="${toUpper name}=''${${s.var}}"'') envSecrets;
+
+      # File-path secrets: bind-mount read-only into the container.
+      secretFileLines = mapAttrsToList (
+        name: s: ''--volume="${s.path}:/run/secrets/${name}:ro"''
+      ) fileSecrets;
+
+      # Well-known file secrets that /git-ssh-setup.sh reads as env vars.
+      wellKnownSecretEnv = {
+        deployKey = "WRAPIX_DEPLOY_KEY";
+        signingKey = "WRAPIX_SIGNING_KEY";
+      };
+      wellKnownSecretLines = mapAttrsToList (
+        name: _s: "--env=${wellKnownSecretEnv.${name}}=/run/secrets/${name}"
+      ) (filterAttrs (n: _: hasAttr n wellKnownSecretEnv) fileSecrets);
+
+      secretFlagsValue = concatStringsSep " " (secretEnvLines ++ secretFileLines ++ wellKnownSecretLines);
+      secretFlagsExport = "export GC_SECRET_FLAGS=${escapeShellArg secretFlagsValue}";
 
       # City helper scripts bundled for PATH (content-addressed — only
       # rebuilds when script text changes, not when unrelated files change)
@@ -336,6 +372,7 @@ let
         export GC_PODMAN_NETWORK="${networkName}"
         export GC_COOLDOWN="${cooldown}"
         export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
+        ${secretFlagsExport}
 
         ${loadImageSnippet}
 
@@ -345,18 +382,17 @@ let
         for f in ${formulasDir}/*.formula.toml; do
           cp -f --remove-destination "$f" .gc/formulas/
         done
-        # Copy orders (preserve directory structure)
         chmod -R u+w .gc/formulas/orders 2>/dev/null || true
         rm -rf .gc/formulas/orders
         cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-        # Symlink scripts to source tree (live — no direnv reload needed)
         _city_src="$GC_WORKSPACE/lib/city"
         for f in ${concatStringsSep " " scriptNames}; do
           ln -sf "$_city_src/$f" .gc/scripts/"$f"
         done
-        # Symlink role prompts to source tree
+        # Workspace-relative symlinks so they resolve inside containers
+        # where only /workspace is mounted (absolute host paths break).
         for f in ${concatStringsSep " " promptNames}; do
-          ln -sf "$_city_src/prompts/$f" .gc/prompts/"$f"
+          ln -sf "../../lib/city/prompts/$f" .gc/prompts/"$f"
         done
 
         # Ensure podman network exists (NixOS module creates via systemd)
@@ -410,6 +446,7 @@ let
           export GC_AGENT_IMAGE="${imageName}"
           export GC_PODMAN_NETWORK="${networkName}"
           export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
+          ${secretFlagsExport}
 
           # Ensure the per-workspace beads dolt container is running
           # and propagate its host/port to child processes (gc → bd).
@@ -439,8 +476,9 @@ let
           for f in ${concatStringsSep " " scriptNames}; do
             ln -sf "$_city_src/$f" .gc/scripts/"$f"
           done
+          # Workspace-relative symlinks — see shellHook above for rationale.
           for f in ${concatStringsSep " " promptNames}; do
-            ln -sf "$_city_src/prompts/$f" .gc/prompts/"$f"
+            ln -sf "../../lib/city/prompts/$f" .gc/prompts/"$f"
           done
 
           if ! podman network exists "${networkName}" 2>/dev/null; then
@@ -483,6 +521,12 @@ let
 
       # Classified secrets metadata
       inherit classifiedSecrets;
+
+      # Single source of truth for podman secret flags — consumed by the
+      # devShell/app shellHook and by modules/city.nix so the systemd,
+      # `nix develop`, and `nix run .#city` entry points all plumb deploy
+      # and signing keys into role containers the same way.
+      secretFlags = secretFlagsValue;
 
       # Default role formulas (directory of .formula.toml files)
       formulas = formulasDir;
