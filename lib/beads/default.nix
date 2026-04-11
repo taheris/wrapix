@@ -165,6 +165,16 @@ let
       # beads git worktree under $ws/.git/beads-worktrees/beads/.beads/dolt-remote)
       # resolves inside the server's namespace. Without this, sync to the
       # beads git worktree — and therefore the github mirror — fails.
+      #
+      # It is also mounted at /workspace to match the path that agent
+      # containers use (lib/city/provider.sh sets workdir to /workspace).
+      # Without this, bd's auto-backup — whose path is resolved server-side —
+      # fails with `mkdir /workspace: permission denied` when clients running
+      # inside agent containers reference `/workspace/.beads/backup`.
+      local workspace_mount=()
+      if [ "$ws" != "/workspace" ]; then
+        workspace_mount=(-v "$ws:/workspace:rw")
+      fi
       podman run -d \
         --name "$name" \
         --entrypoint "" \
@@ -177,6 +187,7 @@ let
         -p "127.0.0.1:$port:$port" \
         -v "$data_dir:/data:rw" \
         -v "$ws:$ws:rw" \
+        "''${workspace_mount[@]}" \
         "$IMAGE" \
         bash -c '
           set -e
