@@ -46,7 +46,7 @@ let
   cityMod = import ../../lib/city {
     inherit pkgs linuxPkgs;
     beads = beadsLib;
-    inherit (sandbox) mkSandbox profiles;
+    inherit (sandbox) mkSandbox profiles baseClaudeSettings;
     inherit (ralph) mkRalph;
   };
 
@@ -75,9 +75,9 @@ let
 
     # Write all output to host-visible log (mounted workspace .beads dir is rw for
     # mayor/scout/judge, but ro for workers — use /tmp as fallback)
-    MOCK_LOG="/workspace/.beads/mock-claude-''${GC_ROLE:-unknown}.log"
+    MOCK_LOG="/workspace/.beads/mock-claude-''${GC_AGENT:-unknown}.log"
     if ! touch "$MOCK_LOG" 2>/dev/null; then
-      MOCK_LOG="/tmp/mock-claude-''${GC_ROLE:-unknown}.log"
+      MOCK_LOG="/tmp/mock-claude-''${GC_AGENT:-unknown}.log"
     fi
     exec > >(tee -a "$MOCK_LOG") 2>&1
 
@@ -95,7 +95,7 @@ let
         # Ensure dolt config exists (container has no global config)
         dolt config --global --add user.email mock@test 2>/dev/null || true
         dolt config --global --add user.name mock 2>/dev/null || true
-        case "''${GC_ROLE:-}" in
+        case "''${GC_AGENT:-}" in
           mayor|mayor*)
             # Mayor stays alive — responds on attach with briefing
             sleep 600
@@ -440,8 +440,8 @@ let
       for f in ${formulas}/*.formula.toml; do cp -f "$f" .gc/formulas/; done
       cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
       for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
-      mkdir -p .gc/prompts
-      for f in ${prompts}/*; do cp -f "$f" .gc/prompts/; done
+      mkdir -p .wrapix/city/current/prompts
+      for f in ${prompts}/*; do cp -f "$f" .wrapix/city/current/prompts/; done
 
       printf "## Scout Rules\nimmediate: FATAL|PANIC\nbatched: ERROR\n## Auto-deploy\nLow-risk: docs only\n" > docs/orchestration.md
       printf "# Style Guidelines\nSH-1: Use set -euo pipefail\n" > docs/style-guidelines.md

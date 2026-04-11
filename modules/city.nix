@@ -276,9 +276,17 @@ let
 
         cd "$GC_WORKSPACE"
 
-        # Stage gc scaffold (config, formulas, scripts, prompts) from the store
-        cp -f --remove-destination ${city.config} city.toml
-        mkdir -p .gc/formulas .gc/scripts .gc/prompts .gc/cache .gc/system .gc/runtime
+        # Stage city-config from the store
+        mkdir -p .wrapix/city
+        _city_stage_tmp=".wrapix/city/.staging.$$"
+        rm -rf "$_city_stage_tmp"
+        cp -rL --no-preserve=mode ${city.configDir} "$_city_stage_tmp"
+        chmod -R u+w "$_city_stage_tmp"
+        rm -rf .wrapix/city/current
+        mv -T "$_city_stage_tmp" .wrapix/city/current
+        cp -f --remove-destination .wrapix/city/current/city.toml city.toml
+
+        mkdir -p .gc/formulas .gc/scripts .gc/cache .gc/system .gc/runtime
         touch .gc/events.jsonl
         for f in ${city.formulas}/*.formula.toml; do
           cp -f --remove-destination "$f" .gc/formulas/
@@ -288,12 +296,6 @@ let
         cp -r --no-preserve=mode ${city.formulas}/orders .gc/formulas/
         for f in ${city.scripts}/*; do
           ln -sf "$f" .gc/scripts/"$(basename "$f")"
-        done
-        # Copy prompts rather than symlink: /nix/store isn't mounted into
-        # agent containers (only /workspace is), so symlinks would break
-        # the `gc prime` file read inside containers.
-        for f in ${city.prompts}/*; do
-          cp -f --remove-destination "$f" .gc/prompts/"$(basename "$f")"
         done
 
         exec .gc/scripts/entrypoint.sh

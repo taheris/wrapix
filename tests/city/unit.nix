@@ -59,7 +59,7 @@ let
 
   city = import ../../lib/city {
     inherit pkgs linuxPkgs beads;
-    inherit (sandbox) mkSandbox profiles;
+    inherit (sandbox) mkSandbox profiles baseClaudeSettings;
     inherit (ralph) mkRalph;
   };
 
@@ -168,10 +168,9 @@ in
       hasWorker = any (a: a.name == "worker") configAttrs.agent;
       hasJudge = any (a: a.name == "judge") configAttrs.agent;
 
-      # Every agent has a prompt_template pointing into .gc/prompts/
-      # so `gc prime` emits role content instead of the generic fallback.
+      # Every agent has a prompt_template pointing into the staged city dir.
       allHavePromptTemplate = all (
-        a: (a.prompt_template or "") == ".gc/prompts/${a.name}.md"
+        a: (a.prompt_template or "") == ".wrapix/city/current/prompts/${a.name}.md"
       ) configAttrs.agent;
 
       # Full city: workers=2 reflected in workspace and worker agent
@@ -247,9 +246,9 @@ in
         set -euo pipefail
         TMPDIR="$(mktemp -d)"
         cp ${minimalCity.config} "$TMPDIR/city.toml"
-        mkdir -p "$TMPDIR/.gc/prompts"
+        mkdir -p "$TMPDIR/.wrapix/city/current/prompts"
         for f in ${minimalCity.prompts}/*; do
-          cp "$f" "$TMPDIR/.gc/prompts/$(basename "$f")"
+          cp "$f" "$TMPDIR/.wrapix/city/current/prompts/$(basename "$f")"
         done
         cd "$TMPDIR"
 
@@ -711,11 +710,11 @@ in
         git -C "$TMPDIR" commit --allow-empty -m "initial" -q
 
         # Stage the real city.toml and prompt files so `gc prime worker`
-        # can resolve `.gc/prompts/worker.md` against the city dir.
+        # resolves against the city dir.
         cp ${minimalCity.config} "$TMPDIR/city.toml"
-        mkdir -p "$TMPDIR/.gc/prompts"
+        mkdir -p "$TMPDIR/.wrapix/city/current/prompts"
         for f in ${minimalCity.prompts}/*; do
-          cp "$f" "$TMPDIR/.gc/prompts/$(basename "$f")"
+          cp "$f" "$TMPDIR/.wrapix/city/current/prompts/$(basename "$f")"
         done
 
         # podman and bd have no usable in-sandbox equivalent — stub them.
@@ -779,6 +778,136 @@ in
 
         rm -rf "$TMPDIR"
         echo "PASS: provider worker lifecycle works"
+        mkdir $out
+      '';
+
+  # city-config derivation: the staged dir contains city.toml, claude-settings
+  # with SessionStart/PreCompact hooks wired to wrapix-prime-hook, tmux.conf,
+  # and every role prompt. This is what entrypoint stages into
+  # .wrapix/city/current on live — identical bytes exercised here.
+  city-config-derivation =
+    runCommandLocal "city-config-derivation" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        set -euo pipefail
+        DIR="${minimalCity.configDir}"
+
+        test -f "$DIR/city.toml" || { echo "FAIL: city.toml missing"; exit 1; }
+        test -f "$DIR/claude-settings.json" || { echo "FAIL: claude-settings.json missing"; exit 1; }
+        test -f "$DIR/tmux.conf" || { echo "FAIL: tmux.conf missing"; exit 1; }
+        for role in mayor scout worker judge; do
+          test -f "$DIR/prompts/$role.md" || { echo "FAIL: prompts/$role.md missing"; exit 1; }
+        done
+        echo "  PASS: all staged files present"
+
+        # SessionStart + PreCompact hooks must point at wrapix-prime-hook
+        for hook in SessionStart PreCompact; do
+          cmd="$(jq -r ".hooks.$hook[0].hooks[0].command" "$DIR/claude-settings.json")"
+          [[ "$cmd" == "wrapix-prime-hook" ]] || {
+            echo "FAIL: $hook hook command is '$cmd', expected 'wrapix-prime-hook'"
+            exit 1
+          }
+        done
+        echo "  PASS: SessionStart + PreCompact wired to wrapix-prime-hook"
+
+        grep -q "set -g mouse on" "$DIR/tmux.conf" || { echo "FAIL: tmux.conf missing mouse on"; exit 1; }
+        echo "  PASS: tmux.conf has mouse on"
+
+        echo "PASS: city-config derivation content is correct"
+        mkdir $out
+      '';
+
+  # wrapix-prime-hook stub: reads $WRAPIX_CITY_DIR/prompts/$GC_AGENT.md.
+  # This is the command Claude Code fires on SessionStart/PreCompact. Tests
+  # the exact file used by cityScripts (no copy, no rewrite).
+  city-prime-hook = runCommandLocal "city-prime-hook" { } ''
+    set -euo pipefail
+    HOOK="${../../lib/city/prime-hook.sh}"
+
+    # Unset vars → must fail loudly
+    if WRAPIX_CITY_DIR="" GC_AGENT="" bash "$HOOK" 2>/dev/null; then
+      echo "FAIL: hook exited 0 with unset vars"
+      exit 1
+    fi
+    echo "  PASS: hook errors when vars unset"
+
+    # Happy path: emits the role prompt verbatim
+    expected="$(cat ${minimalCity.configDir}/prompts/mayor.md)"
+    actual="$(WRAPIX_CITY_DIR="${minimalCity.configDir}" GC_AGENT=mayor bash "$HOOK")"
+    [[ "$actual" == "$expected" ]] || {
+      echo "FAIL: hook output does not match prompts/mayor.md"
+      diff <(echo "$expected") <(echo "$actual") || true
+      exit 1
+    }
+    echo "  PASS: hook emits mayor.md verbatim"
+
+    echo "PASS: wrapix-prime-hook works"
+    mkdir $out
+  '';
+
+  # Provider: persistent_start (mayor) must pass the renamed env vars,
+  # reference $WRAPIX_CITY_DIR in the inline bootstrap, and name the tmux
+  # session after the role (not hardcoded 'main'). Verified by grepping
+  # podman.log since podman itself can't run in the nix sandbox.
+  city-provider-persistent =
+    runCommandLocal "city-provider-persistent" { nativeBuildInputs = [ bash ]; }
+      ''
+        set -euo pipefail
+        PROVIDER="${../../lib/city/provider.sh}"
+        TMPDIR=$(mktemp -d)
+        STUB_BIN="$TMPDIR/bin"
+        mkdir -p "$STUB_BIN"
+
+        cat > "$STUB_BIN/podman" << 'STUB'
+        #!/bin/sh
+        echo "$@" >> "$PODMAN_LOG"
+        STUB
+        chmod +x "$STUB_BIN/podman"
+        export PODMAN_LOG="$TMPDIR/podman.log"
+
+        PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$TMPDIR" \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" start mayor > "$TMPDIR/out" 2>&1 || {
+            echo "FAIL: provider start mayor exited non-zero"
+            cat "$TMPDIR/out"
+            exit 1
+          }
+
+        log="$TMPDIR/podman.log"
+
+        grep -q -- "-e GC_SESSION=mayor" "$log" \
+          || { echo "FAIL: GC_SESSION=mayor not set"; cat "$log"; exit 1; }
+        grep -q -- "-e GC_AGENT=mayor" "$log" \
+          || { echo "FAIL: GC_AGENT=mayor not set"; exit 1; }
+        grep -q -- "-e GC_ALIAS=mayor" "$log" \
+          || { echo "FAIL: GC_ALIAS=mayor not set"; exit 1; }
+        grep -q -- "-e WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" "$log" \
+          || { echo "FAIL: WRAPIX_CITY_DIR env not set"; exit 1; }
+        echo "  PASS: renamed env vars present"
+
+        # Inline bootstrap copies claude-settings and tmux.conf from WRAPIX_CITY_DIR
+        grep -q '\$WRAPIX_CITY_DIR/claude-settings.json' "$log" \
+          || { echo "FAIL: inline bash does not cp claude-settings.json"; cat "$log"; exit 1; }
+        grep -q '\$WRAPIX_CITY_DIR/tmux.conf' "$log" \
+          || { echo "FAIL: inline bash does not cp tmux.conf"; exit 1; }
+        echo "  PASS: inline bootstrap reads from WRAPIX_CITY_DIR"
+
+        # tmux session name must be $GC_AGENT (resolved at container runtime,
+        # not 'main'). Literal string present in the heredoc.
+        grep -q 'tmux new-session -d -s "\$GC_AGENT"' "$log" \
+          || { echo "FAIL: tmux session name not parameterized"; cat "$log"; exit 1; }
+        if grep -q 'new-session -d -s "main"' "$log"; then
+          echo "FAIL: tmux session still hardcoded to 'main'"
+          exit 1
+        fi
+        echo "  PASS: tmux session named after role"
+
+        rm -rf "$TMPDIR"
+        echo "PASS: persistent_start passes renamed env + reads city dir"
         mkdir $out
       '';
 

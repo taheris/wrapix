@@ -271,5 +271,10 @@ let
 
 in
 {
-  inherit mkSandbox mkImage profiles;
+  inherit
+    mkSandbox
+    mkImage
+    profiles
+    baseClaudeSettings
+    ;
 }

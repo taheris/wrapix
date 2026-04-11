@@ -13,7 +13,7 @@ let
   beads = import ./beads { inherit pkgs linuxPkgs; };
   city = import ./city {
     inherit pkgs linuxPkgs;
-    inherit (sandbox) mkSandbox profiles;
+    inherit (sandbox) mkSandbox profiles baseClaudeSettings;
     inherit (ralph) mkRalph;
     inherit beads;
   };

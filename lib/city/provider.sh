@@ -157,11 +157,10 @@ persistent_start() {
     -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
-    -e "GC_ROLE=${SESSION}" \
-    -e "GC_ROLE_NAME=${role}" \
+    -e "GC_SESSION=${SESSION}" \
     -e "GC_AGENT=${role}" \
     -e "GC_ALIAS=${role}" \
-    -e "GC_SESSION_NAME=${SESSION}" \
+    -e "WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" \
     -e "HOME=/home/wrapix" \
     -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
@@ -170,10 +169,9 @@ persistent_start() {
       [[ -f /git-ssh-setup.sh ]] && . /git-ssh-setup.sh
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
-      cp /etc/wrapix/claude-settings.json "$HOME/.claude/settings.json"
-      # Role prime comes from gc prime --hook (SessionStart / PreCompact),
-      # sourced from prompt_template in city.toml.
-      tmux new-session -d -s main "claude --dangerously-skip-permissions"
+      cp "$WRAPIX_CITY_DIR/claude-settings.json" "$HOME/.claude/settings.json"
+      cp "$WRAPIX_CITY_DIR/tmux.conf" "$HOME/.tmux.conf"
+      tmux new-session -d -s "$GC_AGENT" "claude --dangerously-skip-permissions"
       exec tmux wait-for gc-shutdown
     '
 }
@@ -240,10 +238,8 @@ worker_start() {
     fi
   } > "$task_file" 2>/dev/null || true
 
-  # Render the worker role prime on the host where gc can read city.toml;
-  # the worker container is ephemeral and has no gc binary.
-  local prime_file="${GC_WORKSPACE}/${worktree_path}/.role-prompt"
-  (cd "${GC_WORKSPACE}" && gc prime worker) > "$prime_file"
+  cp "${GC_WORKSPACE}/.wrapix/city/current/prompts/worker.md" \
+     "${GC_WORKSPACE}/${worktree_path}/.role-prompt"
 
   # Record dispatch timestamp for cooldown pacing
   local state_dir="${GC_WORKSPACE}/.wrapix/state"
@@ -284,7 +280,9 @@ worker_start() {
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_BEAD_ID=${bead_id}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
-    -e "GC_ROLE=worker" \
+    -e "GC_SESSION=worker" \
+    -e "GC_AGENT=worker" \
+    -e "WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" \
     -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     -e "WRAPIX_SYSTEM_PROMPT_FILE=/workspace/.role-prompt" \
@@ -330,7 +328,7 @@ case "$METHOD" in
     if is_worker; then
       : # no-op for workers
     else
-      persistent_exec tmux send-keys -t main C-c
+      persistent_exec tmux send-keys -t "$(role_name)" C-c
     fi
     ;;
 
@@ -345,7 +343,7 @@ case "$METHOD" in
       : # no-op
     else
       name="$(container_name)"
-      podman exec -it "$name" tmux attach -t main
+      podman exec -it "$name" tmux attach -t "$(role_name)"
       # Restore terminal state after detach (cursor, alternate screen)
       printf '\033[?25h\033[?1049l' 2>/dev/null
       stty sane 2>/dev/null || true
@@ -357,7 +355,7 @@ case "$METHOD" in
     if is_worker; then
       podman logs --tail "${1:-50}" "$name" 2>&1
     else
-      persistent_exec tmux capture-pane -t main -p
+      persistent_exec tmux capture-pane -t "$(role_name)" -p
     fi
     ;;
 
@@ -365,7 +363,7 @@ case "$METHOD" in
     if is_worker; then
       : # no-op
     else
-      persistent_exec tmux send-keys -t main "$@"
+      persistent_exec tmux send-keys -t "$(role_name)" "$@"
     fi
     ;;
 
@@ -374,11 +372,12 @@ case "$METHOD" in
       : # no-op
     else
       name="$(container_name)"
+      tmux_target="$(role_name)"
       # Wait for idle (no recent activity in last 2 seconds), then send keys
       _gc_last=0
       _gc_now=0
       for _ in $(seq 1 30); do
-        _gc_last="$(persistent_exec tmux display-message -t main -p '#{pane_last_activity}' 2>/dev/null || echo "0")"
+        _gc_last="$(persistent_exec tmux display-message -t "$tmux_target" -p '#{pane_last_activity}' 2>/dev/null || echo "0")"
         _gc_now="$(date +%s)"
         if [[ $((_gc_now - _gc_last)) -ge 2 ]]; then
           break
@@ -387,9 +386,9 @@ case "$METHOD" in
       done
       # gc sends nudge message on stdin; send it as tmux keys
       if [[ -n "$STDIN_DATA" ]]; then
-        persistent_exec tmux send-keys -t main "$STDIN_DATA" Enter
+        persistent_exec tmux send-keys -t "$tmux_target" "$STDIN_DATA" Enter
       elif [[ $# -gt 0 ]]; then
-        persistent_exec tmux send-keys -t main "$@"
+        persistent_exec tmux send-keys -t "$tmux_target" "$@"
       fi
     fi
     ;;
@@ -399,7 +398,7 @@ case "$METHOD" in
       echo ""
     else
       # gc expects RFC3339 or empty; tmux returns Unix epoch
-      _gc_epoch="$(persistent_exec tmux display-message -t main -p '#{pane_last_activity}' 2>/dev/null)" || _gc_epoch=""
+      _gc_epoch="$(persistent_exec tmux display-message -t "$(role_name)" -p '#{pane_last_activity}' 2>/dev/null)" || _gc_epoch=""
       if [[ -n "$_gc_epoch" && "$_gc_epoch" != "0" ]]; then
         date -u -d "@${_gc_epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo ""
       else
@@ -412,7 +411,7 @@ case "$METHOD" in
     if is_worker; then
       : # no-op
     else
-      persistent_exec tmux clear-history -t main
+      persistent_exec tmux clear-history -t "$(role_name)"
     fi
     ;;
 

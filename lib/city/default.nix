@@ -11,6 +11,7 @@
   mkRalph,
   profiles,
   beads,
+  baseClaudeSettings,
 }:
 
 let
@@ -249,26 +250,20 @@ let
           max_total = 10;
         };
 
-        # [[agent]] — rendered as array of tables
-        # Custom scale_check: gc's default runs two bd queries which can
-        # timeout under dolt contention (gc hardcodes 30s). A single
-        # bd list query is ~2x faster and avoids the timeout.
-        #
-        # prompt_template is a workspace-relative path gc resolves against
-        # the city dir. The `.gc/prompts/<role>.md` files are scaffolded
-        # (symlinks/copies) by the shellHook, app, and module below.
+        # scale_check uses `bd list` so orphaned in_progress beads resume.
+        # prompt_template resolves against the staged .wrapix/city/current/.
         agent = [
           {
             name = "mayor";
             scope = "city";
             scale_check = "echo 0";
-            prompt_template = ".gc/prompts/mayor.md";
+            prompt_template = ".wrapix/city/current/prompts/mayor.md";
           }
           {
             name = "scout";
             scope = "city";
             scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
-            prompt_template = ".gc/prompts/scout.md";
+            prompt_template = ".wrapix/city/current/prompts/scout.md";
           }
           {
             name = "worker";
@@ -276,13 +271,13 @@ let
             # No agent-level max_active_sessions: gc treats max==1 as
             # single-session (not a pool). Cap is inherited from workspace.
             scale_check = workerScaleCheck;
-            prompt_template = ".gc/prompts/worker.md";
+            prompt_template = ".wrapix/city/current/prompts/worker.md";
           }
           {
             name = "judge";
             scope = "city";
             scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
-            prompt_template = ".gc/prompts/judge.md";
+            prompt_template = ".wrapix/city/current/prompts/judge.md";
           }
         ];
 
@@ -304,6 +299,54 @@ let
       };
 
       cityToml = pkgs.writeText "city.toml" (toTOML cityConfig);
+
+      # baseClaudeSettings + SessionStart/PreCompact hooks. wrapix-prime-hook
+      # is provided by cityScripts and reads $WRAPIX_CITY_DIR/$GC_AGENT.
+      cityClaudeSettings = baseClaudeSettings // {
+        hooks = (baseClaudeSettings.hooks or { }) // {
+          SessionStart = [
+            {
+              matcher = "";
+              hooks = [
+                {
+                  type = "command";
+                  command = "wrapix-prime-hook";
+                }
+              ];
+            }
+          ];
+          PreCompact = [
+            {
+              matcher = "";
+              hooks = [
+                {
+                  type = "command";
+                  command = "wrapix-prime-hook";
+                }
+              ];
+            }
+          ];
+        };
+      };
+
+      cityClaudeSettingsJson = pkgs.writeText "city-claude-settings.json" (
+        builtins.toJSON cityClaudeSettings
+      );
+
+      cityTmuxConf = pkgs.writeText "city-tmux.conf" ''
+        set -g mouse on
+      '';
+
+      # Staged artifacts read by containers via $WRAPIX_CITY_DIR.
+      cityConfigDir = pkgs.runCommand "wrapix-city-config" { } ''
+        mkdir -p $out/prompts
+        cp ${cityToml} $out/city.toml
+        cp ${cityClaudeSettingsJson} $out/claude-settings.json
+        cp ${cityTmuxConf} $out/tmux.conf
+        for f in ${promptsStore}/*; do
+          cp "$f" $out/prompts/"$(basename "$f")"
+        done
+      '';
 
       # Secrets validation — claude secret is required
       secretsValid =
@@ -360,6 +403,7 @@ let
         paths = [
           (pkgs.writeShellScriptBin "wrapix-agent" (readFile ./agent.sh))
           (pkgs.writeShellScriptBin "beads-push" (readFile ../../scripts/beads-push))
+          (pkgs.writeShellScriptBin "wrapix-prime-hook" (readFile ./prime-hook.sh))
         ];
       };
 
@@ -376,9 +420,18 @@ let
 
         ${loadImageSnippet}
 
-        # Copy Nix-generated config so gc finds it (formulas have sed substitutions)
-        cp -f --remove-destination ${cityToml} city.toml
-        mkdir -p .gc/formulas .gc/scripts .gc/prompts
+        # Stage city-config; provider.sh re-stages on role start for drift.
+        mkdir -p .wrapix/city
+        _city_stage_tmp=".wrapix/city/.staging.$$"
+        rm -rf "$_city_stage_tmp"
+        cp -rL --no-preserve=mode ${cityConfigDir} "$_city_stage_tmp"
+        chmod -R u+w "$_city_stage_tmp"
+        rm -rf .wrapix/city/current
+        mv -T "$_city_stage_tmp" .wrapix/city/current
+
+        cp -f --remove-destination .wrapix/city/current/city.toml city.toml
+
+        mkdir -p .gc/formulas .gc/scripts
         for f in ${formulasDir}/*.formula.toml; do
           cp -f --remove-destination "$f" .gc/formulas/
         done
@@ -388,11 +441,6 @@ let
         _city_src="$GC_WORKSPACE/lib/city"
         for f in ${concatStringsSep " " scriptNames}; do
           ln -sf "$_city_src/$f" .gc/scripts/"$f"
-        done
-        # Workspace-relative symlinks so they resolve inside containers
-        # where only /workspace is mounted (absolute host paths break).
-        for f in ${concatStringsSep " " promptNames}; do
-          ln -sf "../../lib/city/prompts/$f" .gc/prompts/"$f"
         done
 
         # Ensure podman network exists (NixOS module creates via systemd)
@@ -458,14 +506,22 @@ let
 
           ${loadImageSnippet}
 
-          cp -f --remove-destination ${cityToml} city.toml
+          # Stage city-config — see shellHook above for rationale.
+          mkdir -p .wrapix/city
+          _city_stage_tmp=".wrapix/city/.staging.$$"
+          rm -rf "$_city_stage_tmp"
+          cp -rL --no-preserve=mode ${cityConfigDir} "$_city_stage_tmp"
+          chmod -R u+w "$_city_stage_tmp"
+          rm -rf .wrapix/city/current
+          mv -T "$_city_stage_tmp" .wrapix/city/current
+          cp -f --remove-destination .wrapix/city/current/city.toml city.toml
 
           # Pre-create the .gc/ layout so gc start never runs auto-init
           # (which scaffolds unwanted root-level dirs and overwrites beads).
           mkdir -p .gc/cache .gc/system .gc/runtime
           touch .gc/events.jsonl
 
-          mkdir -p .gc/formulas .gc/scripts .gc/prompts
+          mkdir -p .gc/formulas .gc/scripts
           for f in ${formulasDir}/*.formula.toml; do
             cp -f --remove-destination "$f" .gc/formulas/
           done
@@ -475,10 +531,6 @@ let
           _city_src="$GC_WORKSPACE/lib/city"
           for f in ${concatStringsSep " " scriptNames}; do
             ln -sf "$_city_src/$f" .gc/scripts/"$f"
-          done
-          # Workspace-relative symlinks — see shellHook above for rationale.
-          for f in ${concatStringsSep " " promptNames}; do
-            ln -sf "../../lib/city/prompts/$f" .gc/prompts/"$f"
           done
 
           if ! podman network exists "${networkName}" 2>/dev/null; then
@@ -509,6 +561,9 @@ let
 
       # The generated city.toml
       config = cityToml;
+
+      # Staged dir (see flake.nix: packages.${system}.city-config).
+      configDir = cityConfigDir;
 
       # TOML content as a Nix attrset (for programmatic access)
       configAttrs = cityConfig;

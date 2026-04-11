@@ -194,6 +194,7 @@
               // {
                 inherit (pkgs) beads gc;
                 default = sandboxPkgs.wrapix;
+                city-config = city.configDir;
                 tmux-mcp = import ./lib/mcp/tmux/mcp-server.nix { inherit pkgs; };
                 wrapix-builder = import ./lib/builder { inherit pkgs linuxPkgs; };
                 wrapix-notifyd = import ./lib/notify/daemon.nix { inherit pkgs; };
