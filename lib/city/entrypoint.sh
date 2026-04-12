@@ -131,9 +131,9 @@ cd "$GC_CITY"
 # The daemon creates the socket at gc_home/.gc/controller.sock; this
 # symlink lets the workspace path reach it.
 mkdir -p "${GC_WORKSPACE}/.gc"
-ln -sfn "$GC_CITY/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.sock"
-ln -sfn "$GC_CITY/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.lock"
-ln -sfn "$GC_CITY/.gc/controller.token" "${GC_WORKSPACE}/.gc/controller.token"
+ln -sfn "home/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.sock"
+ln -sfn "home/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.lock"
+ln -sfn "home/.gc/controller.token" "${GC_WORKSPACE}/.gc/controller.token"
 
 # Run gc in background + wait so the shell stays alive for the trap.
 # On exit (signal or natural), forward SIGTERM to gc. The beads-dolt

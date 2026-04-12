@@ -226,6 +226,7 @@ if [ -f /workspace/.beads/config.yaml ]; then
       bd dolt stop 2>/dev/null || true
       rm -rf "$DOLT_DB"
       mkdir -p /workspace/.beads/dolt
+      chmod 700 /workspace/.beads
       if [ -d "$DOLT_REMOTE" ]; then
         dolt clone "file://$DOLT_REMOTE" "$DOLT_DB" || echo "Warning: dolt clone failed" >&2
       else

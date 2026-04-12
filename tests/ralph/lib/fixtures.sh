@@ -88,6 +88,7 @@ setup_test_env() {
   mkdir -p "$TEST_DIR/.wrapix/ralph/logs"
   mkdir -p "$TEST_DIR/.wrapix/ralph/template"
   mkdir -p "$TEST_DIR/.beads"
+  chmod 700 "$TEST_DIR/.beads"
 
   # Create minimal specs/README.md
   cat > "$TEST_DIR/specs/README.md" << 'EOF'

@@ -490,6 +490,19 @@ let
     }
     subtest "Start gc daemon" start_gc
 
+    verify_relative_symlinks() {
+      # Controller symlinks must be relative so they resolve inside agent
+      # containers where the workspace is bind-mounted at a different path.
+      for f in controller.sock controller.lock controller.token; do
+        local target
+        target="$(readlink "$WS/.gc/$f")"
+        case "$target" in
+          /*) echo "FAIL: $f symlink is absolute: $target"; return 1 ;;
+        esac
+      done
+    }
+    subtest "Verify controller symlinks are relative" verify_relative_symlinks
+
     subtest "Wait for mayor container to start" \
       poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30
 

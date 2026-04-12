@@ -47,7 +47,7 @@ echo "$DOLT_PORT" > "$GC_HOME/.beads/dolt-server.port"
 # City config and .gc subdirectories
 cp -f "${GC_WORKSPACE}/city.toml" "$GC_HOME/" 2>/dev/null || true
 for d in formulas scripts prompts; do
-  [ -d "${GC_WORKSPACE}/.gc/$d" ] && ln -sfn "${GC_WORKSPACE}/.gc/$d" "$GC_HOME/.gc/$d"
+  [ -d "${GC_WORKSPACE}/.gc/$d" ] && ln -sfn "../../$d" "$GC_HOME/.gc/$d"
 done
 
 # gc needs these writable dirs
