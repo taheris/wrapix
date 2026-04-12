@@ -4,7 +4,33 @@
 }:
 
 let
+  inherit (builtins) readFile;
   inherit (pkgs) lib;
+
+  mkImage =
+    if pkgs.stdenv.isDarwin then
+      linuxPkgs.dockerTools.buildLayeredImage
+    else
+      linuxPkgs.dockerTools.streamLayeredImage;
+
+  imageName = "localhost/wrapix-beads:latest";
+  loadImageCmd = if pkgs.stdenv.isDarwin then "cat ${doltImageDrv}" else "${doltImageDrv}";
+
+  # Minimal dolt-only container image used to serve a workspace's .beads/dolt.
+  doltImageDrv = mkImage {
+    name = "wrapix-beads";
+    tag = "latest";
+    maxLayers = 10;
+    contents = with linuxPkgs; [
+      bashInteractive
+      coreutils
+      dockerTools.caCertificates
+      dolt
+    ];
+    config = {
+      Env = [ "PATH=/bin:/usr/bin" ];
+    };
+  };
 
   # Runtime tools beads-dolt shells out to. Baked into the script's PATH so
   # consumers (devShell, tests, live gc daemon) don't have to know.
@@ -13,37 +39,10 @@ let
   cliRuntimePath = lib.makeBinPath (
     with pkgs;
     [
-      coreutils
       bashInteractive
+      coreutils
     ]
   );
-
-  # Minimal dolt-only container image used to serve a workspace's .beads/dolt.
-  doltImageDrv =
-    (
-      if pkgs.stdenv.isDarwin then
-        linuxPkgs.dockerTools.buildLayeredImage
-      else
-        linuxPkgs.dockerTools.streamLayeredImage
-    )
-      {
-        name = "wrapix-beads-dolt";
-        tag = "latest";
-        maxLayers = 10;
-        contents = with linuxPkgs; [
-          dolt
-          bashInteractive
-          coreutils
-          dockerTools.caCertificates
-        ];
-        config = {
-          Env = [ "PATH=/bin:/usr/bin" ];
-        };
-      };
-
-  imageName = "localhost/wrapix-beads-dolt:latest";
-
-  loadImageCmd = if pkgs.stdenv.isDarwin then "cat ${doltImageDrv}" else "${doltImageDrv}";
 
   # Host CLI: manages the per-workspace dolt container.
   #
@@ -79,7 +78,7 @@ let
       if podman image exists "$IMAGE" 2>/dev/null; then
         return 0
       fi
-      echo "Loading beads-dolt image..." >&2
+      echo "Loading beads image..." >&2
       ${loadImageCmd} | podman load -q >/dev/null
     }
 
@@ -175,26 +174,34 @@ let
       if [ "$ws" != "/workspace" ]; then
         workspace_mount=(-v "$ws:/workspace:rw")
       fi
-      podman run -d \
-        --name "$name" \
-        --entrypoint "" \
-        --network wrapix-dolt \
-        --userns=keep-id \
-        -e HOME=/tmp/dolthome \
-        -e DOLT_FORCE_LOCAL_TEMP_FILES=1 \
-        -e DOLT_ROOT_HOST="%" \
-        --tmpfs /tmp:rw,mode=1777 \
-        -p "127.0.0.1:$port:$port" \
-        -v "$data_dir:/data:rw" \
-        -v "$ws:$ws:rw" \
-        "''${workspace_mount[@]}" \
-        "$IMAGE" \
-        bash -c '
-          set -e
-          mkdir -p /tmp/dolthome
-          exec dolt sql-server --data-dir /data -H 0.0.0.0 -P "$1"
-        ' -- "$port" \
-        >/dev/null
+      # Subshell closes inherited fds so conmon doesn't hold direnv's
+      # pipes open (which blocks direnv from completing).
+      (
+        for _fd in /proc/self/fd/*; do
+          _fd=''${_fd##*/}
+          [ "$_fd" -gt 2 ] && eval "exec $_fd>&-" 2>/dev/null || true
+        done
+        podman run -d \
+          --name "$name" \
+          --entrypoint "" \
+          --network wrapix-dolt \
+          --userns=keep-id \
+          -e HOME=/tmp/dolthome \
+          -e DOLT_FORCE_LOCAL_TEMP_FILES=1 \
+          -e DOLT_ROOT_HOST="%" \
+          --tmpfs /tmp:rw,mode=1777 \
+          -p "127.0.0.1:$port:$port" \
+          -v "$data_dir:/data:rw" \
+          -v "$ws:$ws:rw" \
+          "''${workspace_mount[@]}" \
+          "$IMAGE" \
+          bash -c '
+            set -e
+            mkdir -p /tmp/dolthome
+            exec dolt sql-server --data-dir /data -H 0.0.0.0 -P "$1"
+          ' -- "$port" \
+          >/dev/null
+      )
 
       local retries=50
       while [ $retries -gt 0 ]; do
@@ -251,7 +258,7 @@ let
     esac
   '';
 
-  beadsPush = pkgs.writeShellScriptBin "beads-push" (builtins.readFile ../../scripts/beads-push);
+  beadsPush = pkgs.writeShellScriptBin "beads-push" (readFile ../../scripts/beads-push);
 
   # Shell hook fragment: ensures per-workspace dolt is running and exports
   # the env that suppresses bd's embedded autostart. No-op if the current
@@ -267,8 +274,9 @@ let
 
 in
 {
-  image = doltImageDrv;
   inherit imageName shellHook;
+
+  image = doltImageDrv;
   cli = beadsDolt;
   push = beadsPush;
 }
