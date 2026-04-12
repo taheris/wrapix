@@ -805,6 +805,7 @@ in
         cat > "$STUB_BIN/podman" << 'STUB'
         #!/bin/sh
         echo "$@" >> "$PODMAN_LOG"
+        case "$1" in inspect) echo "true" ;; esac
         STUB
         chmod +x "$STUB_BIN/podman"
         export PODMAN_LOG="$TMPDIR/podman.log"
@@ -884,10 +885,13 @@ in
         STUB_BIN="$TMPDIR/bin"
         mkdir -p "$STUB_BIN"
 
-        # Stub podman: record argv, then exit 0
+        # Stub podman: record argv on run, report running on inspect
         cat > "$STUB_BIN/podman" << 'STUB'
         #!/bin/sh
-        printf '%s\n' "$@" > "$PODMAN_ARGS"
+        case "$1" in
+          run) printf '%s\n' "$@" > "$PODMAN_ARGS" ;;
+          inspect) echo "true" ;;
+        esac
         STUB
         chmod +x "$STUB_BIN/podman"
         export PODMAN_ARGS="$TMPDIR/podman.args"

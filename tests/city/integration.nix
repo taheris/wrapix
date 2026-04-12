@@ -7,6 +7,7 @@
 #   Phase 1 (happy path):
 #     gc starts → scout creates bead → sling → worker commits → judge
 #     approves → judge-merge.sh (ff) → post-gate (deploy bead, notify)
+#     + verify tmux session alive in persistent containers
 #   Phase 1b (reconciler): gc sling routes bead → scale_check → worker starts
 #   Phase 2 (merge conflict): diverged branch → rebase conflicts → reject
 #   Phase 3 (escalation): non-approved convergence → post-gate cleanup
@@ -58,7 +59,12 @@ let
   };
 
   # Live outputs — no duplication
-  inherit (liveCity) scripts formulas prompts;
+  inherit (liveCity)
+    scripts
+    formulas
+    prompts
+    configDir
+    ;
 
   toTOML = import ../../lib/util/toml.nix { inherit lib; };
 
@@ -436,6 +442,8 @@ let
       cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
       for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
       mkdir -p .wrapix/city/current/prompts
+      cp -f ${configDir}/claude-settings.json .wrapix/city/current/
+      cp -f ${configDir}/tmux.conf .wrapix/city/current/
       for f in ${prompts}/*; do cp -f "$f" .wrapix/city/current/prompts/; done
 
       printf "## Scout Rules\nimmediate: FATAL|PANIC\nbatched: ERROR\n## Auto-deploy\nLow-risk: docs only\n" > docs/orchestration.md
@@ -505,6 +513,13 @@ let
 
     subtest "Wait for mayor container to start" \
       poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30
+
+    verify_mayor_tmux() {
+      # The health check in persistent_start already verified this on start,
+      # but confirm the tmux session is reachable from the host via podman exec.
+      poll_until 'podman exec gc-test-city-mayor tmux has-session -t mayor 2>/dev/null' 10
+    }
+    subtest "Verify tmux session alive in mayor container" verify_mayor_tmux
 
     subtest "Wait for scout to create a bead" \
       poll_until 'timeout 5 bd list --json 2>/dev/null | jq -e "[.[] | select(.title | test(\"Fix test error\"))] | length > 0"' 60

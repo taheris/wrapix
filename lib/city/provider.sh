@@ -134,7 +134,7 @@ persistent_start() {
   role="$(role_name)"
   beads_staging="$(stage_beads)"
 
-  # shellcheck disable=SC2046
+  # shellcheck disable=SC2046,SC2086
   podman run -d \
     --replace \
     --name "$name" \
@@ -167,15 +167,27 @@ persistent_start() {
     -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
     bash -c '
+      set -e
       # shellcheck disable=SC1091
       [[ -f /git-ssh-setup.sh ]] && . /git-ssh-setup.sh
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp "$WRAPIX_CITY_DIR/claude-settings.json" "$HOME/.claude/settings.json"
       cp "$WRAPIX_CITY_DIR/tmux.conf" "$HOME/.tmux.conf"
+      tmux start-server
       tmux new-session -d -s "$GC_AGENT" "claude --dangerously-skip-permissions"
       exec tmux wait-for gc-shutdown
     '
+
+  # Verify the container survived initialization (tmux startup).
+  # podman run -d returns before the inline script executes, so a brief
+  # wait lets tmux either start or fail-and-exit.
+  sleep 2
+  if [[ "$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" != "true" ]]; then
+    echo "persistent_start: container $name exited during startup — check tmux/config" >&2
+    podman logs --tail 20 "$name" 2>&1 >&2 || true
+    return 1
+  fi
 }
 
 persistent_exec() {
@@ -224,7 +236,7 @@ worker_start() {
   local beads_staging
   beads_staging="$(stage_beads)"
 
-  # shellcheck disable=SC2046
+  # shellcheck disable=SC2046,SC2086
   podman run -d \
     --replace \
     --name "$name" \
