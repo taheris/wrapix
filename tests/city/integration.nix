@@ -43,6 +43,9 @@ let
     inherit (sandbox) mkSandbox profiles baseClaudeSettings;
     inherit (ralph) mkRalph;
   };
+  wrapixLib = import ../../lib {
+    inherit pkgs system linuxPkgs;
+  };
 
   # Name the input profile so liveCity.sandbox.profile ends up as
   # "gc-test" and mkCity's imageName is "wrapix-gc-test:latest". The test
@@ -160,26 +163,48 @@ let
     asTarball = isDarwin;
   };
 
-  # Runtime dependencies for the test script. Starts from the same packages
-  # live city ships (gc, beads-dolt, ralph tooling, ...) so this test exercises
-  # the real invocation closure, not a parallel declaration. Extras below are
-  # test-driver-only tools that live does not need on the host.
-  testDeps =
-    liveCity.packages
-    ++ (with pkgs; [
-      bash
-      beads # bd CLI — test driver calls it directly
-      coreutils
-      dolt # ad-hoc SQL/config from test driver
-      git
-      gnugrep
-      gnused
-      gnutar
-      jq
-      lsof # diagnostics
-      tmux # cleanup
-      util-linux
-    ]);
+  # Host PATH — derived from the SAME mkDevShell the flake uses, plus the
+  # consumer extras the flake adds. If a tool is missing here, the test
+  # fails — just like live would.
+  #
+  # Structure mirrors flake.nix devShells.default:
+  #   wrapix.mkDevShell {
+  #     packages = city.packages ++ [ podman ... ];
+  #   };
+  #
+  # wrapix.mkDevShell (lib/default.nix) provides its own base packages
+  # (beads, dolt, prek) on top of city.packages, so we don't duplicate them.
+  liveDevShell = wrapixLib.mkDevShell {
+    inherit (liveCity) shellHook;
+    packages = liveCity.packages ++ [
+      pkgs.podman # consumer extra (flake.nix)
+    ];
+  };
+
+  # The live PATH has three layers:
+  #   1. nativeBuildInputs — explicit devShell packages (gc, beads, ralph, ...)
+  #   2. stdenv.initialPath — Nix bootstrap (bash, coreutils, sed, grep, ...)
+  #   3. System tools — assumed present on the host (git, jq, util-linux)
+  #      In nix develop, these come from the user's system PATH. In the test
+  #      sandbox we must provide them explicitly.
+  systemDeps = [
+    pkgs.git
+    pkgs.jq
+    pkgs.util-linux # flock, setsid
+    mockClaude # gc workspace provider check (live: system-installed claude)
+  ];
+  livePath = lib.makeBinPath (
+    liveDevShell.nativeBuildInputs ++ pkgs.stdenv.initialPath ++ systemDeps
+  );
+
+  # Test-driver-only extras — used for assertions and diagnostics, NEVER
+  # by code under test. If a tool is needed by entrypoint/gc/provider,
+  # it belongs in liveDevShell or systemDeps above, not here.
+  testOnlyDeps = with pkgs; [
+    lsof # diagnostics dump
+    tmux # cleanup
+  ];
+  testOnlyPath = lib.makeBinPath testOnlyDeps;
 
   testScript = pkgs.writeShellScriptBin "test-city" ''
     set -euo pipefail
@@ -188,7 +213,11 @@ let
     # Helpers
     # ================================================================
 
-    export PATH="${lib.makeBinPath testDeps}:$PATH"
+    # LIVE_PATH = exact devShell PATH. All code under test (entrypoint,
+    # city scripts) runs with ONLY this. Test extras are appended for the
+    # driver's own assertions/diagnostics but never leak into live code.
+    export LIVE_PATH="${livePath}"
+    export PATH="${livePath}:${testOnlyPath}"
 
     # Preflight: check podman before setting up trap/counters so skip
     # doesn't print a misleading "ALL TESTS PASSED" summary.
@@ -341,6 +370,17 @@ let
       return 1
     }
 
+    # Run a city script via the live .gc/scripts/ symlinks with LIVE_PATH.
+    # Every script invocation must go through this to exercise the real
+    # invocation path (symlink resolution, live PATH, live env).
+    # Written as a real script (not a function) so subtest "..." live ...
+    # and VAR=val live ... both work.
+    _LIVE_DIR="$(mktemp -d)"
+    echo '#!/usr/bin/env bash' > "$_LIVE_DIR/live"
+    echo 'exec env PATH="$LIVE_PATH" bash "$WS/.gc/scripts/$1" "''${@:2}"' >> "$_LIVE_DIR/live"
+    chmod +x "$_LIVE_DIR/live"
+    export PATH="$_LIVE_DIR:$PATH"
+
     echo "=== Gas City Integration Test ==="
 
     # ================================================================
@@ -361,6 +401,7 @@ let
     WS=$(mktemp -d -t citytest-XXXXXX)
     # Resolve symlinks (macOS /tmp -> /private/tmp) so podman VM can mount paths
     WS=$(cd "$WS" && pwd -P)
+    export WS
     echo "  > workspace: $WS"
     cd "$WS"
 
@@ -383,7 +424,7 @@ let
       # gc init auto-starts its supervisor and blocks; kill the process group
       # once .beads/metadata.json exists. beads-dolt will then serve the same
       # data dir as a shared podman container.
-      setsid gc init --file ${cityToml} --skip-provider-readiness </dev/null &
+      setsid env PATH="$LIVE_PATH" gc init --file ${cityToml} --skip-provider-readiness </dev/null &
       _GC_INIT_PID=$!
       for _i in $(seq 1 60); do
         [ -f .beads/metadata.json ] && break
@@ -475,7 +516,9 @@ let
       export GC_AGENT_IMAGE="${liveCity.imageName}"
       export GC_PODMAN_NETWORK="$TEST_NETWORK"
 
-      setsid "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc.log" 2>&1 &
+      # Run entrypoint with ONLY the live PATH — no test extras — so
+      # missing-dependency bugs surface here just as they would in prod.
+      setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc.log" 2>&1 &
       GC_PID=$!
 
       for _i in $(seq 1 100); do
@@ -554,8 +597,10 @@ let
     subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
 
-    subtest "Judge merges approved changes" \
-      env GC_BEAD_ID="$BEAD_ID" GC_WORKSPACE="$WS" bash ${scripts}/judge-merge.sh
+    judge_merge_phase1() {
+      GC_BEAD_ID="$BEAD_ID" GC_WORKSPACE="$WS" live judge-merge.sh
+    }
+    subtest "Judge merges approved changes" judge_merge_phase1
 
     # Post-gate fires on convergence.terminated — now lightweight:
     # notifies judge (already merged above), creates deploy bead, notifications.
@@ -564,7 +609,7 @@ let
       GC_TERMINAL_REASON="approved" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scripts}/post-gate.sh
+        live post-gate.sh
     }
     subtest "Run post-gate (deploy bead + notifications)" run_post_gate
 
@@ -698,7 +743,7 @@ let
       git worktree add "$wt" -b "gc-$BEAD2" HEAD~1 2>/dev/null || \
         git worktree add "$wt" "gc-$BEAD2"
       (cd "$wt" && echo "fix applied v2" > fix.txt && git add fix.txt && git commit -m "fix: resolve second error")
-      GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+      GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" live worker-collect.sh
       bd update "$BEAD2" --set-metadata "review_verdict=approve"
       bd update "$BEAD2" --status=in_progress
     }
@@ -708,7 +753,7 @@ let
     judge_merge_conflict() {
       local exit_code=0
       GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" \
-        bash ${scripts}/judge-merge.sh 2>&1 || exit_code=$?
+        live judge-merge.sh 2>&1 || exit_code=$?
       [ "$exit_code" -eq 1 ] || { echo "FAIL: judge-merge should exit 1 on conflict (got: $exit_code)"; return 1; }
     }
     subtest "Judge detects merge conflict and rejects" judge_merge_conflict
@@ -736,15 +781,17 @@ let
 
     BEAD3=$(bd list --json --title "Escalation test" 2>/dev/null | jq -r '.[0].id')
 
-    subtest "Set up worktree for escalation bead" \
-      env GC_BEAD_ID="$BEAD3" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh
+    setup_escalation_worktree() {
+      GC_BEAD_ID="$BEAD3" GC_WORKSPACE="$WS" live worker-setup.sh
+    }
+    subtest "Set up worktree for escalation bead" setup_escalation_worktree
 
     run_post_gate_escalation() {
       GC_BEAD_ID="$BEAD3" \
       GC_TERMINAL_REASON="max_rounds_exceeded" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scripts}/post-gate.sh
+        live post-gate.sh
     }
     subtest "Post-gate handles escalation (non-approved)" run_post_gate_escalation
 
@@ -784,7 +831,7 @@ let
     # setting metadata. This is the state after a crash.
     setup_crashed_worker() {
       [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ] || return 1
-      GC_BEAD_ID="$BEAD4" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD4" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/gc-$BEAD4"
       (cd "$wt" && echo "recovery fix" > recovery.txt && git add recovery.txt && git commit -m "fix: recovery test")
       # No worker-collect.sh — simulates monitor crash (no metadata set)
@@ -797,7 +844,7 @@ let
     subtest "Simulate crashed worker (commits but no metadata)" setup_crashed_worker
 
     run_recovery() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh" run_recovery
 
@@ -840,12 +887,14 @@ let
     BEAD5=$(bd list --json --title "No-op worker test" 2>/dev/null | jq -r '.[0].id')
 
     # Worker started but exited without committing — no commits beyond main.
-    subtest "Set up no-op worker (no commits)" \
-      env GC_BEAD_ID="$BEAD5" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh
+    setup_noop_worker() {
+      GC_BEAD_ID="$BEAD5" GC_WORKSPACE="$WS" live worker-setup.sh
+    }
+    subtest "Set up no-op worker (no commits)" setup_noop_worker
 
     # Recovery should NOT set metadata for a branch with no commits
     run_recovery_noop() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh for no-op worker" run_recovery_noop
 
@@ -860,7 +909,7 @@ let
     verify_gate_rejects_noop() {
       local exit_code=0
       GC_BEAD_ID="$BEAD5" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=1 \
-        bash ${scripts}/gate.sh > /dev/null 2>&1 || exit_code=$?
+        live gate.sh > /dev/null 2>&1 || exit_code=$?
       [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 for no-op worker (got: $exit_code)"; return 1; }
     }
     subtest "Verify gate rejects no-op worker (exit 1, no stall)" verify_gate_rejects_noop
@@ -885,7 +934,7 @@ let
 
     verify_worker_setup() {
       [ -n "$BEAD6" ] && [ "$BEAD6" != "null" ] || return 1
-      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
 
       local wt="$WS/.wrapix/worktree/gc-$BEAD6"
       [ -d "$wt" ] || { echo "FAIL: worktree not created at $wt"; return 1; }
@@ -904,7 +953,7 @@ let
     verify_worker_collect() {
       local wt="$WS/.wrapix/worktree/gc-$BEAD6"
       (cd "$wt" && echo "setup test fix" > setup-fix.txt && git add setup-fix.txt && git commit -m "fix: setup test")
-      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" live worker-collect.sh
 
       local cr
       cr="$(bd show "$BEAD6" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty')"
@@ -925,8 +974,8 @@ let
 
     verify_collect_noop() {
       [ -n "$BEAD7" ] && [ "$BEAD7" != "null" ] || return 1
-      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
-      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" live worker-collect.sh
 
       local cr
       cr="$(bd show "$BEAD7" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty')"
@@ -956,7 +1005,7 @@ let
     setup_rebase_success() {
       [ -n "$BEAD8" ] && [ "$BEAD8" != "null" ] || return 1
       # Worker branches from current HEAD
-      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/gc-$BEAD8"
 
       # Worker commits on its branch
@@ -967,20 +1016,21 @@ let
       (cd "$WS" && echo "parallel change" > parallel.txt && git add parallel.txt && git commit -m "parallel: non-conflicting advance")
 
       # Collect metadata
-      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" live worker-collect.sh
       bd update "$BEAD8" --set-metadata "review_verdict=approve"
     }
     subtest "Set up diverged branch (non-conflicting)" setup_rebase_success
 
     judge_merge_rebase_success() {
       # Stub prek — this test exercises rebase+merge, not pre-commit hooks.
+      # judge-merge.sh guards with `command -v prek` so stubbing is safe.
       local stub_dir
       stub_dir="$(mktemp -d)"
       printf '#!/usr/bin/env bash\nexit 0\n' > "$stub_dir/prek"
       chmod +x "$stub_dir/prek"
       local exit_code=0
-      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
-        bash ${scripts}/judge-merge.sh 2>&1 || exit_code=$?
+      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
+        bash "$WS/.gc/scripts/judge-merge.sh" 2>&1 || exit_code=$?
       rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: judge-merge should exit 0 on rebase success (got: $exit_code)"; return 1; }
     }
@@ -1027,17 +1077,17 @@ let
     subtest "Set up gate approve test" setup_gate_test
 
     verify_gate_approve() {
-      # Stub gc so gate.sh's nudge doesn't fail (gc is stopped)
+      # Stub gc so gate.sh's nudge doesn't fail (gc daemon is stopped).
+      # The stub is prepended to LIVE_PATH so gate.sh still sees all other
+      # live tools — only the gc binary is replaced.
       local stub_dir
       stub_dir="$(mktemp -d)"
-      cat > "$stub_dir/gc" <<'STUB'
-    #!/usr/bin/env bash
-    exit 0
-    STUB
+      echo '#!/usr/bin/env bash' > "$stub_dir/gc"
+      echo 'exit 0' >> "$stub_dir/gc"
       chmod +x "$stub_dir/gc"
       local exit_code=0
-      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-        bash ${scripts}/gate.sh >/dev/null 2>&1 || exit_code=$?
+      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
       rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: gate should exit 0 on approve (got: $exit_code)"; return 1; }
     }
@@ -1059,18 +1109,76 @@ let
     verify_gate_reject() {
       local stub_dir
       stub_dir="$(mktemp -d)"
-      cat > "$stub_dir/gc" <<'STUB'
-    #!/usr/bin/env bash
-    exit 0
-    STUB
+      echo '#!/usr/bin/env bash' > "$stub_dir/gc"
+      echo 'exit 0' >> "$stub_dir/gc"
       chmod +x "$stub_dir/gc"
       local exit_code=0
-      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-        bash ${scripts}/gate.sh >/dev/null 2>&1 || exit_code=$?
+      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
       rm -rf "$stub_dir"
       [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 on reject (got: $exit_code)"; return 1; }
     }
     subtest "Gate exits 1 on reject verdict" verify_gate_reject
+
+    # ================================================================
+    # Phase 8b: dispatch.sh — cooldown-aware worker scale check
+    # ================================================================
+
+    subtest "Create dispatch bead" \
+      bd create --title="Dispatch cooldown test" --type=bug --priority=2
+
+    BEAD_DISPATCH=$(bd list --json --title "Dispatch cooldown test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_dispatch() {
+      [ -n "$BEAD_DISPATCH" ] && [ "$BEAD_DISPATCH" != "null" ] || return 1
+      bd update "$BEAD_DISPATCH" --set-metadata "gc.routed_to=worker"
+    }
+    subtest "Route dispatch bead to worker" setup_dispatch
+
+    verify_dispatch_no_cooldown() {
+      # With cooldown=0, dispatch.sh is a passthrough to bd list
+      local count
+      count="$(GC_COOLDOWN=0 GC_WORKSPACE="$WS" live dispatch.sh)"
+      [ "$count" -ge 1 ] || { echo "FAIL: dispatch should count >=1 bead (got: $count)"; return 1; }
+    }
+    subtest "dispatch.sh counts beads with no cooldown" verify_dispatch_no_cooldown
+
+    verify_dispatch_cooldown_blocks() {
+      # Set last-dispatch to now — cooldown should block
+      mkdir -p "$WS/.wrapix/state"
+      date +%s > "$WS/.wrapix/state/last-dispatch"
+      local count
+      count="$(GC_COOLDOWN=1h GC_WORKSPACE="$WS" live dispatch.sh)"
+      [ "$count" -eq 0 ] || { echo "FAIL: dispatch should return 0 during cooldown (got: $count)"; return 1; }
+    }
+    subtest "dispatch.sh respects cooldown timer" verify_dispatch_cooldown_blocks
+
+    verify_dispatch_p0_bypasses_cooldown() {
+      # P0 beads bypass cooldown
+      bd update "$BEAD_DISPATCH" --priority=0
+      local count
+      count="$(GC_COOLDOWN=1h GC_WORKSPACE="$WS" live dispatch.sh)"
+      [ "$count" -ge 1 ] || { echo "FAIL: P0 should bypass cooldown (got: $count)"; return 1; }
+      bd update "$BEAD_DISPATCH" --priority=2
+    }
+    subtest "dispatch.sh P0 bypasses cooldown" verify_dispatch_p0_bypasses_cooldown
+
+    verify_dispatch_backpressure() {
+      # Backpressure file with future timestamp blocks all dispatch
+      mkdir -p "$WS/.wrapix/state"
+      echo "$(( $(date +%s) + 3600 ))" > "$WS/.wrapix/state/rate-limited"
+      local count
+      count="$(GC_COOLDOWN=0 GC_WORKSPACE="$WS" live dispatch.sh)"
+      [ "$count" -eq 0 ] || { echo "FAIL: backpressure should block dispatch (got: $count)"; return 1; }
+      rm -f "$WS/.wrapix/state/rate-limited"
+    }
+    subtest "dispatch.sh respects backpressure" verify_dispatch_backpressure
+
+    cleanup_dispatch() {
+      rm -f "$WS/.wrapix/state/last-dispatch" "$WS/.wrapix/state/rate-limited"
+      bd close "$BEAD_DISPATCH" 2>/dev/null || true
+    }
+    subtest "Clean up dispatch test" cleanup_dispatch
 
     # ================================================================
     # Phase 9: Post-gate closes work bead on approved convergence
@@ -1092,7 +1200,7 @@ let
       GC_TERMINAL_REASON="approved" \
       GC_WORKSPACE="$WS" \
       GC_CITY_NAME="test-city" \
-        bash ${scripts}/post-gate.sh
+        live post-gate.sh
     }
     subtest "Run post-gate with approved reason" run_post_gate_close
 
@@ -1121,7 +1229,7 @@ let
     subtest "Set up bead with prior rejection notes" setup_retry_notes
 
     verify_task_includes_rejection() {
-      GC_BEAD_ID="$BEAD12" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD12" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/gc-$BEAD12"
       [ -f "$wt/.task" ] || { echo "FAIL: .task file not created"; return 1; }
 
@@ -1150,7 +1258,7 @@ let
 
     setup_orphan_worktree() {
       [ -n "$BEAD13" ] && [ "$BEAD13" != "null" ] || return 1
-      GC_BEAD_ID="$BEAD13" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD13" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/gc-$BEAD13"
       [ -d "$wt" ] || { echo "FAIL: worktree not created"; return 1; }
 
@@ -1160,7 +1268,7 @@ let
     subtest "Create worktree then close its bead (orphan)" setup_orphan_worktree
 
     run_recovery_orphan() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh for orphan cleanup" run_recovery_orphan
 

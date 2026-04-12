@@ -467,12 +467,17 @@ let
         fi
       '';
 
-      # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox
+      # Packages for devShell: gc, bd, ralph scripts, agent wrapper, sandbox.
+      # gc runtime deps (tmux, procps, lsof) are included so the devShell
+      # is self-contained — gc doctor/start checks for these at startup.
       shellPackages = ralphInstance.packages ++ [
-        pkgs.gc
-        cityScripts
         beads.cli
         beads.push
+        cityScripts
+        pkgs.gc
+        pkgs.lsof
+        pkgs.procps
+        pkgs.tmux
       ];
 
       # Pre-built devShell with everything on PATH

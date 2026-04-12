@@ -99,6 +99,7 @@ let
     iputils
     jq
     less
+    lsof
     man
     netcat
     nix
