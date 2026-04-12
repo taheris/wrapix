@@ -97,6 +97,11 @@ handle_escalation() {
 handle_approved() {
   echo "post-gate: convergence approved for bead $BEAD_ID"
 
+  # Close the work bead — convergence succeeded, work is done. Without this,
+  # the bead stays in_progress with gc.routed_to set, causing dispatch.sh to
+  # count it as demand and the fallback bead picker to hand it to new workers.
+  bd close "$BEAD_ID" 2>/dev/null || true
+
   # Notify judge to merge — judge owns the actual git operations
   # (fast-forward, rebase, worktree cleanup). This nudge includes the
   # bead ID so the judge can look up the branch and perform merge.
