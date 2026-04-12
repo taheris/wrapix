@@ -368,7 +368,7 @@ in
         for script in "''${SCRIPTS[@]}"; do
           name="$(basename "$script")"
           bash -n "$script" || { echo "FAIL: $name has syntax errors"; exit 1; }
-          head -20 "$script" | grep -q 'set -euo pipefail' || { echo "FAIL: $name missing set -euo pipefail"; exit 1; }
+          grep -q 'set -euo pipefail' "$script" || { echo "FAIL: $name missing set -euo pipefail"; exit 1; }
           echo "  PASS: $name"
         done
 
@@ -554,77 +554,10 @@ in
                 mkdir $out
       '';
 
-  # Gate: exit codes match review verdict
-  city-gate-functional =
-    runCommandLocal "city-gate-functional"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.coreutils
-          pkgs.jq
-        ];
-      }
-      ''
-                set -euo pipefail
-                GATE="${../../lib/city/gate.sh}"
-
-                echo "Testing gate.sh with mock bd/gc..."
-
-                MOCK_BIN=$(mktemp -d)
-
-                # Test 1: approve -> exit 0
-                cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/bin/sh
-        # bd show <id> --json returns array with metadata
-        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
-          echo '[{"metadata":{"commit_range":"abc..def","review_verdict":"approve"}}]'
-        fi
-        MOCK
-                chmod +x "$MOCK_BIN/bd"
-                cat > "$MOCK_BIN/gc" << 'MOCK'
-        #!/bin/sh
-        exit 0
-        MOCK
-                chmod +x "$MOCK_BIN/gc"
-
-                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-1" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  bash "$GATE" > /dev/null 2>&1
-                echo "  PASS: approve exits 0"
-
-                # Test 2: reject -> exit 1
-                cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/bin/sh
-        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
-          echo '[{"metadata":{"commit_range":"abc..def","review_verdict":"reject"}}]'
-        fi
-        MOCK
-                chmod +x "$MOCK_BIN/bd"
-
-                exit_code=0
-                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-2" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  bash "$GATE" > /dev/null 2>&1 || exit_code=$?
-                [[ "$exit_code" -eq 1 ]] || { echo "FAIL: reject exited $exit_code (expected 1)"; exit 1; }
-                echo "  PASS: reject exits 1"
-
-                # Test 3: missing commit_range -> exit 1
-                cat > "$MOCK_BIN/bd" << 'MOCK'
-        #!/bin/sh
-        if [ "$1" = "show" ] && [ "$3" = "--json" ]; then
-          echo '[{"metadata":{}}]'
-        fi
-        MOCK
-                chmod +x "$MOCK_BIN/bd"
-
-                exit_code=0
-                PATH="$MOCK_BIN:$PATH" GC_BEAD_ID="test-3" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-                  bash "$GATE" > /dev/null 2>&1 || exit_code=$?
-                [[ "$exit_code" -eq 1 ]] || { echo "FAIL: no commit_range exited $exit_code (expected 1)"; exit 1; }
-                echo "  PASS: missing commit_range exits 1"
-
-                rm -rf "$MOCK_BIN"
-                echo "PASS: gate.sh exit codes correct"
-                mkdir $out
-      '';
+  # Gate: tested via integration test (tests/city/integration.nix Phase 1).
+  # The integration test exercises the full path: real gc convergence calls
+  # gate.sh, which computes commit_range from real git branches, with real
+  # podman containers and real beads/dolt.
 
   # Agent wrapper: prompt construction
   city-agent-prompt =

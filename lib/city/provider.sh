@@ -293,19 +293,6 @@ worker_start() {
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 
-  # Monitor worker exit in background — set bead metadata when done
-  (
-    podman wait "$name" >/dev/null 2>&1 || true
-
-    # Determine commit range on the worker branch
-    local branch="gc-${bead_id}"
-    local merge_base
-    merge_base="$(git -C "${GC_WORKSPACE}" merge-base main "${branch}" 2>/dev/null || echo "")"
-    if [[ -n "$merge_base" ]]; then
-      bd update "${bead_id}" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
-      bd update "${bead_id}" --set-metadata "branch_name=${branch}" 2>/dev/null || true
-    fi
-  ) </dev/null >/dev/null 2>&1 &
 }
 
 # ---------------------------------------------------------------------------

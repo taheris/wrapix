@@ -119,7 +119,7 @@ git add -A && git commit -m "chore: capture remaining work ($GC_BEAD_ID)"
 **3. Exit cleanly:**
 
 The container exit signals worker completion to gc convergence. The
-provider script reads the branch state and sets bead metadata
-(commit_range, branch_name) for the judge gate.
+gate condition script detects the exit, computes the commit range,
+and sets bead metadata (commit_range, branch_name) for the judge.
 
 **Exit criteria:** All changes committed, working tree clean, exit 0."""

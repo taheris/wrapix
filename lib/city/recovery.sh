@@ -3,8 +3,8 @@
 #
 # Called by entrypoint.sh before exec'ing gc start --foreground.
 # Scans podman for running gc containers, reconciles against beads state,
-# stops orphans, re-enters convergence for finished workers, and prunes
-# stale worktrees.
+# stops orphans, and prunes stale worktrees. Metadata for finished workers
+# is computed by gate.sh on demand (idempotent, crash-recoverable).
 #
 # Environment variables (set by mkCity / systemd unit):
 #   GC_CITY_NAME  — city name (required)
@@ -52,19 +52,6 @@ bead_is_open() {
   [[ "$status" == "open" || "$status" == "in_progress" ]]
 }
 
-# Check if a branch has commits beyond the merge-base with main.
-branch_has_commits() {
-  local branch="$1"
-  if ! git -C "$WORKSPACE" rev-parse --verify "$branch" >/dev/null 2>&1; then
-    return 1
-  fi
-  local merge_base
-  merge_base="$(git -C "$WORKSPACE" merge-base main "$branch" 2>/dev/null)" || return 1
-  local branch_head
-  branch_head="$(git -C "$WORKSPACE" rev-parse "$branch" 2>/dev/null)" || return 1
-  [[ "$merge_base" != "$branch_head" ]]
-}
-
 # Stop and remove a container.
 stop_container() {
   local container="$1"
@@ -110,62 +97,7 @@ reconcile_workers() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: Find finished workers (commits on branch, bead still open)
-# ---------------------------------------------------------------------------
-
-reconcile_finished_workers() {
-  # Look for beads that have branches with commits but are still open
-  # These are workers that finished (exited with commits) but gc crashed
-  # before convergence could process them.
-  local worktrees
-  worktrees="$(find "${WORKSPACE}/.wrapix/worktree" -maxdepth 1 -name 'gc-*' -type d 2>/dev/null)" || worktrees=""
-
-  [[ -z "$worktrees" ]] && return 0
-
-  while IFS= read -r worktree_path; do
-    [[ -z "$worktree_path" ]] && continue
-
-    local dir_name bead_id branch
-    dir_name="$(basename "$worktree_path")"
-    bead_id="${dir_name#gc-}"
-    branch="gc-${bead_id}"
-
-    # Skip if no matching branch
-    if ! git -C "$WORKSPACE" rev-parse --verify "$branch" >/dev/null 2>&1; then
-      continue
-    fi
-
-    # Skip if bead is not open
-    if ! bead_is_open "$bead_id"; then
-      continue
-    fi
-
-    # Check if the worker container is still running
-    local container_name="gc-${CITY_NAME}-worker-${bead_id}"
-    local running
-    running="$(podman inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null)" || running="false"
-
-    if [[ "$running" == "true" ]]; then
-      # Worker still running — skip, gc will handle it
-      continue
-    fi
-
-    # Worker exited with commits on the branch — set metadata so gc can
-    # re-enter convergence when it starts
-    if branch_has_commits "$branch"; then
-      echo "recovery: finished worker for bead $bead_id — setting commit metadata for convergence re-entry"
-      local merge_base
-      merge_base="$(git -C "$WORKSPACE" merge-base main "$branch" 2>/dev/null)" || merge_base=""
-      if [[ -n "$merge_base" ]]; then
-        bd update "$bead_id" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
-        bd update "$bead_id" --set-metadata "branch_name=$branch" 2>/dev/null || true
-      fi
-    fi
-  done <<< "$worktrees"
-}
-
-# ---------------------------------------------------------------------------
-# Step 3: Clean up stale worktrees
+# Step 2: Clean up stale worktrees
 # ---------------------------------------------------------------------------
 
 cleanup_stale_worktrees() {
@@ -206,7 +138,7 @@ cleanup_stale_worktrees() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 4: Stop orphaned persistent containers (scout/judge) that gc
+# Step 3: Stop orphaned persistent containers (scout/judge) that gc
 # will re-create on start
 # ---------------------------------------------------------------------------
 
@@ -239,7 +171,6 @@ cleanup_persistent_containers() {
 echo "recovery: scanning for containers from city ${CITY_NAME}..."
 
 reconcile_workers
-reconcile_finished_workers
 cleanup_stale_worktrees
 cleanup_persistent_containers
 
