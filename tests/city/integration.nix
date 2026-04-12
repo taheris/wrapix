@@ -191,6 +191,13 @@ let
 
     export PATH="${lib.makeBinPath testDeps}:$PATH"
 
+    # Preflight: check podman before setting up trap/counters so skip
+    # doesn't print a misleading "ALL TESTS PASSED" summary.
+    if ! command -v podman >/dev/null 2>&1; then
+      echo "SKIP: podman not found — city integration tests require podman on the host."
+      exit 0
+    fi
+
     # Isolate from the caller's environment. The wrapix devShell shellHook
     # exports BEADS_DOLT_SERVER_* pointing at the host workspace's dolt
     # container; inheriting those sends the test's `bd` calls to the host
@@ -334,15 +341,6 @@ let
       echo "  > TIMED OUT after ''${timeout}s: $cmd"
       return 1
     }
-
-    # ================================================================
-    # Preflight: check podman is available
-    # ================================================================
-
-    if ! command -v podman >/dev/null 2>&1; then
-      echo "SKIP: podman not found — city integration tests require podman on the host."
-      exit 0
-    fi
 
     echo "=== Gas City Integration Test ==="
 
