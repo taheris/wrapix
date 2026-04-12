@@ -34,14 +34,14 @@ fi
 # Claim the bead and mark in_progress. In the live flow gc sling sets
 # in_progress before the worker starts; we do it here so callers that
 # bypass sling (recovery tests, escalation tests) get the same state.
-(cd "${WORKSPACE}" && bd update "$bead_id" --claim --status=in_progress) 2>/dev/null || true
+(cd "${WORKSPACE}" && bd update "$bead_id" --claim --status=in_progress) >/dev/null 2>&1 || true
 
 worktree_path=".wrapix/worktree/gc-${bead_id}"
 
 # Create git worktree on the host
 if [[ ! -d "${WORKSPACE}/${worktree_path}" ]]; then
-  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" 2>/dev/null || \
-    git -C "${WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}"
+  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" >/dev/null 2>&1 || \
+    git -C "${WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}" >/dev/null 2>&1
 fi
 
 # Build task file from bead description, acceptance criteria, and judge notes
