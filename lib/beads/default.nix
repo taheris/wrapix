@@ -65,7 +65,7 @@ let
     }
 
     _name() {
-      echo "beads-$(_hash "''${1:-$PWD}")"
+      echo "$(basename "''${1:-$PWD}")-beads"
     }
 
     # Port in [13306, 13805]. 500 slots is plenty for any realistic dev host.
@@ -258,14 +258,10 @@ let
   # directory isn't a beads workspace or podman isn't available.
   shellHook = ''
     if [ -d "$PWD/.beads/dolt" ] && command -v podman >/dev/null 2>&1; then
-      if ${beadsDolt}/bin/beads-dolt start "$PWD" >/dev/null 2>&1; then
-        export BEADS_DOLT_SERVER_HOST=127.0.0.1
-        BEADS_DOLT_SERVER_PORT=$(${beadsDolt}/bin/beads-dolt port "$PWD")
-        export BEADS_DOLT_SERVER_PORT
-        export BEADS_DOLT_AUTO_START=0
-      else
-        echo "warning: beads-dolt failed to start for $PWD — bd will fall back to embedded autostart" >&2
-      fi
+      ${beadsDolt}/bin/beads-dolt start "$PWD"
+      export BEADS_DOLT_SERVER_HOST=127.0.0.1
+      export BEADS_DOLT_SERVER_PORT=$(${beadsDolt}/bin/beads-dolt port "$PWD")
+      export BEADS_DOLT_AUTO_START=0
     fi
   '';
 
