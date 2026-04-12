@@ -69,7 +69,7 @@
               }).overrideAttrs
                 (old: {
                   goModules = old.goModules.overrideAttrs {
-                    outputHash = "sha256-UCODmlavmZc2/4ltA2g71UvjjNLxEG+g82IFUjNtpdI=";
+                    outputHash = "sha256-stY1JxMAeINT73KCvwZyh/TUktkLirEcGa0sW1u7W1s=";
                   };
                 });
 

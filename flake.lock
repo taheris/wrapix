@@ -7,10 +7,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1775619690,
-        "narHash": "sha256-O1GuogEtQ3Zq5tc9j7YQ+VKT/ik/tvSZJv36FxrmZGg=",
+        "lastModified": 1775967709,
+        "narHash": "sha256-Ha9FdcfH2hFDhdX1VEKzorfL5NBNoVijJwSN2jB4INk=",
         "ref": "main",
-        "rev": "afbfcbe81da47ca391bf0f1d641136a096562106",
+        "rev": "4e0a654556c5b1bcc1878aa2707fde9b759e469d",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/steveyegge/beads.git"
@@ -47,10 +47,10 @@
     "gascity": {
       "flake": false,
       "locked": {
-        "lastModified": 1775626914,
-        "narHash": "sha256-Y50z4da5vpHT8lfz6+HSao2HAvYuiSt219t13hXa9rs=",
+        "lastModified": 1775981307,
+        "narHash": "sha256-r6rGxeDODaJ/Jdf1EwmfsVKr0q82nCufbBGPUISTTV4=",
         "ref": "main",
-        "rev": "00a8c4239f531cd111fcfa6b5490e15305504e02",
+        "rev": "1b74f73190a5108069eb735294fc98d20f46ae03",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/gastownhall/gascity.git"
@@ -64,10 +64,10 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1775423009,
-        "narHash": "sha256-vPKLpjhIVWdDrfiUM8atW6YkIggCEKdSAlJPzzhkQlw=",
+        "lastModified": 1775710090,
+        "narHash": "sha256-ar3rofg+awPB8QXDaFJhJ2jJhu+KqN/PRCXeyuXR76E=",
         "ref": "nixos-unstable",
-        "rev": "68d8aa3d661f0e6bd5862291b5bb263b2a6595c9",
+        "rev": "4c1018dae018162ec878d42fec712642d214fdfa",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/NixOS/nixpkgs.git"
@@ -96,10 +96,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1775617983,
-        "narHash": "sha256-2NWGA/I4j/qlx6qbg86QvJiK1/GyH9gnf0hFiARWVwE=",
+        "lastModified": 1775963625,
+        "narHash": "sha256-OmwF0Rd/HDbEGC0ZcBS2jPMvmCcn3HDqUypjXrR7KfM=",
         "ref": "master",
-        "rev": "d98b91b1feae7ef07fa2ccb3aa3f83f11abfae54",
+        "rev": "573a61faa8ec910a6b8576cc3c145844245574f3",
         "shallow": true,
         "type": "git",
         "url": "ssh://git@github.com/oxalica/rust-overlay.git"
