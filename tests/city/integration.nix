@@ -584,6 +584,55 @@ let
     subtest "Verify branch cleaned up" verify_branch_cleaned
 
     # ================================================================
+    # Phase 1b: Reconciler-driven worker start (wx-y9qco)
+    #
+    # Phase 1 uses `gc sling --on wrapix-worker` which creates a
+    # convergence loop that starts workers directly, bypassing scale_check.
+    # This phase exercises the reconciler path: route a bead to worker
+    # (with assignee already set, as gc sling does), then verify the
+    # reconciler's scale_check detects it and starts a worker session.
+    # ================================================================
+
+    subtest "Create reconciler-routed bead" \
+      bd create --title="Reconciler worker test" --type=bug --priority=2
+
+    RBEAD=$(bd list --json --title "Reconciler worker test" 2>/dev/null | jq -r '.[0].id')
+
+    route_bead_to_worker() {
+      [ -n "$RBEAD" ] && [ "$RBEAD" != "null" ] || return 1
+      # Simulate what gc sling does: set gc.routed_to, claim, mark in_progress.
+      # The key is that --claim sets the assignee BEFORE scale_check runs,
+      # which is the bug: scale_check uses --no-assignee and returns 0.
+      bd update "$RBEAD" --set-metadata "gc.routed_to=worker"
+      bd update "$RBEAD" --claim
+      bd update "$RBEAD" --status=in_progress
+    }
+    subtest "Route bead to worker with assignee set (simulating gc sling)" route_bead_to_worker
+
+    # The reconciler runs scale_check every patrol_interval (5s in test config).
+    # scale_check queries: bd list --metadata-field gc.routed_to=worker
+    #   --status open,in_progress --no-assignee --json | jq 'length'
+    # With --no-assignee (bug): returns 0 → no worker starts.
+    # Without --no-assignee (fix): returns 1 → reconciler starts worker.
+    subtest "Reconciler starts worker for routed bead (wx-y9qco)" \
+      poll_until "ls $WS/.wrapix/worktree/gc-$RBEAD 2>/dev/null" 30
+
+    # Clean up: stop the worker container and remove worktree so Phase 2
+    # starts clean.
+    cleanup_reconciler_test() {
+      local cname="gc-test-city-worker"
+      podman stop -t 3 "$cname" 2>/dev/null || true
+      podman rm -f "$cname" 2>/dev/null || true
+      local wt="$WS/.wrapix/worktree/gc-$RBEAD"
+      if [[ -d "$wt" ]]; then
+        rm -rf "$wt"
+        git -C "$WS" worktree prune 2>/dev/null || true
+      fi
+      git -C "$WS" branch -D "gc-$RBEAD" 2>/dev/null || true
+    }
+    subtest "Clean up reconciler test" cleanup_reconciler_test
+
+    # ================================================================
     # Stop gc — Phase 2+ don't need it (saves resources, faster cleanup)
     # ================================================================
 

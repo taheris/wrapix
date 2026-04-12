@@ -48,7 +48,7 @@ fi
 
 # --- P0 bypass: always count P0 beads regardless of cooldown ---
 p0_count=$(bd list --metadata-field gc.routed_to=worker --status open,in_progress \
-  --no-assignee --priority 0 --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+  --priority 0 --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
 if (( p0_count > 0 )); then
   echo "$p0_count"
   exit 0
@@ -57,7 +57,7 @@ fi
 # --- No cooldown: count all beads normally ---
 if [[ "$COOLDOWN" == "0" ]]; then
   bd list --metadata-field gc.routed_to=worker --status open,in_progress \
-    --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0
+    --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0
   exit 0
 fi
 
@@ -74,4 +74,4 @@ fi
 
 # Cooldown elapsed (or first dispatch) — count available beads
 bd list --metadata-field gc.routed_to=worker --status open,in_progress \
-  --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0
+  --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0

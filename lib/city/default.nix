@@ -206,7 +206,7 @@ let
       # Worker scale_check: cooldown-aware when cooldown is non-zero
       workerScaleCheck =
         if cooldown == "0" then
-          "bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
+          "bd list --metadata-field gc.routed_to=worker --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0"
         else
           "GC_COOLDOWN=${cooldown} GC_WORKSPACE=\"$(pwd)\" ${dispatchScript}";
 
@@ -262,7 +262,7 @@ let
           {
             name = "scout";
             scope = "city";
-            scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
             prompt_template = ".wrapix/city/current/prompts/scout.md";
           }
           {
@@ -276,7 +276,7 @@ let
           {
             name = "judge";
             scope = "city";
-            scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --no-assignee --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
+            scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
             prompt_template = ".wrapix/city/current/prompts/judge.md";
           }
         ];

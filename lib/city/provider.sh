@@ -196,7 +196,7 @@ worker_start() {
   # in_progress, which would let orphaned beads spin the reconciler.
   bead_id="${GC_BEAD_ID:-}"
   if [[ -z "$bead_id" ]]; then
-    bead_id="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker --status open,in_progress --no-assignee --json 2>/dev/null \
+    bead_id="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker --status open,in_progress --json 2>/dev/null \
       | jq -r '.[0].id // empty' 2>/dev/null)" || bead_id=""
   fi
   if [[ -z "$bead_id" ]]; then
