@@ -359,10 +359,13 @@ in
           "${../../lib/city/dispatch.sh}"
           "${../../lib/city/entrypoint.sh}"
           "${../../lib/city/gate.sh}"
+          "${../../lib/city/judge-merge.sh}"
           "${../../lib/city/post-gate.sh}"
           "${../../lib/city/provider.sh}"
           "${../../lib/city/recovery.sh}"
           "${../../lib/city/scout.sh}"
+          "${../../lib/city/worker-collect.sh}"
+          "${../../lib/city/worker-setup.sh}"
         )
 
         for script in "''${SCRIPTS[@]}"; do
@@ -626,13 +629,22 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
 
         echo "Testing provider.sh worker start..."
 
         TMPDIR=$(mktemp -d)
         STUB_BIN="$TMPDIR/bin"
         mkdir -p "$STUB_BIN"
+
+        # Copy all scripts into one directory so BASH_SOURCE[0] dirname
+        # finds sibling scripts (worker-setup.sh, worker-collect.sh).
+        SCRIPTS_DIR="$TMPDIR/scripts"
+        mkdir -p "$SCRIPTS_DIR"
+        for f in ${minimalCity.scripts}/*; do
+          cp "$f" "$SCRIPTS_DIR/$(basename "$f")"
+        done
+        chmod +x "$SCRIPTS_DIR"/*.sh
+        PROVIDER="$SCRIPTS_DIR/provider.sh"
 
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
