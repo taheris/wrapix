@@ -307,11 +307,16 @@ worker_start() {
 case "$METHOD" in
 
   start)
-    # Extract agent_template from gc's start JSON and export for sub-calls
-    # and for is_worker() fallback detection. (wx-aqe4z)
+    # Extract agent_template and issue from gc's start JSON and export for
+    # sub-calls. agent_template is used by is_worker() fallback detection
+    # (wx-aqe4z); issue carries the bead ID from worker formulas (wx-fsqcz).
     if [[ -n "${STDIN_DATA:-}" ]]; then
       GC_AGENT_TEMPLATE="$(echo "$STDIN_DATA" | grep -o '"agent_template" *: *"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')" || GC_AGENT_TEMPLATE=""
       export GC_AGENT_TEMPLATE
+      _gc_issue="$(echo "$STDIN_DATA" | grep -o '"issue" *: *"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')" || _gc_issue=""
+      if [[ -n "$_gc_issue" ]]; then
+        export GC_BEAD_ID="$_gc_issue"
+      fi
     fi
     if is_worker; then
       worker_start

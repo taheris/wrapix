@@ -284,20 +284,24 @@ let
           {
             name = "scout";
             scope = "city";
+            max_active_sessions = 1;
+            min_active_sessions = 0;
             scale_check = "bd list --metadata-field gc.routed_to=scout --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
             prompt_template = ".wrapix/city/current/prompts/scout.md";
           }
           {
             name = "worker";
             scope = "city";
-            # No agent-level max_active_sessions: gc treats max==1 as
-            # single-session (not a pool). Cap is inherited from workspace.
+            max_active_sessions = workers;
+            min_active_sessions = 0;
             scale_check = workerScaleCheck;
             prompt_template = ".wrapix/city/current/prompts/worker.md";
           }
           {
             name = "judge";
             scope = "city";
+            max_active_sessions = 1;
+            min_active_sessions = 0;
             scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
             prompt_template = ".wrapix/city/current/prompts/judge.md";
           }

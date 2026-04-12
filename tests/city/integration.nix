@@ -1470,6 +1470,88 @@ let
       git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
     }
     subtest "Name-based worker detection still works (wx-aqe4z)" verify_name_based_worker_still_works
+
+    # ================================================================
+    # Phase 15: Provider extracts issue from start JSON (wx-fsqcz)
+    #
+    # When gc starts a worker via a formula, the start JSON contains an
+    # "issue" field with the bead ID. provider.sh must extract it and
+    # export GC_BEAD_ID so worker-setup.sh resolves the correct bead
+    # instead of falling back to a racey bd list query.
+    # ================================================================
+
+    verify_provider_extracts_issue() {
+      local test_bead
+      bd create --title="Issue extraction test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Issue extraction test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$test_bead" ] && [ "$test_bead" != "null" ] || { echo "FAIL: could not create test bead"; return 1; }
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+
+      # Start JSON with both agent_template and issue — mimics gc's real
+      # start payload when a formula routes a specific bead to a worker.
+      local start_json='{"agent_template":"worker","issue":"'"$test_bead"'"}'
+      local exit_code=0
+
+      # Do NOT set GC_BEAD_ID in the env — worker-setup.sh must get it
+      # from the issue field that provider.sh extracts and exports.
+      GC_CITY_NAME="test-city" \
+      GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" \
+      GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" \
+      BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start issue-$test_bead" \
+        2>&1 || exit_code=$?
+
+      if [ "$exit_code" -ne 0 ]; then
+        echo "FAIL: provider start failed (exit $exit_code)"
+        return 1
+      fi
+
+      # Verify the correct worktree was created (keyed by bead ID, not session name)
+      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+        echo "FAIL: worktree not created for bead $test_bead — issue field not extracted"
+        return 1
+      fi
+
+      # Clean up
+      podman stop "gc-test-city-issue-$test_bead" 2>/dev/null || true
+      podman rm -f "gc-test-city-issue-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Provider extracts issue from start JSON (wx-fsqcz)" verify_provider_extracts_issue
+
+    # ================================================================
+    # Phase 16: Agent templates have max_active_sessions (wx-65bws)
+    #
+    # Verify the resolved gc config has max_active_sessions on worker,
+    # scout, and judge — without it, gc treats them as named singles
+    # and the reconciler never creates pool sessions.
+    # ================================================================
+
+    verify_pool_agent_max_sessions() {
+      local resolved
+      resolved="$(gc config show --city "$WS/.gc/home" 2>&1)"
+
+      for role in worker scout judge; do
+        if ! echo "$resolved" | grep -A10 "name = \"$role\"" | grep -q 'max_active_sessions'; then
+          echo "FAIL: $role agent missing max_active_sessions in resolved config"
+          echo "$resolved" | grep -A10 "name = \"$role\""
+          return 1
+        fi
+      done
+
+      # Worker should have max_active_sessions = workers (2 in test config)
+      local worker_max
+      worker_max="$(echo "$resolved" | grep -A10 'name = "worker"' | grep 'max_active_sessions' | head -1 | grep -o '[0-9]*')"
+      if [ "$worker_max" != "2" ]; then
+        echo "FAIL: worker max_active_sessions=$worker_max, expected 2"
+        return 1
+      fi
+    }
+    subtest "Agent templates have max_active_sessions (wx-65bws)" verify_pool_agent_max_sessions
   '';
 
 in

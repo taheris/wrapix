@@ -174,6 +174,24 @@ in
       dogMaxSessions =
         (builtins.head (filter (a: a.name == "dog") configAttrs.agent)).max_active_sessions;
 
+      # wx-65bws: pool agents must have max_active_sessions so gc treats them
+      # as pools (not named singles that perpetually count as 'open').
+      workerMaxSessions =
+        (builtins.head (filter (a: a.name == "worker") configAttrs.agent)).max_active_sessions;
+      scoutMaxSessions =
+        (builtins.head (filter (a: a.name == "scout") configAttrs.agent)).max_active_sessions;
+      judgeMaxSessions =
+        (builtins.head (filter (a: a.name == "judge") configAttrs.agent)).max_active_sessions;
+      workerMinSessions =
+        (builtins.head (filter (a: a.name == "worker") configAttrs.agent)).min_active_sessions;
+      scoutMinSessions =
+        (builtins.head (filter (a: a.name == "scout") configAttrs.agent)).min_active_sessions;
+      judgeMinSessions =
+        (builtins.head (filter (a: a.name == "judge") configAttrs.agent)).min_active_sessions;
+      # Full city: workers=2 → worker.max_active_sessions=2
+      fullWorkerMaxSessions =
+        (builtins.head (filter (a: a.name == "worker") fullCity.configAttrs.agent)).max_active_sessions;
+
       # Every agent with a prompt_template has it pointing into the staged city dir.
       allHavePromptTemplate = all (
         a:
@@ -217,6 +235,14 @@ in
     assert hasJudge;
     assert hasDog;
     assert dogMaxSessions == 0;
+    # wx-65bws: pool agents have max_active_sessions set
+    assert workerMaxSessions == 1; # minimal city defaults to workers=1
+    assert scoutMaxSessions == 1;
+    assert judgeMaxSessions == 1;
+    assert workerMinSessions == 0;
+    assert scoutMinSessions == 0;
+    assert judgeMinSessions == 0;
+    assert fullWorkerMaxSessions == 2; # full city has workers=2
     assert allHavePromptTemplate;
     assert fullWorkerSessions == 2;
     # scoutConfig reflects configured values
@@ -234,6 +260,7 @@ in
       echo "  - [session] with exec:/nix/store/... provider"
       echo "  - [formulas], [beads], [daemon], [convergence] sections present"
       echo "  - [[agent]] is list with mayor, scout, worker, judge, dog (max=0)"
+      echo "  - worker/scout/judge have max_active_sessions (wx-65bws)"
       echo "  - workers reflected in max_active_sessions"
       echo "  - scoutConfig exports correct maxBeads and interval"
       echo "  - mayorConfig exports correct autoDecompose"
