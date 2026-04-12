@@ -1130,6 +1130,64 @@ in
         mkdir $out
       '';
 
+  # Verify .gc/scripts/ symlinks use relative paths (not absolute)
+  # so they resolve inside containers where the workspace is bind-mounted
+  # at a different absolute path than where gc init originally ran.
+  # Calls the real stageGcLayout script (same code path as shellHook and app).
+  city-scripts-relative-symlinks =
+    let
+      citySrc = ../../lib/city;
+      names = concatStringsSep " " minimalCity.scriptNames;
+    in
+    runCommandLocal "city-scripts-relative-symlinks"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        WS="$TMPDIR/workspace"
+        mkdir -p "$WS/lib/city"
+
+        for f in ${names}; do
+          cp "${citySrc}/$f" "$WS/lib/city/$f"
+          chmod +x "$WS/lib/city/$f"
+        done
+
+        # Run the same staging script used by shellHook and app
+        cd "$WS"
+        ${minimalCity.stageGcLayout}
+
+        echo "Checking symlinks are relative and executable..."
+        for f in ${names}; do
+          link="$WS/.gc/scripts/$f"
+          target="$(readlink "$link")"
+          case "$target" in
+            /*) echo "FAIL: $f symlink is absolute: $target"; exit 1 ;;
+          esac
+          if [ ! -x "$link" ]; then
+            echo "FAIL: $f does not resolve or is not executable"; exit 1
+          fi
+        done
+        echo "  PASS: all script symlinks are relative and executable"
+
+        # Copy tree to a different path (simulates container bind-mount)
+        WS2="$TMPDIR/container-mount"
+        cp -a "$WS" "$WS2"
+        for f in ${names}; do
+          if [ ! -x "$WS2/.gc/scripts/$f" ]; then
+            echo "FAIL: $f broken under different mount path"; exit 1
+          fi
+        done
+        echo "  PASS: symlinks resolve under different workspace path"
+
+        echo "PASS: Script symlinks are relative and portable"
+        mkdir $out
+      '';
+
   # Scout formula defaults rewritten with configured values
   city-scout-formula-defaults =
     runCommandLocal "city-scout-formula-defaults"

@@ -61,9 +61,9 @@ let
   # Live outputs — no duplication
   inherit (liveCity)
     scripts
-    formulas
     prompts
     configDir
+    stageGcLayout
     ;
 
   toTOML = import ../../lib/util/toml.nix { inherit lib; };
@@ -436,11 +436,12 @@ let
 
       git add -A && git commit -m "workspace setup"
 
-      # Overlay live formulas and scripts on top of the gc scaffold
-      mkdir -p .gc/formulas/orders/post-gate .gc/scripts
-      for f in ${formulas}/*.formula.toml; do cp -f "$f" .gc/formulas/; done
-      cp -f ${formulas}/orders/post-gate/order.toml .gc/formulas/orders/post-gate/
-      for f in ${scripts}/*; do cp -f "$f" .gc/scripts/; done
+      # Place scripts at lib/city/ (in production this is the source tree;
+      # in the test sandbox we copy from the Nix store), then call the
+      # shared stageGcLayout to create .gc/formulas and .gc/scripts symlinks.
+      mkdir -p lib/city
+      for f in ${scripts}/*; do cp -f "$f" lib/city/; done
+      ${stageGcLayout}
       mkdir -p .wrapix/city/current/prompts
       cp -f ${configDir}/claude-settings.json .wrapix/city/current/
       cp -f ${configDir}/tmux.conf .wrapix/city/current/
@@ -508,8 +509,20 @@ let
           /*) echo "FAIL: $f symlink is absolute: $target"; return 1 ;;
         esac
       done
+
+      # Script symlinks must be relative and executable (wx-kw0q1).
+      for f in "$WS"/.gc/scripts/*.sh; do
+        local target
+        target="$(readlink "$f")"
+        case "$target" in
+          /*) echo "FAIL: $(basename "$f") symlink is absolute: $target"; return 1 ;;
+        esac
+        if [ ! -x "$f" ]; then
+          echo "FAIL: $(basename "$f") symlink is not executable"; return 1
+        fi
+      done
     }
-    subtest "Verify controller symlinks are relative" verify_relative_symlinks
+    subtest "Verify controller and script symlinks are relative" verify_relative_symlinks
 
     subtest "Wait for mayor container to start" \
       poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30

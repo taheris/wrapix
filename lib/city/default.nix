@@ -191,6 +191,22 @@ let
         "worker.md"
       ];
 
+      # Stage formulas and script symlinks into .gc/.
+      # Shared by shellHook, app entrypoint, and integration tests so
+      # they all exercise the same symlink creation path.
+      stageGcLayout = pkgs.writeShellScript "stage-gc-layout" ''
+        mkdir -p .gc/formulas .gc/scripts
+        for f in ${formulasDir}/*.formula.toml; do
+          cp -f --remove-destination "$f" .gc/formulas/
+        done
+        chmod -R u+w .gc/formulas/orders 2>/dev/null || true
+        rm -rf .gc/formulas/orders
+        cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
+        for f in ${concatStringsSep " " scriptNames}; do
+          ln -sf "../../lib/city/$f" .gc/scripts/"$f"
+        done
+      '';
+
       # Content-addressed store copies for integration tests (Nix sandbox
       # can't reach the source tree, so tests need real store paths).
       # builtins.path with a name ensures the hash depends only on file
@@ -434,17 +450,7 @@ let
 
         cp -f --remove-destination .wrapix/city/current/city.toml city.toml
 
-        mkdir -p .gc/formulas .gc/scripts
-        for f in ${formulasDir}/*.formula.toml; do
-          cp -f --remove-destination "$f" .gc/formulas/
-        done
-        chmod -R u+w .gc/formulas/orders 2>/dev/null || true
-        rm -rf .gc/formulas/orders
-        cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-        _city_src="$GC_WORKSPACE/lib/city"
-        for f in ${concatStringsSep " " scriptNames}; do
-          ln -sf "$_city_src/$f" .gc/scripts/"$f"
-        done
+        ${stageGcLayout}
 
         # Ensure podman network exists (NixOS module creates via systemd)
         if command -v podman >/dev/null 2>&1; then
@@ -524,17 +530,7 @@ let
           mkdir -p .gc/cache .gc/system .gc/runtime
           touch .gc/events.jsonl
 
-          mkdir -p .gc/formulas .gc/scripts
-          for f in ${formulasDir}/*.formula.toml; do
-            cp -f --remove-destination "$f" .gc/formulas/
-          done
-          chmod -R u+w .gc/formulas/orders 2>/dev/null || true
-          rm -rf .gc/formulas/orders
-          cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
-          _city_src="$GC_WORKSPACE/lib/city"
-          for f in ${concatStringsSep " " scriptNames}; do
-            ln -sf "$_city_src/$f" .gc/scripts/"$f"
-          done
+          ${stageGcLayout}
 
           if ! podman network exists "${networkName}" 2>/dev/null; then
             podman network create "${networkName}" >/dev/null
@@ -591,6 +587,9 @@ let
 
       # City script and prompt file names (symlinked to source tree at runtime)
       inherit scriptNames promptNames;
+
+      # Stage .gc/formulas + .gc/scripts (shared by shellHook, app, and tests)
+      inherit stageGcLayout;
 
       # Content-addressed store copies (for integration tests in Nix sandbox)
       scripts = scriptsStore;
