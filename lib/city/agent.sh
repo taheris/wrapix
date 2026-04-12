@@ -57,10 +57,21 @@ build_prompt() {
 # ---------------------------------------------------------------------------
 
 claude_run() {
+  # Provision claude config when running inside a city container.
+  # Persistent roles do this in provider.sh's inline init script, but
+  # workers launch wrapix-agent directly on a bare tmpfs $HOME.
+  if [[ -n "${WRAPIX_CITY_DIR:-}" ]]; then
+    mkdir -p "$HOME/.claude"
+    [[ -f /etc/wrapix/claude-config.json ]] && \
+      cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
+    [[ -f "${WRAPIX_CITY_DIR}/claude-settings.json" ]] && \
+      cp "${WRAPIX_CITY_DIR}/claude-settings.json" "$HOME/.claude/settings.json"
+  fi
+
   local prompt
   prompt="$(build_prompt)"
 
-  local -a claude_flags=(-p)
+  local -a claude_flags=(-p --dangerously-skip-permissions)
   if [[ -f "${WRAPIX_SYSTEM_PROMPT_FILE:-}" ]]; then
     claude_flags+=(--append-system-prompt-file "${WRAPIX_SYSTEM_PROMPT_FILE}")
   fi

@@ -624,9 +624,11 @@ in
                 echo "Fix the broken auth module." > "$TMPDIR/task.md"
 
                 # Mock claude to echo the prompt it receives
+                # The last argument is the prompt (after -p and --dangerously-skip-permissions)
                 cat > "$MOCK_BIN/claude" << MOCK
         #!$(command -v bash)
-        if [[ "\$1" == "-p" ]]; then echo "\$2"; fi
+        for arg; do :; done
+        echo "\$arg"
         MOCK
                 chmod +x "$MOCK_BIN/claude"
 

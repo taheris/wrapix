@@ -83,16 +83,35 @@ let
     fi
     exec > >(tee -a "$MOCK_LOG") 2>&1
 
-    case "''${1:-}" in
-      -p)
-        # Worker run mode (called via wrapix-agent run → claude -p <prompt>)
+    # Dispatch on GC_SESSION (set by provider.sh), not CLI flags —
+    # both workers and persistent roles receive --dangerously-skip-permissions.
+    case "''${GC_SESSION:-}" in
+      worker)
+        # Worker run mode (called via wrapix-agent run → claude -p --dangerously-skip-permissions <prompt>)
+        # Verify wx-cswtw: --dangerously-skip-permissions must be passed
+        if [[ " $* " == *" --dangerously-skip-permissions "* ]]; then
+          echo "AGENT_CHECK: --dangerously-skip-permissions PRESENT"
+        else
+          echo "AGENT_CHECK: --dangerously-skip-permissions MISSING"
+        fi
+        # Verify wx-cswtw: claude config must be provisioned before run
+        if [[ -f "$HOME/.claude.json" ]]; then
+          echo "AGENT_CHECK: claude.json PRESENT"
+        else
+          echo "AGENT_CHECK: claude.json MISSING"
+        fi
+        if [[ -f "$HOME/.claude/settings.json" ]]; then
+          echo "AGENT_CHECK: settings.json PRESENT"
+        else
+          echo "AGENT_CHECK: settings.json MISSING"
+        fi
         git config user.email test@test
         git config user.name test
         echo "fix applied" > fix.txt
         git add fix.txt
         git commit -m "fix: resolve test error"
         ;;
-      --dangerously-skip-permissions)
+      *)
         # Persistent session mode (mayor, scout, or judge)
         # Ensure dolt config exists (container has no global config)
         dolt config --global --add user.email mock@test 2>/dev/null || true
@@ -617,6 +636,55 @@ let
 
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
+
+    # wx-cswtw: verify worker's claude invocation had permissions flag and config
+    verify_worker_agent_setup() {
+      # The mock writes to .beads/ if writable, else /tmp/ inside the
+      # container. Workers mount .beads as a staging dir (may be rw or ro
+      # depending on setup). Try the host-visible path first, then copy
+      # from the (possibly stopped) worker container.
+      local logf=""
+      # Host-visible: mock wrote to the beads-staging mount
+      for f in "$WS"/.beads/mock-claude-worker.log "$WS"/.wrapix/worktree/gc-*/.beads/mock-claude-worker.log; do
+        [ -f "$f" ] && logf="$f" && break
+      done
+      if [ -z "$logf" ]; then
+        # Container-internal /tmp: use podman cp from the (stopped) worker
+        local worker_name
+        worker_name="$(podman ps -a --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
+        if [ -n "$worker_name" ]; then
+          logf="$(mktemp)"
+          podman cp "$worker_name:/tmp/mock-claude-worker.log" "$logf" 2>/dev/null || logf=""
+        fi
+      fi
+      if [ -z "$logf" ] || [ ! -f "$logf" ]; then
+        # Last resort: check podman logs for the AGENT_CHECK lines
+        local worker_name
+        worker_name="$(podman ps -a --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
+        if [ -n "$worker_name" ]; then
+          logf="$(mktemp)"
+          podman logs "$worker_name" > "$logf" 2>&1 || true
+        fi
+      fi
+      [ -n "$logf" ] && [ -f "$logf" ] || { echo "FAIL: mock-claude worker log not found"; return 1; }
+
+      grep -q "AGENT_CHECK: --dangerously-skip-permissions PRESENT" "$logf" || {
+        echo "FAIL: --dangerously-skip-permissions not passed to worker claude"
+        grep "AGENT_CHECK" "$logf" || true
+        return 1
+      }
+      grep -q "AGENT_CHECK: claude.json PRESENT" "$logf" || {
+        echo "FAIL: \$HOME/.claude.json not provisioned before worker run"
+        grep "AGENT_CHECK" "$logf" || true
+        return 1
+      }
+      grep -q "AGENT_CHECK: settings.json PRESENT" "$logf" || {
+        echo "FAIL: \$HOME/.claude/settings.json not provisioned before worker run"
+        grep "AGENT_CHECK" "$logf" || true
+        return 1
+      }
+    }
+    subtest "Worker claude has --dangerously-skip-permissions and config (wx-cswtw)" verify_worker_agent_setup
 
     subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
