@@ -741,6 +741,128 @@ let
       bd show "$BEAD3" --json 2>/dev/null | jq -r '.[0].labels[]' 2>/dev/null | grep -q "human"
     }
     subtest "Verify escalation bead flagged for human review" verify_escalation_human_label
+
+    # ================================================================
+    # Phase 4: Crash recovery — monitor died, verify recovery.sh picks up
+    # ================================================================
+
+    subtest "Create recovery bead" \
+      bd create --title="Recovery test" --type=bug --priority=2
+
+    BEAD4=$(bd list --json --title "Recovery test" 2>/dev/null | jq -r '.[0].id')
+
+    # Simulate: worker committed to branch, but monitor died before
+    # setting metadata. This is the state after a crash.
+    setup_crashed_worker() {
+      [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ] || return 1
+      local wt="$WS/.wrapix/worktree/gc-$BEAD4"
+      git worktree add "$wt" -b "gc-$BEAD4" HEAD 2>/dev/null || \
+        git worktree add "$wt" "gc-$BEAD4"
+      (cd "$wt" && echo "recovery fix" > recovery.txt && git add recovery.txt && git commit -m "fix: recovery test")
+      bd update "$BEAD4" --status=in_progress
+
+      # Verify: no commit_range metadata (monitor "died")
+      local cr
+      cr="$(bd show "$BEAD4" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || cr=""
+      [ -z "$cr" ] || { echo "FAIL: commit_range should not be set yet"; return 1; }
+    }
+    subtest "Simulate crashed worker (commits but no metadata)" setup_crashed_worker
+
+    run_recovery() {
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+    }
+    subtest "Run recovery.sh" run_recovery
+
+    verify_recovery_metadata() {
+      local cr
+      cr="$(bd show "$BEAD4" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || cr=""
+      [ -n "$cr" ] || { echo "FAIL: recovery did not set commit_range"; return 1; }
+      echo "  commit_range=$cr"
+
+      local bn
+      bn="$(bd show "$BEAD4" --json 2>/dev/null | jq -r '.[0].metadata.branch_name // empty' 2>/dev/null)" || bn=""
+      [ "$bn" = "gc-$BEAD4" ] || { echo "FAIL: recovery did not set branch_name (got: $bn)"; return 1; }
+    }
+    subtest "Verify recovery set commit_range metadata" verify_recovery_metadata
+
+    # Gate should now succeed (metadata exists)
+    verify_gate_reads_metadata() {
+      local cr
+      cr="$(bd show "$BEAD4" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || cr=""
+      [ -n "$cr" ]
+    }
+    subtest "Verify gate can find metadata after recovery" verify_gate_reads_metadata
+
+    # Clean up recovery worktree
+    cleanup_recovery() {
+      local wt="$WS/.wrapix/worktree/gc-$BEAD4"
+      rm -rf "$wt"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$BEAD4" 2>/dev/null || true
+    }
+    subtest "Clean up recovery worktree" cleanup_recovery
+
+    # ================================================================
+    # Phase 5: No-op worker — exited without committing, verify no stall
+    # ================================================================
+
+    subtest "Create no-op bead" \
+      bd create --title="No-op worker test" --type=bug --priority=2
+
+    BEAD5=$(bd list --json --title "No-op worker test" 2>/dev/null | jq -r '.[0].id')
+
+    # Simulate: worker started but exited without committing anything.
+    # Branch exists but has no commits beyond main.
+    setup_noop_worker() {
+      [ -n "$BEAD5" ] && [ "$BEAD5" != "null" ] || return 1
+      local wt="$WS/.wrapix/worktree/gc-$BEAD5"
+      git worktree add "$wt" -b "gc-$BEAD5" HEAD 2>/dev/null || \
+        git worktree add "$wt" "gc-$BEAD5"
+      bd update "$BEAD5" --status=in_progress
+      # No commits on the branch — worker did nothing
+    }
+    subtest "Simulate no-op worker (no commits)" setup_noop_worker
+
+    # Recovery should NOT set metadata for a branch with no commits
+    run_recovery_noop() {
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+    }
+    subtest "Run recovery.sh for no-op worker" run_recovery_noop
+
+    verify_noop_no_metadata() {
+      local cr
+      cr="$(bd show "$BEAD5" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || cr=""
+      [ -z "$cr" ] || { echo "FAIL: commit_range should not be set for no-op worker (got: $cr)"; return 1; }
+    }
+    subtest "Verify no metadata set for no-op worker" verify_noop_no_metadata
+
+    # Gate should return 1 (no commit_range = not ready)
+    verify_gate_rejects_noop() {
+      # Stub gc (not running) so gate doesn't fail on nudge
+      local stub_bin
+      stub_bin=$(mktemp -d)
+      cat > "$stub_bin/gc" << 'STUB'
+    #!/bin/sh
+    exit 0
+    STUB
+      chmod +x "$stub_bin/gc"
+
+      local exit_code=0
+      PATH="$stub_bin:$PATH" GC_BEAD_ID="$BEAD5" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=1 \
+        bash ${scripts}/gate.sh > /dev/null 2>&1 || exit_code=$?
+      rm -rf "$stub_bin"
+      [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 for no-op worker (got: $exit_code)"; return 1; }
+    }
+    subtest "Verify gate rejects no-op worker (exit 1, no stall)" verify_gate_rejects_noop
+
+    # Clean up no-op worktree
+    cleanup_noop() {
+      local wt="$WS/.wrapix/worktree/gc-$BEAD5"
+      rm -rf "$wt"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$BEAD5" 2>/dev/null || true
+    }
+    subtest "Clean up no-op worktree" cleanup_noop
   '';
 
 in

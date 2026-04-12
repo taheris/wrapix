@@ -293,6 +293,21 @@ worker_start() {
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 
+  # Monitor worker exit in background — set bead metadata when done.
+  # FDs redirected to log file to avoid holding gc's pipes open (WaitDelay).
+  local monitor_log="${GC_WORKSPACE}/${worktree_path}/.monitor.log"
+  (
+    podman wait "$name" || true
+
+    # Determine commit range on the worker branch
+    local branch="gc-${bead_id}"
+    local merge_base
+    merge_base="$(git -C "${GC_WORKSPACE}" merge-base main "${branch}" 2>/dev/null || echo "")"
+    if [[ -n "$merge_base" ]]; then
+      bd update "${bead_id}" --set-metadata "commit_range=${merge_base}..${branch}"
+      bd update "${bead_id}" --set-metadata "branch_name=${branch}"
+    fi
+  ) </dev/null >> "$monitor_log" 2>&1 &
 }
 
 # ---------------------------------------------------------------------------
@@ -326,21 +341,7 @@ case "$METHOD" in
   is-running)
     name="$(container_name)"
     running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
-    if [[ "$running" == "true" ]]; then
-      echo "true"
-    elif is_worker; then
-      # Workers are ephemeral — a container that exited with code 0 completed
-      # successfully, not died. Report true so gc enters convergence (the gate
-      # handles completion detection).
-      exit_code="$(podman inspect --format '{{.State.ExitCode}}' "$name" 2>/dev/null || echo "")"
-      if [[ "$exit_code" == "0" ]]; then
-        echo "true"
-      else
-        echo "false"
-      fi
-    else
-      echo "$running"
-    fi
+    echo "$running"
     ;;
 
   attach)
