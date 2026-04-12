@@ -120,54 +120,19 @@ description = """
 If the review verdict was reject, skip this step — convergence handles retry.
 
 The judge owns both review and merge as one continuous flow. After approving,
-merge immediately — no handoff to another script.
+merge immediately via the judge-merge script:
 
-**1. Fast-forward merge:**
 ```bash
-git checkout main
-git merge --ff-only gc-$BEAD_ID
+GC_BEAD_ID=$BEAD_ID GC_WORKSPACE=$GC_WORKSPACE bash .gc/scripts/judge-merge.sh
 ```
 
-**2. If fast-forward fails (main advanced):**
-Rebase the branch onto main, run prek, then fast-forward:
-```bash
-git checkout gc-$BEAD_ID
-git rebase main
-```
-If rebase has conflicts, abort and reject back to a new worker with the
-conflict details as context — no automatic conflict resolution:
-```bash
-git rebase --abort
-bd update $BEAD_ID --set-metadata "review_verdict=reject"
-bd update $BEAD_ID --set-metadata "merge_failure=Rebase conflicts: $CONFLICT_DETAILS"
-bd update $BEAD_ID --status=open --notes="Judge: merge rejected — rebase conflicts. $CONFLICT_DETAILS"
-```
+The script handles the full merge lifecycle:
+- Fast-forward merge (primary path, preserves linear history)
+- Rebase onto main if fast-forward fails (main advanced)
+- Reject back to worker on rebase conflicts or prek failures
+- Worktree and branch cleanup (always, whether merged or rejected)
 
-After successful rebase, run prek (pre-commit checks):
-```bash
-prek run --stage pre-commit
-```
-If prek fails, reject back to a new worker with the failure output:
-```bash
-git checkout main
-bd update $BEAD_ID --set-metadata "review_verdict=reject"
-bd update $BEAD_ID --set-metadata "merge_failure=Tests failed after rebase: $PREK_OUTPUT"
-bd update $BEAD_ID --status=open --notes="Judge: merge rejected — tests failed after rebase. $PREK_OUTPUT"
-```
-
-If prek passes, fast-forward merge:
-```bash
-git checkout main
-git merge --ff-only gc-$BEAD_ID
-```
-
-**3. Clean up worktree and branch (after merge OR rejection):**
-```bash
-rm -rf .wrapix/worktree/gc-$BEAD_ID
-git worktree prune
-git branch -d gc-$BEAD_ID
-```
-On rejection the old branch is also deleted — the new worker creates a fresh one.
+Exit code 0 = merged, 1 = rejected (metadata set on bead).
 
 **Exit criteria:** Changes merged to main via fast-forward (or rejected with
 specific failure details), worktree and branch cleaned up."""

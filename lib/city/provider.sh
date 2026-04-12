@@ -192,61 +192,27 @@ worker_start() {
   local name bead_id worktree_path
   name="$(container_name)"
 
-  # Must match worker scale_check in city.toml: `bd ready` excludes
-  # in_progress, which would let orphaned beads spin the reconciler.
-  bead_id="${GC_BEAD_ID:-}"
-  if [[ -z "$bead_id" ]]; then
-    bead_id="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker --status open,in_progress --json 2>/dev/null \
-      | jq -r '.[0].id // empty' 2>/dev/null)" || bead_id=""
-  fi
-  if [[ -z "$bead_id" ]]; then
-    echo "worker Start: no bead routed to worker" >&2
-    return 1
-  fi
-  # Claim the bead so other workers don't pick it up
-  (cd "${GC_WORKSPACE}" && bd update "$bead_id" --claim) 2>/dev/null || true
-  worktree_path=".wrapix/worktree/gc-${bead_id}"
+  # Resolve script directory (same dir as this provider.sh)
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-  # Create git worktree on the host
-  if [[ ! -d "${GC_WORKSPACE}/${worktree_path}" ]]; then
-    git -C "${GC_WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" 2>/dev/null || \
-      git -C "${GC_WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}"
-  fi
+  # Worker setup: worktree creation, bead claiming, task file generation.
+  # Shared with integration tests via worker-setup.sh.
+  local setup_output
+  setup_output="$("${script_dir}/worker-setup.sh")" || {
+    echo "worker start: setup failed" >&2
+    return 1
+  }
+  bead_id="$(echo "$setup_output" | sed -n '1p')"
+  worktree_path="$(echo "$setup_output" | sed -n '2p')"
+
+  local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
 
   # Rewrite worktree .git reference for container-internal mount path.
   # The host worktree's .git file points to <host-abs>/.git/worktrees/gc-<id>,
   # which doesn't exist inside the container. Mount the main .git at /mnt/git
   # and rewrite the gitdir to match.
   echo "gitdir: /mnt/git/worktrees/gc-${bead_id}" > "${GC_WORKSPACE}/${worktree_path}/.git"
-
-  # Build task file from bead description, acceptance criteria, and judge notes
-  local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
-  {
-    local bead_json
-    bead_json="$(bd show "${bead_id}" --json 2>/dev/null)" || bead_json=""
-    if [[ -n "$bead_json" ]]; then
-      echo "$bead_json" | jq -r '.description // empty' 2>/dev/null
-      local acceptance
-      acceptance="$(echo "$bead_json" | jq -r '.acceptance // empty' 2>/dev/null)"
-      if [[ -n "$acceptance" ]]; then
-        printf '\n## Acceptance Criteria\n\n%s\n' "$acceptance"
-      fi
-    fi
-    # Append judge notes from prior attempts (if any)
-    local judge_notes
-    judge_notes="$(bd show "${bead_id}" --json 2>/dev/null | jq -r '.[0].metadata.merge_failure // empty' 2>/dev/null)" || judge_notes=""
-    if [[ -n "$judge_notes" ]]; then
-      printf '\n## Prior Rejection\n\n%s\n' "$judge_notes"
-    fi
-  } > "$task_file" 2>/dev/null || true
-
-  cp "${GC_WORKSPACE}/.wrapix/city/current/prompts/worker.md" \
-     "${GC_WORKSPACE}/${worktree_path}/.role-prompt"
-
-  # Record dispatch timestamp for cooldown pacing
-  local state_dir="${GC_WORKSPACE}/.wrapix/state"
-  mkdir -p "$state_dir"
-  date +%s > "$state_dir/last-dispatch"
 
   # Prefer env var (set by entrypoint) over port file (can be corrupted by
   # agents running bd dolt start inside containers with .beads mounted rw).
@@ -298,15 +264,8 @@ worker_start() {
   local monitor_log="${GC_WORKSPACE}/${worktree_path}/.monitor.log"
   (
     podman wait "$name" || true
-
-    # Determine commit range on the worker branch
-    local branch="gc-${bead_id}"
-    local merge_base
-    merge_base="$(git -C "${GC_WORKSPACE}" merge-base main "${branch}" 2>/dev/null || echo "")"
-    if [[ -n "$merge_base" ]]; then
-      bd update "${bead_id}" --set-metadata "commit_range=${merge_base}..${branch}"
-      bd update "${bead_id}" --set-metadata "branch_name=${branch}"
-    fi
+    GC_BEAD_ID="${bead_id}" GC_WORKSPACE="${GC_WORKSPACE}" \
+      "${script_dir}/worker-collect.sh" || true
   ) </dev/null >> "$monitor_log" 2>&1 &
 }
 

@@ -533,24 +533,8 @@ let
     subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
 
-    # The judge owns merge as one continuous flow after review approval.
-    # Simulate the judge performing the merge (in production, the judge
-    # formula's merge step does this after receiving a nudge from post-gate).
-    judge_merge() {
-      local branch="gc-$BEAD_ID"
-      local worktree="$WS/.wrapix/worktree/$branch"
-
-      # Judge merges: fast-forward (branch is on top of main)
-      git -C "$WS" merge --ff-only "$branch"
-
-      # Judge cleans up worktree and branch
-      if [[ -d "$worktree" ]]; then
-        rm -rf "$worktree"
-        git -C "$WS" worktree prune 2>/dev/null || true
-      fi
-      git -C "$WS" branch -d "$branch" 2>/dev/null || true
-    }
-    subtest "Judge merges approved changes" judge_merge
+    subtest "Judge merges approved changes" \
+      env GC_BEAD_ID="$BEAD_ID" GC_WORKSPACE="$WS" bash ${scripts}/judge-merge.sh
 
     # Post-gate fires on convergence.terminated — now lightweight:
     # notifies judge (already merged above), creates deploy bead, notifications.
@@ -687,53 +671,24 @@ let
     simulate_worker2() {
       [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ] || return 1
       local wt="$WS/.wrapix/worktree/gc-$BEAD2"
-      # Create worktree from BEFORE the conflict commit so branches diverge
+      # Create worktree from BEFORE the conflict commit so branches diverge.
+      # Can't use worker-setup.sh here — it branches from HEAD, but we need
+      # HEAD~1 to produce a merge conflict (main advanced while worker worked).
       git worktree add "$wt" -b "gc-$BEAD2" HEAD~1 2>/dev/null || \
         git worktree add "$wt" "gc-$BEAD2"
       (cd "$wt" && echo "fix applied v2" > fix.txt && git add fix.txt && git commit -m "fix: resolve second error")
-      local merge_base
-      merge_base="$(git merge-base main "gc-$BEAD2")"
-      bd update "$BEAD2" --set-metadata "commit_range=''${merge_base}..gc-$BEAD2"
-      bd update "$BEAD2" --set-metadata "branch_name=gc-$BEAD2"
+      GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
       bd update "$BEAD2" --set-metadata "review_verdict=approve"
       bd update "$BEAD2" --status=in_progress
     }
     subtest "Simulate worker commit for second bead" simulate_worker2
 
-    # Simulate judge merge attempt — fast-forward fails, rebase has conflicts
+    # judge-merge.sh exits 1 on rejection (conflicts) — verify that exit code
     judge_merge_conflict() {
-      local branch="gc-$BEAD2"
-      local worktree="$WS/.wrapix/worktree/$branch"
-
-      # Fast-forward fails (main diverged)
-      if git -C "$WS" merge --ff-only "$branch" 2>/dev/null; then
-        echo "FAIL: ff merge should have failed"
-        return 1
-      fi
-
-      # Rebase onto main — should conflict on fix.txt
-      if git -C "$WS" rebase main "$branch" 2>/tmp/gc-rebase-err-$$ ; then
-        echo "FAIL: rebase should have conflicted"
-        rm -f /tmp/gc-rebase-err-$$
-        return 1
-      fi
-      git -C "$WS" rebase --abort 2>/dev/null || true
-      local conflict_details
-      conflict_details="$(cat /tmp/gc-rebase-err-$$ 2>/dev/null || echo "rebase conflicts")"
-      rm -f /tmp/gc-rebase-err-$$
-
-      # Judge rejects with conflict details
-      bd update "$BEAD2" --set-metadata "review_verdict=reject" 2>/dev/null || true
-      bd update "$BEAD2" --set-metadata "merge_failure=Rebase conflicts: $conflict_details" 2>/dev/null || true
-      bd update "$BEAD2" --status=open --notes="Judge: merge rejected — rebase conflicts" 2>/dev/null || true
-
-      # Judge cleans up worktree and branch
-      if [[ -d "$worktree" ]]; then
-        rm -rf "$worktree"
-        git -C "$WS" worktree prune 2>/dev/null || true
-      fi
-      git -C "$WS" branch -D "$branch" 2>/dev/null || true
-      git -C "$WS" checkout main 2>/dev/null || true
+      local exit_code=0
+      GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" \
+        bash ${scripts}/judge-merge.sh 2>&1 || exit_code=$?
+      [ "$exit_code" -eq 1 ] || { echo "FAIL: judge-merge should exit 1 on conflict (got: $exit_code)"; return 1; }
     }
     subtest "Judge detects merge conflict and rejects" judge_merge_conflict
 
@@ -760,14 +715,8 @@ let
 
     BEAD3=$(bd list --json --title "Escalation test" 2>/dev/null | jq -r '.[0].id')
 
-    setup_escalation_worktree() {
-      [ -n "$BEAD3" ] && [ "$BEAD3" != "null" ] || return 1
-      local wt="$WS/.wrapix/worktree/gc-$BEAD3"
-      git worktree add "$wt" -b "gc-$BEAD3" HEAD 2>/dev/null || \
-        git worktree add "$wt" "gc-$BEAD3"
-      bd update "$BEAD3" --status=in_progress
-    }
-    subtest "Set up worktree for escalation bead" setup_escalation_worktree
+    subtest "Set up worktree for escalation bead" \
+      env GC_BEAD_ID="$BEAD3" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh
 
     run_post_gate_escalation() {
       GC_BEAD_ID="$BEAD3" \
@@ -814,11 +763,10 @@ let
     # setting metadata. This is the state after a crash.
     setup_crashed_worker() {
       [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ] || return 1
+      GC_BEAD_ID="$BEAD4" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/gc-$BEAD4"
-      git worktree add "$wt" -b "gc-$BEAD4" HEAD 2>/dev/null || \
-        git worktree add "$wt" "gc-$BEAD4"
       (cd "$wt" && echo "recovery fix" > recovery.txt && git add recovery.txt && git commit -m "fix: recovery test")
-      bd update "$BEAD4" --status=in_progress
+      # No worker-collect.sh — simulates monitor crash (no metadata set)
 
       # Verify: no commit_range metadata (monitor "died")
       local cr
@@ -870,17 +818,9 @@ let
 
     BEAD5=$(bd list --json --title "No-op worker test" 2>/dev/null | jq -r '.[0].id')
 
-    # Simulate: worker started but exited without committing anything.
-    # Branch exists but has no commits beyond main.
-    setup_noop_worker() {
-      [ -n "$BEAD5" ] && [ "$BEAD5" != "null" ] || return 1
-      local wt="$WS/.wrapix/worktree/gc-$BEAD5"
-      git worktree add "$wt" -b "gc-$BEAD5" HEAD 2>/dev/null || \
-        git worktree add "$wt" "gc-$BEAD5"
-      bd update "$BEAD5" --status=in_progress
-      # No commits on the branch — worker did nothing
-    }
-    subtest "Simulate no-op worker (no commits)" setup_noop_worker
+    # Worker started but exited without committing — no commits beyond main.
+    subtest "Set up no-op worker (no commits)" \
+      env GC_BEAD_ID="$BEAD5" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh
 
     # Recovery should NOT set metadata for a branch with no commits
     run_recovery_noop() {
@@ -912,6 +852,76 @@ let
       git -C "$WS" branch -D "gc-$BEAD5" 2>/dev/null || true
     }
     subtest "Clean up no-op worktree" cleanup_noop
+
+    # ================================================================
+    # Phase 6: worker-setup.sh and worker-collect.sh direct tests
+    # ================================================================
+
+    subtest "Create worker-setup test bead" \
+      bd create --title="Worker setup test" --type=task --priority=2
+
+    BEAD6=$(bd list --json --title "Worker setup test" 2>/dev/null | jq -r '.[0].id')
+
+    verify_worker_setup() {
+      [ -n "$BEAD6" ] && [ "$BEAD6" != "null" ] || return 1
+      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+
+      local wt="$WS/.wrapix/worktree/gc-$BEAD6"
+      [ -d "$wt" ] || { echo "FAIL: worktree not created at $wt"; return 1; }
+
+      local status
+      status="$(bd show "$BEAD6" --json 2>/dev/null | jq -r '.[0].status')"
+      [ "$status" = "in_progress" ] || { echo "FAIL: status=$status, expected in_progress"; return 1; }
+
+      [ -f "$wt/.task" ] || { echo "FAIL: .task file not created"; return 1; }
+
+      [ -f "$WS/.wrapix/state/last-dispatch" ] || { echo "FAIL: last-dispatch not written"; return 1; }
+    }
+    subtest "worker-setup.sh creates worktree, claims bead, writes task file" verify_worker_setup
+
+    # worker-collect.sh: happy path — commit on branch, verify metadata
+    verify_worker_collect() {
+      local wt="$WS/.wrapix/worktree/gc-$BEAD6"
+      (cd "$wt" && echo "setup test fix" > setup-fix.txt && git add setup-fix.txt && git commit -m "fix: setup test")
+      GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+
+      local cr
+      cr="$(bd show "$BEAD6" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty')"
+      [ -n "$cr" ] || { echo "FAIL: commit_range not set"; return 1; }
+      echo "  commit_range=$cr"
+
+      local bn
+      bn="$(bd show "$BEAD6" --json 2>/dev/null | jq -r '.[0].metadata.branch_name // empty')"
+      [ "$bn" = "gc-$BEAD6" ] || { echo "FAIL: branch_name=$bn, expected gc-$BEAD6"; return 1; }
+    }
+    subtest "worker-collect.sh sets commit_range and branch_name" verify_worker_collect
+
+    # worker-collect.sh: no-op path — empty branch, verify no metadata
+    subtest "Create worker-collect no-op bead" \
+      bd create --title="Collect no-op test" --type=task --priority=2
+
+    BEAD7=$(bd list --json --title "Collect no-op test" 2>/dev/null | jq -r '.[0].id')
+
+    verify_collect_noop() {
+      [ -n "$BEAD7" ] && [ "$BEAD7" != "null" ] || return 1
+      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+
+      local cr
+      cr="$(bd show "$BEAD7" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty')"
+      [ -z "$cr" ] || { echo "FAIL: commit_range should be empty for no-op (got: $cr)"; return 1; }
+    }
+    subtest "worker-collect.sh no-ops on empty branch" verify_collect_noop
+
+    cleanup_phase6() {
+      for b in "$BEAD6" "$BEAD7"; do
+        local wt="$WS/.wrapix/worktree/gc-$b"
+        [ -d "$wt" ] && rm -rf "$wt"
+        git -C "$WS" worktree prune 2>/dev/null || true
+        git -C "$WS" branch -D "gc-$b" 2>/dev/null || true
+      done
+    }
+    subtest "Clean up Phase 6" cleanup_phase6
   '';
 
 in

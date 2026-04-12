@@ -176,10 +176,13 @@ let
         "dispatch.sh"
         "entrypoint.sh"
         "gate.sh"
+        "judge-merge.sh"
         "post-gate.sh"
         "provider.sh"
         "recovery.sh"
         "stage-gc-home.sh"
+        "worker-collect.sh"
+        "worker-setup.sh"
       ];
       promptNames = [
         "judge.md"

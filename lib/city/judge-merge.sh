@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Judge merge — merges an approved worker branch to main.
+#
+# Attempts fast-forward merge first. If main has advanced, rebases the
+# branch onto main and re-runs prek before merging. Rejects back to a
+# new worker iteration on rebase conflicts or prek failures.
+#
+# Always cleans up the worktree and branch, whether merged or rejected.
+#
+# Exit codes:
+#   0 — merged successfully
+#   1 — rejected (conflicts or prek failure, metadata set on bead)
+#   2 — fatal error (missing env, bad state)
+#
+# Environment variables:
+#   GC_BEAD_ID    — bead to merge (required)
+#   GC_WORKSPACE  — host workspace path (required)
+set -euo pipefail
+
+BEAD_ID="${GC_BEAD_ID:?judge-merge.sh requires GC_BEAD_ID}"
+WORKSPACE="${GC_WORKSPACE:?judge-merge.sh requires GC_WORKSPACE}"
+
+BRANCH="gc-${BEAD_ID}"
+WORKTREE="${WORKSPACE}/.wrapix/worktree/${BRANCH}"
+
+# ---------------------------------------------------------------------------
+# Cleanup — always runs
+# ---------------------------------------------------------------------------
+
+cleanup() {
+  # Worktree is removed before merge attempt; guard handles edge cases
+  if [[ -d "$WORKTREE" ]]; then
+    rm -rf "$WORKTREE"
+    git -C "$WORKSPACE" worktree prune 2>/dev/null || true
+  fi
+  if git -C "$WORKSPACE" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
+    git -C "$WORKSPACE" branch -d "$BRANCH" 2>/dev/null || \
+      git -C "$WORKSPACE" branch -D "$BRANCH" 2>/dev/null || true
+  fi
+  git -C "$WORKSPACE" checkout main 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Reject helper — sets metadata and returns to open
+# ---------------------------------------------------------------------------
+
+reject() {
+  local reason="$1"
+  bd update "$BEAD_ID" --set-metadata "review_verdict=reject" 2>/dev/null || true
+  bd update "$BEAD_ID" --set-metadata "merge_failure=${reason}" 2>/dev/null || true
+  bd update "$BEAD_ID" --status=open --notes="Judge: merge rejected — ${reason}" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Merge
+# ---------------------------------------------------------------------------
+
+# Free the branch from the worktree — git won't allow checkout of a branch
+# that's checked out in a linked worktree. The worktree was the worker's
+# scratch space; the branch tip has all the commits we need.
+if [[ -d "$WORKTREE" ]]; then
+  rm -rf "$WORKTREE"
+  git -C "$WORKSPACE" worktree prune 2>/dev/null || true
+fi
+
+git -C "$WORKSPACE" checkout main 2>/dev/null
+
+# Try fast-forward first
+if git -C "$WORKSPACE" merge --ff-only "$BRANCH" 2>/dev/null; then
+  echo "judge-merge: fast-forward merged $BRANCH"
+  exit 0
+fi
+
+# Main advanced — rebase branch onto main
+git -C "$WORKSPACE" checkout "$BRANCH" 2>/dev/null
+
+rebase_err=$(mktemp)
+if ! git -C "$WORKSPACE" rebase main 2>"$rebase_err"; then
+  conflict_details="$(cat "$rebase_err" 2>/dev/null || echo "rebase conflicts")"
+  rm -f "$rebase_err"
+  git -C "$WORKSPACE" rebase --abort 2>/dev/null || true
+  reject "Rebase conflicts: ${conflict_details}"
+  echo "judge-merge: rejected $BRANCH — rebase conflicts"
+  exit 1
+fi
+rm -f "$rebase_err"
+
+# Run prek if available (pre-commit checks after rebase)
+if command -v prek >/dev/null 2>&1; then
+  prek_out=$(mktemp)
+  if ! (cd "$WORKSPACE" && prek run --stage pre-commit) >"$prek_out" 2>&1; then
+    prek_details="$(cat "$prek_out" 2>/dev/null || echo "prek failure")"
+    rm -f "$prek_out"
+    git -C "$WORKSPACE" checkout main 2>/dev/null
+    reject "Tests failed after rebase: ${prek_details}"
+    echo "judge-merge: rejected $BRANCH — prek failed after rebase"
+    exit 1
+  fi
+  rm -f "$prek_out"
+fi
+
+# Rebase succeeded, merge via fast-forward
+git -C "$WORKSPACE" checkout main 2>/dev/null
+if ! git -C "$WORKSPACE" merge --ff-only "$BRANCH" 2>/dev/null; then
+  reject "Fast-forward failed after rebase (unexpected)"
+  echo "judge-merge: rejected $BRANCH — post-rebase ff failed"
+  exit 1
+fi
+
+echo "judge-merge: rebased and merged $BRANCH"
+exit 0
