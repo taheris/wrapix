@@ -305,7 +305,7 @@ worker_start() {
       bd update "${bead_id}" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
       bd update "${bead_id}" --set-metadata "branch_name=${branch}" 2>/dev/null || true
     fi
-  ) &
+  ) </dev/null >/dev/null 2>&1 &
 }
 
 # ---------------------------------------------------------------------------
