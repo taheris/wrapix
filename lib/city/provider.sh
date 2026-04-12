@@ -199,7 +199,7 @@ worker_start() {
   # Worker setup: worktree creation, bead claiming, task file generation.
   # Shared with integration tests via worker-setup.sh.
   local setup_output
-  setup_output="$("${script_dir}/worker-setup.sh")" || {
+  setup_output="$(bash "${script_dir}/worker-setup.sh")" || {
     echo "worker start: setup failed" >&2
     return 1
   }
@@ -265,7 +265,7 @@ worker_start() {
   (
     podman wait "$name" || true
     GC_BEAD_ID="${bead_id}" GC_WORKSPACE="${GC_WORKSPACE}" \
-      "${script_dir}/worker-collect.sh" || true
+      bash "${script_dir}/worker-collect.sh" || true
   ) </dev/null >> "$monitor_log" 2>&1 &
 }
 
