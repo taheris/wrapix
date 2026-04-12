@@ -49,8 +49,8 @@ task_file="${WORKSPACE}/${worktree_path}/.task"
 {
   local_json="$(bd show "${bead_id}" --json 2>/dev/null)" || local_json=""
   if [[ -n "$local_json" ]]; then
-    echo "$local_json" | jq -r '.description // empty' 2>/dev/null || true
-    acceptance="$(echo "$local_json" | jq -r '.acceptance // empty' 2>/dev/null)" || acceptance=""
+    echo "$local_json" | jq -r '.[0].description // empty' 2>/dev/null || true
+    acceptance="$(echo "$local_json" | jq -r '.[0].acceptance // empty' 2>/dev/null)" || acceptance=""
     if [[ -n "$acceptance" ]]; then
       printf '\n## Acceptance Criteria\n\n%s\n' "$acceptance"
     fi

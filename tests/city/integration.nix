@@ -5,26 +5,19 @@
 #
 # Test flow:
 #   Phase 1 (happy path):
-#     1. gc starts mayor + scout + judge via provider.sh → podman
-#     2. Scout (mock claude) creates a bead
-#     3. Director (test script) slings bead into convergence
-#     4. Worker processes in worktree, commits, exits
-#     5. gate.sh nudges judge, judge approves
-#     6. Judge merges (review + merge as one flow), cleans up worktree
-#     7. post-gate.sh creates deploy bead, flags bd human, notifies
-#     8. Verify: merge on main, worktree cleaned up
-#     gc is stopped after Phase 1 — remaining phases run without it.
-#
-#   Phase 2 (merge conflict):
-#     1. Conflicting change on main
-#     2. Simulated worker commits on divergent branch
-#     3. Judge detects rebase conflict → rejects with conflict details
-#     4. Verify: bead reopened, worktree cleaned up
-#
-#   Phase 3 (escalation):
-#     1. Convergence ends with non-approved reason
-#     2. post-gate handles escalation path
-#     3. Verify: worktree and branch cleaned up
+#     gc starts → scout creates bead → sling → worker commits → judge
+#     approves → judge-merge.sh (ff) → post-gate (deploy bead, notify)
+#   Phase 1b (reconciler): gc sling routes bead → scale_check → worker starts
+#   Phase 2 (merge conflict): diverged branch → rebase conflicts → reject
+#   Phase 3 (escalation): non-approved convergence → post-gate cleanup
+#   Phase 4 (crash recovery): worker committed, monitor died → recovery.sh
+#   Phase 5 (no-op worker): empty branch → recovery no-op, gate rejects
+#   Phase 6 (script tests): worker-setup.sh, worker-collect.sh direct tests
+#   Phase 7 (rebase success): main advanced, no conflict → rebase + ff-merge
+#   Phase 8 (gate verdicts): gate.sh approve → exit 0, reject → exit 1
+#   Phase 9 (post-gate close): approved convergence → work bead closed
+#   Phase 10 (retry notes): judge rejection notes appear in .task on retry
+#   Phase 11 (orphan cleanup): closed bead → recovery cleans worktree+branch
 #
 # Requires podman. Run via: nix run .#test-city
 {
@@ -922,6 +915,230 @@ let
       done
     }
     subtest "Clean up Phase 6" cleanup_phase6
+
+    # ================================================================
+    # Phase 7: Rebase success path — main advanced, rebase works, merge
+    # ================================================================
+
+    subtest "Create rebase-success bead" \
+      bd create --title="Rebase success test" --type=bug --priority=2
+
+    BEAD8=$(bd list --json --title "Rebase success test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_rebase_success() {
+      [ -n "$BEAD8" ] && [ "$BEAD8" != "null" ] || return 1
+      # Worker branches from current HEAD
+      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      local wt="$WS/.wrapix/worktree/gc-$BEAD8"
+
+      # Worker commits on its branch
+      (cd "$wt" && echo "rebase fix" > rebase-fix.txt && git add rebase-fix.txt && git commit -m "fix: rebase success test")
+
+      # Main advances with a NON-conflicting change (different file)
+      git -C "$WS" checkout main 2>/dev/null
+      (cd "$WS" && echo "parallel change" > parallel.txt && git add parallel.txt && git commit -m "parallel: non-conflicting advance")
+
+      # Collect metadata
+      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" bash ${scripts}/worker-collect.sh
+      bd update "$BEAD8" --set-metadata "review_verdict=approve"
+    }
+    subtest "Set up diverged branch (non-conflicting)" setup_rebase_success
+
+    judge_merge_rebase_success() {
+      local exit_code=0
+      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
+        bash ${scripts}/judge-merge.sh 2>&1 || exit_code=$?
+      [ "$exit_code" -eq 0 ] || { echo "FAIL: judge-merge should exit 0 on rebase success (got: $exit_code)"; return 1; }
+    }
+    subtest "Judge rebases and merges diverged branch" judge_merge_rebase_success
+
+    verify_rebase_merge_landed() {
+      git -C "$WS" log --oneline main | grep -q "rebase success test"
+    }
+    subtest "Verify rebased commit landed on main" verify_rebase_merge_landed
+
+    verify_rebase_linear_history() {
+      # After rebase+ff-merge, history must be linear (no merge commits)
+      local merge_commits
+      merge_commits="$(git -C "$WS" log --merges --oneline main | wc -l)"
+      [ "$merge_commits" -eq 0 ] || { echo "FAIL: found $merge_commits merge commits, expected linear history"; return 1; }
+    }
+    subtest "Verify linear history after rebase merge" verify_rebase_linear_history
+
+    subtest "Verify rebase worktree cleaned up" \
+      test ! -d "$WS/.wrapix/worktree/gc-$BEAD8"
+
+    verify_rebase_branch_cleaned() {
+      ! git -C "$WS" branch | grep "gc-$BEAD8"
+    }
+    subtest "Verify rebase branch cleaned up" verify_rebase_branch_cleaned
+
+    # ================================================================
+    # Phase 8: Gate happy path — approve and reject verdicts
+    # ================================================================
+
+    subtest "Create gate-approve bead" \
+      bd create --title="Gate approve test" --type=task --priority=2
+
+    BEAD9=$(bd list --json --title "Gate approve test" 2>/dev/null | jq -r '.[0].id')
+
+    # gate.sh needs gc session nudge — stub it so we test gate logic only
+    setup_gate_test() {
+      [ -n "$BEAD9" ] && [ "$BEAD9" != "null" ] || return 1
+      # Set up the bead with commit_range and pre-set verdict (gate polls immediately)
+      bd update "$BEAD9" --status=in_progress
+      bd update "$BEAD9" --set-metadata "commit_range=abc..def"
+      bd update "$BEAD9" --set-metadata "review_verdict=approve"
+    }
+    subtest "Set up gate approve test" setup_gate_test
+
+    verify_gate_approve() {
+      # Stub gc so gate.sh's nudge doesn't fail (gc is stopped)
+      local stub_dir
+      stub_dir="$(mktemp -d)"
+      cat > "$stub_dir/gc" <<'STUB'
+    #!/usr/bin/env bash
+    exit 0
+    STUB
+      chmod +x "$stub_dir/gc"
+      local exit_code=0
+      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+        bash ${scripts}/gate.sh >/dev/null 2>&1 || exit_code=$?
+      rm -rf "$stub_dir"
+      [ "$exit_code" -eq 0 ] || { echo "FAIL: gate should exit 0 on approve (got: $exit_code)"; return 1; }
+    }
+    subtest "Gate exits 0 on approve verdict" verify_gate_approve
+
+    subtest "Create gate-reject bead" \
+      bd create --title="Gate reject test" --type=task --priority=2
+
+    BEAD10=$(bd list --json --title "Gate reject test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_gate_reject() {
+      [ -n "$BEAD10" ] && [ "$BEAD10" != "null" ] || return 1
+      bd update "$BEAD10" --status=in_progress
+      bd update "$BEAD10" --set-metadata "commit_range=abc..def"
+      bd update "$BEAD10" --set-metadata "review_verdict=reject"
+    }
+    subtest "Set up gate reject test" setup_gate_reject
+
+    verify_gate_reject() {
+      local stub_dir
+      stub_dir="$(mktemp -d)"
+      cat > "$stub_dir/gc" <<'STUB'
+    #!/usr/bin/env bash
+    exit 0
+    STUB
+      chmod +x "$stub_dir/gc"
+      local exit_code=0
+      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+        bash ${scripts}/gate.sh >/dev/null 2>&1 || exit_code=$?
+      rm -rf "$stub_dir"
+      [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 on reject (got: $exit_code)"; return 1; }
+    }
+    subtest "Gate exits 1 on reject verdict" verify_gate_reject
+
+    # ================================================================
+    # Phase 9: Post-gate closes work bead on approved convergence
+    # ================================================================
+
+    subtest "Create post-gate-close bead" \
+      bd create --title="Post-gate close test" --type=bug --priority=2
+
+    BEAD11=$(bd list --json --title "Post-gate close test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_post_gate_close() {
+      [ -n "$BEAD11" ] && [ "$BEAD11" != "null" ] || return 1
+      bd update "$BEAD11" --status=in_progress
+    }
+    subtest "Set up post-gate close test" setup_post_gate_close
+
+    run_post_gate_close() {
+      GC_BEAD_ID="$BEAD11" \
+      GC_TERMINAL_REASON="approved" \
+      GC_WORKSPACE="$WS" \
+      GC_CITY_NAME="test-city" \
+        bash ${scripts}/post-gate.sh
+    }
+    subtest "Run post-gate with approved reason" run_post_gate_close
+
+    verify_post_gate_closed_bead() {
+      local status
+      status="$(bd show "$BEAD11" --json 2>/dev/null | jq -r '.[0].status')"
+      [ "$status" = "closed" ] || { echo "FAIL: bead status=$status, expected closed"; return 1; }
+    }
+    subtest "Verify post-gate closed work bead" verify_post_gate_closed_bead
+
+    # ================================================================
+    # Phase 10: Task file includes judge rejection notes on retry
+    # ================================================================
+
+    subtest "Create retry-notes bead" \
+      bd create --title="Retry notes test" --type=bug --priority=2 \
+        --description="Fix the flaky parser"
+
+    BEAD12=$(bd list --json --title "Retry notes test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_retry_notes() {
+      [ -n "$BEAD12" ] && [ "$BEAD12" != "null" ] || return 1
+      # Simulate judge rejection with merge_failure notes
+      bd update "$BEAD12" --set-metadata "merge_failure=Rebase conflicts: CONFLICT in parser.sh"
+    }
+    subtest "Set up bead with prior rejection notes" setup_retry_notes
+
+    verify_task_includes_rejection() {
+      GC_BEAD_ID="$BEAD12" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      local wt="$WS/.wrapix/worktree/gc-$BEAD12"
+      [ -f "$wt/.task" ] || { echo "FAIL: .task file not created"; return 1; }
+
+      grep -q "flaky parser" "$wt/.task" || { echo "FAIL: .task missing bead description"; cat "$wt/.task"; return 1; }
+      grep -q "Prior Rejection" "$wt/.task" || { echo "FAIL: .task missing Prior Rejection section"; cat "$wt/.task"; return 1; }
+      grep -q "CONFLICT in parser.sh" "$wt/.task" || { echo "FAIL: .task missing conflict details"; cat "$wt/.task"; return 1; }
+    }
+    subtest "Task file includes prior rejection notes" verify_task_includes_rejection
+
+    cleanup_phase10() {
+      local wt="$WS/.wrapix/worktree/gc-$BEAD12"
+      [ -d "$wt" ] && rm -rf "$wt"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$BEAD12" 2>/dev/null || true
+    }
+    subtest "Clean up Phase 10" cleanup_phase10
+
+    # ================================================================
+    # Phase 11: Recovery cleans up orphaned worktrees (bead closed)
+    # ================================================================
+
+    subtest "Create orphan-cleanup bead" \
+      bd create --title="Orphan cleanup test" --type=bug --priority=2
+
+    BEAD13=$(bd list --json --title "Orphan cleanup test" 2>/dev/null | jq -r '.[0].id')
+
+    setup_orphan_worktree() {
+      [ -n "$BEAD13" ] && [ "$BEAD13" != "null" ] || return 1
+      GC_BEAD_ID="$BEAD13" GC_WORKSPACE="$WS" bash ${scripts}/worker-setup.sh >/dev/null
+      local wt="$WS/.wrapix/worktree/gc-$BEAD13"
+      [ -d "$wt" ] || { echo "FAIL: worktree not created"; return 1; }
+
+      # Close the bead — worktree is now orphaned
+      bd close "$BEAD13"
+    }
+    subtest "Create worktree then close its bead (orphan)" setup_orphan_worktree
+
+    run_recovery_orphan() {
+      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" bash ${scripts}/recovery.sh
+    }
+    subtest "Run recovery.sh for orphan cleanup" run_recovery_orphan
+
+    verify_orphan_worktree_cleaned() {
+      [ ! -d "$WS/.wrapix/worktree/gc-$BEAD13" ] || { echo "FAIL: orphaned worktree still exists"; return 1; }
+    }
+    subtest "Verify orphaned worktree cleaned up by recovery" verify_orphan_worktree_cleaned
+
+    verify_orphan_branch_cleaned() {
+      ! git -C "$WS" branch | grep "gc-$BEAD13"
+    }
+    subtest "Verify orphaned branch cleaned up by recovery" verify_orphan_branch_cleaned
   '';
 
 in
