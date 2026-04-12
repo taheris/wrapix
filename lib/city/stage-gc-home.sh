@@ -44,8 +44,16 @@ if ! grep -q '^dolt\.auto-start:' "$GC_HOME/.beads/config.yaml" 2>/dev/null; the
 fi
 echo "$DOLT_PORT" > "$GC_HOME/.beads/dolt-server.port"
 
-# City config and .gc subdirectories
-cp -f "${GC_WORKSPACE}/city.toml" "$GC_HOME/" 2>/dev/null || true
+# City config and .gc subdirectories.
+# Strip workspace.provider — a stale "claude" value causes gc to use its
+# built-in tmux provider for display commands instead of the exec session
+# provider, making gc status/peek fail with "no tmux server". (wx-y4tx2)
+if [[ -f "${GC_WORKSPACE}/city.toml" ]]; then
+  sed '/^\[workspace\]/,/^\[/{/^provider = /d}' \
+    "${GC_WORKSPACE}/city.toml" > "$GC_HOME/city.toml"
+else
+  true
+fi
 for d in formulas scripts prompts; do
   [ -d "${GC_WORKSPACE}/.gc/$d" ] && ln -sfn "../../$d" "$GC_HOME/.gc/$d"
 done

@@ -555,10 +555,11 @@ let
         echo "$resolved"
         return 1
       fi
+      # 5 agents: mayor, scout, worker, judge, dog (max=0 override)
       local agent_count
       agent_count="$(echo "$resolved" | grep -c '^\[\[agent\]\]')"
-      if [ "$agent_count" -ne 4 ]; then
-        echo "FAIL: expected 4 agents, found $agent_count (phantom agent injected?)"
+      if [ "$agent_count" -ne 5 ]; then
+        echo "FAIL: expected 5 agents (4 + dog override), found $agent_count"
         echo "$resolved"
         return 1
       fi
@@ -1304,6 +1305,171 @@ let
       ! git -C "$WS" branch | grep "gc-$BEAD13"
     }
     subtest "Verify orphaned branch cleaned up by recovery" verify_orphan_branch_cleaned
+
+    # ================================================================
+    # Phase 12: Phantom dog agent suppressed (wx-m7a1d)
+    #
+    # System packs define a dog agent (max=3). The city.toml override
+    # sets max_active_sessions=0, preventing gc from creating any dog
+    # sessions. Pack stripping is not possible (gc populates packs at
+    # startup), so the config override is the sole defense.
+    # ================================================================
+
+    verify_no_phantom_dog() {
+      local resolved
+      resolved="$(gc config show --city "$WS/.gc/home" 2>&1)"
+      # The dog override must be present with max_active_sessions = 0
+      if ! echo "$resolved" | grep -A5 'name = "dog"' | grep -q 'max_active_sessions = 0'; then
+        echo "FAIL: dog agent override missing or max_active_sessions != 0"
+        echo "$resolved" | grep -A10 'name = "dog"'
+        return 1
+      fi
+    }
+    subtest "Dog agent override has max_active_sessions=0 (wx-m7a1d)" verify_no_phantom_dog
+
+    # ================================================================
+    # Phase 13: workspace.provider stripped from city.toml (wx-y4tx2)
+    #
+    # A stale workspace.provider="claude" causes gc to use its built-in
+    # tmux provider for display commands instead of the exec provider.
+    # entrypoint.sh and stage-gc-home.sh strip the field defensively.
+    # ================================================================
+
+    verify_no_workspace_provider() {
+      # Inject a stale workspace.provider into the workspace city.toml,
+      # then re-run stage-gc-home.sh and verify it's stripped.
+      local test_toml="$WS/city.toml.test-y4tx2"
+      cp "$WS/city.toml" "$test_toml"
+      # Add provider = "claude" under [workspace] if not already there
+      sed -i '/^\[workspace\]/a provider = "claude"' "$test_toml"
+      # Verify we injected it
+      grep -q 'provider = "claude"' "$test_toml" || { echo "FAIL: could not inject test provider"; return 1; }
+
+      # stage-gc-home reads from $GC_WORKSPACE/city.toml — use a temp workspace
+      local stage_tmp
+      stage_tmp="$(mktemp -d)"
+      cp "$test_toml" "$stage_tmp/city.toml"
+      mkdir -p "$stage_tmp/.beads" "$stage_tmp/.gc"
+      touch "$stage_tmp/.beads/config.yaml"
+      git init -q "$stage_tmp"
+
+      local staged_home
+      staged_home="$(GC_WORKSPACE="$stage_tmp" GC_DOLT_PORT=99999 live stage-gc-home.sh)"
+      if grep -q 'provider = "claude"' "$staged_home/city.toml"; then
+        echo "FAIL: workspace.provider not stripped from staged city.toml"
+        grep provider "$staged_home/city.toml"
+        rm -rf "$stage_tmp"
+        return 1
+      fi
+      rm -rf "$stage_tmp"
+      rm -f "$test_toml"
+    }
+    subtest "workspace.provider stripped from city.toml (wx-y4tx2)" verify_no_workspace_provider
+
+    verify_gc_home_no_workspace_provider() {
+      # The live gc home (staged by entrypoint) must not have workspace.provider
+      if grep -q 'provider = "claude"' "$WS/.gc/home/city.toml" 2>/dev/null; then
+        echo "FAIL: gc home city.toml has workspace.provider"
+        grep provider "$WS/.gc/home/city.toml"
+        return 1
+      fi
+    }
+    subtest "gc home city.toml has no workspace.provider (wx-y4tx2)" verify_gc_home_no_workspace_provider
+
+    # ================================================================
+    # Phase 14: Provider routes non-standard worker names correctly (wx-aqe4z)
+    #
+    # gc may assign session names that don't contain "worker" (e.g.
+    # bead-id based names). The provider must detect workers from the
+    # start data's agent_template field, not just name patterns.
+    # ================================================================
+
+    verify_worker_detection_by_template() {
+      # Simulate gc calling provider.sh start with a non-worker-named session
+      # but agent_template=worker in the start JSON. Verify it uses worker_start
+      # (creates worktree) rather than persistent_start (tmux).
+      local test_bead
+      bd create --title="Worker detection test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Worker detection test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$test_bead" ] && [ "$test_bead" != "null" ] || { echo "FAIL: could not create test bead"; return 1; }
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+
+      # Call provider start with a bead-id-style session name and
+      # agent_template=worker in stdin JSON. If the provider correctly
+      # detects the worker template, it will call worker_start (which
+      # creates a worktree). If not, it calls persistent_start (which
+      # tries tmux and fails).
+      local start_json='{"agent_template":"worker","bead_id":"'"$test_bead"'"}'
+      local exit_code=0
+
+      GC_BEAD_ID="$test_bead" \
+      GC_CITY_NAME="test-city" \
+      GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" \
+      GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" \
+      BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start $test_bead" \
+        2>&1 || exit_code=$?
+
+      if [ "$exit_code" -ne 0 ]; then
+        echo "FAIL: provider start failed (exit $exit_code) — likely routed to persistent_start"
+        return 1
+      fi
+
+      # Verify worktree was created (worker_start creates it, persistent_start doesn't)
+      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+        echo "FAIL: worktree not created — provider used persistent_start instead of worker_start"
+        return 1
+      fi
+
+      # Clean up
+      podman stop "gc-test-city-$test_bead" 2>/dev/null || true
+      podman rm -f "gc-test-city-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Provider detects worker from agent_template, not name (wx-aqe4z)" verify_worker_detection_by_template
+
+    verify_name_based_worker_still_works() {
+      # Verify the existing name-based detection still works (regression check).
+      # A session named "worker-test" should always be detected as a worker.
+      local test_bead
+      bd create --title="Name-based worker test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Name-based worker test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$test_bead" ] && [ "$test_bead" != "null" ] || { echo "FAIL: could not create test bead"; return 1; }
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+
+      local exit_code=0
+      GC_BEAD_ID="$test_bead" \
+      GC_CITY_NAME="test-city" \
+      GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" \
+      GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" \
+      BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '{}' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" \
+        2>&1 || exit_code=$?
+
+      if [ "$exit_code" -ne 0 ]; then
+        echo "FAIL: name-based worker detection failed (exit $exit_code)"
+        return 1
+      fi
+
+      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+        echo "FAIL: worktree not created for name-based worker"
+        return 1
+      fi
+
+      # Clean up
+      podman stop "gc-test-city-worker-$test_bead" 2>/dev/null || true
+      podman rm -f "gc-test-city-worker-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Name-based worker detection still works (wx-aqe4z)" verify_name_based_worker_still_works
   '';
 
 in

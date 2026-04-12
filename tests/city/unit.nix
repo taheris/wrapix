@@ -169,10 +169,16 @@ in
       hasScout = any (a: a.name == "scout") configAttrs.agent;
       hasWorker = any (a: a.name == "worker") configAttrs.agent;
       hasJudge = any (a: a.name == "judge") configAttrs.agent;
+      # wx-m7a1d: dog override suppresses system pack injection
+      hasDog = any (a: a.name == "dog") configAttrs.agent;
+      dogMaxSessions =
+        (builtins.head (filter (a: a.name == "dog") configAttrs.agent)).max_active_sessions;
 
-      # Every agent has a prompt_template pointing into the staged city dir.
+      # Every agent with a prompt_template has it pointing into the staged city dir.
       allHavePromptTemplate = all (
-        a: (a.prompt_template or "") == ".wrapix/city/current/prompts/${a.name}.md"
+        a:
+        !(hasAttr "prompt_template" a)
+        || (a.prompt_template or "") == ".wrapix/city/current/prompts/${a.name}.md"
       ) configAttrs.agent;
 
       # Full city: workers=2 reflected in workspace and worker agent
@@ -204,11 +210,13 @@ in
     assert convergenceMaxPerAgent == 2;
     assert convergenceMaxTotal == 10;
     assert agentIsList;
-    assert agentCount == 4;
+    assert agentCount == 5;
     assert hasMayor;
     assert hasScout;
     assert hasWorker;
     assert hasJudge;
+    assert hasDog;
+    assert dogMaxSessions == 0;
     assert allHavePromptTemplate;
     assert fullWorkerSessions == 2;
     # scoutConfig reflects configured values
@@ -225,7 +233,7 @@ in
       echo "  - [workspace] with name and provider"
       echo "  - [session] with exec:/nix/store/... provider"
       echo "  - [formulas], [beads], [daemon], [convergence] sections present"
-      echo "  - [[agent]] is list with mayor, scout, worker, judge"
+      echo "  - [[agent]] is list with mayor, scout, worker, judge, dog (max=0)"
       echo "  - workers reflected in max_active_sessions"
       echo "  - scoutConfig exports correct maxBeads and interval"
       echo "  - mayorConfig exports correct autoDecompose"
@@ -1297,10 +1305,10 @@ in
             exit 1
           fi
 
-          # Count agent blocks — should be exactly 4 (mayor, scout, worker, judge)
+          # Count agent blocks — should be exactly 5 (mayor, scout, worker, judge, dog override)
           agent_count="$(echo "$resolved" | grep -c '^\[\[agent\]\]' || true)"
-          if [ "$agent_count" -ne 4 ]; then
-            echo "FAIL: expected 4 agents in $cfg, found $agent_count"
+          if [ "$agent_count" -ne 5 ]; then
+            echo "FAIL: expected 5 agents in $cfg, found $agent_count"
             echo "$resolved"
             exit 1
           fi

@@ -301,6 +301,16 @@ let
             scale_check = "bd list --metadata-field gc.routed_to=judge --status open,in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0";
             prompt_template = ".wrapix/city/current/prompts/judge.md";
           }
+          {
+            # Override the dog agent injected by system packs (gastown,
+            # maintenance, dolt). max_active_sessions=0 prevents gc from
+            # creating any dog sessions. (wx-m7a1d)
+            name = "dog";
+            scope = "city";
+            max_active_sessions = 0;
+            min_active_sessions = 0;
+            scale_check = "echo 0";
+          }
         ];
 
         # [[named_session]] — persistent sessions that gc auto-starts

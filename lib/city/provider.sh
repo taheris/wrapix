@@ -37,8 +37,25 @@ container_name() {
   fi
 }
 
+# Detect worker sessions.  gc may assign session names that don't contain
+# "worker" (e.g. bead-id based names in convergences).  Check the start
+# data's agent_template field first, then fall back to name patterns. (wx-aqe4z)
 is_worker() {
-  [[ "${SESSION}" == worker* || "${SESSION}" == *-worker* ]]
+  # Fast path: name-based detection
+  if [[ "${SESSION}" == worker* || "${SESSION}" == *-worker* ]]; then
+    return 0
+  fi
+  # Slow path: parse agent_template from gc's start JSON on stdin.
+  # STDIN_DATA is populated for start/nudge/set-meta/process-alive methods.
+  if [[ -n "${STDIN_DATA:-}" ]]; then
+    local tpl
+    tpl="$(echo "$STDIN_DATA" | grep -o '"agent_template" *: *"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')" || tpl=""
+    if [[ "$tpl" == "worker" ]]; then
+      return 0
+    fi
+  fi
+  # Check GC_AGENT_TEMPLATE env var (set by our own start for sub-calls)
+  [[ "${GC_AGENT_TEMPLATE:-}" == "worker" ]]
 }
 
 is_judge() {
@@ -49,11 +66,13 @@ is_mayor() {
   [[ "${SESSION}" == mayor* || "${SESSION}" == *-mayor* ]]
 }
 
-# Base role name (mayor, scout, judge, worker) regardless of session prefix
+# Base role name (mayor, scout, judge, worker) regardless of session prefix.
+# Checks GC_AGENT_TEMPLATE first (set during start), then name patterns.
 role_name() {
-  if is_worker; then echo "worker"
+  if [[ "${GC_AGENT_TEMPLATE:-}" == "worker" ]] || is_worker; then echo "worker"
   elif is_mayor; then echo "mayor"
   elif is_judge; then echo "judge"
+  elif [[ -n "${GC_AGENT_TEMPLATE:-}" ]]; then echo "${GC_AGENT_TEMPLATE}"
   else echo "scout"
   fi
 }
@@ -288,6 +307,12 @@ worker_start() {
 case "$METHOD" in
 
   start)
+    # Extract agent_template from gc's start JSON and export for sub-calls
+    # and for is_worker() fallback detection. (wx-aqe4z)
+    if [[ -n "${STDIN_DATA:-}" ]]; then
+      GC_AGENT_TEMPLATE="$(echo "$STDIN_DATA" | grep -o '"agent_template" *: *"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')" || GC_AGENT_TEMPLATE=""
+      export GC_AGENT_TEMPLATE
+    fi
     if is_worker; then
       worker_start
     else

@@ -51,6 +51,7 @@ export GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER"
 if [[ -f "${GC_WORKSPACE}/city.toml" ]]; then
   sed -i \
     -e "s|port = 99999|port = ${DOLT_PORT}|" \
+    -e '/^\[workspace\]/,/^\[/{/^provider = /d}' \
     "${GC_WORKSPACE}/city.toml"
 fi
 
