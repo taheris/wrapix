@@ -108,6 +108,46 @@ let
       podman network exists wrapix-dolt
     }
 
+    # Detect and evict a non-container process squatting on our port.
+    # This can happen when e.g. gc's embedded dolt outlives its test run
+    # and occupies the same port the container expects.
+    _evict_port_squatter() {
+      local port="$1"
+      command -v ss >/dev/null 2>&1 || return 0
+
+      local info
+      info=$(ss -tlnp "sport = :$port" 2>/dev/null) || true
+
+      # Extract pid= from ss output: users:(("dolt",pid=12345,fd=8))
+      local rest="''${info#*pid=}"
+      [ "$rest" = "$info" ] && return 0  # no listener
+      local pid="''${rest%%[!0-9]*}"
+      [ -z "$pid" ] && return 0
+
+      # Container port-forwarding uses rootlessport/pasta/conmon — never
+      # a bare dolt binary.  If the listener is dolt, it is a stale host
+      # process (e.g. leftover gc embedded dolt from a test run).
+      local exe
+      exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || true
+      case "$exe" in
+        */dolt) ;;
+        *) return 0 ;;
+      esac
+
+      echo "beads-dolt: port $port squatted by stale host dolt (pid=$pid)" >&2
+      echo "beads-dolt: killing to reclaim port for container" >&2
+      kill "$pid" 2>/dev/null || true
+
+      # Wait for the port to free up (up to 4 s).
+      local w=20
+      while [ $w -gt 0 ]; do
+        ss -tlnp "sport = :$port" 2>/dev/null | grep -q "pid=" || return 0
+        sleep 0.2
+        w=$((w - 1))
+      done
+      echo "beads-dolt: warning: port $port still occupied after eviction" >&2
+    }
+
     cmd_start() {
       local ws="''${1:-$PWD}"
       local name port data_dir
@@ -119,6 +159,8 @@ let
         echo "beads-dolt: no .beads/dolt directory at $ws — nothing to serve" >&2
         return 2
       fi
+
+      _evict_port_squatter "$port"
 
       if podman container exists "$name"; then
         if podman inspect --format '{{.State.Running}}' "$name" | grep -q true \
