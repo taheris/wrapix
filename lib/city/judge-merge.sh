@@ -27,6 +27,8 @@ WORKTREE="${WORKSPACE}/.wrapix/worktree/${BRANCH}"
 # Cleanup — always runs
 # ---------------------------------------------------------------------------
 
+stashed=false
+
 cleanup() {
   # Worktree is removed before merge attempt; guard handles edge cases
   if [[ -d "$WORKTREE" ]]; then
@@ -38,6 +40,9 @@ cleanup() {
       git -C "$WORKSPACE" branch -D "$BRANCH" 2>/dev/null || true
   fi
   git -C "$WORKSPACE" checkout main 2>/dev/null || true
+  if [[ "$stashed" == true ]]; then
+    git -C "$WORKSPACE" stash pop -q 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
@@ -72,7 +77,13 @@ if git -C "$WORKSPACE" merge --ff-only "$BRANCH" 2>/dev/null; then
   exit 0
 fi
 
-# Main advanced — rebase branch onto main
+# Main advanced — rebase branch onto main.
+# Stash any dirty tracked files (e.g. city.toml modified by entrypoint)
+# so git rebase doesn't fail on an unclean working tree.
+if ! git -C "$WORKSPACE" diff --quiet 2>/dev/null; then
+  git -C "$WORKSPACE" stash push -q 2>/dev/null && stashed=true
+fi
+
 git -C "$WORKSPACE" checkout "$BRANCH" 2>/dev/null
 
 rebase_err=$(mktemp)

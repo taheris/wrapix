@@ -945,9 +945,15 @@ let
     subtest "Set up diverged branch (non-conflicting)" setup_rebase_success
 
     judge_merge_rebase_success() {
+      # Stub prek — this test exercises rebase+merge, not pre-commit hooks.
+      local stub_dir
+      stub_dir="$(mktemp -d)"
+      printf '#!/usr/bin/env bash\nexit 0\n' > "$stub_dir/prek"
+      chmod +x "$stub_dir/prek"
       local exit_code=0
-      GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
+      PATH="$stub_dir:$PATH" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
         bash ${scripts}/judge-merge.sh 2>&1 || exit_code=$?
+      rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: judge-merge should exit 0 on rebase success (got: $exit_code)"; return 1; }
     }
     subtest "Judge rebases and merges diverged branch" judge_merge_rebase_success
