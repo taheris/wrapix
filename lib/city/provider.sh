@@ -326,7 +326,21 @@ case "$METHOD" in
   is-running)
     name="$(container_name)"
     running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
-    echo "$running"
+    if [[ "$running" == "true" ]]; then
+      echo "true"
+    elif is_worker; then
+      # Workers are ephemeral — a container that exited with code 0 completed
+      # successfully, not died. Report true so gc enters convergence (the gate
+      # handles completion detection).
+      exit_code="$(podman inspect --format '{{.State.ExitCode}}' "$name" 2>/dev/null || echo "")"
+      if [[ "$exit_code" == "0" ]]; then
+        echo "true"
+      else
+        echo "false"
+      fi
+    else
+      echo "$running"
+    fi
     ;;
 
   attach)
