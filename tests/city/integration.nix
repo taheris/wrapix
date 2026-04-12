@@ -542,6 +542,29 @@ let
     }
     subtest "Start gc daemon" start_gc
 
+    # wx-entt5: workspace.provider = "claude" causes gc to auto-inject a
+    # phantom "claude" agent with provider = "claude" (HOST tmux management),
+    # conflicting with the exec provider. Check the staged gc home that the
+    # live entrypoint created — the same config the running gc daemon uses.
+    verify_no_phantom_agent() {
+      local resolved
+      resolved="$(gc config show --city "$WS/.gc/home" 2>&1)"
+      if echo "$resolved" | grep -q 'provider = "claude"'; then
+        echo "FAIL: gc config contains 'provider = \"claude\"' — phantom agent injected"
+        echo "Resolved config:"
+        echo "$resolved"
+        return 1
+      fi
+      local agent_count
+      agent_count="$(echo "$resolved" | grep -c '^\[\[agent\]\]')"
+      if [ "$agent_count" -ne 4 ]; then
+        echo "FAIL: expected 4 agents, found $agent_count (phantom agent injected?)"
+        echo "$resolved"
+        return 1
+      fi
+    }
+    subtest "No phantom claude agent in resolved config (wx-entt5)" verify_no_phantom_agent
+
     verify_relative_symlinks() {
       # Controller symlinks must be relative so they resolve inside agent
       # containers where the workspace is bind-mounted at a different path.

@@ -148,7 +148,9 @@ in
       # Workspace section
       hasWorkspace = hasAttr "workspace" configAttrs;
       workspaceName = configAttrs.workspace.name;
-      workspaceProvider = configAttrs.workspace.provider;
+      # wx-entt5: workspace must NOT have a provider field — setting it to
+      # "claude" causes gc to inject a phantom agent with HOST tmux management.
+      hasNoWorkspaceProvider = !(hasAttr "provider" configAttrs.workspace);
 
       # Session section with exec provider
       sessionProvider = configAttrs.session.provider;
@@ -192,7 +194,7 @@ in
     in
     assert hasWorkspace;
     assert workspaceName == "dev";
-    assert workspaceProvider == "claude";
+    assert hasNoWorkspaceProvider;
     assert hasExecPrefix;
     assert hasStablePath;
     assert hasFormulas;
@@ -1264,6 +1266,49 @@ in
 
         rm -rf "$WORK"
         echo "PASS: All generated configs accepted by gc"
+        mkdir $out
+      '';
+
+  # wx-entt5: workspace.provider = "claude" causes gc to auto-inject a phantom
+  # "claude" agent with provider = "claude" (HOST tmux), conflicting with exec.
+  city-no-phantom-agent =
+    runCommandLocal "city-no-phantom-agent"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gc
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+        echo "Checking gc does not inject phantom claude agent..."
+
+        for cfg in ${minimalCity.config} ${fullCity.config} ${emptyCity.config}; do
+          WORK=$(mktemp -d)
+          cp "$cfg" "$WORK/city.toml"
+          cd "$WORK"
+          resolved="$(gc config show --city "$WORK" 2>&1)"
+
+          # No agent should have provider = "claude" (that's gc's built-in HOST tmux)
+          if echo "$resolved" | grep -q 'provider = "claude"'; then
+            echo "FAIL: gc injected phantom claude agent from $cfg"
+            echo "$resolved"
+            exit 1
+          fi
+
+          # Count agent blocks — should be exactly 4 (mayor, scout, worker, judge)
+          agent_count="$(echo "$resolved" | grep -c '^\[\[agent\]\]' || true)"
+          if [ "$agent_count" -ne 4 ]; then
+            echo "FAIL: expected 4 agents in $cfg, found $agent_count"
+            echo "$resolved"
+            exit 1
+          fi
+
+          rm -rf "$WORK"
+        done
+
+        echo "PASS: No phantom claude agent in any config"
         mkdir $out
       '';
 

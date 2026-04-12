@@ -233,7 +233,10 @@ let
       cityConfig = {
         workspace = {
           inherit name;
-          provider = agent;
+          # NOTE: Do NOT set `provider = "claude"` here — that activates gc's
+          # built-in claude provider which manages sessions via HOST tmux,
+          # conflicting with the exec session provider. Agent invocation is
+          # handled by wrapix-agent inside containers. (wx-entt5)
           max_active_sessions = workers;
         };
 
