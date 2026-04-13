@@ -1250,16 +1250,15 @@ in
         mkdir $out
       '';
 
-  # Verify .gc/scripts/ symlinks use relative paths (not absolute)
-  # so they resolve inside containers where the workspace is bind-mounted
-  # at a different absolute path than where gc init originally ran.
+  # Verify .gc/scripts/ are executable copies from the Nix store
+  # (not symlinks — copies work for consumers who lack the source tree
+  # and inside containers where the workspace is bind-mounted).
   # Calls the real stageGcLayout script (same code path as shellHook and app).
-  city-scripts-relative-symlinks =
+  city-scripts-store-copies =
     let
-      citySrc = ../../lib/city;
       names = concatStringsSep " " minimalCity.scriptNames;
     in
-    runCommandLocal "city-scripts-relative-symlinks"
+    runCommandLocal "city-scripts-store-copies"
       {
         nativeBuildInputs = [
           bash
@@ -1270,41 +1269,38 @@ in
         set -euo pipefail
 
         WS="$TMPDIR/workspace"
-        mkdir -p "$WS/lib/city"
-
-        for f in ${names}; do
-          cp "${citySrc}/$f" "$WS/lib/city/$f"
-          chmod +x "$WS/lib/city/$f"
-        done
+        mkdir -p "$WS"
 
         # Run the same staging script used by shellHook and app
         cd "$WS"
         ${minimalCity.stageGcLayout}
 
-        echo "Checking symlinks are relative and executable..."
+        echo "Checking scripts are executable regular files..."
         for f in ${names}; do
-          link="$WS/.gc/scripts/$f"
-          target="$(readlink "$link")"
-          case "$target" in
-            /*) echo "FAIL: $f symlink is absolute: $target"; exit 1 ;;
-          esac
-          if [ ! -x "$link" ]; then
-            echo "FAIL: $f does not resolve or is not executable"; exit 1
+          file="$WS/.gc/scripts/$f"
+          if [ -L "$file" ]; then
+            echo "FAIL: $f is a symlink (expected a copy)"; exit 1
+          fi
+          if [ ! -f "$file" ]; then
+            echo "FAIL: $f is missing"; exit 1
+          fi
+          if [ ! -x "$file" ]; then
+            echo "FAIL: $f is not executable"; exit 1
           fi
         done
-        echo "  PASS: all script symlinks are relative and executable"
+        echo "  PASS: all scripts are executable regular files"
 
         # Copy tree to a different path (simulates container bind-mount)
         WS2="$TMPDIR/container-mount"
         cp -a "$WS" "$WS2"
         for f in ${names}; do
           if [ ! -x "$WS2/.gc/scripts/$f" ]; then
-            echo "FAIL: $f broken under different mount path"; exit 1
+            echo "FAIL: $f not executable under different mount path"; exit 1
           fi
         done
-        echo "  PASS: symlinks resolve under different workspace path"
+        echo "  PASS: scripts work under different workspace path"
 
-        echo "PASS: Script symlinks are relative and portable"
+        echo "PASS: Script store copies verified"
         mkdir $out
       '';
 

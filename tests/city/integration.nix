@@ -48,9 +48,8 @@ let
   };
 
   # Name the input profile so liveCity.sandbox.profile ends up as
-  # "gc-test" and mkCity's imageName is "wrapix-gc-test:latest". The test
-  # builds testImage below from liveCity.sandbox.profile, guaranteeing the
-  # loaded image tag matches what gc asks podman to run.
+  # "city-test". The test builds testImage below from liveCity.sandbox.profile
+  # and tags it with liveCity.imageName (hash-based) after loading.
   testProfile = sandbox.profiles.base // {
     name = "test";
   };
@@ -182,8 +181,8 @@ let
 
   inherit (pkgs.stdenv) isDarwin;
 
-  # Reuse liveCity's computed profile (name = "gc-test") so the image tag
-  # matches liveCity.imageName ("wrapix-gc-test:latest") that gc requests.
+  # Reuse liveCity's computed profile (name = "city-test") so after loading
+  # and tagging, the image matches liveCity.imageName.
   testImage = sandbox.mkImage {
     inherit (liveCity.sandbox) profile;
     entrypointSh = ../../lib/sandbox/linux/entrypoint.sh;
@@ -424,7 +423,9 @@ let
     # ================================================================
 
     subtest "Load test container image" \
-      sh -c '${if isDarwin then "cat ${testImage}" else "${testImage}"} | podman load'
+      sh -c '${
+        if isDarwin then "cat ${testImage}" else "${testImage}"
+      } | podman load && podman tag "localhost/wrapix-${liveCity.sandbox.profile.name}:latest" "${liveCity.imageName}" 2>/dev/null || true'
 
     WS=$(mktemp -d -t citytest-XXXXXX)
     # Resolve symlinks (macOS /tmp -> /private/tmp) so podman VM can mount paths

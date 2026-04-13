@@ -115,7 +115,7 @@ in
       # store since it's computed at build time.
       shellHook = ''
         export PATH="${scripts}/bin:${wrapixBin}/bin:$PATH"
-        export RALPH_TEMPLATE_DIR="$PWD/lib/ralph/template"
+        export RALPH_TEMPLATE_DIR="${templateDir}"
         export RALPH_METADATA_DIR="${scripts}/share/ralph"
         export WRAPIX_PROFILE="${effectiveSandbox.profile.name}"
       '';

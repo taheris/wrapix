@@ -5,6 +5,7 @@ let
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
   paths = import ../../util/path.nix { };
   shellLib = import ../../util/shell.nix { };
+  imageTagLib = import ../../util/image-tag.nix { };
 
   inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
@@ -69,32 +70,24 @@ in
               sleep 2
             fi
 
-            # Load profile image if needed (reload if image hash changed)
-            PROFILE_IMAGE="wrapix-${profile.name}:latest"
-            IMAGE_VERSION_FILE="$WRAPIX_CACHE/images/wrapix-${profile.name}.version"
-            CURRENT_IMAGE_HASH="${profileImage}"
-            mkdir -p "$WRAPIX_CACHE/images"
-            if ! container image inspect "$PROFILE_IMAGE" >/dev/null 2>&1 || \
-               [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
+            # Load profile image using hash-based tag — no version file needed.
+            PROFILE_IMAGE="wrapix-${profile.name}:${imageTagLib.mkImageTag profileImage}"
+            if ! container image inspect "$PROFILE_IMAGE" >/dev/null 2>&1; then
               verbose "Image hash changed or missing, reloading..."
               echo "Loading profile image..."
-              # Delete old image if exists
-              container image delete "$PROFILE_IMAGE" 2>/dev/null || true
+              container image delete "wrapix-${profile.name}:latest" 2>/dev/null || true
               # Convert Docker-format tar to OCI-archive for Apple container CLI.
-              # Note: --insecure-policy bypasses signature verification, which is safe here
-              # because images are built locally from Nix derivations (trusted source with
-              # cryptographic hashes), not pulled from untrusted registries.
+              # --insecure-policy is safe: images are built locally from Nix
+              # derivations (trusted source with cryptographic hashes).
               OCI_TAR="$WRAPIX_CACHE/profile-image-oci.tar"
               mkdir -p "$WRAPIX_CACHE"
               ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:${profileImage}" "oci-archive:$OCI_TAR"
-              # Load and capture the digest from output (format: "untagged@sha256:...")
               LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
               LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
               if [ -n "$LOADED_REF" ]; then
                 container image tag "$LOADED_REF" "$PROFILE_IMAGE"
               fi
               rm -f "$OCI_TAR"
-              echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
               verbose "Loaded image $PROFILE_IMAGE"
             else
               verbose "Using cached image $PROFILE_IMAGE"

@@ -5,6 +5,7 @@ let
   knownHosts = import ../known-hosts.nix { inherit pkgs; };
   paths = import ../../util/path.nix { };
   shellLib = import ../../util/shell.nix { };
+  imageTagLib = import ../../util/image-tag.nix { };
 
   inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
@@ -218,25 +219,21 @@ in
             ''
         }
 
-        # Load image with caching: only reload when the Nix store path changes
-        IMAGE_VERSION_FILE="$WRAPIX_CACHE/images/wrapix-${profile.name}.version"
-        CURRENT_IMAGE_HASH="${profileImage}"
-        mkdir -p "$WRAPIX_CACHE/images"
-        if [ -f "$IMAGE_VERSION_FILE" ] && [ "$(cat "$IMAGE_VERSION_FILE")" = "$CURRENT_IMAGE_HASH" ]; then
-          IMAGE_ID="localhost/wrapix-${profile.name}:latest"
-          # Verify the image still exists in podman store
-          if ! podman image exists "$IMAGE_ID" 2>/dev/null; then
-            verbose "Image missing from podman store, reloading..."
-            rm -f "$IMAGE_VERSION_FILE"
-          else
-            verbose "Using cached image $IMAGE_ID"
-          fi
-        fi
-        if [ ! -f "$IMAGE_VERSION_FILE" ] || [ "$(cat "$IMAGE_VERSION_FILE")" != "$CURRENT_IMAGE_HASH" ]; then
+        # Load image using hash-based tag — no version file needed.
+        # The tag is derived from the Nix store path of the image
+        # derivation, which changes when any input changes.
+        IMAGE_ID="localhost/wrapix-${profile.name}:${imageTagLib.mkImageTag profileImage}"
+        if ! podman image exists "$IMAGE_ID" 2>/dev/null; then
           verbose "Loading image from ${profileImage}..."
-          IMAGE_ID=$(${profileImage} | podman load -q | sed 's/Loaded image: //')
-          echo "$CURRENT_IMAGE_HASH" > "$IMAGE_VERSION_FILE"
+          ${profileImage} | podman load -q >/dev/null
+          podman tag "localhost/wrapix-${profile.name}:latest" "$IMAGE_ID" 2>/dev/null || true
+          podman images --filter "reference=localhost/wrapix-${profile.name}" --format '{{.Tag}}' | while read -r _old_tag; do
+            case "$_old_tag" in latest|${imageTagLib.mkImageTag profileImage}) continue ;; esac
+            podman rmi -f "localhost/wrapix-${profile.name}:$_old_tag"
+          done
           verbose "Loaded image $IMAGE_ID"
+        else
+          verbose "Using cached image $IMAGE_ID"
         fi
 
         verbose "Starting container (cpus=$CPUS, memory=${toString memoryMb}m)..."

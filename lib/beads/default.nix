@@ -13,7 +13,9 @@ let
     else
       linuxPkgs.dockerTools.streamLayeredImage;
 
-  imageName = "localhost/wrapix-beads:latest";
+  imageTagLib = import ../util/image-tag.nix { };
+  imageTag = imageTagLib.mkImageTag doltImageDrv;
+  imageName = "localhost/wrapix-beads:${imageTag}";
   loadImageCmd = if pkgs.stdenv.isDarwin then "cat ${doltImageDrv}" else "${doltImageDrv}";
 
   # Minimal dolt-only container image used to serve a workspace's .beads/dolt.
@@ -80,6 +82,11 @@ let
       fi
       echo "Loading beads image..." >&2
       ${loadImageCmd} | podman load -q >/dev/null
+      podman tag "localhost/wrapix-beads:latest" "$IMAGE" 2>/dev/null || true
+      podman images --filter "reference=localhost/wrapix-beads" --format '{{.Tag}}' | while read -r _old_tag; do
+        case "$_old_tag" in latest|${imageTag}) continue ;; esac
+        podman rmi -f "localhost/wrapix-beads:$_old_tag"
+      done
     }
 
     cmd_name() { _name "''${1:-$PWD}"; }

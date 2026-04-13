@@ -257,7 +257,14 @@ let
       loadImages = pkgs.writeShellScript "load-images-${name}" (
         ''
           set -euo pipefail
-          ${city.sandbox.image} | ${pkgs.podman}/bin/podman load
+          if ! ${pkgs.podman}/bin/podman image exists "${city.imageName}" 2>/dev/null; then
+            ${city.sandbox.image} | ${pkgs.podman}/bin/podman load
+            ${pkgs.podman}/bin/podman tag "localhost/wrapix-${city.sandbox.profile.name}:latest" "${city.imageName}" 2>/dev/null || true
+            ${pkgs.podman}/bin/podman images --filter "reference=localhost/wrapix-${city.sandbox.profile.name}" --format '{{.Tag}}' | while read -r _old_tag; do
+              case "$_old_tag" in latest|${imageTagLib.mkImageTag city.sandbox.image}) continue ;; esac
+              ${pkgs.podman}/bin/podman rmi -f "localhost/wrapix-${city.sandbox.profile.name}:$_old_tag"
+            done
+          fi
         ''
         + builtins.concatStringsSep "" (
           mapAttrsToList (svcName: _svc: ''
@@ -329,7 +336,7 @@ let
   networkServices = mapAttrs' (
     name: _cityCfg:
     let
-      networkName = "gc-${name}";
+      networkName = "city-${name}";
     in
     nameValuePair "wrapix-city-${name}-network" {
       description = "Podman network for wrapix city: ${name}";

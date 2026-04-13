@@ -16,24 +16,29 @@
 
 let
   inherit (builtins)
+    attrNames
     concatStringsSep
     elem
+    filter
     hasAttr
     isString
     listToAttrs
     mapAttrs
     path
+    readDir
     readFile
     substring
     ;
   inherit (pkgs.lib)
     escapeShellArg
     filterAttrs
+    hasSuffix
     mapAttrsToList
     ;
   inherit (pkgs.lib.strings) toUpper;
 
   toTOML = import ../util/toml.nix { inherit (pkgs) lib; };
+  imageTagLib = import ../util/image-tag.nix { };
 
   # Build a service container image from a Nix package
   mkServiceImage =
@@ -105,7 +110,7 @@ let
       ];
 
       cityProfile = profile // {
-        name = "gc-${profile.name}";
+        name = "city-${profile.name}";
         packages = (profile.packages or [ ]) ++ imagePackages;
       };
       agentSandbox = if sandbox != null then sandbox else mkSandbox { profile = cityProfile; };
@@ -113,27 +118,27 @@ let
       # Ralph wired to the same sandbox
       ralphInstance = mkRalph { sandbox = agentSandbox; };
 
-      imageName = "wrapix-${agentSandbox.profile.name}:latest";
       profileImage = agentSandbox.image;
-      networkName = "gc-${name}";
+      imageTag = imageTagLib.mkImageTag profileImage;
+      imageName = "localhost/wrapix-${agentSandbox.profile.name}:${imageTag}";
+      networkName = "city-${name}";
 
       # Load image into podman: stream script on Linux, tarball on Darwin.
       # On Darwin, the image is a buildLayeredImage tar (Linux shebang won't run).
       loadImageCmd = if pkgs.stdenv.isDarwin then "cat ${profileImage}" else "${profileImage}";
 
-      # Shared image loading snippet — used by both shellHook and app
+      # Shared image loading snippet — used by both shellHook and app.
+      # Uses hash-based tag derived from the Nix store path so
+      # `podman image exists` is sufficient for freshness (no version file).
       loadImageSnippet = ''
-        XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}"
-        _img_version="$XDG_CACHE_HOME/wrapix/images/wrapix-${agentSandbox.profile.name}.version"
-        mkdir -p "$XDG_CACHE_HOME/wrapix/images"
-        if [ ! -f "$_img_version" ] || [ "$(cat "$_img_version")" != "${profileImage}" ]; then
+        if ! podman image exists "${imageName}" 2>/dev/null; then
           echo "Loading sandbox image..."
           ${loadImageCmd} | podman load -q >/dev/null
-          echo "${profileImage}" > "$_img_version"
-        elif ! podman image exists "${imageName}" 2>/dev/null; then
-          echo "Reloading sandbox image (missing from podman store)..."
-          ${loadImageCmd} | podman load -q >/dev/null
-          echo "${profileImage}" > "$_img_version"
+          podman tag "localhost/wrapix-${agentSandbox.profile.name}:latest" "${imageName}" 2>/dev/null || true
+          podman images --filter "reference=localhost/wrapix-${agentSandbox.profile.name}" --format '{{.Tag}}' | while read -r _old_tag; do
+            case "$_old_tag" in latest|${imageTag}) continue ;; esac
+            podman rmi -f "localhost/wrapix-${agentSandbox.profile.name}:$_old_tag"
+          done
         fi
       '';
 
@@ -191,9 +196,10 @@ let
         "worker.md"
       ];
 
-      # Stage formulas and script symlinks into .gc/.
-      # Shared by shellHook, app entrypoint, and integration tests so
-      # they all exercise the same symlink creation path.
+      # Stage formulas and scripts into .gc/ from the Nix store.
+      # Copies (not symlinks) so this works for consumers who don't
+      # have the wrapix source tree.  Shared by shellHook, app
+      # entrypoint, and integration tests.
       stageGcLayout = pkgs.writeShellScript "stage-gc-layout" ''
         mkdir -p .gc/formulas .gc/scripts
         for f in ${formulasDir}/*.formula.toml; do
@@ -203,7 +209,8 @@ let
         rm -rf .gc/formulas/orders
         cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
         for f in ${concatStringsSep " " scriptNames}; do
-          ln -sf "../../lib/city/$f" .gc/scripts/"$f"
+          cp -f --remove-destination "${scriptsStore}/$f" .gc/scripts/"$f"
+          chmod +x .gc/scripts/"$f"
         done
       '';
 
@@ -443,9 +450,37 @@ let
         ];
       };
 
+      # Source files that affect the container image — auto-discovered
+      # via readDir so new files are tracked without manual updates.
+      # Written to .wrapix/direnv-watch by shellHook so nix-direnv
+      # re-evaluates when any of these change.
+      direnvWatchFiles =
+        let
+          shFiles =
+            dir: prefix: map (f: "${prefix}/${f}") (filter (f: hasSuffix ".sh" f) (attrNames (readDir dir)));
+          allFiles = dir: prefix: map (f: "${prefix}/${f}") (attrNames (readDir dir));
+          filesOnly =
+            dir: prefix:
+            map (f: "${prefix}/${f}") (filter (f: (readDir dir).${f} == "regular") (attrNames (readDir dir)));
+        in
+        shFiles ./. "lib/city"
+        ++ allFiles ../ralph/cmd "lib/ralph/cmd"
+        ++ filesOnly ../ralph/template "lib/ralph/template"
+        ++ filesOnly ../ralph/template/partial "lib/ralph/template/partial"
+        ++ [ "scripts/beads-push" ];
+
       # Shell hook: copies config and exports env vars for provider
       shellHook = ''
         ${ralphInstance.shellHook}
+
+        mkdir -p .wrapix
+        _direnv_watch_new=$(cat <<'WATCHEOF'
+        ${concatStringsSep "\n" direnvWatchFiles}
+        WATCHEOF
+        )
+        if [ ! -f .wrapix/direnv-watch ] || [ "$(cat .wrapix/direnv-watch)" != "$_direnv_watch_new" ]; then
+          printf '%s\n' "$_direnv_watch_new" > .wrapix/direnv-watch
+        fi
 
         export GC_AGENT_IMAGE="${imageName}"
         export GC_BEADS_DOLT_CONTAINER="$(beads-dolt name "$(pwd)")"
@@ -621,7 +656,7 @@ let
       # Individual formula paths for selective override
       inherit defaultFormulas;
 
-      inherit imageName networkName;
+      inherit imageName imageTag networkName;
 
       # Re-export inputs for downstream consumers (NixOS module, etc.)
       inherit
