@@ -136,6 +136,30 @@ ln -sfn "home/.gc/controller.sock" "${GC_WORKSPACE}/.gc/controller.sock"
 ln -sfn "home/.gc/controller.lock" "${GC_WORKSPACE}/.gc/controller.lock"
 ln -sfn "home/.gc/controller.token" "${GC_WORKSPACE}/.gc/controller.token"
 
+# Step 4b: Kill stale containers on config drift (wx-i42sb)
+_kill_stale_containers() {
+  [[ -f "$GC_CITY/city.toml" ]] || return 0
+
+  local current_hash hash_file previous_hash
+  current_hash="$(sha256sum "$GC_CITY/city.toml" | cut -d' ' -f1)"
+  hash_file="${GC_WORKSPACE}/.gc/config.hash"
+
+  if [[ -f "$hash_file" ]]; then
+    previous_hash="$(cat "$hash_file")"
+    if [[ "$previous_hash" != "$current_hash" ]]; then
+      echo "Config drift detected (${previous_hash:0:12}… → ${current_hash:0:12}…), killing stale containers" >&2
+      local cid
+      for cid in $(podman ps -q --filter "label=gc-city=${GC_CITY_NAME}" 2>/dev/null); do
+        podman stop "$cid" 2>/dev/null || true
+        podman rm -f "$cid" 2>/dev/null || true
+      done
+    fi
+  fi
+
+  echo "$current_hash" > "$hash_file"
+}
+_kill_stale_containers
+
 # Run gc in background + wait so the shell stays alive for the trap.
 # On exit (signal or natural), forward SIGTERM to gc. The beads-dolt
 # container is shared with the devShell and persists across city runs.

@@ -3,22 +3,29 @@
 # Exercises the real stack: gc → provider.sh → podman → container → mock claude
 # Only the LLM binary is substituted. Everything else runs for real.
 #
-# Test flow:
-#   Phase 1 (happy path):
+# Scenarios:
+#   happy-path:
 #     gc starts → scout creates bead → sling → worker commits → judge
 #     approves → judge-merge.sh (ff) → post-gate (deploy bead, notify)
 #     + verify tmux session alive in persistent containers
-#   Phase 1b (reconciler): gc sling routes bead → scale_check → worker starts
-#   Phase 2 (merge conflict): diverged branch → rebase conflicts → reject
-#   Phase 3 (escalation): non-approved convergence → post-gate cleanup
-#   Phase 4 (crash recovery): worker committed, monitor died → recovery.sh
-#   Phase 5 (no-op worker): empty branch → recovery no-op, gate rejects
-#   Phase 6 (script tests): worker-setup.sh, worker-collect.sh direct tests
-#   Phase 7 (rebase success): main advanced, no conflict → rebase + ff-merge
-#   Phase 8 (gate verdicts): gate.sh approve → exit 0, reject → exit 1
-#   Phase 9 (post-gate close): approved convergence → work bead closed
-#   Phase 10 (retry notes): judge rejection notes appear in .task on retry
-#   Phase 11 (orphan cleanup): closed bead → recovery cleans worktree+branch
+#   reconciler-sling: gc sling routes bead → scale_check → worker starts
+#   merge-conflict-reject: diverged branch → rebase conflicts → reject
+#   escalation-non-approved: non-approved convergence → post-gate cleanup
+#   recovery-monitor-died: worker committed, monitor died → recovery.sh
+#   recovery-empty-branch: empty branch → recovery no-op, gate rejects
+#   worker-setup-collect: worker-setup.sh, worker-collect.sh direct tests
+#   rebase-success: main advanced, no conflict → rebase + ff-merge
+#   gate-approve-reject: gate.sh approve → exit 0, reject → exit 1
+#   dispatch-cooldown: dispatch.sh cooldown, P0 bypass, backpressure
+#   post-gate-close-bead: approved convergence → work bead closed
+#   retry-judge-notes: judge rejection notes appear in .task on retry
+#   recovery-orphan-worktree: closed bead → recovery cleans worktree+branch
+#   phantom-dog-suppressed: dog agent max_active_sessions=0 (wx-m7a1d)
+#   provider-stripped-from-config: workspace.provider removed (wx-y4tx2)
+#   provider-worker-name-routing: agent_template detection (wx-aqe4z)
+#   provider-extracts-issue: issue field from start JSON (wx-fsqcz)
+#   agent-max-sessions: pool agents have max_active_sessions (wx-65bws)
+#   config-drift-kills-stale: mutated city.toml → entrypoint kills stale sessions (wx-i42sb)
 #
 # Requires podman. Run via: nix run .#test-city
 {
@@ -525,7 +532,7 @@ let
     subtest "Set up workspace" setup_workspace
 
     # ================================================================
-    # Phase 1: Happy path — mayor + scout + judge → worker → judge merge
+    # happy-path: mayor + scout + judge → worker → judge merge
     # ================================================================
 
     validate_config() {
@@ -746,14 +753,15 @@ let
     subtest "Verify branch cleaned up" verify_branch_cleaned
 
     # ================================================================
-    # Phase 1b: Reconciler-driven worker start (wx-y9qco)
+    # reconciler-sling: reconciler-driven worker start (wx-y9qco)
     #
-    # Phase 1 uses convergence (gc sling --on) which bypasses scale_check.
-    # This phase exercises the reconciler path: gc sling routes a bead,
-    # scale_check (dispatch.sh) detects demand, reconciler starts a worker.
+    # happy-path uses convergence (gc sling --on) which bypasses
+    # scale_check. This scenario exercises the reconciler path: gc sling
+    # routes a bead, scale_check (dispatch.sh) detects demand, reconciler
+    # starts a worker.
     #
-    # post-gate.sh now closes the Phase 1 work bead on approved
-    # convergence, so no manual cleanup is needed between phases.
+    # post-gate.sh closed the happy-path work bead on approved
+    # convergence, so no manual cleanup is needed between scenarios.
     # ================================================================
 
     subtest "Create reconciler-routed bead" \
@@ -770,8 +778,8 @@ let
     subtest "Reconciler starts worker for routed bead (wx-y9qco)" \
       poll_until "ls $WS/.wrapix/worktree/gc-$RBEAD 2>/dev/null" 60
 
-    # Clean up: stop the worker container and remove worktree so Phase 2
-    # starts clean.
+    # Clean up: stop the worker container and remove worktree so
+    # merge-conflict-reject starts clean.
     cleanup_reconciler_test() {
       for cid in $(podman ps -q --filter "name=gc-test-city-worker" 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
@@ -787,7 +795,7 @@ let
     subtest "Clean up reconciler test" cleanup_reconciler_test
 
     # ================================================================
-    # Stop gc — Phase 2+ don't need it (saves resources, faster cleanup)
+    # Stop gc — remaining scenarios don't need it (saves resources)
     # ================================================================
 
     stop_gc() {
@@ -804,7 +812,7 @@ let
         wait "$GC_PID" 2>/dev/null || true
       fi
       # Stop and remove all gc containers. The beads-dolt container is
-      # shared across phases and kept running (entrypoint only disconnects
+      # shared across scenarios and kept running (entrypoint only disconnects
       # it from the network on exit).
       for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
@@ -812,17 +820,17 @@ let
       done
       GC_PID=""
 
-      # Ensure beads-dolt is still running for Phase 2+ assertions
+      # Ensure beads-dolt is still running for remaining scenarios
       beads-dolt start "$WS" >/dev/null 2>&1 || true
       for _i in $(seq 1 50); do
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
       done
     }
-    subtest "Stop gc after Phase 1" stop_gc
+    subtest "Stop gc after happy-path" stop_gc
 
     # ================================================================
-    # Phase 2: Merge conflict — rebase fails, reject_to_worker
+    # merge-conflict-reject: rebase fails, reject_to_worker
     # ================================================================
 
     create_conflict() {
@@ -837,8 +845,8 @@ let
 
     BEAD2=$(bd list --json --title "Second fix" 2>/dev/null | jq -r '.[0].id')
 
-    # Phase 2 tests the judge's merge conflict handling. The judge owns
-    # merge, so conflict rejection is the judge's responsibility.
+    # Tests the judge's merge conflict handling. The judge owns merge,
+    # so conflict rejection is the judge's responsibility.
     simulate_worker2() {
       [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ] || return 1
       local wt="$WS/.wrapix/worktree/gc-$BEAD2"
@@ -878,7 +886,7 @@ let
       test ! -d "$WS/.wrapix/worktree/gc-$BEAD2"
 
     # ================================================================
-    # Phase 3: Escalation — convergence ends with non-approved reason
+    # escalation-non-approved: convergence ends with non-approved reason
     # ================================================================
 
     subtest "Create escalation bead" \
@@ -924,7 +932,7 @@ let
     subtest "Verify escalation bead flagged for human review" verify_escalation_human_label
 
     # ================================================================
-    # Phase 4: Crash recovery — monitor died, verify recovery.sh picks up
+    # recovery-monitor-died: monitor died, verify recovery.sh picks up
     # ================================================================
 
     subtest "Create recovery bead" \
@@ -983,7 +991,7 @@ let
     subtest "Clean up recovery worktree" cleanup_recovery
 
     # ================================================================
-    # Phase 5: No-op worker — exited without committing, verify no stall
+    # recovery-empty-branch: worker exited without committing
     # ================================================================
 
     subtest "Create no-op bead" \
@@ -1029,7 +1037,7 @@ let
     subtest "Clean up no-op worktree" cleanup_noop
 
     # ================================================================
-    # Phase 6: worker-setup.sh and worker-collect.sh direct tests
+    # worker-setup-collect: worker-setup.sh and worker-collect.sh
     # ================================================================
 
     subtest "Create worker-setup test bead" \
@@ -1096,10 +1104,10 @@ let
         git -C "$WS" branch -D "gc-$b" 2>/dev/null || true
       done
     }
-    subtest "Clean up Phase 6" cleanup_phase6
+    subtest "Clean up worker-setup-collect" cleanup_phase6
 
     # ================================================================
-    # Phase 7: Rebase success path — main advanced, rebase works, merge
+    # rebase-success: main advanced, rebase works, merge
     # ================================================================
 
     subtest "Create rebase-success bead" \
@@ -1163,7 +1171,7 @@ let
     subtest "Verify rebase branch cleaned up" verify_rebase_branch_cleaned
 
     # ================================================================
-    # Phase 8: Gate happy path — approve and reject verdicts
+    # gate-approve-reject: approve and reject verdicts
     # ================================================================
 
     subtest "Create gate-approve bead" \
@@ -1226,7 +1234,7 @@ let
     subtest "Gate exits 1 on reject verdict" verify_gate_reject
 
     # ================================================================
-    # Phase 8b: dispatch.sh — cooldown-aware worker scale check
+    # dispatch-cooldown: cooldown-aware worker scale check
     # ================================================================
 
     subtest "Create dispatch bead" \
@@ -1286,7 +1294,7 @@ let
     subtest "Clean up dispatch test" cleanup_dispatch
 
     # ================================================================
-    # Phase 9: Post-gate closes work bead on approved convergence
+    # post-gate-close-bead: approved convergence closes work bead
     # ================================================================
 
     subtest "Create post-gate-close bead" \
@@ -1317,7 +1325,7 @@ let
     subtest "Verify post-gate closed work bead" verify_post_gate_closed_bead
 
     # ================================================================
-    # Phase 10: Task file includes judge rejection notes on retry
+    # retry-judge-notes: task file includes judge rejection notes
     # ================================================================
 
     subtest "Create retry-notes bead" \
@@ -1350,10 +1358,10 @@ let
       git -C "$WS" worktree prune 2>/dev/null || true
       git -C "$WS" branch -D "gc-$BEAD12" 2>/dev/null || true
     }
-    subtest "Clean up Phase 10" cleanup_phase10
+    subtest "Clean up retry-judge-notes" cleanup_phase10
 
     # ================================================================
-    # Phase 11: Recovery cleans up orphaned worktrees (bead closed)
+    # recovery-orphan-worktree: closed bead → recovery cleans worktree
     # ================================================================
 
     subtest "Create orphan-cleanup bead" \
@@ -1388,7 +1396,7 @@ let
     subtest "Verify orphaned branch cleaned up by recovery" verify_orphan_branch_cleaned
 
     # ================================================================
-    # Phase 12: Phantom dog agent suppressed (wx-m7a1d)
+    # phantom-dog-suppressed: dog agent max=0 override (wx-m7a1d)
     #
     # System packs define a dog agent (max=3). The city.toml override
     # sets max_active_sessions=0, preventing gc from creating any dog
@@ -1409,7 +1417,7 @@ let
     subtest "Dog agent override has max_active_sessions=0 (wx-m7a1d)" verify_no_phantom_dog
 
     # ================================================================
-    # Phase 13: workspace.provider stripped from city.toml (wx-y4tx2)
+    # provider-stripped-from-config: workspace.provider removed (wx-y4tx2)
     #
     # A stale workspace.provider="claude" causes gc to use its built-in
     # tmux provider for display commands instead of the exec provider.
@@ -1458,7 +1466,7 @@ let
     subtest "gc home city.toml has no workspace.provider (wx-y4tx2)" verify_gc_home_no_workspace_provider
 
     # ================================================================
-    # Phase 14: Provider routes non-standard worker names correctly (wx-aqe4z)
+    # provider-worker-name-routing: agent_template detection (wx-aqe4z)
     #
     # gc may assign session names that don't contain "worker" (e.g.
     # bead-id based names). The provider must detect workers from the
@@ -1553,7 +1561,7 @@ let
     subtest "Name-based worker detection still works (wx-aqe4z)" verify_name_based_worker_still_works
 
     # ================================================================
-    # Phase 15: Provider extracts issue from start JSON (wx-fsqcz)
+    # provider-extracts-issue: issue field from start JSON (wx-fsqcz)
     #
     # When gc starts a worker via a formula, the start JSON contains an
     # "issue" field with the bead ID. provider.sh must extract it and
@@ -1605,7 +1613,7 @@ let
     subtest "Provider extracts issue from start JSON (wx-fsqcz)" verify_provider_extracts_issue
 
     # ================================================================
-    # Phase 16: Agent templates have max_active_sessions (wx-65bws)
+    # agent-max-sessions: pool agents have max_active_sessions (wx-65bws)
     #
     # Verify the resolved gc config has max_active_sessions on worker,
     # scout, and judge — without it, gc treats them as named singles
@@ -1633,6 +1641,112 @@ let
       fi
     }
     subtest "Agent templates have max_active_sessions (wx-65bws)" verify_pool_agent_max_sessions
+
+    # ================================================================
+    # config-drift-kills-stale: entrypoint kills stale containers (wx-i42sb)
+    #
+    # Exercise the live entrypoint config drift path: start a labeled
+    # container (simulating a leftover from a previous gc run), write a
+    # config.hash with the old hash, mutate city.toml, then restart the
+    # entrypoint. The entrypoint compares hashes and kills all containers
+    # with the gc-city label before starting gc.
+    # ================================================================
+
+    config_drift_setup() {
+      # Start a labeled container simulating a leftover persistent session.
+      podman run -d --replace \
+        --name gc-test-city-stale-scout \
+        --entrypoint "" \
+        --network "$TEST_NETWORK" \
+        --label "gc-city=test-city" \
+        "${liveCity.imageName}" sleep 3600
+
+      # The happy-path entrypoint wrote .gc/config.hash with the current
+      # city.toml hash. That file is the "previous run" state. Now mutate
+      # city.toml so the next entrypoint run sees a different hash.
+      echo "# drift-marker $(date +%s)" >> "$WS/city.toml"
+
+      # Verify precondition: stale container is running
+      if [[ "$(podman inspect --format '{{.State.Running}}' gc-test-city-stale-scout 2>/dev/null)" != "true" ]]; then
+        echo "FAIL: stale container should be running before entrypoint"
+        return 1
+      fi
+    }
+    subtest "Config drift: set up stale container" config_drift_setup
+
+    config_drift_restart() {
+      DOLT_CONTAINER="$(beads-dolt name "$WS")"
+      DOLT_PORT="$(beads-dolt port "$WS")"
+
+      export GC_CITY_NAME="test-city"
+      export GC_WORKSPACE="$WS"
+      export GC_AGENT_IMAGE="${liveCity.imageName}"
+      export GC_PODMAN_NETWORK="$TEST_NETWORK"
+
+      # Run the live entrypoint — stages gc home (picks up mutated
+      # city.toml), detects hash mismatch, kills stale containers,
+      # writes new hash, starts gc.
+      setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/drift.log" 2>&1 &
+      DRIFT_PID=$!
+
+      # Wait for drift detection or gc start
+      for _i in $(seq 1 60); do
+        if grep -q "Config drift detected" "$WS/drift.log" 2>/dev/null || \
+           grep -q "City started" "$WS/drift.log" 2>/dev/null || \
+           ! kill -0 "$DRIFT_PID" 2>/dev/null; then
+          break
+        fi
+        sleep 0.5
+      done
+      sleep 2
+
+      # Verify the stale container was killed
+      local stale_running
+      stale_running="$(podman inspect --format '{{.State.Running}}' gc-test-city-stale-scout 2>/dev/null || echo "gone")"
+      if [[ "$stale_running" == "true" ]]; then
+        echo "FAIL: stale container still running after entrypoint"
+        echo "Entrypoint log:"
+        cat "$WS/drift.log" | sed 's/^/  /'
+        kill -TERM -"$DRIFT_PID" 2>/dev/null || true
+        return 1
+      fi
+      echo "  PASS: stale container killed"
+
+      # Verify the entrypoint logged the drift
+      if ! grep -q "Config drift detected" "$WS/drift.log" 2>/dev/null; then
+        echo "FAIL: no drift log message in entrypoint output"
+        cat "$WS/drift.log" | sed 's/^/  /'
+        kill -TERM -"$DRIFT_PID" 2>/dev/null || true
+        return 1
+      fi
+      echo "  PASS: drift detection logged"
+
+      # Verify config.hash was updated to new value
+      local hash_file="$WS/.gc/config.hash"
+      if [[ ! -f "$hash_file" ]]; then
+        echo "FAIL: config.hash not written"
+        kill -TERM -"$DRIFT_PID" 2>/dev/null || true
+        return 1
+      fi
+      echo "  PASS: config.hash updated"
+
+      # Clean up: stop the entrypoint
+      kill -TERM -"$DRIFT_PID" 2>/dev/null || true
+      for _ in $(seq 1 30); do
+        kill -0 "$DRIFT_PID" 2>/dev/null || break
+        sleep 0.2
+      done
+      kill -9 -"$DRIFT_PID" 2>/dev/null || true
+      wait "$DRIFT_PID" 2>/dev/null || true
+
+      # Clean up containers
+      podman rm -f gc-test-city-stale-scout 2>/dev/null || true
+      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+        podman stop -t 3 "$cid" 2>/dev/null || true
+        podman rm -f "$cid" 2>/dev/null || true
+      done
+    }
+    subtest "Config drift: entrypoint kills stale containers (wx-i42sb)" config_drift_restart
   '';
 
 in

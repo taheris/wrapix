@@ -42,9 +42,11 @@ ops pipeline with good defaults and minimal configuration.
 |-----------|------|
 | `gc start --foreground` | Controller — reconciliation loop, convergence, orders, scheduling. Runs on the host, not in a container |
 | Provider script | Translates gc commands to podman operations, manages worktrees, mounts bead context |
+| Controller query API | Read-only session/status queries over the controller unix socket, accessible from containers |
+| Controller mail handler | Receives intent-based mutation requests from agents via mail |
 | Post-gate order | Event-gated order triggered by `convergence.terminated` — notifies judge, deploy bead creation |
 | Gate condition script | Bridges convergence gate and judge session — nudges judge, waits for verdict |
-| Entrypoint wrapper | Ensures `beads-dolt` is running and attached to the city network, prints pending reviews, runs recovery, starts events watcher, stages gc home, runs `gc start --foreground` with trap-based cleanup (of city-owned resources only — `beads-dolt` persists) |
+| Entrypoint wrapper | Ensures `beads-dolt` is running and attached to the city network, prints pending reviews, runs recovery, kills stale containers on config drift, starts events watcher, stages gc home, runs `gc start --foreground` with trap-based cleanup (of city-owned resources only — `beads-dolt` persists) |
 
 ### Deployment Model
 
@@ -57,6 +59,17 @@ ops pipeline with good defaults and minimal configuration.
 - Service containers are built from Nix packages via `dockerTools.streamLayeredImage`
 - NixOS module generates the systemd unit, the per-city podman network, and
   invokes `mkCity` to produce `city.toml` and container images
+
+**Dual-mode gc:**
+
+- **Host-side gc**: direct provider access via podman (unchanged)
+- **Container-side gc**: when `GC_AGENT` is set, gc routes read-only
+  commands (status, session list) through the controller unix socket
+  (already mounted at `.gc/controller.sock`) and write operations
+  (nudge, lifecycle) through mail to the controller
+- Containers cannot escape their sandbox — no podman socket, no provider
+  access. Mail is the cross-boundary mutation API; the controller socket
+  is the read-only query API
 
 - Dolt is provided by `beads-dolt`, a separate per-workspace container
   managed by `lib/beads` and shared between host-side `bd` and the city.
@@ -79,12 +92,12 @@ ops pipeline with good defaults and minimal configuration.
 
 Four agent roles in the ops loop (city government theme):
 
-| Role | Job | Lifetime | Workspace Access | Podman Socket |
-|------|-----|----------|-----------------|---------------|
-| **Mayor** | Human's conversational interface — triage, status briefing, executes approved actions | Persistent | Read-only + `.beads/` rw | None |
-| **Scout** | Watches service containers, detects errors, creates beads, system housekeeping | Persistent | Read-only + `.beads/` rw | Read-only (logs, inspect) |
-| **Worker** | Picks up a bead, investigates, writes the fix | Ephemeral (per bead) | Read-write (own worktree) | None |
-| **Judge** | Reviews every worker's output, enforces style guidelines, owns merge | Persistent | Read-write (for merge) + `.beads/` rw | None |
+| Role | Job | Lifetime | Workspace Access | Host Access | gc Path |
+|------|-----|----------|-----------------|-------------|---------|
+| **Mayor** | Human's conversational interface — triage, status briefing, executes approved actions | Persistent | Read-only + `.beads/` rw | None | Controller socket + mail |
+| **Scout** | Watches service containers, detects errors, creates beads, system housekeeping | Persistent | Read-only + `.beads/` rw | Read-only podman (logs, inspect) | Controller socket + mail |
+| **Worker** | Picks up a bead, investigates, writes the fix | Ephemeral (per bead) | Read-write (own worktree) | None | Controller socket + mail |
+| **Judge** | Reviews every worker's output, enforces style guidelines, owns merge | Persistent | Read-write (for merge) + `.beads/` rw | None | Controller socket + mail |
 
 The human interacts primarily through the Mayor via `gc session attach mayor`.
 Direct CLI access (`gc`, `bd`, `ralph`) is always available as a bypass.
@@ -419,6 +432,20 @@ services.wrapix.cities.myapp = {
 
 Shell script implementing Gas City's `exec:<script>` provider pattern.
 The script receives a command and arguments, translates to podman operations.
+This is the **host-side** interface only — container-side gc never calls the
+provider.
+
+**Container-side gc command routing:**
+
+| gc command | Container path | Mechanism |
+|------------|---------------|-----------|
+| `gc status` | Controller query API | Unix socket (read-only) |
+| `gc session list` | Controller query API | Unix socket (read-only) |
+| `gc session nudge` | Mail to controller | `gc mail send --to controller -s "nudge"` |
+| `gc agent start/stop` | Mail to controller | Intent-based, controller executes with provider |
+| `gc mail send/check` | Direct (beads-based) | Already works, no provider dependency |
+| `gc sling` | Direct (beads-based) | Already works, no provider dependency |
+| `bd *` | Direct (beads-based) | Already works, no provider dependency |
 
 **Persistent roles (mayor, scout, judge)** — full tmux-based interaction:
 
@@ -469,7 +496,9 @@ Container labeling convention:
 **Persistent roles (mayor, scout, judge):**
 - Started with the city, stopped with the city
 - `podman run -d` with tmux server as PID 1
-- gc interacts via `podman exec tmux send-keys` / `capture-pane`
+- Host-side gc interacts via `podman exec tmux send-keys` / `capture-pane`
+- Container-side agents interact via mail (for nudge/send-keys) and the
+  controller query API (for session list) — never via podman
 - Human attaches to the mayor via `gc session attach mayor`
 
 **Ephemeral workers:**
@@ -698,6 +727,22 @@ No new commands. Existing tools compose:
 | `bd` | Work tracking | `bd ready`, `bd human`, `bd close` (direct bypass) |
 | `ralph` | Spec workflow + setup | `ralph plan`, `ralph todo` (standalone), `ralph run` (fallback), `ralph sync` (city setup) |
 
+**Container-side gc availability:**
+
+When `GC_AGENT` is set, gc auto-detects container context and routes
+commands through the controller socket (reads) or mail (writes). On the
+host (no `GC_AGENT`), gc works as today.
+
+| Command | Container support | Mechanism |
+|---------|-------------------|-----------|
+| `gc status` | Yes | Controller query API |
+| `gc session list` | Yes | Controller query API |
+| `gc session nudge` | Yes | Mail to controller |
+| `gc mail send/check` | Yes | Direct (beads) |
+| `gc sling` | Yes | Direct (beads) |
+| `gc session attach` | No | Host only (requires TTY) |
+| `gc restart` | Yes | Mail to controller |
+
 ## Affected Files/Modules
 
 | Area | Files | Change |
@@ -797,4 +842,7 @@ No new commands. Existing tools compose:
 - Formal convoy/grouping data model — mayor handles informal grouping via queries
 - Token tracking / budget enforcement — rely on backpressure + cooldown
 - Service builds from source — services defined by Nix package
-- Gas City upstream contributions — provider is `exec:` script, not a Go PR
+- Gas City upstream contributions — provider is `exec:` script, not a Go PR.
+  Exception: the container-side client/server split requires upstream
+  changes to the gascity Go binary (controller query API, mail-based
+  mutation handler, GC_AGENT context detection)

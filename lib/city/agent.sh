@@ -15,6 +15,8 @@
 #   WRAPIX_OUTPUT_FILE — capture output to file (optional)
 set -euo pipefail
 
+log() { echo "[wrapix-agent] $*" >&2; }
+
 AGENT="${WRAPIX_AGENT:-claude}"
 MODE="${1:-run}"
 DOCS_DIR="${WRAPIX_DOCS_DIR:-/workspace/docs}"
@@ -57,39 +59,49 @@ build_prompt() {
 # ---------------------------------------------------------------------------
 
 claude_run() {
-  # Provision claude config when running inside a city container.
   if [[ -n "${WRAPIX_CITY_DIR:-}" ]]; then
+    log "provisioning claude config"
     mkdir -p "$HOME/.claude"
-    [[ -f /etc/wrapix/claude-config.json ]] && \
+    if [[ -f /etc/wrapix/claude-config.json ]]; then
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
-    [[ -f "${WRAPIX_CITY_DIR}/claude-settings.json" ]] && \
+      log "copied claude-config.json"
+    fi
+    if [[ -f "${WRAPIX_CITY_DIR}/claude-settings.json" ]]; then
       cp "${WRAPIX_CITY_DIR}/claude-settings.json" "$HOME/.claude/settings.json"
-    [[ -f "${WRAPIX_CITY_DIR}/tmux.conf" ]] && \
+      log "copied claude-settings.json"
+    fi
+    if [[ -f "${WRAPIX_CITY_DIR}/tmux.conf" ]]; then
       cp "${WRAPIX_CITY_DIR}/tmux.conf" "$HOME/.tmux.conf"
+      log "copied tmux.conf"
+    fi
   fi
 
   local prompt
   prompt="$(build_prompt)"
+  log "prompt built (${#prompt} chars)"
 
   local -a claude_flags=(-p --dangerously-skip-permissions)
   if [[ -f "${WRAPIX_SYSTEM_PROMPT_FILE:-}" ]]; then
     claude_flags+=(--append-system-prompt-file "${WRAPIX_SYSTEM_PROMPT_FILE}")
   fi
 
-  # wx-m5sd6: when running in a city, wrap claude in tmux for observability.
-  # Write invocation to a script to avoid quoting issues with tmux commands.
   if [[ -n "${WRAPIX_CITY_DIR:-}" ]]; then
+    log "starting claude in tmux session"
     local run_sh="/tmp/.wrapix-run.sh"
     {
       printf '#!/usr/bin/env bash\n'
+      printf 'set -euo pipefail\n'
       printf 'claude'
       for arg in "${claude_flags[@]}"; do printf ' %q' "$arg"; done
-      printf ' %q\n' "$prompt"
+      printf ' %q 2>&1 | tee /workspace/.worker.log\n' "$prompt"
+      printf 'rc=${PIPESTATUS[0]}\n'
+      printf 'echo "[wrapix-agent] claude exited with code ${rc}" >&2\n'
+      printf 'tmux wait-for -S worker-exit\n'
     } > "$run_sh"
     chmod +x "$run_sh"
 
     tmux start-server
-    tmux new-session -d -s worker "$run_sh; tmux wait-for -S worker-exit"
+    tmux new-session -d -s worker "$run_sh"
     exec tmux wait-for worker-exit
   fi
 
