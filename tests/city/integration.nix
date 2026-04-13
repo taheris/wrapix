@@ -87,7 +87,7 @@ let
     # both workers and persistent roles receive --dangerously-skip-permissions.
     case "''${GC_SESSION:-}" in
       worker)
-        # Worker run mode (called via wrapix-agent run → claude -p --dangerously-skip-permissions <prompt>)
+        # Worker run mode — launched inside tmux by provider.sh
         # Verify wx-cswtw: --dangerously-skip-permissions must be passed
         if [[ " $* " == *" --dangerously-skip-permissions "* ]]; then
           echo "AGENT_CHECK: --dangerously-skip-permissions PRESENT"
@@ -104,6 +104,12 @@ let
           echo "AGENT_CHECK: settings.json PRESENT"
         else
           echo "AGENT_CHECK: settings.json MISSING"
+        fi
+        # wx-m5sd6: workers must run inside tmux (not claude -p)
+        if [[ -n "''${TMUX:-}" ]]; then
+          echo "AGENT_CHECK: tmux PRESENT"
+        else
+          echo "AGENT_CHECK: tmux MISSING — worker claude must run inside tmux"
         fi
         git config user.email test@test
         git config user.name test
@@ -634,6 +640,22 @@ let
     }
     subtest "Director slings bead into convergence (from gc home)" sling_bead
 
+    # wx-m5sd6: verify worker container has a live tmux session (process-shape check).
+    # Workers must use tmux like persistent roles — not claude -p which exits immediately.
+    verify_worker_tmux() {
+      local wname
+      wname="$(podman ps --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
+      [ -n "$wname" ] || { echo "FAIL: no running worker container"; return 1; }
+      podman exec "$wname" tmux has-session -t worker 2>/dev/null || {
+        echo "FAIL: worker container $wname has no tmux session 'worker'"
+        echo "Processes in container:"
+        podman exec "$wname" ps aux 2>/dev/null || true
+        return 1
+      }
+    }
+    subtest "Worker container has tmux session (wx-m5sd6)" \
+      poll_until verify_worker_tmux 30
+
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
 
@@ -683,8 +705,14 @@ let
         grep "AGENT_CHECK" "$logf" || true
         return 1
       }
+      # wx-m5sd6: worker claude must run inside tmux, not via claude -p
+      grep -q "AGENT_CHECK: tmux PRESENT" "$logf" || {
+        echo "FAIL: worker claude not running inside tmux (wx-m5sd6)"
+        grep "AGENT_CHECK" "$logf" || true
+        return 1
+      }
     }
-    subtest "Worker claude has --dangerously-skip-permissions and config (wx-cswtw)" verify_worker_agent_setup
+    subtest "Worker claude has --dangerously-skip-permissions, config, and tmux (wx-cswtw, wx-m5sd6)" verify_worker_agent_setup
 
     subtest "Wait for judge approval" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 30
