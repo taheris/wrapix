@@ -245,7 +245,7 @@ persistent_exec() {
 }
 
 # ---------------------------------------------------------------------------
-# Ephemeral worker helpers — task command, no tmux
+# Ephemeral worker helpers — task via tmux (wx-m5sd6)
 # ---------------------------------------------------------------------------
 
 worker_start() {
@@ -317,6 +317,7 @@ worker_start() {
     -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     -e "WRAPIX_SYSTEM_PROMPT_FILE=/workspace/.role-prompt" \
+    -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 

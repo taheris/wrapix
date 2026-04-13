@@ -58,14 +58,14 @@ build_prompt() {
 
 claude_run() {
   # Provision claude config when running inside a city container.
-  # Persistent roles do this in provider.sh's inline init script, but
-  # workers launch wrapix-agent directly on a bare tmpfs $HOME.
   if [[ -n "${WRAPIX_CITY_DIR:-}" ]]; then
     mkdir -p "$HOME/.claude"
     [[ -f /etc/wrapix/claude-config.json ]] && \
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
     [[ -f "${WRAPIX_CITY_DIR}/claude-settings.json" ]] && \
       cp "${WRAPIX_CITY_DIR}/claude-settings.json" "$HOME/.claude/settings.json"
+    [[ -f "${WRAPIX_CITY_DIR}/tmux.conf" ]] && \
+      cp "${WRAPIX_CITY_DIR}/tmux.conf" "$HOME/.tmux.conf"
   fi
 
   local prompt
@@ -74,6 +74,23 @@ claude_run() {
   local -a claude_flags=(-p --dangerously-skip-permissions)
   if [[ -f "${WRAPIX_SYSTEM_PROMPT_FILE:-}" ]]; then
     claude_flags+=(--append-system-prompt-file "${WRAPIX_SYSTEM_PROMPT_FILE}")
+  fi
+
+  # wx-m5sd6: when running in a city, wrap claude in tmux for observability.
+  # Write invocation to a script to avoid quoting issues with tmux commands.
+  if [[ -n "${WRAPIX_CITY_DIR:-}" ]]; then
+    local run_sh="/tmp/.wrapix-run.sh"
+    {
+      printf '#!/usr/bin/env bash\n'
+      printf 'claude'
+      for arg in "${claude_flags[@]}"; do printf ' %q' "$arg"; done
+      printf ' %q\n' "$prompt"
+    } > "$run_sh"
+    chmod +x "$run_sh"
+
+    tmux start-server
+    tmux new-session -d -s worker "$run_sh; tmux wait-for -S worker-exit"
+    exec tmux wait-for worker-exit
   fi
 
   if [[ -n "${WRAPIX_OUTPUT_FILE:-}" ]]; then

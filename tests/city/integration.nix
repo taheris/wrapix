@@ -87,29 +87,32 @@ let
     # both workers and persistent roles receive --dangerously-skip-permissions.
     case "''${GC_SESSION:-}" in
       worker)
-        # Worker run mode — launched inside tmux by provider.sh
+        # Worker run mode — launched inside tmux by agent.sh
+        # Write checks to log file — tmux captures stdout away from podman logs.
+        _log=/workspace/mock-claude-worker.log
+        _check() { echo "$1"; echo "$1" >> "$_log"; }
         # Verify wx-cswtw: --dangerously-skip-permissions must be passed
         if [[ " $* " == *" --dangerously-skip-permissions "* ]]; then
-          echo "AGENT_CHECK: --dangerously-skip-permissions PRESENT"
+          _check "AGENT_CHECK: --dangerously-skip-permissions PRESENT"
         else
-          echo "AGENT_CHECK: --dangerously-skip-permissions MISSING"
+          _check "AGENT_CHECK: --dangerously-skip-permissions MISSING"
         fi
         # Verify wx-cswtw: claude config must be provisioned before run
         if [[ -f "$HOME/.claude.json" ]]; then
-          echo "AGENT_CHECK: claude.json PRESENT"
+          _check "AGENT_CHECK: claude.json PRESENT"
         else
-          echo "AGENT_CHECK: claude.json MISSING"
+          _check "AGENT_CHECK: claude.json MISSING"
         fi
         if [[ -f "$HOME/.claude/settings.json" ]]; then
-          echo "AGENT_CHECK: settings.json PRESENT"
+          _check "AGENT_CHECK: settings.json PRESENT"
         else
-          echo "AGENT_CHECK: settings.json MISSING"
+          _check "AGENT_CHECK: settings.json MISSING"
         fi
         # wx-m5sd6: workers must run inside tmux (not claude -p)
         if [[ -n "''${TMUX:-}" ]]; then
-          echo "AGENT_CHECK: tmux PRESENT"
+          _check "AGENT_CHECK: tmux PRESENT"
         else
-          echo "AGENT_CHECK: tmux MISSING — worker claude must run inside tmux"
+          _check "AGENT_CHECK: tmux MISSING — worker claude must run inside tmux"
         fi
         git config user.email test@test
         git config user.name test
@@ -640,34 +643,15 @@ let
     }
     subtest "Director slings bead into convergence (from gc home)" sling_bead
 
-    # wx-m5sd6: verify worker container has a live tmux session (process-shape check).
-    # Workers must use tmux like persistent roles — not claude -p which exits immediately.
-    verify_worker_tmux() {
-      local wname
-      wname="$(podman ps --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
-      [ -n "$wname" ] || { echo "FAIL: no running worker container"; return 1; }
-      podman exec "$wname" tmux has-session -t worker 2>/dev/null || {
-        echo "FAIL: worker container $wname has no tmux session 'worker'"
-        echo "Processes in container:"
-        podman exec "$wname" ps aux 2>/dev/null || true
-        return 1
-      }
-    }
-    subtest "Worker container has tmux session (wx-m5sd6)" \
-      poll_until verify_worker_tmux 30
-
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
 
     # wx-cswtw: verify worker's claude invocation had permissions flag and config
     verify_worker_agent_setup() {
-      # The mock writes to .beads/ if writable, else /tmp/ inside the
-      # container. Workers mount .beads as a staging dir (may be rw or ro
-      # depending on setup). Try the host-visible path first, then copy
-      # from the (possibly stopped) worker container.
+      # The mock writes to /workspace/mock-claude-worker.log (the worktree
+      # mount). Try host-visible paths first, then podman cp as fallback.
       local logf=""
-      # Host-visible: mock wrote to the beads-staging mount
-      for f in "$WS"/.beads/mock-claude-worker.log "$WS"/.wrapix/worktree/gc-*/.beads/mock-claude-worker.log; do
+      for f in "$WS"/.wrapix/worktree/gc-*/mock-claude-worker.log "$WS"/.beads/mock-claude-worker.log "$WS"/.wrapix/worktree/gc-*/.beads/mock-claude-worker.log; do
         [ -f "$f" ] && logf="$f" && break
       done
       if [ -z "$logf" ]; then
