@@ -446,14 +446,16 @@ let
       # Shell hook: copies config and exports env vars for provider
       shellHook = ''
         ${ralphInstance.shellHook}
-        export GC_CITY_NAME="${name}"
-        export GC_WORKSPACE="$(pwd)"
-        export GC_AGENT_IMAGE="${imageName}"
-        export GC_PODMAN_NETWORK="${networkName}"
-        export GC_COOLDOWN="${cooldown}"
-        export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
-        ${secretFlagsExport}
 
+        export GC_AGENT_IMAGE="${imageName}"
+        export GC_BEADS_DOLT_CONTAINER="$(beads-dolt name "$(pwd)")"
+        export GC_CITY_NAME="${name}"
+        export GC_COOLDOWN="${cooldown}"
+        export GC_PODMAN_NETWORK="${networkName}"
+        export GC_WORKSPACE="$(pwd)"
+        export SCOUT_MAX_BEADS="${toString scoutMaxBeads}"
+
+        ${secretFlagsExport}
         ${loadImageSnippet}
 
         # Stage city-config; provider.sh re-stages on role start for drift.
@@ -464,7 +466,6 @@ let
         chmod -R u+w "$_city_stage_tmp"
         rm -rf .wrapix/city/current
         mv -T "$_city_stage_tmp" .wrapix/city/current
-
         cp -f --remove-destination .wrapix/city/current/city.toml city.toml
 
         ${stageGcLayout}

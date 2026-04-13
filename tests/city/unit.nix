@@ -760,6 +760,10 @@ in
           || { echo "FAIL: task file not mounted"; exit 1; }
         echo "  PASS: task file mounted"
 
+        grep -q "\.wrapix:/workspace/.wrapix" "$TMPDIR/podman.log" \
+          || { echo "FAIL: .wrapix not mounted in worker"; exit 1; }
+        echo "  PASS: .wrapix mounted in worker"
+
         rm -rf "$TMPDIR"
         echo "PASS: provider worker lifecycle works"
         mkdir $out
@@ -1018,6 +1022,83 @@ in
 
         rm -rf "$TMPDIR"
         echo "PASS: provider.sh -> gc -> bd env chain is intact"
+        mkdir $out
+      '';
+
+  # ---------------------------------------------------------------------------
+  # Env coverage: provider.sh check-env against shellHook and entrypoint
+  #
+  # provider.sh declares REQUIRED_ENV — the canonical list of env vars needed
+  # for container start. The check-env method validates them at runtime.
+  #
+  # This test calls check-env with only the vars each entry path provides,
+  # exercising the live validation code. Adding a var to REQUIRED_ENV without
+  # adding it to shellHook or entrypoint fails the test automatically.
+  # ---------------------------------------------------------------------------
+  city-env-parity =
+    let
+      shellHookNix = readFile ../../lib/city/default.nix;
+      entrypointSrc = readFile ../../lib/city/entrypoint.sh;
+    in
+    runCommandLocal "city-env-parity"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.gnugrep
+          pkgs.coreutils
+        ];
+      }
+      ''
+        set -euo pipefail
+        PROVIDER="${../../lib/city/provider.sh}"
+
+        # Extract exported var names from each source.
+        # Catches both "export VAR=val" and bare "export VAR".
+        grep -oP '(?<=export )[A-Z_]+' <<'SHELLHOOK' | sort -u > "$TMPDIR/shellhook.vars"
+        ${shellHookNix}
+        SHELLHOOK
+
+        grep -oP '(?<=export )[A-Z_]+' <<'ENTRYPOINT' | sort -u > "$TMPDIR/entrypoint.vars"
+        ${entrypointSrc}
+        ENTRYPOINT
+
+        # Build an env with placeholder values for each exported var, then
+        # run check-env. If provider.sh requires a var that neither source
+        # exports, check-env prints MISSING and exits non-zero.
+
+        # shellHook path — must cover all REQUIRED_ENV on its own
+        env_args=""
+        while IFS= read -r var; do
+          env_args+=" $var=placeholder"
+        done < "$TMPDIR/shellhook.vars"
+
+        BASH="$(command -v bash)"
+        if ! env -i PATH="$(dirname "$BASH")" $env_args "$BASH" "$PROVIDER" check-env _ 2>"$TMPDIR/shellhook.err"; then
+          echo "FAIL: shellHook env does not satisfy provider.sh REQUIRED_ENV:"
+          cat "$TMPDIR/shellhook.err"
+          exit 1
+        fi
+        echo "  PASS: shellHook covers all REQUIRED_ENV"
+
+        # entrypoint path — entrypoint + NixOS module vars must cover all.
+        # NixOS module provides these (not exported by entrypoint.sh itself):
+        nixos_vars="GC_CITY_NAME GC_WORKSPACE GC_PODMAN_NETWORK GC_AGENT_IMAGE"
+        env_args=""
+        while IFS= read -r var; do
+          env_args+=" $var=placeholder"
+        done < "$TMPDIR/entrypoint.vars"
+        for var in $nixos_vars; do
+          env_args+=" $var=placeholder"
+        done
+
+        if ! env -i PATH="$(dirname "$BASH")" $env_args "$BASH" "$PROVIDER" check-env _ 2>"$TMPDIR/entrypoint.err"; then
+          echo "FAIL: entrypoint + NixOS module env does not satisfy provider.sh REQUIRED_ENV:"
+          cat "$TMPDIR/entrypoint.err"
+          exit 1
+        fi
+        echo "  PASS: entrypoint + NixOS module covers all REQUIRED_ENV"
+
+        echo "PASS: provider.sh check-env passes for both entry paths"
         mkdir $out
       '';
 

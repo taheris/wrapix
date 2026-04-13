@@ -23,6 +23,35 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# Environment contract
+#
+# Every variable listed here is required for container start (persistent or
+# worker). The check-env method validates them — called by unit tests against
+# both the shellHook and entrypoint env sets. Add new requirements here, not
+# as ad-hoc ${VAR:?} scattered through the code.
+# ---------------------------------------------------------------------------
+
+REQUIRED_ENV=(
+  GC_CITY_NAME
+  GC_WORKSPACE
+  GC_AGENT_IMAGE
+  GC_PODMAN_NETWORK
+  GC_BEADS_DOLT_CONTAINER
+  BEADS_DOLT_SERVER_PORT
+)
+
+check_env() {
+  local fail=0
+  for var in "${REQUIRED_ENV[@]}"; do
+    if [[ -z "${!var:-}" ]]; then
+      echo "MISSING: $var" >&2
+      fail=1
+    fi
+  done
+  return "$fail"
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -270,6 +299,7 @@ worker_start() {
     $(resource_flags worker) \
     -v "${GC_WORKSPACE}/${worktree_path}:/workspace:rw" \
     -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
+    -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:ro" \
     -v "${beads_staging}:/workspace/.beads" \
     -v "${task_file}:/workspace/.task:ro" \
     ${GC_SECRET_FLAGS:-} \
@@ -307,6 +337,7 @@ worker_start() {
 case "$METHOD" in
 
   start)
+    check_env
     # Extract agent_template and issue from gc's start JSON and export for
     # sub-calls. agent_template is used by is_worker() fallback detection
     # (wx-aqe4z); issue carries the bead ID from worker formulas (wx-fsqcz).
@@ -489,6 +520,10 @@ case "$METHOD" in
 
   capabilities)
     echo "{}"
+    ;;
+
+  check-env)
+    check_env
     ;;
 
   *)
