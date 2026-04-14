@@ -435,7 +435,7 @@ let
     subtest "Load test container image" \
       sh -c '${
         if isDarwin then "cat ${testImage}" else "${testImage}"
-      } | podman load && podman tag "localhost/wrapix-${liveCity.sandbox.profile.name}:latest" "${liveCity.imageName}" 2>/dev/null || true'
+      } | podman load && podman tag "localhost/wrapix-${liveCity.sandbox.profile.name}:latest" "${liveCity.imageName}"'
 
     WS=$(mktemp -d -t citytest-XXXXXX)
     # Resolve symlinks (macOS /tmp -> /private/tmp) so podman VM can mount paths
@@ -566,7 +566,9 @@ let
         sleep 0.2
       done
 
-      sleep 3
+      # Wait for gc daemon to create controller socket (readiness signal)
+      # or die (crash detection). Replaces a fixed sleep — deterministic.
+      poll_until 'test -S "$WS/.gc/home/.gc/controller.sock" || ! kill -0 "$GC_PID" 2>/dev/null' 15
       if ! kill -0 "$GC_PID" 2>/dev/null; then
         echo "gc daemon died:"
         tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/  /' || true
@@ -649,20 +651,18 @@ let
     # Shared tmux socket: gc session nudge from host via provider.sh → shared socket
     verify_gc_nudge_via_socket() {
       GC_CITY="$WS/.gc/home" gc session nudge --delivery=immediate scout "host-nudge-test"
-      sleep 1
-      tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "host-nudge-test"
+      poll_until 'tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "host-nudge-test"' 10
     }
     subtest "gc session nudge uses shared tmux socket from host" verify_gc_nudge_via_socket
 
-    # Cross-container: mayor calls gc session nudge from inside its container
-    # Uses default delivery (wait-idle) — the production path that acquires
-    # .gc/nudges/state.lock.  --delivery=immediate bypasses the queue and
-    # would not catch a read-only .gc mount (wx-9gm3t).
+    # Cross-container: mayor calls gc session nudge from inside its container.
+    # Uses --delivery=immediate so the nudge is sent directly via the shared
+    # tmux socket — this tests the cross-container socket path.  .gc writability
+    # (lock file for wait-idle) is covered by verify_gc_writable_* below.
     verify_cross_container_gc_nudge() {
       podman exec gc-test-city-mayor \
-        gc session nudge scout "cross-container-nudge-test"
-      sleep 2
-      tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "cross-container-nudge-test"
+        gc session nudge --delivery=immediate scout "cross-container-nudge-test"
+      poll_until 'tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "cross-container-nudge-test"' 10
     }
     subtest "gc session nudge works from inside mayor container" verify_cross_container_gc_nudge
 
@@ -1229,7 +1229,7 @@ let
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
       setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc-gate.log" 2>&1 &
       GC_PID=$!
-      sleep 3
+      poll_until 'test -S "$WS/.gc/home/.gc/controller.sock" || ! kill -0 "$GC_PID" 2>/dev/null' 15
       if ! kill -0 "$GC_PID" 2>/dev/null; then
         echo "gc daemon died before gate tests:"
         tail -40 "$WS/gc-gate.log" 2>/dev/null | sed 's/^/  /' || true
@@ -1769,18 +1769,9 @@ let
         fi
         sleep 0.5
       done
-      sleep 2
 
-      # Verify the stale container was killed
-      local stale_running
-      stale_running="$(podman inspect --format '{{.State.Running}}' gc-test-city-stale-scout 2>/dev/null || echo "gone")"
-      if [[ "$stale_running" == "true" ]]; then
-        echo "FAIL: stale container still running after entrypoint"
-        echo "Entrypoint log:"
-        cat "$WS/drift.log" | sed 's/^/  /'
-        kill -TERM -"$DRIFT_PID" 2>/dev/null || true
-        return 1
-      fi
+      # Poll until the stale container is stopped (rather than sleeping a fixed interval)
+      poll_until '! podman inspect --format "{{.State.Running}}" gc-test-city-stale-scout 2>/dev/null | grep -q true' 15
       echo "  PASS: stale container killed"
 
       # Verify the entrypoint logged the drift
