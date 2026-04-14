@@ -2,11 +2,6 @@
 { pkgs }:
 
 let
-  knownHosts = import ../known-hosts.nix { inherit pkgs; };
-  paths = import ../../util/path.nix { };
-  shellLib = import ../../util/shell.nix { };
-  imageTagLib = import ../../util/image-tag.nix { };
-
   inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
   inherit (pkgs) writeShellScriptBin writeTextDir;
@@ -17,6 +12,12 @@ let
     mkDeployKeyExpr
     stageBeads
     ;
+
+  imageTagLib = import ../../util/image-tag.nix { };
+  knownHosts = import ../known-hosts.nix { inherit pkgs; };
+  paths = import ../../util/path.nix { };
+  shellLib = import ../../util/shell.nix { };
+  sshConfig = import ../../util/ssh.nix;
 
   promptDir = writeTextDir "wrapix-prompt" (readFile ../prompt.txt);
 
@@ -184,16 +185,14 @@ in
             # Add SSH known_hosts and system prompt (directories from Nix store)
             # Note: prompt mounted to /etc/wrapix-prompts (not /etc/wrapix) to preserve
             # claude-config.json and claude-settings.json baked into /etc/wrapix by image.nix
-            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:/home/wrapix/.ssh/known_hosts_dir"
+            MOUNT_ARGS="$MOUNT_ARGS -v ${knownHosts}:${sshConfig.knownHostsDirTarget}"
             MOUNT_ARGS="$MOUNT_ARGS -v ${promptDir}:/etc/wrapix-prompts"
 
             # Notifications use TCP to gateway (port 5959) instead of mounted Unix socket
             # VirtioFS cannot pass Unix socket operations, so the container client
             # connects to the host daemon via TCP (WRAPIX_NOTIFY_TCP=1 set below)
 
-            # Add deploy key and signing key: stage only specific key files to temp dir
-            # This isolates the container from seeing other projects' deploy keys
-            # (aligned with Linux behavior which mounts only specific key files)
+            # Add deploy key and signing key (not under ~/.ssh/ — see lib/util/ssh.nix)
             DEPLOY_KEY_NAME=${deployKeyExpr}
             DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
             SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
@@ -205,13 +204,13 @@ in
               [ -f "$SIGNING_KEY" ] && cp "$SIGNING_KEY" "$DEPLOY_STAGING/$DEPLOY_KEY_NAME-signing"
               MOUNT_ARGS="$MOUNT_ARGS -v $DEPLOY_STAGING:/mnt/wrapix/deploy_keys"
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
-              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
-              DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME:${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME"
+              DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME"
             fi
             if [ -f "$SIGNING_KEY" ]; then
               [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
-              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME-signing:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
-              DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+              FILE_MOUNTS="$FILE_MOUNTS/mnt/wrapix/deploy_keys/$DEPLOY_KEY_NAME-signing:${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME-signing"
+              DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME-signing"
             fi
 
             ${stageBeads}

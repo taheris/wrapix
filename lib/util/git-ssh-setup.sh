@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Git/SSH setup shared between sandbox entrypoint and city provider.
+# Git/SSH setup shared across all sandbox containers and city agents.
 #
 # Sourced (not executed). Caller is responsible for `set -euo pipefail`
 # semantics. Reads:

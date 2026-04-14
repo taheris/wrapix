@@ -24,6 +24,7 @@
 
 let
   inherit (pkgs.lib) concatStringsSep mapAttrsToList optionalString;
+  sshConfig = import ../util/ssh.nix;
 
   notifyClient = import ../notify/client.nix { inherit pkgs; };
   ralph = import ../ralph { inherit pkgs; };
@@ -125,7 +126,7 @@ buildImage {
     cp ${entrypointSh} entrypoint.sh
     chmod +x entrypoint.sh
 
-    cp ${./linux/git-ssh-setup.sh} git-ssh-setup.sh
+    cp ${sshConfig.gitSshSetup} git-ssh-setup.sh
     chmod 0644 git-ssh-setup.sh
 
     ${pkgs.lib.optionalString krunSupport ''

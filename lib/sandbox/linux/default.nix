@@ -2,11 +2,6 @@
 { pkgs }:
 
 let
-  knownHosts = import ../known-hosts.nix { inherit pkgs; };
-  paths = import ../../util/path.nix { };
-  shellLib = import ../../util/shell.nix { };
-  imageTagLib = import ../../util/image-tag.nix { };
-
   inherit (builtins) readFile;
   inherit (paths) mkMountSpecs;
   inherit (pkgs) writeShellApplication writeText;
@@ -17,6 +12,12 @@ let
     mkDeployKeyExpr
     stageBeads
     ;
+
+  imageTagLib = import ../../util/image-tag.nix { };
+  knownHosts = import ../known-hosts.nix { inherit pkgs; };
+  paths = import ../../util/path.nix { };
+  shellLib = import ../../util/shell.nix { };
+  sshConfig = import ../../util/ssh.nix;
 
   prompt = writeText "wrapix-prompt" (readFile ../prompt.txt);
 
@@ -127,8 +128,9 @@ in
         }}
         MOUNTS
 
-        # Mount SSH known_hosts file directly and system prompt
-        VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:/home/wrapix/.ssh/known_hosts:ro"
+        # Mount SSH known_hosts as system-wide file (not under ~/.ssh/ —
+        # podman auto-creates parent dirs owned by root on the tmpfs home)
+        VOLUME_ARGS="$VOLUME_ARGS -v ${knownHosts}/known_hosts:${sshConfig.knownHostsTarget}:ro"
         VOLUME_ARGS="$VOLUME_ARGS -v ${prompt}:/etc/wrapix-prompt:ro"
 
         # Mount notification socket directory if daemon is running
@@ -142,19 +144,18 @@ in
           echo "      Run 'nix run .#wrapix-notifyd' on host for desktop notifications" >&2
         fi
 
-        # Mount deploy key and signing key for this repo (see scripts/setup-deploy-key)
+        # Mount deploy key and signing key (not under ~/.ssh/ — see lib/util/ssh.nix)
         DEPLOY_KEY_NAME=${deployKeyExpr}
         DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
         SIGNING_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
         DEPLOY_KEY_ARGS=""
         if [ -f "$DEPLOY_KEY" ]; then
-          VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME:ro"
-          # Pass deploy key path to entrypoint for SSH config setup
-          DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
+          VOLUME_ARGS="$VOLUME_ARGS -v $DEPLOY_KEY:${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME:ro"
+          DEPLOY_KEY_ARGS="-e WRAPIX_DEPLOY_KEY=${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME"
         fi
         if [ -f "$SIGNING_KEY" ]; then
-          VOLUME_ARGS="$VOLUME_ARGS -v $SIGNING_KEY:/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing:ro"
-          DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=/home/wrapix/.ssh/deploy_keys/$DEPLOY_KEY_NAME-signing"
+          VOLUME_ARGS="$VOLUME_ARGS -v $SIGNING_KEY:${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME-signing:ro"
+          DEPLOY_KEY_ARGS="$DEPLOY_KEY_ARGS -e WRAPIX_SIGNING_KEY=${sshConfig.containerKeyDir}/$DEPLOY_KEY_NAME-signing"
         fi
 
         ${stageBeads}

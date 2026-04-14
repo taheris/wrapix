@@ -434,7 +434,7 @@ in
       }
       ''
         set -euo pipefail
-        FRAGMENT="${../../lib/sandbox/linux/git-ssh-setup.sh}"
+        FRAGMENT="${../../lib/util/git-ssh-setup.sh}"
 
         TMPDIR=$(mktemp -d)
         export HOME="$TMPDIR/home"

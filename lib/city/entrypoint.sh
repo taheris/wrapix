@@ -47,7 +47,9 @@ export GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER"
 
 # Pull latest beads state before the city starts writing, so auto-push
 # doesn't hit non-fast-forward errors from a stale local branch.
-bd dolt pull
+if bd dolt remote list 2>/dev/null | grep -q origin; then
+  bd dolt pull
+fi
 
 # Register beads custom types that gc uses internally (session, convergence, etc.).
 # Without this, gc operations fail with "invalid issue type" (wx-i7t1q).

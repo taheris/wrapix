@@ -90,51 +90,15 @@ if [ -n "${WRAPIX_SOCK_MOUNTS:-}" ]; then
     done
 fi
 
-# Set up SSH configuration
-# Note: known_hosts directory is bind-mounted from Nix store (VirtioFS only supports dirs)
-mkdir -p "$HOME/.ssh"
-KNOWN_HOSTS_SRC="$HOME/.ssh/known_hosts_dir/known_hosts"
-[ -f "$KNOWN_HOSTS_SRC" ] && cp "$KNOWN_HOSTS_SRC" "$HOME/.ssh/known_hosts"
-
-# Configure SSH to use deploy key if available (copied by WRAPIX_FILE_MOUNTS above)
-WRAPIX_DEPLOY_KEY="${WRAPIX_DEPLOY_KEY:-}"
-if [ -n "${WRAPIX_DEPLOY_KEY:-}" ] && [ -f "$WRAPIX_DEPLOY_KEY" ]; then
-  cat > "$HOME/.ssh/config" <<EOF
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile $WRAPIX_DEPLOY_KEY
-    IdentitiesOnly yes
-EOF
-  chmod 600 "$HOME/.ssh/config"
+# Copy known_hosts from mounted directory (VirtioFS only supports dirs, not files)
+KNOWN_HOSTS_SRC="/etc/wrapix/known_hosts_dir/known_hosts"
+if [ -f "$KNOWN_HOSTS_SRC" ]; then
+  cp "$KNOWN_HOSTS_SRC" /etc/ssh/ssh_known_hosts
 fi
 
-# Configure git SSH signing using separate signing key
-# (GitHub doesn't allow same key for deploy and signing)
-WRAPIX_SIGNING_KEY="${WRAPIX_SIGNING_KEY:-}"
-if [ -n "${WRAPIX_SIGNING_KEY:-}" ] && [ -f "$WRAPIX_SIGNING_KEY" ]; then
-  git config --global gpg.format ssh
-  git config --global user.signingkey "$WRAPIX_SIGNING_KEY"
-
-  # Create allowed_signers for signature verification
-  # Write temp file to writable location (signing key dir may be read-only mount)
-  mkdir -p "$HOME/.config/git"
-  PUBKEY_TMP="$HOME/.config/git/signing_key.pub.tmp"
-  if ssh-keygen -y -f "$WRAPIX_SIGNING_KEY" > "$PUBKEY_TMP" 2>/dev/null; then
-    echo "${GIT_AUTHOR_EMAIL:-sandbox@wrapix.dev} $(cat "$PUBKEY_TMP")" > "$HOME/.config/git/allowed_signers"
-    rm "$PUBKEY_TMP"
-    git config --global gpg.ssh.allowedSignersFile "$HOME/.config/git/allowed_signers"
-  fi
-
-  # Enable auto-signing by default when signing key is configured
-  # Set WRAPIX_GIT_SIGN=0 to disable
-  if [ "${WRAPIX_GIT_SIGN:-1}" != "0" ]; then
-    git config --global commit.gpgsign true
-  fi
-fi
-
-# Fix permissions
-chmod 700 "$HOME/.ssh"
+# Git/SSH setup — shared with Linux entrypoint and city provider
+# shellcheck source=/dev/null
+. /git-ssh-setup.sh
 
 cd /workspace
 
