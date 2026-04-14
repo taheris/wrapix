@@ -244,7 +244,7 @@ in
     assert judgeMinSessions == 0;
     assert fullWorkerMaxSessions == 2; # full city has workers=2
     assert allHavePromptTemplate;
-    assert fullWorkerSessions == 2;
+    assert fullWorkerSessions == 5; # workers(2) + 3 named sessions (wx-kw4gg)
     # scoutConfig reflects configured values
     assert minimalScoutConfig.maxBeads == 10;
     assert minimalScoutConfig.interval == "5m";

@@ -248,7 +248,11 @@ let
           # built-in claude provider which manages sessions via HOST tmux,
           # conflicting with the exec session provider. Agent invocation is
           # handled by wrapix-agent inside containers. (wx-entt5)
-          max_active_sessions = workers;
+          #
+          # Named sessions (mayor, scout, judge) count against the global
+          # cap even when suspended/asleep, so add 3 to avoid starving
+          # workers. (wx-kw4gg)
+          max_active_sessions = workers + 3;
         };
 
         session = {

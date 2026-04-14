@@ -193,6 +193,7 @@ persistent_start() {
 
   # shellcheck disable=SC2046,SC2086
   podman run -d \
+    --pull=never \
     --replace \
     --name "$name" \
     --entrypoint "" \
@@ -320,6 +321,7 @@ worker_start() {
 
   # shellcheck disable=SC2046,SC2086
   podman run -d \
+    --pull=never \
     --replace \
     --name "$name" \
     --entrypoint "" \
@@ -434,9 +436,20 @@ case "$METHOD" in
     name="$(container_name)"
     running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
     if [[ "$running" != "true" ]]; then
-      _gc_sock="$(tmux_sock "$(role_name)")"
-      if [[ -S "$_gc_sock" ]] && tmux -S "$_gc_sock" list-sessions &>/dev/null; then
-        running="true"
+      if is_worker; then
+        # Workers are ephemeral — exit 0 means the task completed, not a
+        # crash. Report "true" so gc doesn't treat it as "died during
+        # startup" and retry in a loop. The background monitor handles
+        # post-completion (collect, gate, post-gate, bead close).
+        _gc_exit="$(podman inspect --format '{{.State.ExitCode}}' "$name" 2>/dev/null)" || _gc_exit=""
+        if [[ "$_gc_exit" == "0" ]]; then
+          running="true"
+        fi
+      else
+        _gc_sock="$(tmux_sock "$(role_name)")"
+        if [[ -S "$_gc_sock" ]] && tmux -S "$_gc_sock" list-sessions &>/dev/null; then
+          running="true"
+        fi
       fi
     fi
     echo "$running"
