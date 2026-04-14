@@ -106,6 +106,15 @@ role_name() {
   fi
 }
 
+# Shared tmux socket path for a target role.
+# Persistent containers create sockets here so any container (or the host)
+# can reach another role's tmux without podman exec.
+tmux_sock() {
+  local target="${1:-$(role_name)}"
+  local ws="${GC_WORKSPACE:-/workspace}"
+  echo "${ws}/.wrapix/tmux/${target}.sock"
+}
+
 # Stage .beads config files for container-local database isolation.
 # Each container gets its own .beads with just config — no host mount.
 stage_beads() {
@@ -207,7 +216,7 @@ persistent_start() {
     -e "GC_DOLT_PORT=${dolt_port}" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     -e "GC_CITY_NAME=${GC_CITY_NAME}" \
-    -e "GC_SESSION=${SESSION}" \
+    -e "GC_SESSION=exec:/workspace/.gc/scripts/provider.sh" \
     -e "GC_AGENT=${role}" \
     -e "GC_ALIAS=${role}" \
     -e "WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" \
@@ -222,9 +231,11 @@ persistent_start() {
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
       cp "$WRAPIX_CITY_DIR/claude-settings.json" "$HOME/.claude/settings.json"
       cp "$WRAPIX_CITY_DIR/tmux.conf" "$HOME/.tmux.conf"
-      tmux start-server
-      tmux new-session -d -s "$GC_AGENT" "claude --dangerously-skip-permissions"
-      exec tmux wait-for gc-shutdown
+      mkdir -p /workspace/.wrapix/tmux
+      _sock="/workspace/.wrapix/tmux/${GC_AGENT}.sock"
+      tmux -S "$_sock" start-server
+      tmux -S "$_sock" new-session -d -s "$GC_AGENT" "claude --dangerously-skip-permissions"
+      exec tmux -S "$_sock" wait-for gc-shutdown
     '
 
   # Verify the container survived initialization (tmux startup).
@@ -239,9 +250,19 @@ persistent_start() {
 }
 
 persistent_exec() {
-  local name
-  name="$(container_name)"
-  podman exec "$name" "$@"
+  local target sock
+  target="$(role_name)"
+  sock="$(tmux_sock "$target")"
+  if [[ -S "$sock" ]]; then
+    # Direct tmux via shared socket — works from host and inside containers.
+    shift  # drop "tmux" (always the first arg at every call site)
+    tmux -S "$sock" "$@"
+  else
+    # Fallback: podman exec (pre-migration containers without shared sockets).
+    local name
+    name="$(container_name)"
+    podman exec "$name" "$@"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -377,6 +398,7 @@ case "$METHOD" in
     ;;
 
   stop)
+    rm -f "$(tmux_sock "$(role_name)")" 2>/dev/null || true
     name="$(container_name)"
     podman stop "$name" 2>/dev/null || true
     podman rm -f "$name" 2>/dev/null || true
@@ -393,6 +415,12 @@ case "$METHOD" in
   is-running)
     name="$(container_name)"
     running="$(podman inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")"
+    if [[ "$running" != "true" ]]; then
+      _gc_sock="$(tmux_sock "$(role_name)")"
+      if [[ -S "$_gc_sock" ]] && tmux -S "$_gc_sock" list-sessions &>/dev/null; then
+        running="true"
+      fi
+    fi
     echo "$running"
     ;;
 
@@ -400,8 +428,13 @@ case "$METHOD" in
     if is_worker; then
       : # no-op
     else
-      name="$(container_name)"
-      podman exec -it "$name" tmux attach -t "$(role_name)"
+      _gc_sock="$(tmux_sock "$(role_name)")"
+      if [[ -S "$_gc_sock" ]]; then
+        tmux -S "$_gc_sock" attach -t "$(role_name)"
+      else
+        name="$(container_name)"
+        podman exec -it "$name" tmux attach -t "$(role_name)"
+      fi
       # Restore terminal state after detach (cursor, alternate screen)
       printf '\033[?25h\033[?1049l' 2>/dev/null
       stty sane 2>/dev/null || true

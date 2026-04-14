@@ -45,6 +45,10 @@ export BEADS_DOLT_AUTO_START=0
 export GC_DOLT_PORT="$DOLT_PORT"
 export GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER"
 
+# Pull latest beads state before the city starts writing, so auto-push
+# doesn't hit non-fast-forward errors from a stale local branch.
+bd dolt pull
+
 # Register beads custom types that gc uses internally (session, convergence, etc.).
 # Without this, gc operations fail with "invalid issue type" (wx-i7t1q).
 bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"

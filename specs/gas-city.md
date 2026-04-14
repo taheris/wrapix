@@ -63,13 +63,16 @@ ops pipeline with good defaults and minimal configuration.
 **Dual-mode gc:**
 
 - **Host-side gc**: direct provider access via podman (unchanged)
-- **Container-side gc**: when `GC_AGENT` is set, gc routes read-only
-  commands (status, session list) through the controller unix socket
-  (already mounted at `.gc/controller.sock`) and write operations
-  (nudge, lifecycle) through mail to the controller
-- Containers cannot escape their sandbox — no podman socket, no provider
-  access. Mail is the cross-boundary mutation API; the controller socket
-  is the read-only query API
+- **Container-side gc**: persistent role containers set
+  `GC_SESSION=exec:/workspace/.gc/scripts/provider.sh`, which tells gc
+  to use the exec provider directly. The provider's tmux methods work
+  cross-container because tmux sockets live on the shared `.wrapix/tmux/`
+  mount (see Shared Tmux Sockets). Read-only commands (status, session
+  list) still go through the controller unix socket. No upstream gc
+  changes required.
+- Workers use `GC_SESSION=worker` (falls through to gc's built-in tmux
+  provider) since they run their own local tmux and don't participate in
+  cross-container communication
 
 - Dolt is provided by `beads-dolt`, a separate per-workspace container
   managed by `lib/beads` and shared between host-side `bd` and the city.
@@ -432,8 +435,10 @@ services.wrapix.cities.myapp = {
 
 Shell script implementing Gas City's `exec:<script>` provider pattern.
 The script receives a command and arguments, translates to podman operations.
-This is the **host-side** interface only — container-side gc never calls the
-provider.
+Both host-side and container-side gc call the provider — container-side gc
+sets `GC_SESSION=exec:<script>` so gc resolves to the exec provider, and
+shared tmux sockets allow the provider's tmux methods to work cross-container
+without podman (see Shared Tmux Sockets).
 
 **Container-side gc command routing:**
 
@@ -441,7 +446,9 @@ provider.
 |------------|---------------|-----------|
 | `gc status` | Controller query API | Unix socket (read-only) |
 | `gc session list` | Controller query API | Unix socket (read-only) |
-| `gc session nudge` | Mail to controller | `gc mail send --to controller -s "nudge"` |
+| `gc session nudge` | Exec provider | Shared tmux socket (direct) |
+| `gc session peek` | Exec provider | Shared tmux socket (direct) |
+| `gc session send-keys` | Exec provider | Shared tmux socket (direct) |
 | `gc agent start/stop` | Mail to controller | Intent-based, controller executes with provider |
 | `gc mail send/check` | Direct (beads-based) | Already works, no provider dependency |
 | `gc sling` | Direct (beads-based) | Already works, no provider dependency |
@@ -451,16 +458,16 @@ provider.
 
 | gc method | Provider action |
 |-----------|----------------|
-| `Start` | `podman run -d` with tmux as PID 1 |
-| `Stop` | `podman stop && podman rm` |
-| `Interrupt` | `podman exec tmux send-keys C-c` |
-| `IsRunning` | `podman inspect --format '{{.State.Running}}'` |
-| `Attach` | `podman exec -it tmux attach` |
-| `Peek` | `podman exec tmux capture-pane` |
-| `SendKeys` | `podman exec tmux send-keys` |
-| `Nudge` | Wait for idle + `podman exec tmux send-keys` |
-| `GetLastActivity` | `podman exec tmux display -p '#{pane_last_activity}'` |
-| `ClearScrollback` | `podman exec tmux clear-history` |
+| `Start` | `podman run -d` with tmux as PID 1, socket at `.wrapix/tmux/<role>.sock` |
+| `Stop` | Remove shared socket + `podman stop && podman rm` |
+| `Interrupt` | `tmux -S <socket> send-keys C-c` (falls back to `podman exec` if no socket) |
+| `IsRunning` | Check shared socket liveness, fall back to `podman inspect` |
+| `Attach` | `tmux -S <socket> attach` (falls back to `podman exec -it tmux attach`) |
+| `Peek` | `tmux -S <socket> capture-pane` |
+| `SendKeys` | `tmux -S <socket> send-keys` |
+| `Nudge` | Wait for idle + `tmux -S <socket> send-keys` |
+| `GetLastActivity` | `tmux -S <socket> display -p '#{pane_last_activity}'` |
+| `ClearScrollback` | `tmux -S <socket> clear-history` |
 | `IsAttached` | Return false (not tracked in v1) |
 | `RunLive` | No-op (unsupported by exec provider — returns nil without calling script) |
 
@@ -491,14 +498,47 @@ Container labeling convention:
 - `gc-role=mayor|scout|worker|judge`
 - `gc-bead=<bead-id>` (workers only)
 
+### Shared Tmux Sockets
+
+Persistent role containers (mayor, scout, judge) place their tmux server
+sockets on the shared `.wrapix/` mount at `.wrapix/tmux/<role>.sock`.
+This enables cross-container communication without podman:
+
+- **Why**: `podman exec` is not available inside containers. Without
+  shared sockets, container-side `gc session nudge` cannot reach other
+  roles' tmux sessions.
+- **How**: `persistent_start` launches tmux with
+  `tmux -S /workspace/.wrapix/tmux/${GC_AGENT}.sock`. The `persistent_exec`
+  helper checks for the socket first (`tmux -S <socket> ...`), falling
+  back to `podman exec` for pre-migration containers.
+- **gc resolution**: Persistent containers set
+  `GC_SESSION=exec:/workspace/.gc/scripts/provider.sh` so gc uses the
+  exec provider (which calls `provider.sh`) rather than its built-in tmux
+  provider. Without this, gc's internal tmux state cache tries
+  `tmux list-panes -a` on a non-existent default socket and concludes
+  sessions are not running.
+- **Workers**: Keep `GC_SESSION=worker` (gc's built-in tmux provider).
+  Workers run their own local tmux for process lifecycle
+  (`tmux wait-for worker-exit`) and don't participate in cross-container
+  communication.
+- **Permissions**: All containers use `--userns=keep-id`, so socket
+  file permissions work across containers sharing the `.wrapix/` mount.
+- **Cleanup**: `recovery.sh` removes stale sockets for roles whose
+  containers are no longer running. The `stop` method removes the socket
+  before stopping the container.
+
 ### Session Lifecycle
 
 **Persistent roles (mayor, scout, judge):**
 - Started with the city, stopped with the city
-- `podman run -d` with tmux server as PID 1
-- Host-side gc interacts via `podman exec tmux send-keys` / `capture-pane`
-- Container-side agents interact via mail (for nudge/send-keys) and the
-  controller query API (for session list) — never via podman
+- `podman run -d` with tmux server as PID 1, socket on shared
+  `.wrapix/tmux/<role>.sock` mount
+- Both host-side and container-side gc interact via shared tmux sockets
+  (`tmux -S .wrapix/tmux/<role>.sock`). The provider falls back to
+  `podman exec` if no socket exists (pre-migration containers).
+- Container-side agents use `GC_SESSION=exec:<script>` so gc resolves
+  the exec provider and calls `provider.sh nudge/peek/send-keys` which
+  talks to the target's tmux socket directly
 - Human attaches to the mayor via `gc session attach mayor`
 
 **Ephemeral workers:**
@@ -529,6 +569,8 @@ Container labeling convention:
 - Orphaned workers (no matching in-progress bead): stop and remove
 - Workers that finished (commits on branch, bead still open): re-enter convergence
 - Stale worktrees in `.wrapix/worktree/gc-*`: clean up orphans
+- Stale tmux sockets in `.wrapix/tmux/*.sock`: remove sockets for roles
+  whose containers are no longer running
 
 ### Beads Sync
 
@@ -729,15 +771,17 @@ No new commands. Existing tools compose:
 
 **Container-side gc availability:**
 
-When `GC_AGENT` is set, gc auto-detects container context and routes
-commands through the controller socket (reads) or mail (writes). On the
-host (no `GC_AGENT`), gc works as today.
+Persistent role containers set `GC_SESSION=exec:<provider>` so gc uses
+the exec provider directly. Shared tmux sockets enable cross-container
+nudge/peek/send-keys without podman. On the host (no `GC_SESSION`), gc
+discovers the provider from `city.toml`.
 
 | Command | Container support | Mechanism |
 |---------|-------------------|-----------|
 | `gc status` | Yes | Controller query API |
 | `gc session list` | Yes | Controller query API |
-| `gc session nudge` | Yes | Mail to controller |
+| `gc session nudge` | Yes | Exec provider → shared tmux socket |
+| `gc session peek` | Yes | Exec provider → shared tmux socket |
 | `gc mail send/check` | Yes | Direct (beads) |
 | `gc sling` | Yes | Direct (beads) |
 | `gc session attach` | No | Host only (requires TTY) |
@@ -843,6 +887,5 @@ host (no `GC_AGENT`), gc works as today.
 - Token tracking / budget enforcement — rely on backpressure + cooldown
 - Service builds from source — services defined by Nix package
 - Gas City upstream contributions — provider is `exec:` script, not a Go PR.
-  Exception: the container-side client/server split requires upstream
-  changes to the gascity Go binary (controller query API, mail-based
-  mutation handler, GC_AGENT context detection)
+  Container-side gc works via `GC_SESSION=exec:<provider>` and shared tmux
+  sockets — no upstream changes needed

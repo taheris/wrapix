@@ -871,8 +871,8 @@ in
 
         log="$TMPDIR/podman.log"
 
-        grep -q -- "-e GC_SESSION=mayor" "$log" \
-          || { echo "FAIL: GC_SESSION=mayor not set"; cat "$log"; exit 1; }
+        grep -q -- "-e GC_SESSION=exec:/workspace/.gc/scripts/provider.sh" "$log" \
+          || { echo "FAIL: GC_SESSION=exec:provider.sh not set"; cat "$log"; exit 1; }
         grep -q -- "-e GC_AGENT=mayor" "$log" \
           || { echo "FAIL: GC_AGENT=mayor not set"; exit 1; }
         grep -q -- "-e GC_ALIAS=mayor" "$log" \
@@ -890,7 +890,7 @@ in
 
         # tmux session name must be $GC_AGENT (resolved at container runtime,
         # not 'main'). Literal string present in the heredoc.
-        grep -q 'tmux new-session -d -s "\$GC_AGENT"' "$log" \
+        grep -q 'new-session -d -s "\$GC_AGENT"' "$log" \
           || { echo "FAIL: tmux session name not parameterized"; cat "$log"; exit 1; }
         if grep -q 'new-session -d -s "main"' "$log"; then
           echo "FAIL: tmux session still hardcoded to 'main'"
@@ -898,8 +898,149 @@ in
         fi
         echo "  PASS: tmux session named after role"
 
+        # Shared tmux socket: persistent_start must use -S for all tmux
+        # commands so the socket lands on the shared .wrapix/tmux/ mount.
+        grep -q 'mkdir -p /workspace/.wrapix/tmux' "$log" \
+          || { echo "FAIL: tmux socket directory not created"; cat "$log"; exit 1; }
+        grep -q 'tmux -S.*start-server' "$log" \
+          || { echo "FAIL: tmux not started with shared socket"; cat "$log"; exit 1; }
+        grep -q '\.wrapix/tmux' "$log" \
+          || { echo "FAIL: tmux socket not on .wrapix/tmux/"; cat "$log"; exit 1; }
+        echo "  PASS: tmux uses shared socket on .wrapix/tmux/"
+
         rm -rf "$TMPDIR"
         echo "PASS: persistent_start passes renamed env + reads city dir"
+        mkdir $out
+      '';
+
+  # Provider: shared tmux socket — nudge, peek, send-keys, get-last-activity
+  # all work via the shared .wrapix/tmux/ socket when GC_AGENT is set
+  # (container-side path). Uses real tmux servers, no podman needed.
+  city-provider-tmux-socket =
+    runCommandLocal "city-provider-tmux-socket"
+      {
+        nativeBuildInputs = [
+          bash
+          pkgs.tmux
+          pkgs.coreutils
+          pkgs.netcat-gnu
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        SCRIPTS_DIR="$(mktemp -d)"
+        for f in ${minimalCity.scripts}/*; do
+          cp "$f" "$SCRIPTS_DIR/$(basename "$f")"
+        done
+        chmod +x "$SCRIPTS_DIR"/*.sh
+        PROVIDER="$SCRIPTS_DIR/provider.sh"
+
+        WS="$(mktemp -d)"
+        mkdir -p "$WS/.wrapix/tmux"
+
+        # Stub podman — should never be called when socket exists
+        STUB_BIN="$WS/stub-bin"
+        mkdir -p "$STUB_BIN"
+        cat > "$STUB_BIN/podman" << 'STUB'
+        #!/bin/sh
+        echo "FAIL: podman should not be called when socket exists" >&2
+        exit 1
+        STUB
+        chmod +x "$STUB_BIN/podman"
+
+        # Start a real tmux server with a shared socket (simulating scout container)
+        SCOUT_SOCK="$WS/.wrapix/tmux/scout.sock"
+        tmux -S "$SCOUT_SOCK" start-server
+        tmux -S "$SCOUT_SOCK" new-session -d -s scout "cat"
+        sleep 0.5
+
+        cleanup() {
+          tmux -S "$SCOUT_SOCK" kill-server 2>/dev/null || true
+          rm -rf "$WS" "$SCRIPTS_DIR"
+        }
+        trap cleanup EXIT
+
+        # --- Test 1: nudge via shared socket ---
+        echo "test-nudge-message" | \
+          PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$WS" \
+          GC_AGENT=mayor \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" nudge scout
+        sleep 0.5
+
+        pane="$(tmux -S "$SCOUT_SOCK" capture-pane -t scout -p)"
+        echo "$pane" | grep -q "test-nudge-message" \
+          || { echo "FAIL: nudge message not delivered via shared socket"; echo "Pane: $pane"; exit 1; }
+        echo "  PASS: nudge delivered via shared socket"
+
+        # --- Test 2: peek (capture-pane) via shared socket ---
+        output="$(PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$WS" \
+          GC_AGENT=mayor \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" peek scout)"
+        echo "$output" | grep -q "test-nudge-message" \
+          || { echo "FAIL: peek did not return pane content"; echo "Output: $output"; exit 1; }
+        echo "  PASS: peek works via shared socket"
+
+        # --- Test 3: get-last-activity via shared socket ---
+        # In Nix sandbox, pane_last_activity epoch may be 0 (no real clock),
+        # so we accept empty — the test proves the socket path works without error.
+        activity="$(PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$WS" \
+          GC_AGENT=mayor \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" get-last-activity scout)" \
+          || { echo "FAIL: get-last-activity errored via shared socket"; exit 1; }
+        echo "  PASS: get-last-activity works via shared socket (got: ''${activity:-empty})"
+
+        # --- Test 4: send-keys via shared socket ---
+        PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$WS" \
+          GC_AGENT=mayor \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" send-keys scout "send-keys-test" Enter
+        sleep 0.3
+
+        pane="$(tmux -S "$SCOUT_SOCK" capture-pane -t scout -p)"
+        echo "$pane" | grep -q "send-keys-test" \
+          || { echo "FAIL: send-keys not delivered via shared socket"; echo "Pane: $pane"; exit 1; }
+        echo "  PASS: send-keys works via shared socket"
+
+        # --- Test 5: is-running detects live socket ---
+        running="$(PATH="$STUB_BIN:$PATH" \
+          GC_CITY_NAME=test \
+          GC_WORKSPACE="$WS" \
+          GC_AGENT=mayor \
+          GC_AGENT_IMAGE=test:latest \
+          GC_PODMAN_NETWORK=wrapix-test \
+          GC_BEADS_DOLT_CONTAINER=beads-test \
+          BEADS_DOLT_SERVER_PORT=13306 \
+          bash "$PROVIDER" is-running scout)"
+        [[ "$running" == "true" ]] \
+          || { echo "FAIL: is-running should detect live socket (got: $running)"; exit 1; }
+        echo "  PASS: is-running detects live tmux socket"
+
+        echo ""
+        echo "PASS: all provider methods work via shared tmux socket"
         mkdir $out
       '';
 

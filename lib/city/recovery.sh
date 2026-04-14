@@ -233,6 +233,32 @@ cleanup_persistent_containers() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 5: Clean up stale tmux sockets
+#
+# Persistent containers create shared tmux sockets at .wrapix/tmux/<role>.sock
+# so other containers can reach their tmux directly. Remove sockets for roles
+# whose containers are no longer running.
+# ---------------------------------------------------------------------------
+
+cleanup_stale_sockets() {
+  local sock_dir="${WORKSPACE}/.wrapix/tmux"
+  [[ -d "$sock_dir" ]] || return 0
+
+  for sock in "$sock_dir"/*.sock; do
+    [[ -e "$sock" ]] || continue
+    local role
+    role="$(basename "$sock" .sock)"
+    local container="gc-${CITY_NAME}-${role}"
+    local running
+    running="$(podman inspect --format '{{.State.Running}}' "$container" 2>/dev/null)" || running="false"
+    if [[ "$running" != "true" ]]; then
+      echo "recovery: removing stale tmux socket for $role"
+      rm -f "$sock"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -242,5 +268,6 @@ reconcile_workers
 reconcile_finished_workers
 cleanup_stale_worktrees
 cleanup_persistent_containers
+cleanup_stale_sockets
 
 echo "recovery: reconciliation complete"

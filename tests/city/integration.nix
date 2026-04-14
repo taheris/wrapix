@@ -300,16 +300,18 @@ let
         echo "  container $cname (podman logs):"
         podman logs "$cid" 2>&1 | tail -20 | sed 's/^/    /' || true
       done
-      echo "  dolt container logs:"
-      podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 | sed 's/^/    /' || true
-      if [ -n "$WS" ] && [ -d "$WS/.beads/dolt" ]; then
-        echo "  .beads/dolt tree:"
-        find "$WS/.beads/dolt" -maxdepth 4 2>/dev/null | sed 's/^/    /'
-        echo "  files referencing /tmp/:"
-        grep -rl "/tmp/" "$WS/.beads/dolt" 2>/dev/null | while IFS= read -r f; do
-          echo "    $f:"
-          grep -o "/tmp/[A-Za-z0-9_/.-]*" "$f" 2>/dev/null | sort -u | sed 's/^/      /'
-        done
+      if [[ "''${DEBUG:-}" == "1" ]]; then
+        echo "  dolt container logs:"
+        podman logs "$DOLT_CONTAINER" 2>&1 | tail -10 | sed 's/^/    /' || true
+        if [ -n "$WS" ] && [ -d "$WS/.beads/dolt" ]; then
+          echo "  .beads/dolt tree:"
+          find "$WS/.beads/dolt" -maxdepth 4 2>/dev/null | sed 's/^/    /'
+          echo "  files referencing /tmp/:"
+          grep -rl "/tmp/" "$WS/.beads/dolt" 2>/dev/null | while IFS= read -r f; do
+            echo "    $f:"
+            grep -o "/tmp/[A-Za-z0-9_/.-]*" "$f" 2>/dev/null | sort -u | sed 's/^/      /'
+          done
+        fi
       fi
       # Mock claude logs written to host-visible .beads/ dir
       for logf in "$WS"/.beads/mock-claude-*.log; do
@@ -633,11 +635,41 @@ let
       poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30
 
     verify_mayor_tmux() {
-      # The health check in persistent_start already verified this on start,
-      # but confirm the tmux session is reachable from the host via podman exec.
-      poll_until 'podman exec gc-test-city-mayor tmux has-session -t mayor 2>/dev/null' 10
+      # Verify the shared tmux socket was created on .wrapix/tmux/ and the
+      # session is reachable directly (no podman exec needed).
+      poll_until 'test -S "$WS/.wrapix/tmux/mayor.sock"' 10
+      tmux -S "$WS/.wrapix/tmux/mayor.sock" has-session -t mayor 2>/dev/null
     }
     subtest "Verify tmux session alive in mayor container" verify_mayor_tmux
+
+    # Wait for scout to start (needed for nudge tests below)
+    subtest "Wait for scout container to start" \
+      poll_until 'test -S "$WS/.wrapix/tmux/scout.sock"' 30
+
+    # Shared tmux socket: gc session nudge from host via provider.sh → shared socket
+    verify_gc_nudge_via_socket() {
+      GC_CITY="$WS/.gc/home" gc session nudge --delivery=immediate scout "host-nudge-test"
+      sleep 1
+      tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "host-nudge-test"
+    }
+    subtest "gc session nudge uses shared tmux socket from host" verify_gc_nudge_via_socket
+
+    # Cross-container: mayor calls gc session nudge from inside its container
+    verify_cross_container_gc_nudge() {
+      podman exec gc-test-city-mayor \
+        gc session nudge --delivery=immediate scout "cross-container-nudge-test"
+      sleep 1
+      tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "cross-container-nudge-test"
+    }
+    subtest "gc session nudge works from inside mayor container" verify_cross_container_gc_nudge
+
+    # gc session peek via shared socket (read path)
+    verify_gc_peek_via_socket() {
+      local output
+      output="$(GC_CITY="$WS/.gc/home" gc session peek scout)"
+      [[ -n "$output" ]]
+    }
+    subtest "gc session peek uses shared tmux socket" verify_gc_peek_via_socket
 
     subtest "Wait for scout to create a bead" \
       poll_until 'timeout 5 bd list --json 2>/dev/null | jq -e "[.[] | select(.title | test(\"Fix test error\"))] | length > 0"' 60
