@@ -900,6 +900,10 @@ in
 
         # Shared tmux socket: persistent_start must use -S for all tmux
         # commands so the socket lands on the shared .wrapix/tmux/ mount.
+        grep -q '\.gc:/workspace/\.gc:rw' "$log" \
+          || { echo "FAIL: .gc not mounted rw in persistent container"; cat "$log"; exit 1; }
+        echo "  PASS: .gc mounted rw"
+
         grep -q 'mkdir -p /workspace/.wrapix/tmux' "$log" \
           || { echo "FAIL: tmux socket directory not created"; cat "$log"; exit 1; }
         grep -q 'tmux -S.*start-server' "$log" \

@@ -206,6 +206,7 @@ persistent_start() {
     $(resource_flags "${SESSION}") \
     -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
     -v "${beads_staging}:/workspace/.beads" \
+    -v "${GC_WORKSPACE}/.gc:/workspace/.gc:rw" \
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
     -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
     ${GC_SECRET_FLAGS:-} \

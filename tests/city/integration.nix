@@ -655,13 +655,33 @@ let
     subtest "gc session nudge uses shared tmux socket from host" verify_gc_nudge_via_socket
 
     # Cross-container: mayor calls gc session nudge from inside its container
+    # Uses default delivery (wait-idle) — the production path that acquires
+    # .gc/nudges/state.lock.  --delivery=immediate bypasses the queue and
+    # would not catch a read-only .gc mount (wx-9gm3t).
     verify_cross_container_gc_nudge() {
       podman exec gc-test-city-mayor \
-        gc session nudge --delivery=immediate scout "cross-container-nudge-test"
-      sleep 1
+        gc session nudge scout "cross-container-nudge-test"
+      sleep 2
       tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "cross-container-nudge-test"
     }
     subtest "gc session nudge works from inside mayor container" verify_cross_container_gc_nudge
+
+    # .gc must be writable from inside containers (wx-9gm3t)
+    verify_gc_writable_scout() {
+      podman exec gc-test-city-scout \
+        touch /workspace/.gc/nudges/write-test-scout
+      [ -f "$WS/.gc/nudges/write-test-scout" ]
+      rm -f "$WS/.gc/nudges/write-test-scout"
+    }
+    subtest ".gc is writable from scout container" verify_gc_writable_scout
+
+    verify_gc_writable_mayor() {
+      podman exec gc-test-city-mayor \
+        touch /workspace/.gc/nudges/write-test-mayor
+      [ -f "$WS/.gc/nudges/write-test-mayor" ]
+      rm -f "$WS/.gc/nudges/write-test-mayor"
+    }
+    subtest ".gc is writable from mayor container" verify_gc_writable_mayor
 
     # gc session peek via shared socket (read path)
     verify_gc_peek_via_socket() {
@@ -1201,17 +1221,30 @@ let
 
     # ================================================================
     # gate-approve-reject: approve and reject verdicts
+    # gate.sh calls real gc session nudge — no stubs (wx-9gm3t)
     # ================================================================
+
+    # Restart gc daemon so gate.sh's gc session nudge uses the live path.
+    restart_gc_for_gate() {
+      podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
+      setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc-gate.log" 2>&1 &
+      GC_PID=$!
+      sleep 3
+      if ! kill -0 "$GC_PID" 2>/dev/null; then
+        echo "gc daemon died before gate tests:"
+        tail -40 "$WS/gc-gate.log" 2>/dev/null | sed 's/^/  /' || true
+        return 1
+      fi
+    }
+    subtest "Restart gc for gate tests" restart_gc_for_gate
 
     subtest "Create gate-approve bead" \
       bd create --title="Gate approve test" --type=task --priority=2
 
     BEAD9=$(bd list --json --title "Gate approve test" 2>/dev/null | jq -r '.[0].id')
 
-    # gate.sh needs gc session nudge — stub it so we test gate logic only
     setup_gate_test() {
       [ -n "$BEAD9" ] && [ "$BEAD9" != "null" ] || return 1
-      # Set up the bead with commit_range and pre-set verdict (gate polls immediately)
       bd update "$BEAD9" --status=in_progress
       bd update "$BEAD9" --set-metadata "commit_range=abc..def"
       bd update "$BEAD9" --set-metadata "review_verdict=approve"
@@ -1219,18 +1252,9 @@ let
     subtest "Set up gate approve test" setup_gate_test
 
     verify_gate_approve() {
-      # Stub gc so gate.sh's nudge doesn't fail (gc daemon is stopped).
-      # The stub is prepended to LIVE_PATH so gate.sh still sees all other
-      # live tools — only the gc binary is replaced.
-      local stub_dir
-      stub_dir="$(mktemp -d)"
-      echo '#!/usr/bin/env bash' > "$stub_dir/gc"
-      echo 'exit 0' >> "$stub_dir/gc"
-      chmod +x "$stub_dir/gc"
       local exit_code=0
-      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+      PATH="$LIVE_PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
         bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
-      rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: gate should exit 0 on approve (got: $exit_code)"; return 1; }
     }
     subtest "Gate exits 0 on approve verdict" verify_gate_approve
@@ -1249,18 +1273,36 @@ let
     subtest "Set up gate reject test" setup_gate_reject
 
     verify_gate_reject() {
-      local stub_dir
-      stub_dir="$(mktemp -d)"
-      echo '#!/usr/bin/env bash' > "$stub_dir/gc"
-      echo 'exit 0' >> "$stub_dir/gc"
-      chmod +x "$stub_dir/gc"
       local exit_code=0
-      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
+      PATH="$LIVE_PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
         bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
-      rm -rf "$stub_dir"
       [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 on reject (got: $exit_code)"; return 1; }
     }
     subtest "Gate exits 1 on reject verdict" verify_gate_reject
+
+    # Stop gc after gate tests
+    stop_gc_after_gate() {
+      if [ -n "$GC_PID" ] && kill -0 "$GC_PID" 2>/dev/null; then
+        kill -TERM -"$GC_PID" 2>/dev/null || true
+        for _ in $(seq 1 100); do
+          kill -0 "$GC_PID" 2>/dev/null || break
+          sleep 0.1
+        done
+        kill -9 -"$GC_PID" 2>/dev/null || true
+        wait "$GC_PID" 2>/dev/null || true
+      fi
+      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+        podman stop -t 3 "$cid" 2>/dev/null || true
+        podman rm -f "$cid" 2>/dev/null || true
+      done
+      GC_PID=""
+      beads-dolt start "$WS" >/dev/null 2>&1 || true
+      for _i in $(seq 1 50); do
+        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        sleep 0.2
+      done
+    }
+    subtest "Stop gc after gate tests" stop_gc_after_gate
 
     # ================================================================
     # dispatch-cooldown: cooldown-aware worker scale check
