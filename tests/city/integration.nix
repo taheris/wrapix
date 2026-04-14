@@ -558,7 +558,9 @@ let
 
       # Run entrypoint with ONLY the live PATH — no test extras — so
       # missing-dependency bugs surface here just as they would in prod.
-      setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc.log" 2>&1 &
+      # GC_NUDGE_IDLE_TIMEOUT=1: provider idle wait is 1s (not 30s) so
+      # cross-container nudge tests don't block on the wait-idle loop.
+      setsid env PATH="$LIVE_PATH" GC_NUDGE_IDLE_TIMEOUT=1 "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc.log" 2>&1 &
       GC_PID=$!
 
       for _i in $(seq 1 100); do
@@ -656,13 +658,21 @@ let
     subtest "gc session nudge uses shared tmux socket from host" verify_gc_nudge_via_socket
 
     # Cross-container: mayor calls gc session nudge from inside its container.
-    # Uses --delivery=immediate so the nudge is sent directly via the shared
-    # tmux socket — this tests the cross-container socket path.  .gc writability
-    # (lock file for wait-idle) is covered by verify_gc_writable_* below.
+    # Uses default delivery (wait-idle) — the production path that enqueues
+    # to .gc/nudges/ (acquiring state.lock).  For exec providers, queued
+    # nudges are drained by Claude Code's session hook (gc nudge drain);
+    # we simulate that second half here.
     verify_cross_container_gc_nudge() {
       podman exec gc-test-city-mayor \
-        gc session nudge --delivery=immediate scout "cross-container-nudge-test"
-      poll_until 'tmux -S "$WS/.wrapix/tmux/scout.sock" capture-pane -t scout -p | grep -q "cross-container-nudge-test"' 10
+        gc session nudge scout "cross-container-nudge-test"
+      # Drain from inside the scout container — the live path:
+      # Claude Code's session hook runs gc nudge drain inside the agent container.
+      local drained
+      drained="$(podman exec gc-test-city-scout gc nudge drain scout 2>&1)"
+      echo "$drained" | grep -q "cross-container-nudge-test" || {
+        echo "FAIL: drained output missing nudge message: $drained"
+        return 1
+      }
     }
     subtest "gc session nudge works from inside mayor container" verify_cross_container_gc_nudge
 
@@ -868,6 +878,11 @@ let
         podman rm -f "$cid" 2>/dev/null || true
       done
       GC_PID=""
+
+      # Remove stale git locks left by killed monitor pipeline processes
+      # (e.g. worker-collect.sh's git merge-base holding index.lock when
+      # the process group was SIGKILL'd).
+      rm -f "$WS/.git/index.lock"
 
       # Ensure beads-dolt is still running for remaining scenarios
       beads-dolt start "$WS" >/dev/null 2>&1 || true
@@ -1173,8 +1188,14 @@ let
       # Worker commits on its branch
       (cd "$wt" && echo "rebase fix" > rebase-fix.txt && git add rebase-fix.txt && git commit -m "fix: rebase success test")
 
-      # Main advances with a NON-conflicting change (different file)
+      # Main advances with a NON-conflicting change (different file).
+      # Verify checkout succeeded — inside subtest() set -e is disabled,
+      # so a stale index.lock from a dying monitor pipeline would cause
+      # checkout to fail silently and the commit to land on the wrong branch.
       git -C "$WS" checkout main 2>/dev/null
+      local current_branch
+      current_branch="$(git -C "$WS" rev-parse --abbrev-ref HEAD)"
+      [[ "$current_branch" == "main" ]] || { echo "FAIL: checkout main failed, HEAD on $current_branch"; return 1; }
       (cd "$WS" && echo "parallel change" > parallel.txt && git add parallel.txt && git commit -m "parallel: non-conflicting advance")
 
       # Collect metadata
@@ -1227,7 +1248,7 @@ let
     # Restart gc daemon so gate.sh's gc session nudge uses the live path.
     restart_gc_for_gate() {
       podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
-      setsid env PATH="$LIVE_PATH" "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc-gate.log" 2>&1 &
+      setsid env PATH="$LIVE_PATH" GC_NUDGE_IDLE_TIMEOUT=1 "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc-gate.log" 2>&1 &
       GC_PID=$!
       poll_until 'test -S "$WS/.gc/home/.gc/controller.sock" || ! kill -0 "$GC_PID" 2>/dev/null' 15
       if ! kill -0 "$GC_PID" 2>/dev/null; then

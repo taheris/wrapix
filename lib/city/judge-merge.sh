@@ -35,11 +35,14 @@ cleanup() {
     rm -rf "$WORKTREE"
     git -C "$WORKSPACE" worktree prune 2>/dev/null || true
   fi
+  # Checkout main BEFORE deleting the branch — git refuses to delete the
+  # branch that HEAD points to, so the delete silently fails if we're
+  # still on it (e.g. after rebase --abort leaves HEAD on the branch).
+  git -C "$WORKSPACE" checkout main 2>/dev/null || true
   if git -C "$WORKSPACE" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
     git -C "$WORKSPACE" branch -d "$BRANCH" 2>/dev/null || \
       git -C "$WORKSPACE" branch -D "$BRANCH" 2>/dev/null || true
   fi
-  git -C "$WORKSPACE" checkout main 2>/dev/null || true
   if [[ "$stashed" == true ]]; then
     git -C "$WORKSPACE" stash pop -q 2>/dev/null || true
   fi

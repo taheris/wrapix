@@ -468,7 +468,7 @@ case "$METHOD" in
       # Wait for idle (no recent activity in last 2 seconds), then send keys
       _gc_last=0
       _gc_now=0
-      for _ in $(seq 1 30); do
+      for _ in $(seq 1 "${GC_NUDGE_IDLE_TIMEOUT:-30}"); do
         _gc_last="$(persistent_exec tmux display-message -t "$tmux_target" -p '#{pane_last_activity}' 2>/dev/null || echo "0")"
         _gc_now="$(date +%s)"
         if [[ $((_gc_now - _gc_last)) -ge 2 ]]; then
