@@ -321,13 +321,32 @@ worker_start() {
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 
-  # Monitor worker exit in background — set bead metadata when done.
+  # Monitor worker exit in background — collect metadata, run gate, post-gate.
   # FDs redirected to log file to avoid holding gc's pipes open (WaitDelay).
+  # This is the live worker→judge pipeline (wx-7ttop):
+  #   worker-collect (set commit_range) → gate.sh (nudge judge, poll verdict)
+  #   → post-gate.sh (close bead, deploy bead, notifications).
   local monitor_log="${GC_WORKSPACE}/${worktree_path}/.monitor.log"
   (
     podman wait "$name" || true
     GC_BEAD_ID="${bead_id}" GC_WORKSPACE="${GC_WORKSPACE}" \
       bash "${script_dir}/worker-collect.sh" || true
+
+    # Gate check → post-gate pipeline. gate.sh nudges the judge,
+    # polls for review_verdict, and exits 0 (approve) or 1 (reject/timeout).
+    local gate_exit=0
+    GC_BEAD_ID="${bead_id}" \
+      bash "${script_dir}/gate.sh" || gate_exit=$?
+
+    if [[ "$gate_exit" -eq 0 ]]; then
+      GC_BEAD_ID="${bead_id}" GC_TERMINAL_REASON="approved" \
+      GC_WORKSPACE="${GC_WORKSPACE}" GC_CITY_NAME="${GC_CITY_NAME:-}" \
+        bash "${script_dir}/post-gate.sh" || true
+    else
+      GC_BEAD_ID="${bead_id}" GC_TERMINAL_REASON="max_rounds_exceeded" \
+      GC_WORKSPACE="${GC_WORKSPACE}" GC_CITY_NAME="${GC_CITY_NAME:-}" \
+        bash "${script_dir}/post-gate.sh" || true
+    fi
   ) </dev/null >> "$monitor_log" 2>&1 &
 }
 

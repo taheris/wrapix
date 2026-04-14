@@ -644,21 +644,14 @@ let
 
     sling_bead() {
       [ -n "$BEAD_ID" ] && [ "$BEAD_ID" != "null" ] || return 1
-      # Create a convergence loop that owns the worker→judge handoff
-      # (wx-7ttop). gc converge drives the full pipeline: start worker →
-      # run gate.sh on exit → nudge judge → post-gate order on terminate.
       # Use the gc home already staged by the entrypoint.
-      GC_CITY="$WS/.gc/home" gc converge create \
-        --formula wrapix-worker \
-        --gate condition \
-        --gate-condition ".gc/scripts/gate.sh" \
-        --gate-timeout "600s" \
-        --target worker \
-        --title "Review $BEAD_ID" \
-        --var "issue=$BEAD_ID" \
-        --max-iterations 2
+      # Do NOT re-run stage-gc-home.sh here — it rm -rf's the directory,
+      # which destroys gc's cwd (the running daemon holds the old inode).
+      # The provider monitor runs the full pipeline after the worker exits:
+      # worker-collect → gate.sh → post-gate.sh (wx-7ttop).
+      GC_CITY="$WS/.gc/home" gc sling worker "$BEAD_ID" --on wrapix-worker
     }
-    subtest "Director creates convergence loop (worker→judge)" sling_bead
+    subtest "Director slings bead (worker→judge via monitor pipeline)" sling_bead
 
     subtest "Wait for worker worktree" \
       poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
@@ -715,21 +708,18 @@ let
     }
     subtest "Worker claude has --dangerously-skip-permissions, config, and tmux (wx-cswtw, wx-m5sd6)" verify_worker_agent_setup
 
-    # Convergence gate (gate.sh) polls commit_range → nudges judge →
-    # polls review_verdict. Mock judge auto-approves in_progress beads
-    # with commit_range set.
-    subtest "Wait for judge approval (via convergence gate)" \
+    # Provider monitor runs gate.sh after worker-collect sets commit_range.
+    # gate.sh nudges judge → mock judge auto-approves → gate returns 0.
+    subtest "Wait for judge approval (via monitor gate pipeline)" \
       poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 120
 
-    # Post-gate fires automatically on convergence.terminated (order in
-    # .gc/formulas/orders/post-gate/order.toml). It closes the bead,
-    # creates the deploy bead, and nudges the judge to merge.
-    subtest "Wait for post-gate order (deploy bead created)" \
+    # Monitor pipeline: gate approved → post-gate.sh fires → closes bead,
+    # creates deploy bead, nudges judge to merge.
+    subtest "Wait for post-gate pipeline (deploy bead created)" \
       poll_until 'bd list --json 2>/dev/null | jq -e "[.[] | select(.title | startswith(\"Deploy:\"))] | length > 0"' 120
 
-    # Judge merge — in the live flow this is triggered by post-gate's
-    # gc session nudge judge. Called manually here since the mock judge
-    # does not handle merge nudges.
+    # Judge merge — post-gate nudges judge via gc session nudge. Called
+    # manually since the mock judge does not handle merge nudges.
     judge_merge_phase1() {
       GC_BEAD_ID="$BEAD_ID" GC_WORKSPACE="$WS" live judge-merge.sh
     }
