@@ -196,23 +196,27 @@ let
         "worker.md"
       ];
 
-      # Stage formulas and scripts into .gc/ from the Nix store.
-      # Copies (not symlinks) so this works for consumers who don't
-      # have the wrapix source tree.  Shared by shellHook, app
-      # entrypoint, and integration tests.
+      # Stage formulas and scripts into .gc/.staged/ (shadow directory).
+      # A running city watches .gc/formulas/ via fsnotify, so writing
+      # directly there triggers a reload on every devShell entry.
+      # Writing to the shadow dir avoids that; promoteGcLayout (or
+      # `city-reload`) swaps staged content into the live paths.
       stageGcLayout = pkgs.writeShellScript "stage-gc-layout" ''
-        mkdir -p .gc/formulas .gc/scripts
+        rm -rf .gc/.staged
+        mkdir -p .gc/.staged/formulas .gc/.staged/scripts
         for f in ${formulasDir}/*.formula.toml; do
-          cp -f --remove-destination "$f" .gc/formulas/
+          cp -f --remove-destination "$f" .gc/.staged/formulas/
         done
-        chmod -R u+w .gc/formulas/orders 2>/dev/null || true
-        rm -rf .gc/formulas/orders
-        cp -r --no-preserve=mode ${formulasDir}/orders .gc/formulas/
+        cp -r --no-preserve=mode ${formulasDir}/orders .gc/.staged/formulas/orders
         for f in ${concatStringsSep " " scriptNames}; do
-          cp -f --remove-destination "${scriptsStore}/$f" .gc/scripts/"$f"
-          chmod +x .gc/scripts/"$f"
+          cp -f --remove-destination "${scriptsStore}/$f" .gc/.staged/scripts/"$f"
+          chmod +x .gc/.staged/scripts/"$f"
         done
       '';
+
+      # Promote staged layout to live — atomic rename dance per directory.
+      # The running city sees rename events and reloads on the next tick.
+      promoteGcLayout = pkgs.writeShellScript "promote-gc-layout" (readFile ./city-reload.sh);
 
       # Content-addressed store copies for integration tests (Nix sandbox
       # can't reach the source tree, so tests need real store paths).
@@ -447,6 +451,7 @@ let
           (pkgs.writeShellScriptBin "wrapix-agent" (readFile ./agent.sh))
           (pkgs.writeShellScriptBin "beads-push" (readFile ../../scripts/beads-push))
           (pkgs.writeShellScriptBin "wrapix-prime-hook" (readFile ./prime-hook.sh))
+          (pkgs.writeShellScriptBin "city-reload" (readFile ./city-reload.sh))
         ];
       };
 
@@ -504,6 +509,12 @@ let
         cp -f --remove-destination .wrapix/city/current/city.toml city.toml
 
         ${stageGcLayout}
+        # First-time setup: promote staged content so gc start works.
+        # Subsequent reloads leave live paths untouched — call city-reload
+        # to promote explicitly when ready.
+        if [ ! -d .gc/formulas ]; then
+          ${promoteGcLayout}
+        fi
 
         # Ensure podman network exists (NixOS module creates via systemd)
         if command -v podman >/dev/null 2>&1; then
@@ -589,6 +600,7 @@ let
           touch .gc/events.jsonl
 
           ${stageGcLayout}
+          ${promoteGcLayout}
 
           if ! podman network exists "${networkName}" 2>/dev/null; then
             podman network create "${networkName}" >/dev/null
@@ -646,8 +658,8 @@ let
       # City script and prompt file names (symlinked to source tree at runtime)
       inherit scriptNames promptNames;
 
-      # Stage .gc/formulas + .gc/scripts (shared by shellHook, app, and tests)
-      inherit stageGcLayout;
+      # Stage .gc/.staged/ and promote to .gc/ (shared by shellHook, app, and tests)
+      inherit stageGcLayout promoteGcLayout;
 
       # Content-addressed store copies (for integration tests in Nix sandbox)
       scripts = scriptsStore;

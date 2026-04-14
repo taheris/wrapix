@@ -1256,7 +1256,7 @@ in
   # Verify .gc/scripts/ are executable copies from the Nix store
   # (not symlinks — copies work for consumers who lack the source tree
   # and inside containers where the workspace is bind-mounted).
-  # Calls the real stageGcLayout script (same code path as shellHook and app).
+  # Calls the real stageGcLayout + promoteGcLayout (same code path as app).
   city-scripts-store-copies =
     let
       names = concatStringsSep " " minimalCity.scriptNames;
@@ -1274,9 +1274,10 @@ in
         WS="$TMPDIR/workspace"
         mkdir -p "$WS"
 
-        # Run the same staging script used by shellHook and app
+        # Run the same staging + promote pipeline used by app
         cd "$WS"
         ${minimalCity.stageGcLayout}
+        ${minimalCity.promoteGcLayout}
 
         echo "Checking scripts are executable regular files..."
         for f in ${names}; do

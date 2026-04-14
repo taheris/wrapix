@@ -73,6 +73,7 @@ let
     prompts
     configDir
     stageGcLayout
+    promoteGcLayout
     ;
 
   toTOML = import ../../lib/util/toml.nix { inherit lib; };
@@ -515,10 +516,11 @@ let
 
       # Place scripts at lib/city/ (in production this is the source tree;
       # in the test sandbox we copy from the Nix store), then call the
-      # shared stageGcLayout to create .gc/formulas and .gc/scripts symlinks.
+      # shared stageGcLayout to stage into .gc/.staged/, then promote to live.
       mkdir -p lib/city
       for f in ${scripts}/*; do cp -f "$f" lib/city/; done
       ${stageGcLayout}
+      ${promoteGcLayout}
       mkdir -p .wrapix/city/current/prompts
       cp -f ${configDir}/claude-settings.json .wrapix/city/current/
       cp -f ${configDir}/tmux.conf .wrapix/city/current/
