@@ -449,12 +449,15 @@ in
         echo "  PASS: no-op when no env vars"
 
         # Case 2: WRAPIX_DEPLOY_KEY points at a file — GIT_SSH_COMMAND exported
+        #         and ~/.ssh/config written so bare ssh also uses the key
         KEY="$TMPDIR/deploy.key"
         ssh-keygen -t ed25519 -f "$KEY" -N "" -q
-        WRAPIX_DEPLOY_KEY="$KEY" bash -c '. '"$FRAGMENT"'; \
+        HOME="$TMPDIR/home-case2" WRAPIX_DEPLOY_KEY="$KEY" bash -c 'mkdir -p "$HOME" && . '"$FRAGMENT"'; \
           [[ "$GIT_SSH_COMMAND" == "ssh -i '"$KEY"' -o IdentitiesOnly=yes" ]] || { \
-          echo "FAIL: GIT_SSH_COMMAND=$GIT_SSH_COMMAND"; exit 1; }'
-        echo "  PASS: GIT_SSH_COMMAND set from deploy key"
+          echo "FAIL: GIT_SSH_COMMAND=$GIT_SSH_COMMAND"; exit 1; }; \
+          grep -q "IdentityFile '"$KEY"'" "$HOME/.ssh/config" || { \
+          echo "FAIL: ~/.ssh/config missing IdentityFile"; cat "$HOME/.ssh/config" 2>/dev/null; exit 1; }'
+        echo "  PASS: GIT_SSH_COMMAND and ~/.ssh/config set from deploy key"
 
         # Case 3: WRAPIX_SIGNING_KEY configures commit signing
         SKEY="$TMPDIR/signing.key"
