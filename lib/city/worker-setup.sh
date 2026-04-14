@@ -12,10 +12,6 @@
 # Environment variables:
 #   GC_BEAD_ID     — bead to work on (optional; falls back to routed bead picker)
 #   GC_WORKSPACE   — host workspace path (required)
-#
-# Output (stdout):
-#   Line 1: bead_id
-#   Line 2: worktree_path (relative to GC_WORKSPACE)
 set -euo pipefail
 
 WORKSPACE="${GC_WORKSPACE:?worker-setup.sh requires GC_WORKSPACE}"
@@ -34,7 +30,10 @@ fi
 # Claim the bead and mark in_progress. In the live flow gc sling sets
 # in_progress before the worker starts; we do it here so callers that
 # bypass sling (recovery tests, escalation tests) get the same state.
-(cd "${WORKSPACE}" && bd update "$bead_id" --claim --status=in_progress) >/dev/null 2>&1 || true
+# Without --claim, two workers can be dispatched to the same bead concurrently.
+if ! (cd "${WORKSPACE}" && bd update "$bead_id" --claim --status=in_progress) >/dev/null; then
+  echo "worker-setup: WARNING: failed to claim bead $bead_id — may race with another worker" >&2
+fi
 
 worktree_path=".wrapix/worktree/gc-${bead_id}"
 
@@ -61,7 +60,7 @@ task_file="${WORKSPACE}/${worktree_path}/.task"
   if [[ -n "$judge_notes" ]]; then
     printf '\n## Prior Rejection\n\n%s\n' "$judge_notes"
   fi
-} > "$task_file" 2>/dev/null || true
+} > "$task_file" || echo "worker-setup: WARNING: failed to write task file $task_file" >&2
 
 # Copy worker role prompt if available
 if [[ -f "${WORKSPACE}/.wrapix/city/current/prompts/worker.md" ]]; then
@@ -73,7 +72,3 @@ fi
 state_dir="${WORKSPACE}/.wrapix/state"
 mkdir -p "$state_dir"
 date +%s > "$state_dir/last-dispatch"
-
-# Output for callers
-echo "$bead_id"
-echo "$worktree_path"

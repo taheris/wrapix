@@ -12,6 +12,12 @@ the Mayor via `bd human` instead.
 - **SH-3** — Use `[[ ]]` for conditionals, not `[ ]`
 - **SH-4** — Use `$(command)` for substitution, not backticks
 - **SH-5** — Functions use `local` for all variables except intentional exports
+- **SH-6** — Never silently suppress errors with `2>/dev/null || true` without
+  a comment explaining which specific error is expected and why it's safe to
+  ignore. Prefer precondition checks (`if [ -f ... ]; then`) over
+  try-and-ignore. If an operation is genuinely best-effort (e.g. notifications),
+  comment `# best-effort: <why>` on the same line. Treat `|| true` like an
+  empty `catch {}` — it must justify what it's catching.
 
 ## Nix (NX-)
 

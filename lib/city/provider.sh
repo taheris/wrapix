@@ -278,15 +278,27 @@ worker_start() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+  # Resolve bead ID if not already set (reconciler path doesn't pass issue
+  # in start JSON; worker-setup.sh falls back to bd list routed beads).
+  if [[ -z "${GC_BEAD_ID:-}" ]]; then
+    GC_BEAD_ID="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker \
+      --status open,in_progress --json 2>/dev/null \
+      | jq -r '.[0].id // empty' 2>/dev/null)" || GC_BEAD_ID=""
+    if [[ -z "$GC_BEAD_ID" ]]; then
+      echo "worker start: no bead routed to worker" >&2
+      return 1
+    fi
+    export GC_BEAD_ID
+  fi
+
   # Worker setup: worktree creation, bead claiming, task file generation.
   # Shared with integration tests via worker-setup.sh.
-  local setup_output
-  setup_output="$(bash "${script_dir}/worker-setup.sh")" || {
-    echo "worker start: setup failed" >&2
+  bash "${script_dir}/worker-setup.sh" >/dev/null || {
+    echo "worker start: setup failed for bead ${GC_BEAD_ID}" >&2
     return 1
   }
-  bead_id="$(echo "$setup_output" | sed -n '1p')"
-  worktree_path="$(echo "$setup_output" | sed -n '2p')"
+  bead_id="${GC_BEAD_ID}"
+  worktree_path=".wrapix/worktree/gc-${bead_id}"
 
   local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
 
@@ -350,9 +362,14 @@ worker_start() {
   #   → post-gate.sh (close bead, deploy bead, notifications).
   local monitor_log="${GC_WORKSPACE}/${worktree_path}/.monitor.log"
   (
+    # best-effort: container may already be gone (killed externally)
     podman wait "$name" || true
-    GC_BEAD_ID="${bead_id}" GC_WORKSPACE="${GC_WORKSPACE}" \
-      bash "${script_dir}/worker-collect.sh" || true
+
+    if ! GC_BEAD_ID="${bead_id}" GC_WORKSPACE="${GC_WORKSPACE}" \
+      bash "${script_dir}/worker-collect.sh"; then
+      echo "monitor: ERROR: worker-collect.sh failed for bead ${bead_id}" >&2
+      # Continue — gate.sh will detect missing commit_range and exit 1
+    fi
 
     # Gate check → post-gate pipeline. gate.sh nudges the judge,
     # polls for review_verdict, and exits 0 (approve) or 1 (reject/timeout).
@@ -360,14 +377,14 @@ worker_start() {
     GC_BEAD_ID="${bead_id}" \
       bash "${script_dir}/gate.sh" || gate_exit=$?
 
-    if [[ "$gate_exit" -eq 0 ]]; then
-      GC_BEAD_ID="${bead_id}" GC_TERMINAL_REASON="approved" \
+    local post_gate_reason="approved"
+    if [[ "$gate_exit" -ne 0 ]]; then
+      post_gate_reason="max_rounds_exceeded"
+    fi
+    if ! GC_BEAD_ID="${bead_id}" GC_TERMINAL_REASON="$post_gate_reason" \
       GC_WORKSPACE="${GC_WORKSPACE}" GC_CITY_NAME="${GC_CITY_NAME:-}" \
-        bash "${script_dir}/post-gate.sh" || true
-    else
-      GC_BEAD_ID="${bead_id}" GC_TERMINAL_REASON="max_rounds_exceeded" \
-      GC_WORKSPACE="${GC_WORKSPACE}" GC_CITY_NAME="${GC_CITY_NAME:-}" \
-        bash "${script_dir}/post-gate.sh" || true
+        bash "${script_dir}/post-gate.sh"; then
+      echo "monitor: ERROR: post-gate.sh failed for bead ${bead_id} (reason: ${post_gate_reason})" >&2
     fi
   ) </dev/null >> "$monitor_log" 2>&1 &
 }
@@ -521,7 +538,10 @@ case "$METHOD" in
     # gc sends value on stdin; fall back to positional arg for direct calls
     value="${STDIN_DATA:-${2:-}}"
     # Store metadata as a file inside the container
-    podman exec "$name" sh -c "mkdir -p /tmp/gc-meta && echo '${value}' > /tmp/gc-meta/${key}" 2>/dev/null
+    if ! podman exec "$name" sh -c "mkdir -p /tmp/gc-meta && echo '${value}' > /tmp/gc-meta/${key}"; then
+      echo "provider: ERROR: set-meta ${key} failed for container ${name}" >&2
+      exit 1
+    fi
     ;;
 
   get-meta)

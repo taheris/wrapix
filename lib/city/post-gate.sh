@@ -70,20 +70,26 @@ is_low_risk() {
 handle_escalation() {
   echo "post-gate: convergence escalated for bead $BEAD_ID (reason: $TERMINAL_REASON)"
 
-  # Mark bead with escalation metadata so the mayor can find and present it
-  bd update "$BEAD_ID" --set-metadata "escalated=true" 2>/dev/null || true
-  bd update "$BEAD_ID" --set-metadata "escalation_reason=$TERMINAL_REASON" 2>/dev/null || true
-  bd update "$BEAD_ID" --notes="Convergence escalated: $TERMINAL_REASON — needs human review via mayor" 2>/dev/null || true
+  # Mark bead with escalation metadata so the mayor can find and present it.
+  # These writes are critical — without them the escalation is invisible.
+  bd update "$BEAD_ID" --set-metadata "escalated=true" ||
+    echo "post-gate: ERROR: failed to set escalated=true on $BEAD_ID" >&2
+  bd update "$BEAD_ID" --set-metadata "escalation_reason=$TERMINAL_REASON" ||
+    echo "post-gate: ERROR: failed to set escalation_reason on $BEAD_ID" >&2
+  bd update "$BEAD_ID" --notes="Convergence escalated: $TERMINAL_REASON — needs human review via mayor" ||
+    echo "post-gate: ERROR: failed to update notes on $BEAD_ID" >&2
 
-  # Flag for human review — mayor picks this up via bd human list
-  bd label add "$BEAD_ID" human 2>/dev/null || true
+  # Flag for human review — mayor picks this up via bd human list.
+  # Without this label the escalation is never surfaced.
+  bd label add "$BEAD_ID" human ||
+    echo "post-gate: ERROR: failed to add human label to $BEAD_ID" >&2
 
-  # Notify mayor directly so it can present on next attach
+  # best-effort: notification channels — metadata above is authoritative
   gc mail send --to mayor -s "escalation" \
     -m "Convergence escalated for bead $BEAD_ID (reason: $TERMINAL_REASON). Worker→judge loop exhausted after max iterations. Review via bd show $BEAD_ID." \
     2>/dev/null || true
 
-  # Fallback notification for when human is not attached to mayor
+  # best-effort: desktop notification for when human is not attached
   notify "[${CITY_NAME}] Convergence escalated: bead ${BEAD_ID} — ${TERMINAL_REASON}"
 
   # Clean up worktree and branch on escalation
@@ -100,14 +106,15 @@ handle_approved() {
   # Close the work bead — convergence succeeded, work is done. Without this,
   # the bead stays in_progress with gc.routed_to set, causing dispatch.sh to
   # count it as demand and the fallback bead picker to hand it to new workers.
-  bd close "$BEAD_ID" 2>/dev/null || true
+  bd close "$BEAD_ID" ||
+    echo "post-gate: ERROR: failed to close bead $BEAD_ID — may be re-dispatched" >&2
 
   # Notify judge to merge — judge owns the actual git operations
-  # (fast-forward, rebase, worktree cleanup). This nudge includes the
-  # bead ID so the judge can look up the branch and perform merge.
+  # (fast-forward, rebase, worktree cleanup). This nudge is the only way
+  # the judge learns it should merge; silent failure = branch never merged.
   gc session nudge judge \
-    "Merge approved bead $BEAD_ID — branch gc-${BEAD_ID}. Run merge step now." \
-    2>/dev/null || true
+    "Merge approved bead $BEAD_ID — branch gc-${BEAD_ID}. Run merge step now." ||
+    echo "post-gate: ERROR: failed to nudge judge to merge $BEAD_ID" >&2
 
   # Create deploy bead
   create_deploy_bead
@@ -146,7 +153,11 @@ create_deploy_bead() {
   # Determine whether to flag for director approval or auto-deploy
   if has_auto_deploy && is_low_risk; then
     echo "post-gate: auto-deploy eligible (low-risk + Auto-deploy configured)"
-    bd update "$deploy_id" --set-metadata "auto_deploy=true" 2>/dev/null || true
+    if ! bd update "$deploy_id" --set-metadata "auto_deploy=true"; then
+      # Auto-deploy metadata failed — fall through to human approval as safe default
+      echo "post-gate: WARNING: auto_deploy metadata failed, falling through to human approval" >&2
+      bd label add "$deploy_id" human 2>/dev/null || true
+    fi
   else
     # Default: flag for director approval
     bd label add "$deploy_id" human 2>/dev/null || true
