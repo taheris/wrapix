@@ -45,6 +45,10 @@ export BEADS_DOLT_AUTO_START=0
 export GC_DOLT_PORT="$DOLT_PORT"
 export GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER"
 
+# Register beads custom types that gc uses internally (session, convergence, etc.).
+# Without this, gc operations fail with "invalid issue type" (wx-i7t1q).
+bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
+
 # Substitute the dolt port sentinel in city.toml. The host field is
 # already 127.0.0.1 (host gc daemon needs that); the provider script
 # overrides BEADS_DOLT_SERVER_HOST per-container with $DOLT_CONTAINER.
