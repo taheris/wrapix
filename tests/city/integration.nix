@@ -1616,6 +1616,9 @@ let
     verify_name_based_worker_still_works() {
       # Verify the existing name-based detection still works (regression check).
       # A session named "worker-test" should always be detected as a worker.
+      # Re-ensure network exists — the previous test's container cleanup can
+      # leave netavark in a state where the network bridge is torn down.
+      podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
       local test_bead
       bd create --title="Name-based worker test" --type=task --priority=2
       test_bead=$(bd list --json --title "Name-based worker test" 2>/dev/null | jq -r '.[0].id')
