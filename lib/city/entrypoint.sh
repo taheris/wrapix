@@ -112,7 +112,7 @@ start_events_watcher() {
       --format='{{.Actor.Attributes.name}} {{.Status}}' 2>/dev/null |
     while IFS=' ' read -r container_name event_type; do
       # Skip gc-managed containers (agent sessions)
-      if [[ "$container_name" == gc-"${CITY_NAME}"-* ]]; then
+      if [[ "$container_name" == "${CITY_NAME}"-* ]]; then
         continue
       fi
 

@@ -397,10 +397,11 @@ housekeeping_worktree_cleanup() {
   local worktree_dir="$GC_WORKSPACE/.wrapix/worktree"
   [[ -d "$worktree_dir" ]] || return 0
 
-  for wt in "$worktree_dir"/gc-*; do
+  for wt in "$worktree_dir"/*/; do
     [[ -d "$wt" ]] || continue
 
-    local bead_id="${wt##*gc-}"
+    local bead_id
+    bead_id="$(basename "$wt")"
 
     # Check if a worker container exists for this bead
     if podman ps --filter "label=gc-bead=$bead_id" --format '{{.Names}}' 2>/dev/null | grep -q .; then

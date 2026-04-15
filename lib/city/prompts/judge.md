@@ -25,11 +25,11 @@ When nudged with a bead ID and commit range:
 ### Merge (after approval)
 
 Review and merge as one continuous flow:
-1. `git merge --ff-only gc-$BEAD_ID` (linear history only)
+1. `git merge --ff-only $BEAD_ID` (linear history only)
 2. If fast-forward fails: rebase onto main, run `prek`, then ff-merge
 3. If rebase conflicts: reject back to worker with conflict details
 4. If tests fail after rebase: reject back to worker with failure output
-5. Clean up: `rm -rf .wrapix/worktree/gc-$BEAD_ID`, `git worktree prune`, `git branch -d gc-$BEAD_ID`
+5. Clean up: `rm -rf .wrapix/worktree/$BEAD_ID`, `git worktree prune`, `git branch -d $BEAD_ID`
 
 ### Context Sweep
 

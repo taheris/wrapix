@@ -19,7 +19,7 @@ set -euo pipefail
 BEAD_ID="${GC_BEAD_ID:?worker-collect.sh requires GC_BEAD_ID}"
 WORKSPACE="${GC_WORKSPACE:?worker-collect.sh requires GC_WORKSPACE}"
 
-BRANCH="gc-${BEAD_ID}"
+BRANCH="${BEAD_ID}"
 
 # best-effort: branch may not exist if worker was killed before first commit
 merge_base="$(git -C "${WORKSPACE}" merge-base main "${BRANCH}" 2>/dev/null || echo "")"

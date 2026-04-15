@@ -20,7 +20,7 @@ set -euo pipefail
 BEAD_ID="${GC_BEAD_ID:?judge-merge.sh requires GC_BEAD_ID}"
 WORKSPACE="${GC_WORKSPACE:?judge-merge.sh requires GC_WORKSPACE}"
 
-BRANCH="gc-${BEAD_ID}"
+BRANCH="${BEAD_ID}"
 WORKTREE="${WORKSPACE}/.wrapix/worktree/${BRANCH}"
 
 # ---------------------------------------------------------------------------

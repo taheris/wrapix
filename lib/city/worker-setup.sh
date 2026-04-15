@@ -36,12 +36,12 @@ if ! (cd "${WORKSPACE}" && bd update "$bead_id" --claim --status=in_progress) >/
   echo "worker-setup: WARNING: failed to claim bead $bead_id — may race with another worker" >&2
 fi
 
-worktree_path=".wrapix/worktree/gc-${bead_id}"
+worktree_path=".wrapix/worktree/${bead_id}"
 
 # Create git worktree on the host
 if [[ ! -d "${WORKSPACE}/${worktree_path}" ]]; then
-  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" 2>&1 || \
-    git -C "${WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}" 2>&1
+  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "${bead_id}" 2>&1 || \
+    git -C "${WORKSPACE}" worktree add "${worktree_path}" "${bead_id}" 2>&1
 fi
 
 # Build task file from bead description, acceptance criteria, and judge notes

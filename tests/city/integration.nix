@@ -274,7 +274,9 @@ let
     FAILED=0
     GC_PID=""
     WS=""
-    TEST_NETWORK="${liveCity.networkName}"
+    RUN_ID="$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    CITY_NAME="test-$RUN_ID"
+    TEST_NETWORK="city-$CITY_NAME"
     DOLT_CONTAINER=""
     DOLT_PORT=""
     # Pass --no-fail-fast to run all tests even after failures
@@ -295,7 +297,7 @@ let
         tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
       fi
       # Show logs from any gc containers
-      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+      for cid in $(podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null); do
         local cname
         cname=$(podman inspect --format '{{.Name}}' "$cid" 2>/dev/null || echo "$cid")
         echo "  container $cname (podman logs):"
@@ -341,10 +343,9 @@ let
       if [ -n "$WS" ]; then
         beads-dolt stop "$WS" 2>/dev/null || true
       fi
-      podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
-      podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+      podman ps --filter "name=$CITY_NAME-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+      podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
       podman network rm "$TEST_NETWORK" 2>/dev/null || true
-      podman rmi "${liveCity.imageName}" 2>/dev/null || true
       if [ -n "$WS" ]; then
         rm -rf "$WS" 2>/dev/null || true
       fi
@@ -425,8 +426,8 @@ let
     # Pre-cleanup: remove stale state from previous runs
     # ================================================================
 
-    podman ps --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
-    podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
+    podman ps --filter "name=$CITY_NAME-" -q 2>/dev/null | xargs -r podman stop -t 3 2>/dev/null || true
+    podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null | xargs -r podman rm -f 2>/dev/null || true
     podman network rm "$TEST_NETWORK" 2>/dev/null || true
 
     # ================================================================
@@ -547,12 +548,12 @@ let
     subtest "Validate gc accepts config" validate_config
 
     start_gc() {
-      podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
+      podman rm -f "''${CITY_NAME}-mayor" "''${CITY_NAME}-scout" "''${CITY_NAME}-judge" 2>/dev/null || true
 
       DOLT_CONTAINER="$(beads-dolt name "$WS")"
       DOLT_PORT="$(beads-dolt port "$WS")"
 
-      export GC_CITY_NAME="test-city"
+      export GC_CITY_NAME="$CITY_NAME"
       export GC_WORKSPACE="$WS"
       export GC_AGENT_IMAGE="${liveCity.imageName}"
       export GC_PODMAN_NETWORK="$TEST_NETWORK"
@@ -637,7 +638,7 @@ let
     subtest "Verify controller and script symlinks are relative" verify_relative_symlinks
 
     subtest "Wait for mayor container to start" \
-      poll_until 'podman ps --filter "name=gc-test-city-mayor" -q 2>/dev/null | grep -q .' 30
+      poll_until 'podman ps --filter "name=''${CITY_NAME}-mayor" -q 2>/dev/null | grep -q .' 30
 
     verify_mayor_tmux() {
       # Verify the shared tmux socket was created on .wrapix/tmux/ and the
@@ -664,12 +665,12 @@ let
     # nudges are drained by Claude Code's session hook (gc nudge drain);
     # we simulate that second half here.
     verify_cross_container_gc_nudge() {
-      podman exec gc-test-city-mayor \
+      podman exec "''${CITY_NAME}-mayor" \
         gc session nudge scout "cross-container-nudge-test"
       # Drain from inside the scout container — the live path:
       # Claude Code's session hook runs gc nudge drain inside the agent container.
       local drained
-      drained="$(podman exec gc-test-city-scout gc nudge drain scout 2>&1)"
+      drained="$(podman exec "''${CITY_NAME}-scout" gc nudge drain scout 2>&1)"
       echo "$drained" | grep -q "cross-container-nudge-test" || {
         echo "FAIL: drained output missing nudge message: $drained"
         return 1
@@ -679,7 +680,7 @@ let
 
     # .gc must be writable from inside containers (wx-9gm3t)
     verify_gc_writable_scout() {
-      podman exec gc-test-city-scout \
+      podman exec "''${CITY_NAME}-scout" \
         touch /workspace/.gc/nudges/write-test-scout
       [ -f "$WS/.gc/nudges/write-test-scout" ]
       rm -f "$WS/.gc/nudges/write-test-scout"
@@ -687,7 +688,7 @@ let
     subtest ".gc is writable from scout container" verify_gc_writable_scout
 
     verify_gc_writable_mayor() {
-      podman exec gc-test-city-mayor \
+      podman exec "''${CITY_NAME}-mayor" \
         touch /workspace/.gc/nudges/write-test-mayor
       [ -f "$WS/.gc/nudges/write-test-mayor" ]
       rm -f "$WS/.gc/nudges/write-test-mayor"
@@ -719,20 +720,20 @@ let
     subtest "Director slings bead (worker→judge via monitor pipeline)" sling_bead
 
     subtest "Wait for worker worktree" \
-      poll_until "ls $WS/.wrapix/worktree/gc-*/fix.txt 2>/dev/null" 90
+      poll_until "ls $WS/.wrapix/worktree/*/fix.txt 2>/dev/null" 90
 
     # wx-cswtw: verify worker's claude invocation had permissions flag and config
     verify_worker_agent_setup() {
       # The mock writes to /workspace/mock-claude-worker.log (the worktree
       # mount). Try host-visible paths first, then podman cp as fallback.
       local logf=""
-      for f in "$WS"/.wrapix/worktree/gc-*/mock-claude-worker.log "$WS"/.beads/mock-claude-worker.log "$WS"/.wrapix/worktree/gc-*/.beads/mock-claude-worker.log; do
+      for f in "$WS"/.wrapix/worktree/*/mock-claude-worker.log "$WS"/.beads/mock-claude-worker.log "$WS"/.wrapix/worktree/*/.beads/mock-claude-worker.log; do
         [ -f "$f" ] && logf="$f" && break
       done
       if [ -z "$logf" ]; then
         # Container-internal /tmp: use podman cp from the (stopped) worker
         local worker_name
-        worker_name="$(podman ps -a --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
+        worker_name="$(podman ps -a --filter "name=$CITY_NAME-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
         if [ -n "$worker_name" ]; then
           logf="$(mktemp)"
           podman cp "$worker_name:/tmp/mock-claude-worker.log" "$logf" 2>/dev/null || logf=""
@@ -741,7 +742,7 @@ let
       if [ -z "$logf" ] || [ ! -f "$logf" ]; then
         # Last resort: check podman logs for the AGENT_CHECK lines
         local worker_name
-        worker_name="$(podman ps -a --filter "name=gc-test-city-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
+        worker_name="$(podman ps -a --filter "name=$CITY_NAME-worker" --format '{{.Names}}' 2>/dev/null | head -1)"
         if [ -n "$worker_name" ]; then
           logf="$(mktemp)"
           podman logs "$worker_name" > "$logf" 2>&1 || true
@@ -812,7 +813,7 @@ let
 
     verify_worktree_cleaned() {
       # Judge cleaned up the worktree and branch during merge
-      ! test -d "$WS"/.wrapix/worktree/gc-* 2>/dev/null
+      ! test -d "$WS"/.wrapix/worktree/* 2>/dev/null
     }
     subtest "Verify worktree cleaned up" verify_worktree_cleaned
 
@@ -845,21 +846,21 @@ let
     # scale_check counts routed open beads; the deficit vs running sessions
     # becomes "new" tier demand → reconciler starts a worker.
     subtest "Reconciler starts worker for routed bead (wx-y9qco)" \
-      poll_until "ls $WS/.wrapix/worktree/gc-$RBEAD 2>/dev/null" 60
+      poll_until "ls $WS/.wrapix/worktree/$RBEAD 2>/dev/null" 60
 
     # Clean up: stop the worker container and remove worktree so
     # merge-conflict-reject starts clean.
     cleanup_reconciler_test() {
-      for cid in $(podman ps -q --filter "name=gc-test-city-worker" 2>/dev/null); do
+      for cid in $(podman ps -q --filter "name=$CITY_NAME-worker" 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
-      local wt="$WS/.wrapix/worktree/gc-$RBEAD"
+      local wt="$WS/.wrapix/worktree/$RBEAD"
       if [[ -d "$wt" ]]; then
         rm -rf "$wt"
         git -C "$WS" worktree prune 2>/dev/null || true
       fi
-      git -C "$WS" branch -D "gc-$RBEAD" 2>/dev/null || true
+      git -C "$WS" branch -D "$RBEAD" 2>/dev/null || true
     }
     subtest "Clean up reconciler test" cleanup_reconciler_test
 
@@ -883,7 +884,7 @@ let
       # Stop and remove all gc containers. The beads-dolt container is
       # shared across scenarios and kept running (entrypoint only disconnects
       # it from the network on exit).
-      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+      for cid in $(podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
@@ -923,12 +924,12 @@ let
     # so conflict rejection is the judge's responsibility.
     simulate_worker2() {
       [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ] || return 1
-      local wt="$WS/.wrapix/worktree/gc-$BEAD2"
+      local wt="$WS/.wrapix/worktree/$BEAD2"
       # Create worktree from BEFORE the conflict commit so branches diverge.
       # Can't use worker-setup.sh here — it branches from HEAD, but we need
       # HEAD~1 to produce a merge conflict (main advanced while worker worked).
-      git worktree add "$wt" -b "gc-$BEAD2" HEAD~1 2>/dev/null || \
-        git worktree add "$wt" "gc-$BEAD2"
+      git worktree add "$wt" -b "$BEAD2" HEAD~1 2>/dev/null || \
+        git worktree add "$wt" "$BEAD2"
       (cd "$wt" && echo "fix applied v2" > fix.txt && git add fix.txt && git commit -m "fix: resolve second error")
       GC_BEAD_ID="$BEAD2" GC_WORKSPACE="$WS" live worker-collect.sh
       bd update "$BEAD2" --set-metadata "review_verdict=approve"
@@ -957,7 +958,7 @@ let
     subtest "Verify merge_failure metadata set" verify_merge_failure_metadata
 
     subtest "Verify old worktree cleaned up after rejection" \
-      test ! -d "$WS/.wrapix/worktree/gc-$BEAD2"
+      test ! -d "$WS/.wrapix/worktree/$BEAD2"
 
     # ================================================================
     # escalation-non-approved: convergence ends with non-approved reason
@@ -977,25 +978,25 @@ let
       GC_BEAD_ID="$BEAD3" \
       GC_TERMINAL_REASON="max_rounds_exceeded" \
       GC_WORKSPACE="$WS" \
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
         live post-gate.sh
     }
     subtest "Post-gate handles escalation (non-approved)" run_post_gate_escalation
 
     # wx-kutwf: worktree and branch preserved for debugging on escalation
     subtest "Verify escalation worktree preserved for debugging (wx-kutwf)" \
-      test -d "$WS/.wrapix/worktree/gc-$BEAD3"
+      test -d "$WS/.wrapix/worktree/$BEAD3"
 
     verify_escalation_branch_preserved() {
-      git branch | grep -q "gc-$BEAD3"
+      git branch | grep -q "$BEAD3"
     }
     subtest "Verify escalation branch preserved for debugging (wx-kutwf)" verify_escalation_branch_preserved
 
     # Clean up manually (simulates what recovery.sh or human would do)
     cleanup_escalation_worktree() {
-      rm -rf "$WS/.wrapix/worktree/gc-$BEAD3"
+      rm -rf "$WS/.wrapix/worktree/$BEAD3"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$BEAD3" 2>/dev/null || true
+      git -C "$WS" branch -D "$BEAD3" 2>/dev/null || true
     }
     subtest "Clean up escalation worktree" cleanup_escalation_worktree
 
@@ -1028,7 +1029,7 @@ let
     setup_crashed_worker() {
       [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ] || return 1
       GC_BEAD_ID="$BEAD4" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
-      local wt="$WS/.wrapix/worktree/gc-$BEAD4"
+      local wt="$WS/.wrapix/worktree/$BEAD4"
       (cd "$wt" && echo "recovery fix" > recovery.txt && git add recovery.txt && git commit -m "fix: recovery test")
       # No worker-collect.sh — simulates monitor crash (no metadata set)
 
@@ -1040,7 +1041,7 @@ let
     subtest "Simulate crashed worker (commits but no metadata)" setup_crashed_worker
 
     run_recovery() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
+      GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh" run_recovery
 
@@ -1052,7 +1053,7 @@ let
 
       local bn
       bn="$(bd show "$BEAD4" --json 2>/dev/null | jq -r '.[0].metadata.branch_name // empty' 2>/dev/null)" || bn=""
-      [ "$bn" = "gc-$BEAD4" ] || { echo "FAIL: recovery did not set branch_name (got: $bn)"; return 1; }
+      [ "$bn" = "$BEAD4" ] || { echo "FAIL: recovery did not set branch_name (got: $bn)"; return 1; }
     }
     subtest "Verify recovery set commit_range metadata" verify_recovery_metadata
 
@@ -1066,10 +1067,10 @@ let
 
     # Clean up recovery worktree
     cleanup_recovery() {
-      local wt="$WS/.wrapix/worktree/gc-$BEAD4"
+      local wt="$WS/.wrapix/worktree/$BEAD4"
       rm -rf "$wt"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$BEAD4" 2>/dev/null || true
+      git -C "$WS" branch -D "$BEAD4" 2>/dev/null || true
     }
     subtest "Clean up recovery worktree" cleanup_recovery
 
@@ -1090,7 +1091,7 @@ let
 
     # Recovery should NOT set metadata for a branch with no commits
     run_recovery_noop() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
+      GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh for no-op worker" run_recovery_noop
 
@@ -1112,10 +1113,10 @@ let
 
     # Clean up no-op worktree
     cleanup_noop() {
-      local wt="$WS/.wrapix/worktree/gc-$BEAD5"
+      local wt="$WS/.wrapix/worktree/$BEAD5"
       rm -rf "$wt"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$BEAD5" 2>/dev/null || true
+      git -C "$WS" branch -D "$BEAD5" 2>/dev/null || true
     }
     subtest "Clean up no-op worktree" cleanup_noop
 
@@ -1132,7 +1133,7 @@ let
       [ -n "$BEAD6" ] && [ "$BEAD6" != "null" ] || return 1
       GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
 
-      local wt="$WS/.wrapix/worktree/gc-$BEAD6"
+      local wt="$WS/.wrapix/worktree/$BEAD6"
       [ -d "$wt" ] || { echo "FAIL: worktree not created at $wt"; return 1; }
 
       local status
@@ -1147,7 +1148,7 @@ let
 
     # worker-collect.sh: happy path — commit on branch, verify metadata
     verify_worker_collect() {
-      local wt="$WS/.wrapix/worktree/gc-$BEAD6"
+      local wt="$WS/.wrapix/worktree/$BEAD6"
       (cd "$wt" && echo "setup test fix" > setup-fix.txt && git add setup-fix.txt && git commit -m "fix: setup test")
       GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" live worker-collect.sh
 
@@ -1158,7 +1159,7 @@ let
 
       local bn
       bn="$(bd show "$BEAD6" --json 2>/dev/null | jq -r '.[0].metadata.branch_name // empty')"
-      [ "$bn" = "gc-$BEAD6" ] || { echo "FAIL: branch_name=$bn, expected gc-$BEAD6"; return 1; }
+      [ "$bn" = "$BEAD6" ] || { echo "FAIL: branch_name=$bn, expected $BEAD6"; return 1; }
     }
     subtest "worker-collect.sh sets commit_range and branch_name" verify_worker_collect
 
@@ -1181,10 +1182,10 @@ let
 
     cleanup_phase6() {
       for b in "$BEAD6" "$BEAD7"; do
-        local wt="$WS/.wrapix/worktree/gc-$b"
+        local wt="$WS/.wrapix/worktree/$b"
         [ -d "$wt" ] && rm -rf "$wt"
         git -C "$WS" worktree prune 2>/dev/null || true
-        git -C "$WS" branch -D "gc-$b" 2>/dev/null || true
+        git -C "$WS" branch -D "$b" 2>/dev/null || true
       done
     }
     subtest "Clean up worker-setup-collect" cleanup_phase6
@@ -1202,7 +1203,7 @@ let
       [ -n "$BEAD8" ] && [ "$BEAD8" != "null" ] || return 1
       # Worker branches from current HEAD
       GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
-      local wt="$WS/.wrapix/worktree/gc-$BEAD8"
+      local wt="$WS/.wrapix/worktree/$BEAD8"
 
       # Worker commits on its branch
       (cd "$wt" && echo "rebase fix" > rebase-fix.txt && git add rebase-fix.txt && git commit -m "fix: rebase success test")
@@ -1252,10 +1253,10 @@ let
     subtest "Verify linear history after rebase merge" verify_rebase_linear_history
 
     subtest "Verify rebase worktree cleaned up" \
-      test ! -d "$WS/.wrapix/worktree/gc-$BEAD8"
+      test ! -d "$WS/.wrapix/worktree/$BEAD8"
 
     verify_rebase_branch_cleaned() {
-      ! git -C "$WS" branch | grep "gc-$BEAD8"
+      ! git -C "$WS" branch | grep "$BEAD8"
     }
     subtest "Verify rebase branch cleaned up" verify_rebase_branch_cleaned
 
@@ -1266,7 +1267,7 @@ let
 
     # Restart gc daemon so gate.sh's gc session nudge uses the live path.
     restart_gc_for_gate() {
-      podman rm -f gc-test-city-mayor gc-test-city-scout gc-test-city-judge 2>/dev/null || true
+      podman rm -f "''${CITY_NAME}-mayor" "''${CITY_NAME}-scout" "''${CITY_NAME}-judge" 2>/dev/null || true
       setsid env PATH="$LIVE_PATH" GC_NUDGE_IDLE_TIMEOUT=1 "$WS/.gc/scripts/entrypoint.sh" >"$WS/gc-gate.log" 2>&1 &
       GC_PID=$!
       poll_until 'test -S "$WS/.gc/home/.gc/controller.sock" || ! kill -0 "$GC_PID" 2>/dev/null' 15
@@ -1331,7 +1332,7 @@ let
         kill -9 -"$GC_PID" 2>/dev/null || true
         wait "$GC_PID" 2>/dev/null || true
       fi
-      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+      for cid in $(podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
@@ -1423,7 +1424,7 @@ let
       GC_BEAD_ID="$BEAD11" \
       GC_TERMINAL_REASON="approved" \
       GC_WORKSPACE="$WS" \
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
         live post-gate.sh
     }
     subtest "Run post-gate with approved reason" run_post_gate_close
@@ -1454,7 +1455,7 @@ let
 
     verify_task_includes_rejection() {
       GC_BEAD_ID="$BEAD12" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
-      local wt="$WS/.wrapix/worktree/gc-$BEAD12"
+      local wt="$WS/.wrapix/worktree/$BEAD12"
       [ -f "$wt/.task" ] || { echo "FAIL: .task file not created"; return 1; }
 
       grep -q "flaky parser" "$wt/.task" || { echo "FAIL: .task missing bead description"; cat "$wt/.task"; return 1; }
@@ -1464,10 +1465,10 @@ let
     subtest "Task file includes prior rejection notes" verify_task_includes_rejection
 
     cleanup_phase10() {
-      local wt="$WS/.wrapix/worktree/gc-$BEAD12"
+      local wt="$WS/.wrapix/worktree/$BEAD12"
       [ -d "$wt" ] && rm -rf "$wt"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$BEAD12" 2>/dev/null || true
+      git -C "$WS" branch -D "$BEAD12" 2>/dev/null || true
     }
     subtest "Clean up retry-judge-notes" cleanup_phase10
 
@@ -1483,7 +1484,7 @@ let
     setup_orphan_worktree() {
       [ -n "$BEAD13" ] && [ "$BEAD13" != "null" ] || return 1
       GC_BEAD_ID="$BEAD13" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
-      local wt="$WS/.wrapix/worktree/gc-$BEAD13"
+      local wt="$WS/.wrapix/worktree/$BEAD13"
       [ -d "$wt" ] || { echo "FAIL: worktree not created"; return 1; }
 
       # Close the bead — worktree is now orphaned
@@ -1492,17 +1493,17 @@ let
     subtest "Create worktree then close its bead (orphan)" setup_orphan_worktree
 
     run_recovery_orphan() {
-      GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" live recovery.sh
+      GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" live recovery.sh
     }
     subtest "Run recovery.sh for orphan cleanup" run_recovery_orphan
 
     verify_orphan_worktree_cleaned() {
-      [ ! -d "$WS/.wrapix/worktree/gc-$BEAD13" ] || { echo "FAIL: orphaned worktree still exists"; return 1; }
+      [ ! -d "$WS/.wrapix/worktree/$BEAD13" ] || { echo "FAIL: orphaned worktree still exists"; return 1; }
     }
     subtest "Verify orphaned worktree cleaned up by recovery" verify_orphan_worktree_cleaned
 
     verify_orphan_branch_cleaned() {
-      ! git -C "$WS" branch | grep "gc-$BEAD13"
+      ! git -C "$WS" branch | grep "$BEAD13"
     }
     subtest "Verify orphaned branch cleaned up by recovery" verify_orphan_branch_cleaned
 
@@ -1603,7 +1604,7 @@ let
       local exit_code=0
 
       GC_BEAD_ID="$test_bead" \
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
       GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" \
       GC_PODMAN_NETWORK="$TEST_NETWORK" \
@@ -1618,17 +1619,17 @@ let
       fi
 
       # Verify worktree was created (worker_start creates it, persistent_start doesn't)
-      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+      if [ ! -d "$WS/.wrapix/worktree/$test_bead" ]; then
         echo "FAIL: worktree not created — provider used persistent_start instead of worker_start"
         return 1
       fi
 
       # Clean up
-      podman stop "gc-test-city-$test_bead" 2>/dev/null || true
-      podman rm -f "gc-test-city-$test_bead" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      podman stop "$CITY_NAME-$test_bead" 2>/dev/null || true
+      podman rm -f "$CITY_NAME-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Provider detects worker from agent_template, not name (wx-aqe4z)" verify_worker_detection_by_template
 
@@ -1646,7 +1647,7 @@ let
 
       local exit_code=0
       GC_BEAD_ID="$test_bead" \
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
       GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" \
       GC_PODMAN_NETWORK="$TEST_NETWORK" \
@@ -1660,17 +1661,17 @@ let
         return 1
       fi
 
-      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+      if [ ! -d "$WS/.wrapix/worktree/$test_bead" ]; then
         echo "FAIL: worktree not created for name-based worker"
         return 1
       fi
 
       # Clean up
-      podman stop "gc-test-city-worker-$test_bead" 2>/dev/null || true
-      podman rm -f "gc-test-city-worker-$test_bead" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      podman stop "$CITY_NAME-worker-$test_bead" 2>/dev/null || true
+      podman rm -f "$CITY_NAME-worker-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Name-based worker detection still works (wx-aqe4z)" verify_name_based_worker_still_works
 
@@ -1697,7 +1698,7 @@ let
 
       # Do NOT set GC_BEAD_ID in the env — worker-setup.sh must get it
       # from the issue field that provider.sh extracts and exports.
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
       GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" \
       GC_PODMAN_NETWORK="$TEST_NETWORK" \
@@ -1712,17 +1713,17 @@ let
       fi
 
       # Verify the correct worktree was created (keyed by bead ID, not session name)
-      if [ ! -d "$WS/.wrapix/worktree/gc-$test_bead" ]; then
+      if [ ! -d "$WS/.wrapix/worktree/$test_bead" ]; then
         echo "FAIL: worktree not created for bead $test_bead — issue field not extracted"
         return 1
       fi
 
       # Clean up
-      podman stop "gc-test-city-issue-$test_bead" 2>/dev/null || true
-      podman rm -f "gc-test-city-issue-$test_bead" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      podman stop "$CITY_NAME-issue-$test_bead" 2>/dev/null || true
+      podman rm -f "$CITY_NAME-issue-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Provider extracts issue from start JSON (wx-fsqcz)" verify_provider_extracts_issue
 
@@ -1769,10 +1770,10 @@ let
     config_drift_setup() {
       # Start a labeled container simulating a leftover persistent session.
       podman run -d --replace \
-        --name gc-test-city-stale-scout \
+        --name $CITY_NAME-stale-scout \
         --entrypoint "" \
         --network "$TEST_NETWORK" \
-        --label "gc-city=test-city" \
+        --label "gc-city=$CITY_NAME" \
         "${liveCity.imageName}" sleep 3600
 
       # The happy-path entrypoint wrote .gc/config.hash with the current
@@ -1781,7 +1782,7 @@ let
       echo "# drift-marker $(date +%s)" >> "$WS/city.toml"
 
       # Verify precondition: stale container is running
-      if [[ "$(podman inspect --format '{{.State.Running}}' gc-test-city-stale-scout 2>/dev/null)" != "true" ]]; then
+      if [[ "$(podman inspect --format '{{.State.Running}}' $CITY_NAME-stale-scout 2>/dev/null)" != "true" ]]; then
         echo "FAIL: stale container should be running before entrypoint"
         return 1
       fi
@@ -1792,7 +1793,7 @@ let
       DOLT_CONTAINER="$(beads-dolt name "$WS")"
       DOLT_PORT="$(beads-dolt port "$WS")"
 
-      export GC_CITY_NAME="test-city"
+      export GC_CITY_NAME="$CITY_NAME"
       export GC_WORKSPACE="$WS"
       export GC_AGENT_IMAGE="${liveCity.imageName}"
       export GC_PODMAN_NETWORK="$TEST_NETWORK"
@@ -1814,7 +1815,7 @@ let
       done
 
       # Poll until the stale container is stopped (rather than sleeping a fixed interval)
-      poll_until '! podman inspect --format "{{.State.Running}}" gc-test-city-stale-scout 2>/dev/null | grep -q true' 15
+      poll_until '! podman inspect --format "{{.State.Running}}" $CITY_NAME-stale-scout 2>/dev/null | grep -q true' 15
       echo "  PASS: stale container killed"
 
       # Verify the entrypoint logged the drift
@@ -1845,8 +1846,8 @@ let
       wait "$DRIFT_PID" 2>/dev/null || true
 
       # Clean up containers
-      podman rm -f gc-test-city-stale-scout 2>/dev/null || true
-      for cid in $(podman ps -a --filter "name=gc-test-city-" -q 2>/dev/null); do
+      podman rm -f $CITY_NAME-stale-scout 2>/dev/null || true
+      for cid in $(podman ps -a --filter "name=$CITY_NAME-" -q 2>/dev/null); do
         podman stop -t 3 "$cid" 2>/dev/null || true
         podman rm -f "$cid" 2>/dev/null || true
       done
@@ -1873,7 +1874,7 @@ let
       # Call with s-wx-<id> session name and empty start JSON (no agent_template)
       local exit_code=0
       GC_BEAD_ID="$test_bead" \
-      GC_CITY_NAME="test-city" \
+      GC_CITY_NAME="$CITY_NAME" \
       GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" \
       GC_PODMAN_NETWORK="$TEST_NETWORK" \
@@ -1886,17 +1887,17 @@ let
         echo "FAIL: provider start failed for s-wx-* session (exit $exit_code)"
         return 1
       fi
-      [ -d "$WS/.wrapix/worktree/gc-$test_bead" ] || {
+      [ -d "$WS/.wrapix/worktree/$test_bead" ] || {
         echo "FAIL: worktree not created for s-wx-* session"
         return 1
       }
 
       # Clean up
-      podman stop "gc-test-city-s-wx-$test_bead" 2>/dev/null || true
-      podman rm -f "gc-test-city-s-wx-$test_bead" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      podman stop "$CITY_NAME-s-wx-$test_bead" 2>/dev/null || true
+      podman rm -f "$CITY_NAME-s-wx-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Provider detects worker from bead metadata for s-wx-* names (wx-pq03c)" verify_worker_detection_by_bead_metadata
 
@@ -1956,12 +1957,12 @@ let
       test_bead=$(bd list --json --title "Pre-start guard test" 2>/dev/null | jq -r '.[0].id')
       bd update "$test_bead" --set-metadata "gc.routed_to=worker"
 
-      local container_name="gc-test-city-worker-$test_bead"
+      local container_name="$CITY_NAME-worker-$test_bead"
       local start_json='{"agent_template":"worker","issue":"'"$test_bead"'"}'
 
       # First start: MOCK_WORKER_SLEEP keeps mock claude alive so container
       # is still running when the second start arrives.
-      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
       GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
       GC_SECRET_FLAGS="-e MOCK_WORKER_SLEEP=120" \
@@ -1976,7 +1977,7 @@ let
 
       # Second start should detect running container and no-op
       local exit_code=0
-      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
       GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
         bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" \
@@ -1990,9 +1991,9 @@ let
       # Clean up
       podman stop "$container_name" 2>/dev/null || true
       podman rm -f "$container_name" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Worker pre-start guard prevents double-start (wx-tvj7o)" verify_worker_prestart_guard
 
@@ -2008,34 +2009,34 @@ let
       bd update "$test_bead" --set-metadata "gc.routed_to=worker"
 
       local start_json='{"agent_template":"worker","issue":"'"$test_bead"'"}'
-      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \
       GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
       GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
         bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" 2>&1
 
-      poll_until "podman inspect --format '{{.State.Running}}' gc-test-city-worker-$test_bead 2>/dev/null | grep -q true" 15
+      poll_until "podman inspect --format '{{.State.Running}}' $CITY_NAME-worker-$test_bead 2>/dev/null | grep -q true" 15
 
       # Stop via provider
-      GC_AGENT_TEMPLATE=worker GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_AGENT_TEMPLATE=worker GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \
         bash -c "echo '''' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh stop worker-$test_bead" 2>&1
 
       # Container should still exist (stopped, not removed)
-      podman inspect "gc-test-city-worker-$test_bead" >/dev/null 2>&1 || {
+      podman inspect "$CITY_NAME-worker-$test_bead" >/dev/null 2>&1 || {
         echo "FAIL: stopped worker container was removed"
         return 1
       }
 
       # podman logs should still work
-      podman logs "gc-test-city-worker-$test_bead" >/dev/null 2>&1 || {
+      podman logs "$CITY_NAME-worker-$test_bead" >/dev/null 2>&1 || {
         echo "FAIL: cannot read logs from stopped worker container"
         return 1
       }
 
       # Clean up
-      podman rm -f "gc-test-city-worker-$test_bead" 2>/dev/null || true
-      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      podman rm -f "$CITY_NAME-worker-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/$test_bead"
       git -C "$WS" worktree prune 2>/dev/null || true
-      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+      git -C "$WS" branch -D "$test_bead" 2>/dev/null || true
     }
     subtest "Stopped worker container preserved for log inspection (wx-4041e)" verify_stopped_container_preserved
   '';

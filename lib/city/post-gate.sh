@@ -21,8 +21,8 @@ TERMINAL_REASON="${GC_TERMINAL_REASON:?post-gate.sh requires GC_TERMINAL_REASON}
 WORKSPACE="${GC_WORKSPACE:?post-gate.sh requires GC_WORKSPACE}"
 CITY_NAME="${GC_CITY_NAME:?post-gate.sh requires GC_CITY_NAME}"
 
-BRANCH="gc-${BEAD_ID}"
-WORKTREE_PATH=".wrapix/worktree/gc-${BEAD_ID}"
+BRANCH="${BEAD_ID}"
+WORKTREE_PATH=".wrapix/worktree/${BEAD_ID}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,7 +116,7 @@ handle_approved() {
   # (fast-forward, rebase, worktree cleanup). This nudge is the only way
   # the judge learns it should merge; silent failure = branch never merged.
   gc session nudge judge \
-    "Merge approved bead $BEAD_ID — branch gc-${BEAD_ID}. Run merge step now." ||
+    "Merge approved bead $BEAD_ID — branch ${BEAD_ID}. Run merge step now." ||
     echo "post-gate: ERROR: failed to nudge judge to merge $BEAD_ID" >&2
 
   # Create deploy bead
@@ -140,7 +140,7 @@ create_deploy_bead() {
   local deploy_id
   deploy_id="$(bd create \
     --title="Deploy: ${title}" \
-    --description="Deploy change from bead ${BEAD_ID}. Merged branch gc-${BEAD_ID} to main." \
+    --description="Deploy change from bead ${BEAD_ID}. Merged branch ${BEAD_ID} to main." \
     --type=task \
     --priority=2 \
     --labels="deploy,gc-deploy" \

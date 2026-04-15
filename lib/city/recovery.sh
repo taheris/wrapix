@@ -118,7 +118,7 @@ reconcile_finished_workers() {
   # These are workers that finished (exited with commits) but gc crashed
   # before convergence could process them.
   local worktrees
-  worktrees="$(find "${WORKSPACE}/.wrapix/worktree" -maxdepth 1 -name 'gc-*' -type d 2>/dev/null)" || worktrees=""
+  worktrees="$(find "${WORKSPACE}/.wrapix/worktree" -maxdepth 1 -mindepth 1 -type d 2>/dev/null)" || worktrees=""
 
   [[ -z "$worktrees" ]] && return 0
 
@@ -127,8 +127,8 @@ reconcile_finished_workers() {
 
     local dir_name bead_id branch
     dir_name="$(basename "$worktree_path")"
-    bead_id="${dir_name#gc-}"
-    branch="gc-${bead_id}"
+    bead_id="$dir_name"
+    branch="${bead_id}"
 
     # Skip if no matching branch
     if ! git -C "$WORKSPACE" rev-parse --verify "$branch" >/dev/null 2>&1; then
@@ -141,7 +141,7 @@ reconcile_finished_workers() {
     fi
 
     # Check if the worker container is still running
-    local container_name="gc-${CITY_NAME}-worker-${bead_id}"
+    local container_name="${CITY_NAME}-worker-${bead_id}"
     local running
     running="$(podman inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null)" || running="false"
 
@@ -176,7 +176,7 @@ cleanup_stale_worktrees() {
 
   # Remove worktrees for beads that are no longer open
   local worktrees
-  worktrees="$(find "${WORKSPACE}/.wrapix/worktree" -maxdepth 1 -name 'gc-*' -type d 2>/dev/null)" || worktrees=""
+  worktrees="$(find "${WORKSPACE}/.wrapix/worktree" -maxdepth 1 -mindepth 1 -type d 2>/dev/null)" || worktrees=""
 
   [[ -z "$worktrees" ]] && return 0
 
@@ -185,7 +185,7 @@ cleanup_stale_worktrees() {
 
     local dir_name bead_id
     dir_name="$(basename "$worktree_path")"
-    bead_id="${dir_name#gc-}"
+    bead_id="$dir_name"
 
     # If bead is still open, keep the worktree
     if bead_is_open "$bead_id"; then
@@ -199,7 +199,7 @@ cleanup_stale_worktrees() {
     git -C "$WORKSPACE" worktree prune 2>/dev/null || true
 
     # Also clean up the branch if it still exists
-    local branch="gc-${bead_id}"
+    local branch="${bead_id}"
     if git -C "$WORKSPACE" rev-parse --verify "$branch" >/dev/null 2>&1; then
       git -C "$WORKSPACE" branch -d "$branch" 2>/dev/null || \
         git -C "$WORKSPACE" branch -D "$branch" 2>/dev/null || true
@@ -250,7 +250,7 @@ cleanup_stale_sockets() {
     [[ -e "$sock" ]] || continue
     local role
     role="$(basename "$sock" .sock)"
-    local container="gc-${CITY_NAME}-${role}"
+    local container="${CITY_NAME}-${role}"
     local running
     running="$(podman inspect --format '{{.State.Running}}' "$container" 2>/dev/null)" || running="false"
     if [[ "$running" != "true" ]]; then

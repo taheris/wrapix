@@ -34,7 +34,7 @@ Stop creating new beads after reaching the configured max (default: 10 open bead
 
 - **Stale beads:** `bd stale` — flag for human review via `bd label add <id> human`
 - **Orphaned workers:** cross-reference worker containers against in-progress beads, stop orphans
-- **Worktree cleanup:** remove stale `.wrapix/worktree/gc-*` directories with no matching worker
+- **Worktree cleanup:** remove stale `.wrapix/worktree/` directories with no matching worker
 
 ## Context Hierarchy
 

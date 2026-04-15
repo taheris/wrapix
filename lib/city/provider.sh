@@ -56,9 +56,9 @@ check_env() {
 # ---------------------------------------------------------------------------
 
 container_name() {
-  local prefix="gc-${GC_CITY_NAME:?}-"
+  local prefix="${GC_CITY_NAME:?}-"
   # Avoid double-prefixing: gc passes bare names on first start
-  # ("mayor") but fully-qualified names after config reload ("gc-dev-mayor").
+  # ("mayor") but fully-qualified names after config reload ("dev-mayor").
   if [[ "${SESSION:?}" == "${prefix}"* ]]; then
     echo "${SESSION}"
   else
@@ -333,7 +333,7 @@ worker_start() {
     return 1
   }
   bead_id="${GC_BEAD_ID}"
-  worktree_path=".wrapix/worktree/gc-${bead_id}"
+  worktree_path=".wrapix/worktree/${bead_id}"
 
   # Host-side persistent log directory — survives worktree cleanup (wx-iy1vt)
   local host_log_dir="${GC_WORKSPACE}/.gc/logs/worker/${bead_id}"
@@ -345,7 +345,7 @@ worker_start() {
   # The host worktree's .git file points to <host-abs>/.git/worktrees/gc-<id>,
   # which doesn't exist inside the container. Mount the main .git at /mnt/git
   # and rewrite the gitdir to match.
-  echo "gitdir: /mnt/git/worktrees/gc-${bead_id}" > "${GC_WORKSPACE}/${worktree_path}/.git"
+  echo "gitdir: /mnt/git/worktrees/${bead_id}" > "${GC_WORKSPACE}/${worktree_path}/.git"
 
   # Prefer env var (set by entrypoint) over port file (can be corrupted by
   # agents running bd dolt start inside containers with .beads mounted rw).

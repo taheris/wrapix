@@ -733,17 +733,17 @@ in
             exit 1
           }
 
-        test -d "$TMPDIR/.wrapix/worktree/gc-bead-123" \
+        test -d "$TMPDIR/.wrapix/worktree/bead-123" \
           || { echo "FAIL: worktree not created"; exit 1; }
         echo "  PASS: worktree created"
 
-        git -C "$TMPDIR" rev-parse --verify gc-bead-123 > /dev/null 2>&1 \
+        git -C "$TMPDIR" rev-parse --verify bead-123 > /dev/null 2>&1 \
           || { echo "FAIL: branch not created"; exit 1; }
         echo "  PASS: git branch created"
 
         # The role prompt file must exist and contain real template
         # content emitted by the live gc binary (not the generic fallback).
-        prime="$TMPDIR/.wrapix/worktree/gc-bead-123/.role-prompt"
+        prime="$TMPDIR/.wrapix/worktree/bead-123/.role-prompt"
         test -f "$prime" || { echo "FAIL: .role-prompt not rendered"; exit 1; }
         grep -q "Role: Worker" "$prime" \
           || { echo "FAIL: .role-prompt missing worker header"; cat "$prime"; exit 1; }
@@ -751,7 +751,7 @@ in
           || { echo "FAIL: .role-prompt is fallback, not prompt_template"; cat "$prime"; exit 1; }
         echo "  PASS: live gc prime rendered role prompt"
 
-        grep -q "worktree/gc-bead-123:/workspace" "$TMPDIR/podman.log" \
+        grep -q "worktree/bead-123:/workspace" "$TMPDIR/podman.log" \
           || { echo "FAIL: worktree not mounted"; exit 1; }
         echo "  PASS: worktree mounted in container"
 
@@ -1755,18 +1755,18 @@ in
 
         # Create a stale worktree
         mkdir -p "$WS/.wrapix/worktree"
-        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-stale-bead" -b gc-stale-bead -q
-        test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/stale-bead" -b stale-bead -q
+        test -d "$WS/.wrapix/worktree/stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
 
         # Run recovery
         PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" bash "$RECOVERY"
 
         # Verify stale worktree was cleaned up
-        ! test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: stale worktree not cleaned"; exit 1; }
+        ! test -d "$WS/.wrapix/worktree/stale-bead" || { echo "FAIL: stale worktree not cleaned"; exit 1; }
         echo "  PASS: stale worktree cleaned up"
 
         # Verify branch was cleaned up
-        ! git -C "$WS" rev-parse --verify gc-stale-bead 2>/dev/null || { echo "FAIL: stale branch not cleaned"; exit 1; }
+        ! git -C "$WS" rev-parse --verify stale-bead 2>/dev/null || { echo "FAIL: stale branch not cleaned"; exit 1; }
         echo "  PASS: stale branch cleaned up"
 
         rm -rf "$TMPDIR"
@@ -1899,9 +1899,9 @@ in
         git -C "$WS" init -q -b main
         git -C "$WS" commit --allow-empty -m "initial" -q
         mkdir -p "$WS/.wrapix/worktree"
-        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-stale-bead" -b gc-stale-bead -q
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/stale-bead" -b stale-bead -q
 
-        test -d "$WS/.wrapix/worktree/gc-stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
+        test -d "$WS/.wrapix/worktree/stale-bead" || { echo "FAIL: worktree not created"; exit 1; }
 
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
@@ -1923,13 +1923,13 @@ in
         PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" \
           bash "$SCOUT" housekeeping-worktrees
 
-        ! test -d "$WS/.wrapix/worktree/gc-stale-bead" || \
+        ! test -d "$WS/.wrapix/worktree/stale-bead" || \
           { echo "FAIL: stale worktree not cleaned"; exit 1; }
         echo "  PASS: stale worktrees cleaned up"
 
         # ---- Test 4: in-progress worktrees preserved ----
 
-        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-active-bead" -b gc-active-bead -q
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/active-bead" -b active-bead -q
 
         cat > "$MOCK_BIN/bd" << 'MOCK'
         #!/bin/sh
@@ -1944,7 +1944,7 @@ in
         PATH="$MOCK_BIN:$PATH" GC_CITY_NAME=test GC_WORKSPACE="$WS" \
           bash "$SCOUT" housekeeping-worktrees
 
-        test -d "$WS/.wrapix/worktree/gc-active-bead" || \
+        test -d "$WS/.wrapix/worktree/active-bead" || \
           { echo "FAIL: in-progress worktree was removed"; exit 1; }
         echo "  PASS: in-progress worktrees preserved"
 
@@ -2164,7 +2164,7 @@ in
 
         # Create a worktree to be cleaned up
         mkdir -p "$WS/.wrapix/worktree"
-        git -C "$WS" worktree add "$WS/.wrapix/worktree/gc-esc-bead" -b gc-esc-bead -q
+        git -C "$WS" worktree add "$WS/.wrapix/worktree/esc-bead" -b esc-bead -q
 
         # Mock bd — record all calls
         BD_LOG="$TMPDIR/bd.log"
@@ -2220,10 +2220,10 @@ in
         echo "  PASS: fallback notification sent"
 
         # wx-kutwf: worktree and branch preserved for debugging on escalation
-        test -d "$WS/.wrapix/worktree/gc-esc-bead" || { echo "FAIL: worktree should be preserved for debugging (wx-kutwf)"; exit 1; }
+        test -d "$WS/.wrapix/worktree/esc-bead" || { echo "FAIL: worktree should be preserved for debugging (wx-kutwf)"; exit 1; }
         echo "  PASS: worktree preserved for debugging"
 
-        git -C "$WS" rev-parse --verify gc-esc-bead >/dev/null 2>&1 || { echo "FAIL: branch should be preserved for debugging (wx-kutwf)"; exit 1; }
+        git -C "$WS" rev-parse --verify esc-bead >/dev/null 2>&1 || { echo "FAIL: branch should be preserved for debugging (wx-kutwf)"; exit 1; }
         echo "  PASS: branch preserved for debugging"
 
         rm -rf "$TMPDIR"
@@ -2802,7 +2802,7 @@ in
         git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "initial" -q
 
         # Simulate worker branch with changes
-        git -C "$WS_WORKER" checkout -b gc-bead-42 -q
+        git -C "$WS_WORKER" checkout -b bead-42 -q
         echo "fixed" > "$WS_WORKER/file.txt"
         git -C "$WS_WORKER" add -A && git -C "$WS_WORKER" commit -m "fix: auth bug (bead-42)" -q
         echo "more" > "$WS_WORKER/file2.txt"
@@ -2890,31 +2890,31 @@ in
         git -C "$WS_JUDGE" add -A && git -C "$WS_JUDGE" commit -m "initial" -q
 
         # Create worker branch (simulate worker output)
-        git -C "$WS_JUDGE" checkout -b gc-bead-99 -q
+        git -C "$WS_JUDGE" checkout -b bead-99 -q
         echo "fixed code" > "$WS_JUDGE/code.sh"
         git -C "$WS_JUDGE" add -A && git -C "$WS_JUDGE" commit -m "fix: resolve issue (bead-99)" -q
         WORKER_HEAD=$(git -C "$WS_JUDGE" rev-parse HEAD)
         git -C "$WS_JUDGE" checkout main -q
 
         # Create a worktree directory to be cleaned
-        mkdir -p "$WS_JUDGE/.wrapix/worktree/gc-bead-99"
-        echo "worktree content" > "$WS_JUDGE/.wrapix/worktree/gc-bead-99/dummy"
+        mkdir -p "$WS_JUDGE/.wrapix/worktree/bead-99"
+        echo "worktree content" > "$WS_JUDGE/.wrapix/worktree/bead-99/dummy"
 
         # Formula command: fast-forward merge
-        git -C "$WS_JUDGE" merge --ff-only gc-bead-99 -q
+        git -C "$WS_JUDGE" merge --ff-only bead-99 -q
         MAIN_HEAD=$(git -C "$WS_JUDGE" rev-parse HEAD)
         [[ "$MAIN_HEAD" == "$WORKER_HEAD" ]] || { echo "FAIL: ff merge didn't advance main"; exit 1; }
         echo "  PASS: fast-forward merge succeeded"
 
         # Formula command: cleanup worktree directory
-        rm -rf "$WS_JUDGE/.wrapix/worktree/gc-bead-99"
-        ! test -d "$WS_JUDGE/.wrapix/worktree/gc-bead-99" || { echo "FAIL: worktree not cleaned"; exit 1; }
+        rm -rf "$WS_JUDGE/.wrapix/worktree/bead-99"
+        ! test -d "$WS_JUDGE/.wrapix/worktree/bead-99" || { echo "FAIL: worktree not cleaned"; exit 1; }
         echo "  PASS: worktree directory removed"
 
         # Formula command: prune worktrees and delete branch
         git -C "$WS_JUDGE" worktree prune
-        git -C "$WS_JUDGE" branch -d gc-bead-99 -q
-        ! git -C "$WS_JUDGE" rev-parse --verify gc-bead-99 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
+        git -C "$WS_JUDGE" branch -d bead-99 -q
+        ! git -C "$WS_JUDGE" rev-parse --verify bead-99 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
         echo "  PASS: branch deleted after merge"
 
         # =====================================================================
@@ -2929,7 +2929,7 @@ in
         git -C "$WS_REBASE" add -A && git -C "$WS_REBASE" commit -m "initial" -q
 
         # Worker branch
-        git -C "$WS_REBASE" checkout -b gc-bead-77 -q
+        git -C "$WS_REBASE" checkout -b bead-77 -q
         echo "worker fix" > "$WS_REBASE/worker.txt"
         git -C "$WS_REBASE" add -A && git -C "$WS_REBASE" commit -m "fix: worker (bead-77)" -q
 
@@ -2940,22 +2940,22 @@ in
 
         # Formula command: ff fails, rebase then ff
         ff_exit=0
-        git -C "$WS_REBASE" merge --ff-only gc-bead-77 -q 2>/dev/null || ff_exit=$?
+        git -C "$WS_REBASE" merge --ff-only bead-77 -q 2>/dev/null || ff_exit=$?
         [[ "$ff_exit" -ne 0 ]] || { echo "FAIL: ff should fail when main advanced"; exit 1; }
         echo "  PASS: fast-forward correctly fails when main advanced"
 
         # Formula command: rebase onto main
-        git -C "$WS_REBASE" checkout gc-bead-77 -q
+        git -C "$WS_REBASE" checkout bead-77 -q
         git -C "$WS_REBASE" rebase main -q
         git -C "$WS_REBASE" checkout main -q
-        git -C "$WS_REBASE" merge --ff-only gc-bead-77 -q
+        git -C "$WS_REBASE" merge --ff-only bead-77 -q
 
         # Verify both changes present
         test -f "$WS_REBASE/worker.txt" || { echo "FAIL: worker change missing after rebase+merge"; exit 1; }
         test -f "$WS_REBASE/other.txt" || { echo "FAIL: other change missing after rebase+merge"; exit 1; }
         echo "  PASS: rebase + fast-forward merge succeeded"
 
-        git -C "$WS_REBASE" branch -d gc-bead-77 -q
+        git -C "$WS_REBASE" branch -d bead-77 -q
         echo "  PASS: branch cleaned up after rebase merge"
 
         # =====================================================================
@@ -2970,7 +2970,7 @@ in
         git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "initial" -q
 
         # Worker branch modifies shared.txt
-        git -C "$WS_CONFLICT" checkout -b gc-bead-55 -q
+        git -C "$WS_CONFLICT" checkout -b bead-55 -q
         echo "worker version" > "$WS_CONFLICT/shared.txt"
         git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "fix: worker (bead-55)" -q
 
@@ -2980,28 +2980,28 @@ in
         git -C "$WS_CONFLICT" add -A && git -C "$WS_CONFLICT" commit -m "feat: main change" -q
 
         # Create worktree directory to verify cleanup
-        mkdir -p "$WS_CONFLICT/.wrapix/worktree/gc-bead-55"
-        echo "worktree" > "$WS_CONFLICT/.wrapix/worktree/gc-bead-55/dummy"
+        mkdir -p "$WS_CONFLICT/.wrapix/worktree/bead-55"
+        echo "worktree" > "$WS_CONFLICT/.wrapix/worktree/bead-55/dummy"
 
         # Formula command: ff fails
         ff_exit=0
-        git -C "$WS_CONFLICT" merge --ff-only gc-bead-55 -q 2>/dev/null || ff_exit=$?
+        git -C "$WS_CONFLICT" merge --ff-only bead-55 -q 2>/dev/null || ff_exit=$?
         [[ "$ff_exit" -ne 0 ]] || { echo "FAIL: ff should fail"; exit 1; }
 
         # Formula command: rebase conflicts — abort and reject
         rebase_exit=0
-        git -C "$WS_CONFLICT" rebase main gc-bead-55 2>/dev/null || rebase_exit=$?
+        git -C "$WS_CONFLICT" rebase main bead-55 2>/dev/null || rebase_exit=$?
         [[ "$rebase_exit" -ne 0 ]] || { echo "FAIL: rebase should conflict"; exit 1; }
         git -C "$WS_CONFLICT" rebase --abort 2>/dev/null
         echo "  PASS: rebase conflict detected and aborted"
 
         # Formula command: cleanup after rejection
-        rm -rf "$WS_CONFLICT/.wrapix/worktree/gc-bead-55"
+        rm -rf "$WS_CONFLICT/.wrapix/worktree/bead-55"
         git -C "$WS_CONFLICT" worktree prune 2>/dev/null || true
         git -C "$WS_CONFLICT" checkout main -q
-        git -C "$WS_CONFLICT" branch -D gc-bead-55 -q
-        ! test -d "$WS_CONFLICT/.wrapix/worktree/gc-bead-55" || { echo "FAIL: worktree not cleaned"; exit 1; }
-        ! git -C "$WS_CONFLICT" rev-parse --verify gc-bead-55 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
+        git -C "$WS_CONFLICT" branch -D bead-55 -q
+        ! test -d "$WS_CONFLICT/.wrapix/worktree/bead-55" || { echo "FAIL: worktree not cleaned"; exit 1; }
+        ! git -C "$WS_CONFLICT" rev-parse --verify bead-55 2>/dev/null || { echo "FAIL: branch not deleted"; exit 1; }
         echo "  PASS: worktree and branch cleaned up after rejection"
 
         # =====================================================================
