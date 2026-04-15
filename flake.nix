@@ -164,7 +164,8 @@
                 inherit (builtins) mapAttrs;
                 inherit (wrapix) profiles;
 
-                mkSandboxPkg = cfg: (wrapix.mkSandbox (cfg // { packages = sandboxPackages; })).package;
+                mkSandboxPkg =
+                  cfg: (wrapix.mkSandbox (cfg // { packages = (cfg.packages or [ ]) ++ sandboxPackages; })).package;
                 sandboxPkgs = mapAttrs (_: mkSandboxPkg) {
                   wrapix = {
                     profile = profiles.base;
@@ -174,6 +175,10 @@
                   };
                   wrapix-python = {
                     profile = profiles.python;
+                  };
+                  wrapix-debug = {
+                    profile = profiles.base;
+                    packages = [ linuxPkgs.podman ];
                   };
                   wrapix-mcp = {
                     profile = profiles.base;
