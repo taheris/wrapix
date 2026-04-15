@@ -185,6 +185,25 @@ resource_flags() {
   echo "$flags"
 }
 
+# Common env flags for all containers (persistent and worker).
+# Centralizes the gc→container env contract — add new vars here, not
+# in each start function.  Uses the same echo-flags pattern as
+# container_labels() and resource_flags().
+container_env() {
+  local dolt_host="$1" dolt_port="$2"
+  echo "-e BEADS_DOLT_AUTO_START=0"
+  echo "-e BEADS_DOLT_SERVER_HOST=${dolt_host}"
+  echo "-e BEADS_DOLT_SERVER_PORT=${dolt_port}"
+  echo "-e GC_DOLT_HOST=${dolt_host}"
+  echo "-e GC_DOLT_PORT=${dolt_port}"
+  echo "-e CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}"
+  echo "-e GC_CITY_NAME=${GC_CITY_NAME}"
+  echo "-e GC_CITY=/workspace/.gc/home"
+  echo "-e WRAPIX_CITY_DIR=/workspace/.wrapix/city/current"
+  echo "-e HOME=/home/wrapix"
+  echo "-e TERM=xterm-256color"
+}
+
 # ---------------------------------------------------------------------------
 # Persistent role helpers (scout, judge) — tmux as PID 1
 # ---------------------------------------------------------------------------
@@ -231,19 +250,10 @@ persistent_start() {
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
     -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
     ${GC_SECRET_FLAGS:-} \
-    -e "BEADS_DOLT_AUTO_START=0" \
-    -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
-    -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
-    -e "GC_DOLT_HOST=${dolt_host}" \
-    -e "GC_DOLT_PORT=${dolt_port}" \
-    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-    -e "GC_CITY_NAME=${GC_CITY_NAME}" \
+    $(container_env "$dolt_host" "$dolt_port") \
     -e "GC_SESSION=exec:/workspace/.gc/scripts/provider.sh" \
     -e "GC_AGENT=${role}" \
     -e "GC_ALIAS=${role}" \
-    -e "WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" \
-    -e "HOME=/home/wrapix" \
-    -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE:?}" \
     bash -c '
       set -e
@@ -251,7 +261,18 @@ persistent_start() {
       [[ -f /git-ssh-setup.sh ]] && . /git-ssh-setup.sh
       mkdir -p "$HOME/.claude"
       cp /etc/wrapix/claude-config.json "$HOME/.claude.json"
-      cp "$WRAPIX_CITY_DIR/claude-settings.json" "$HOME/.claude/settings.json"
+      # Merge Nix-generated settings (env, Notification hook) with gc-
+      # installed hooks (UserPromptSubmit, Stop).  gc owns the hook
+      # definitions — using its template keeps hooks in sync across
+      # gc version upgrades.
+      if [[ -f /workspace/.gc/home/hooks/claude.json ]]; then
+        jq -s "(.[0] * .[1]) + {hooks: ((.[0].hooks // {}) + (.[1].hooks // {}))}" \
+          "$WRAPIX_CITY_DIR/claude-settings.json" \
+          /workspace/.gc/home/hooks/claude.json \
+          > "$HOME/.claude/settings.json"
+      else
+        cp "$WRAPIX_CITY_DIR/claude-settings.json" "$HOME/.claude/settings.json"
+      fi
       cp "$WRAPIX_CITY_DIR/tmux.conf" "$HOME/.tmux.conf"
       mkdir -p /workspace/.wrapix/tmux
       _sock="/workspace/.wrapix/tmux/${GC_AGENT}.sock"
@@ -377,21 +398,12 @@ worker_start() {
     -v "${task_file}:/workspace/.task:ro" \
     -v "${host_log_dir}:/workspace/logs:rw" \
     ${GC_SECRET_FLAGS:-} \
-    -e "BEADS_DOLT_AUTO_START=0" \
-    -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
-    -e "BEADS_DOLT_SERVER_PORT=${dolt_port}" \
-    -e "GC_DOLT_HOST=${dolt_host}" \
-    -e "GC_DOLT_PORT=${dolt_port}" \
-    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+    $(container_env "$dolt_host" "$dolt_port") \
     -e "GC_BEAD_ID=${bead_id}" \
-    -e "GC_CITY_NAME=${GC_CITY_NAME}" \
     -e "GC_SESSION=worker" \
     -e "GC_AGENT=worker" \
-    -e "WRAPIX_CITY_DIR=/workspace/.wrapix/city/current" \
-    -e "HOME=/home/wrapix" \
     -e "WRAPIX_PROMPT_FILE=/workspace/.task" \
     -e "WRAPIX_SYSTEM_PROMPT_FILE=/workspace/.role-prompt" \
-    -e "TERM=xterm-256color" \
     "${GC_AGENT_IMAGE}" \
     wrapix-agent run
 

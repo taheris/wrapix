@@ -144,20 +144,39 @@ let
             sleep 600
             ;;
           judge|judge*)
-            # Poll for beads needing review, approve them
-            for i in $(seq 1 300); do
-              for id in $(bd list --status=in_progress --json 2>/dev/null | jq -r '.[].id' 2>/dev/null); do
-                cr=$(bd show "$id" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null) || cr=""
-                if [ -n "$cr" ]; then
-                  # Only approve if not already approved
-                  existing=$(bd show "$id" --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null) || existing=""
-                  if [ -z "$existing" ]; then
-                    bd update "$id" --set-metadata "review_verdict=approve" 2>/dev/null || true
-                    bd update "$id" --notes "Judge: approved — test" 2>/dev/null || true
-                  fi
-                fi
-              done
-              sleep 1
+            # Simulate Claude Code's hook-driven nudge drain.
+            # Read UserPromptSubmit commands from the merged settings
+            # (gc's hooks/claude.json + Nix env, merged by provider.sh).
+            # This exercises the real production path: hooks → drain → act.
+            _settings="$HOME/.claude/settings.json"
+            while true; do
+              while IFS= read -r _cmd; do
+                [[ -z "$_cmd" ]] && continue
+                _out="$(eval "$_cmd" 2>&1)" || true
+                while IFS= read -r line; do
+                  case "$line" in
+                    *"Review bead "*)
+                      echo "JUDGE: received nudge via drain: $line"
+                      rest="''${line#*Review bead }"
+                      bead_id="''${rest%% —*}"
+                      commit_range="''${rest##*commit range: }"
+                      sleep 3
+                      verdict="approve"
+                      new_sh="$(git diff "$commit_range" --name-only --diff-filter=A -- '*.sh')"
+                      for f in $new_sh; do
+                        content="$(git show "''${commit_range##*..}:$f")" || continue
+                        if ! echo "$content" | head -5 | grep -q 'set -euo pipefail'; then
+                          verdict="reject"
+                          bd update "$bead_id" --notes "Judge: SH-1 violated in $f" || true
+                          break
+                        fi
+                      done
+                      bd update "$bead_id" --set-metadata "review_verdict=$verdict" || true
+                      ;;
+                  esac
+                done <<< "$_out"
+              done < <(jq -r '.hooks.UserPromptSubmit[]?.hooks[]?.command // empty' "$_settings")
+              sleep 2
             done
             ;;
           *)
@@ -288,10 +307,6 @@ let
     dump_diagnostics() {
       echo ""
       echo "--- Diagnostics ---"
-      echo "  dolt server:"
-      echo "    container: $(podman inspect --format '{{.State.Status}}' "$DOLT_CONTAINER" 2>/dev/null || echo 'not found')"
-      echo "    reachable: $(bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && echo yes || echo no)"
-      echo "    GC_DOLT_PORT=''${GC_DOLT_PORT:-unset}"
       if [ -n "$WS" ] && [ -f "$WS/gc.log" ]; then
         echo "  gc.log (last 40 lines):"
         tail -40 "$WS/gc.log" 2>/dev/null | sed 's/^/    /' || true
@@ -322,6 +337,12 @@ let
         echo "  $(basename "$logf"):"
         tail -30 "$logf" | sed 's/^/    /'
       done
+      if [ -n "''${BEAD_ID:-}" ]; then
+        echo "  bead $BEAD_ID metadata:"
+        (cd "$WS" && bd show "$BEAD_ID" --json 2>/dev/null | jq '.[0].metadata // {}' 2>/dev/null | sed 's/^/    /') || true
+        echo "  monitor.log ($BEAD_ID):"
+        cat "$WS/.gc/logs/worker/$BEAD_ID/monitor.log" 2>/dev/null | tail -30 | sed 's/^/    /' || echo "    (not found)"
+      fi
       if [ -n "$WS" ]; then
         echo "  beads:"
         (cd "$WS" && bd list 2>/dev/null | sed 's/^/    /') || true
@@ -361,26 +382,45 @@ let
     }
     trap cleanup EXIT
 
-    # Run a named subtest. Returns 0 on pass, 1 on fail.
-    # In fail-fast mode, dumps diagnostics and exits on failure.
+    # Run a named subtest. The function body runs in a subshell with
+    # set -euo pipefail so ANY failing command aborts the test.
+    # Functions that set variables consumed by later tests must call
+    # save VAR1 VAR2 ... to propagate them out of the subshell.
+    save() {
+      [ -n "''${SUBTEST_VARS:-}" ] || return 0
+      declare -p "$@" >> "$SUBTEST_VARS"
+    }
     subtest() {
       local name="$1"
       shift
       echo ""
       echo "--- $name ---"
-      if "$@"; then
+      local vars_file
+      vars_file="$(mktemp)"
+      set +e
+      (
+        set -euo pipefail
+        export SUBTEST_VARS="$vars_file"
+        "$@"
+      )
+      local rc=$?
+      set -e
+      if [ "$rc" -eq 0 ]; then
+        if [ -s "$vars_file" ]; then
+          eval "$(sed -e 's/^declare -x /export /' -e 's/^declare -[^ ]* //' "$vars_file")"
+        fi
         echo "PASS: $name"
         PASSED=$((PASSED + 1))
-        return 0
       else
         echo "FAIL: $name"
         FAILED=$((FAILED + 1))
         if [ "$FAIL_FAST" = true ]; then
           dump_diagnostics
+          rm -f "$vars_file"
           exit 1
         fi
-        return 1
       fi
+      rm -f "$vars_file"
     }
 
     # Poll until a command succeeds. Usage: poll_until command timeout
@@ -542,7 +582,7 @@ let
     # ================================================================
 
     validate_config() {
-      result=$(gc config show --validate 2>&1)
+      result=$(gc config show --city "$WS" --validate 2>&1)
       echo "$result" | grep -qi "valid\|ok"
     }
     subtest "Validate gc accepts config" validate_config
@@ -585,6 +625,9 @@ let
       # gc CLI commands (gc sling, gc status) resolve the dolt port from
       # .beads/dolt-server.port for non-external (localhost) dolt servers.
       echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
+      save DOLT_CONTAINER DOLT_PORT GC_PID \
+        GC_CITY_NAME GC_WORKSPACE GC_AGENT_IMAGE GC_PODMAN_NETWORK \
+        BEADS_DOLT_SERVER_HOST BEADS_DOLT_SERVER_PORT BEADS_DOLT_AUTO_START
     }
     subtest "Start gc daemon" start_gc
 
@@ -623,15 +666,17 @@ let
         esac
       done
 
-      # Script symlinks must be relative and executable (wx-kw0q1).
+      # Scripts must be executable (wx-kw0q1). If symlinked, must be relative.
       for f in "$WS"/.gc/scripts/*.sh; do
-        local target
-        target="$(readlink "$f")"
-        case "$target" in
-          /*) echo "FAIL: $(basename "$f") symlink is absolute: $target"; return 1 ;;
-        esac
+        if [ -L "$f" ]; then
+          local target
+          target="$(readlink "$f")"
+          case "$target" in
+            /*) echo "FAIL: $(basename "$f") symlink is absolute: $target"; return 1 ;;
+          esac
+        fi
         if [ ! -x "$f" ]; then
-          echo "FAIL: $(basename "$f") symlink is not executable"; return 1
+          echo "FAIL: $(basename "$f") is not executable"; return 1
         fi
       done
     }
@@ -681,17 +726,17 @@ let
     # .gc must be writable from inside containers (wx-9gm3t)
     verify_gc_writable_scout() {
       podman exec "''${CITY_NAME}-scout" \
-        touch /workspace/.gc/nudges/write-test-scout
-      [ -f "$WS/.gc/nudges/write-test-scout" ]
-      rm -f "$WS/.gc/nudges/write-test-scout"
+        touch /workspace/.gc/home/.gc/nudges/write-test-scout
+      [ -f "$WS/.gc/home/.gc/nudges/write-test-scout" ]
+      rm -f "$WS/.gc/home/.gc/nudges/write-test-scout"
     }
     subtest ".gc is writable from scout container" verify_gc_writable_scout
 
     verify_gc_writable_mayor() {
       podman exec "''${CITY_NAME}-mayor" \
-        touch /workspace/.gc/nudges/write-test-mayor
-      [ -f "$WS/.gc/nudges/write-test-mayor" ]
-      rm -f "$WS/.gc/nudges/write-test-mayor"
+        touch /workspace/.gc/home/.gc/nudges/write-test-mayor
+      [ -f "$WS/.gc/home/.gc/nudges/write-test-mayor" ]
+      rm -f "$WS/.gc/home/.gc/nudges/write-test-mayor"
     }
     subtest ".gc is writable from mayor container" verify_gc_writable_mayor
 
@@ -709,7 +754,7 @@ let
     BEAD_ID=$(bd list --json 2>/dev/null | jq -r '[.[] | select(.title | test("Fix test error"))][0].id' || echo "")
 
     sling_bead() {
-      [ -n "$BEAD_ID" ] && [ "$BEAD_ID" != "null" ] || return 1
+      [ -n "$BEAD_ID" ] && [ "$BEAD_ID" != "null" ]
       # Use the gc home already staged by the entrypoint.
       # Do NOT re-run stage-home.sh here — it rm -rf's the directory,
       # which destroys gc's cwd (the running daemon holds the old inode).
@@ -775,12 +820,12 @@ let
     subtest "Worker claude has --dangerously-skip-permissions, config, and tmux (wx-cswtw, wx-m5sd6)" verify_worker_agent_setup
 
     # Provider monitor runs gate.sh after worker-collect sets commit_range.
-    # gate.sh nudges judge → mock judge auto-approves → gate returns 0.
+    # gate.sh nudges judge → mock judge reads nudge, diffs, approves → gate returns 0.
     subtest "Wait for judge approval (via monitor gate pipeline)" \
-      poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 120
+      poll_until "bd show $BEAD_ID --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null | grep -q approve" 60
 
     # Monitor pipeline: gate approved → post-gate.sh fires → closes bead,
-    # creates deploy bead, nudges judge to merge.
+    # creates deploy bead. Mock judge only handles "Review bead" nudges.
     subtest "Wait for post-gate pipeline (deploy bead created)" \
       poll_until 'bd list --json 2>/dev/null | jq -e "[.[] | select(.title | startswith(\"Deploy:\"))] | length > 0"' 120
 
@@ -901,6 +946,7 @@ let
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
       done
+      save GC_PID
     }
     subtest "Stop gc after happy-path" stop_gc
 
@@ -923,7 +969,7 @@ let
     # Tests the judge's merge conflict handling. The judge owns merge,
     # so conflict rejection is the judge's responsibility.
     simulate_worker2() {
-      [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ] || return 1
+      [ -n "$BEAD2" ] && [ "$BEAD2" != "null" ]
       local wt="$WS/.wrapix/worktree/$BEAD2"
       # Create worktree from BEFORE the conflict commit so branches diverge.
       # Can't use worker-setup.sh here — it branches from HEAD, but we need
@@ -1027,7 +1073,7 @@ let
     # Simulate: worker committed to branch, but monitor died before
     # setting metadata. This is the state after a crash.
     setup_crashed_worker() {
-      [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ] || return 1
+      [ -n "$BEAD4" ] && [ "$BEAD4" != "null" ]
       GC_BEAD_ID="$BEAD4" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/$BEAD4"
       (cd "$wt" && echo "recovery fix" > recovery.txt && git add recovery.txt && git commit -m "fix: recovery test")
@@ -1130,7 +1176,7 @@ let
     BEAD6=$(bd list --json --title "Worker setup test" 2>/dev/null | jq -r '.[0].id')
 
     verify_worker_setup() {
-      [ -n "$BEAD6" ] && [ "$BEAD6" != "null" ] || return 1
+      [ -n "$BEAD6" ] && [ "$BEAD6" != "null" ]
       GC_BEAD_ID="$BEAD6" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
 
       local wt="$WS/.wrapix/worktree/$BEAD6"
@@ -1170,7 +1216,7 @@ let
     BEAD7=$(bd list --json --title "Collect no-op test" 2>/dev/null | jq -r '.[0].id')
 
     verify_collect_noop() {
-      [ -n "$BEAD7" ] && [ "$BEAD7" != "null" ] || return 1
+      [ -n "$BEAD7" ] && [ "$BEAD7" != "null" ]
       GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       GC_BEAD_ID="$BEAD7" GC_WORKSPACE="$WS" live worker-collect.sh
 
@@ -1200,7 +1246,7 @@ let
     BEAD8=$(bd list --json --title "Rebase success test" 2>/dev/null | jq -r '.[0].id')
 
     setup_rebase_success() {
-      [ -n "$BEAD8" ] && [ "$BEAD8" != "null" ] || return 1
+      [ -n "$BEAD8" ] && [ "$BEAD8" != "null" ]
       # Worker branches from current HEAD
       GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/$BEAD8"
@@ -1276,50 +1322,95 @@ let
         tail -40 "$WS/gc-gate.log" 2>/dev/null | sed 's/^/  /' || true
         return 1
       fi
+      save GC_PID
     }
     subtest "Restart gc for gate tests" restart_gc_for_gate
 
-    subtest "Create gate-approve bead" \
+    subtest "Wait for judge tmux socket" \
+      poll_until "test -S \"$WS/.wrapix/tmux/judge.sock\"" 60
+
+    setup_gate_approve() {
       bd create --title="Gate approve test" --type=task --priority=2
-
-    BEAD9=$(bd list --json --title "Gate approve test" 2>/dev/null | jq -r '.[0].id')
-
-    setup_gate_test() {
-      [ -n "$BEAD9" ] && [ "$BEAD9" != "null" ] || return 1
+      BEAD9=$(bd list --json --title "Gate approve test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$BEAD9" ] && [ "$BEAD9" != "null" ]
       bd update "$BEAD9" --status=in_progress
-      bd update "$BEAD9" --set-metadata "commit_range=abc..def"
-      bd update "$BEAD9" --set-metadata "review_verdict=approve"
+      local merge_base
+      merge_base="$(git rev-parse HEAD)"
+      git checkout -b gate-approve-branch
+      printf '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n' > fix-approve.sh
+      git add fix-approve.sh
+      git commit -m "add clean script"
+      git checkout main
+      bd update "$BEAD9" --set-metadata "commit_range=''${merge_base}..gate-approve-branch"
+      save BEAD9
     }
-    subtest "Set up gate approve test" setup_gate_test
+    subtest "Set up gate approve test (wx-ha7ff)" setup_gate_approve
 
     verify_gate_approve() {
       local exit_code=0
-      PATH="$LIVE_PATH" GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
+      PATH="$LIVE_PATH" GC_CITY="$WS/.gc/home" \
+        GC_BEAD_ID="$BEAD9" GC_POLL_INTERVAL=1 GC_POLL_TIMEOUT=30 \
+        bash "$WS/.gc/scripts/gate.sh" 2>&1 || exit_code=$?
       [ "$exit_code" -eq 0 ] || { echo "FAIL: gate should exit 0 on approve (got: $exit_code)"; return 1; }
     }
-    subtest "Gate exits 0 on approve verdict" verify_gate_approve
-
-    subtest "Create gate-reject bead" \
-      bd create --title="Gate reject test" --type=task --priority=2
-
-    BEAD10=$(bd list --json --title "Gate reject test" 2>/dev/null | jq -r '.[0].id')
+    subtest "Gate exits 0 — judge reads nudge, diffs, approves (wx-ha7ff)" verify_gate_approve
 
     setup_gate_reject() {
-      [ -n "$BEAD10" ] && [ "$BEAD10" != "null" ] || return 1
+      bd create --title="Gate reject test" --type=task --priority=2
+      BEAD10=$(bd list --json --title "Gate reject test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$BEAD10" ] && [ "$BEAD10" != "null" ]
       bd update "$BEAD10" --status=in_progress
-      bd update "$BEAD10" --set-metadata "commit_range=abc..def"
-      bd update "$BEAD10" --set-metadata "review_verdict=reject"
+      local merge_base
+      merge_base="$(git rev-parse HEAD)"
+      git checkout -b gate-reject-branch
+      printf '#!/usr/bin/env bash\necho no guard\n' > bad.sh
+      git add bad.sh
+      git commit -m "add script without set -euo pipefail"
+      git checkout main
+      bd update "$BEAD10" --set-metadata "commit_range=''${merge_base}..gate-reject-branch"
+      save BEAD10
     }
-    subtest "Set up gate reject test" setup_gate_reject
+    subtest "Set up gate reject test (wx-ha7ff)" setup_gate_reject
 
     verify_gate_reject() {
       local exit_code=0
-      PATH="$LIVE_PATH" GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=5 \
-        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
+      PATH="$LIVE_PATH" GC_CITY="$WS/.gc/home" \
+        GC_BEAD_ID="$BEAD10" GC_POLL_INTERVAL=1 GC_POLL_TIMEOUT=30 \
+        bash "$WS/.gc/scripts/gate.sh" 2>&1 || exit_code=$?
       [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 on reject (got: $exit_code)"; return 1; }
     }
-    subtest "Gate exits 1 on reject verdict" verify_gate_reject
+    subtest "Gate exits 1 — judge reads nudge, diffs bad.sh, rejects (wx-ha7ff)" verify_gate_reject
+
+    setup_gate_renudge() {
+      bd create --title="Gate renudge test" --type=task --priority=2
+      BEAD11=$(bd list --json --title "Gate renudge test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$BEAD11" ] && [ "$BEAD11" != "null" ]
+      bd update "$BEAD11" --status=in_progress
+      local merge_base
+      merge_base="$(git rev-parse HEAD)"
+      git checkout -b gate-renudge-branch
+      printf '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n' > fix-renudge.sh
+      git add fix-renudge.sh
+      git commit -m "add clean script for renudge"
+      git checkout main
+      bd update "$BEAD11" --set-metadata "commit_range=''${merge_base}..gate-renudge-branch"
+      save BEAD11
+    }
+    subtest "Set up gate re-nudge test (wx-ha7ff)" setup_gate_renudge
+
+    verify_gate_renudge() {
+      local gate_log
+      gate_log="$(mktemp)"
+      local exit_code=0
+      PATH="$LIVE_PATH" GC_CITY="$WS/.gc/home" \
+        GC_BEAD_ID="$BEAD11" GC_POLL_INTERVAL=1 GC_POLL_TIMEOUT=30 \
+        GC_RENUDGE_INTERVAL=2 \
+        bash "$WS/.gc/scripts/gate.sh" >"$gate_log" 2>&1 || exit_code=$?
+      [ "$exit_code" -eq 0 ] || { echo "FAIL: gate should exit 0 (got: $exit_code)"; cat "$gate_log"; return 1; }
+      grep -q "re-nudging" "$gate_log" || { echo "FAIL: expected re-nudge log line"; cat "$gate_log"; return 1; }
+      rm -f "$gate_log"
+    }
+    subtest "Gate re-nudges judge during poll (wx-ha7ff)" verify_gate_renudge
 
     # Stop gc after gate tests
     stop_gc_after_gate() {
@@ -1342,6 +1433,7 @@ let
         bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
         sleep 0.2
       done
+      save GC_PID
     }
     subtest "Stop gc after gate tests" stop_gc_after_gate
 
@@ -1355,7 +1447,7 @@ let
     BEAD_DISPATCH=$(bd list --json --title "Dispatch cooldown test" 2>/dev/null | jq -r '.[0].id')
 
     setup_dispatch() {
-      [ -n "$BEAD_DISPATCH" ] && [ "$BEAD_DISPATCH" != "null" ] || return 1
+      [ -n "$BEAD_DISPATCH" ] && [ "$BEAD_DISPATCH" != "null" ]
       bd update "$BEAD_DISPATCH" --set-metadata "gc.routed_to=worker"
     }
     subtest "Route dispatch bead to worker" setup_dispatch
@@ -1415,7 +1507,7 @@ let
     BEAD11=$(bd list --json --title "Post-gate close test" 2>/dev/null | jq -r '.[0].id')
 
     setup_post_gate_close() {
-      [ -n "$BEAD11" ] && [ "$BEAD11" != "null" ] || return 1
+      [ -n "$BEAD11" ] && [ "$BEAD11" != "null" ]
       bd update "$BEAD11" --status=in_progress
     }
     subtest "Set up post-gate close test" setup_post_gate_close
@@ -1447,7 +1539,7 @@ let
     BEAD12=$(bd list --json --title "Retry notes test" 2>/dev/null | jq -r '.[0].id')
 
     setup_retry_notes() {
-      [ -n "$BEAD12" ] && [ "$BEAD12" != "null" ] || return 1
+      [ -n "$BEAD12" ] && [ "$BEAD12" != "null" ]
       # Simulate judge rejection with merge_failure notes
       bd update "$BEAD12" --set-metadata "merge_failure=Rebase conflicts: CONFLICT in parser.sh"
     }
@@ -1482,7 +1574,7 @@ let
     BEAD13=$(bd list --json --title "Orphan cleanup test" 2>/dev/null | jq -r '.[0].id')
 
     setup_orphan_worktree() {
-      [ -n "$BEAD13" ] && [ "$BEAD13" != "null" ] || return 1
+      [ -n "$BEAD13" ] && [ "$BEAD13" != "null" ]
       GC_BEAD_ID="$BEAD13" GC_WORKSPACE="$WS" live worker-setup.sh >/dev/null
       local wt="$WS/.wrapix/worktree/$BEAD13"
       [ -d "$wt" ] || { echo "FAIL: worktree not created"; return 1; }
@@ -2018,7 +2110,7 @@ let
 
       # Stop via provider
       GC_AGENT_TEMPLATE=worker GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \
-        bash -c "echo '''' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh stop worker-$test_bead" 2>&1
+        echo "" | PATH="$LIVE_PATH" bash "$WS/.gc/scripts/provider.sh" stop "worker-$test_bead" 2>&1
 
       # Container should still exist (stopped, not removed)
       podman inspect "$CITY_NAME-worker-$test_bead" >/dev/null 2>&1 || {

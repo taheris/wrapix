@@ -116,8 +116,8 @@ buildImage {
   ];
 
   extraCommands = ''
-    mkdir -p tmp home/wrapix root var/run var/cache mnt/wrapix/file mnt/wrapix/dir
-    chmod 1777 tmp var/cache
+    mkdir -p tmp home/wrapix root var/run var/cache var/tmp mnt/wrapix/file mnt/wrapix/dir
+    chmod 1777 tmp var/cache var/tmp
     chmod 777 home/wrapix
 
     mkdir -p etc/wrapix

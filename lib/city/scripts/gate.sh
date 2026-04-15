@@ -14,6 +14,7 @@
 #   GC_POLL_INTERVAL         — seconds between verdict polls (default: 10)
 #   GC_POLL_TIMEOUT          — max seconds to wait for verdict (default: 600)
 #   GC_COMMIT_RANGE_TIMEOUT  — max seconds to wait for commit_range (default: 300)
+#   GC_RENUDGE_INTERVAL      — seconds between re-nudges during poll (default: 60)
 set -euo pipefail
 
 BEAD_ID="${GC_BEAD_ID:?gate.sh requires GC_BEAD_ID}"
@@ -51,14 +52,23 @@ fi
 # Step 2: Nudge the judge session with the commit range
 # ---------------------------------------------------------------------------
 
-gc session nudge judge "Review bead $BEAD_ID — commit range: $commit_range"
+NUDGE_MSG="Review bead $BEAD_ID — commit range: $commit_range"
+RENUDGE_INTERVAL="${GC_RENUDGE_INTERVAL:-60}"
+
+gc session nudge judge "$NUDGE_MSG"
 
 # ---------------------------------------------------------------------------
 # Step 3: Poll bead metadata for review_verdict
+#
+# Re-nudge every RENUDGE_INTERVAL seconds so a judge session restart
+# (which changes the epoch) doesn't permanently fence out the nudge.
+# The nudge system deduplicates by agent+source+reference, so repeated
+# nudges are cheap — but a fresh nudge carries the current epoch.
 # ---------------------------------------------------------------------------
 
 elapsed=0
 verdict=""
+_since_nudge=0
 
 while [[ "$elapsed" -lt "$POLL_TIMEOUT" ]]; do
   # best-effort: verdict may not be set yet (polling)
@@ -74,6 +84,13 @@ while [[ "$elapsed" -lt "$POLL_TIMEOUT" ]]; do
 
   sleep "$POLL_INTERVAL"
   elapsed=$((elapsed + POLL_INTERVAL))
+  _since_nudge=$((_since_nudge + POLL_INTERVAL))
+
+  if (( _since_nudge >= RENUDGE_INTERVAL )); then
+    echo "gate: re-nudging judge for bead $BEAD_ID" >&2
+    gc session nudge judge "$NUDGE_MSG" 2>/dev/null || true
+    _since_nudge=0
+  fi
 done
 
 # ---------------------------------------------------------------------------

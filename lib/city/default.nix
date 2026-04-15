@@ -353,6 +353,9 @@ let
 
       # baseClaudeSettings + SessionStart/PreCompact hooks. wrapix-prime-hook
       # is provided by cityScripts and reads $WRAPIX_CITY_DIR/$GC_AGENT.
+      # NOTE: UserPromptSubmit/Stop hooks come from gc's installed
+      # hooks/claude.json — provider.sh merges them at container startup
+      # so hooks stay in sync with the gc version.
       cityClaudeSettings = baseClaudeSettings // {
         hooks = (baseClaudeSettings.hooks or { }) // {
           SessionStart = [
