@@ -1232,7 +1232,7 @@ let
       printf '#!/usr/bin/env bash\nexit 0\n' > "$stub_dir/prek"
       chmod +x "$stub_dir/prek"
       local exit_code=0
-      PATH="$LIVE_PATH:$stub_dir" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
+      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
         bash "$WS/.gc/scripts/judge-merge.sh" 2>&1 || exit_code=$?
       rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: judge-merge should exit 0 on rebase success (got: $exit_code)"; return 1; }
