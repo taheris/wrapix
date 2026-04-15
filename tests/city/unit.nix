@@ -1356,7 +1356,7 @@ in
     let
       hasScriptNames = hasAttr "scriptNames" minimalCity;
       # Source directory containing the scripts
-      citySrc = ../../lib/city;
+      citySrc = ../../lib/city/scripts;
     in
     assert hasScriptNames;
 
