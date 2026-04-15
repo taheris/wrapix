@@ -85,7 +85,7 @@ let
       podman tag "localhost/wrapix-beads:latest" "$IMAGE" 2>/dev/null || true
       podman images --filter "reference=localhost/wrapix-beads" --format '{{.Tag}}' | while read -r _old_tag; do
         case "$_old_tag" in latest|${imageTag}) continue ;; esac
-        podman rmi -f "localhost/wrapix-beads:$_old_tag"
+        podman rmi "localhost/wrapix-beads:$_old_tag" 2>/dev/null || true
       done
     }
 

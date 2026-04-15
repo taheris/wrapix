@@ -137,7 +137,7 @@ let
           podman tag "localhost/wrapix-${agentSandbox.profile.name}:latest" "${imageName}" 2>/dev/null || true
           podman images --filter "reference=localhost/wrapix-${agentSandbox.profile.name}" --format '{{.Tag}}' | while read -r _old_tag; do
             case "$_old_tag" in latest|${imageTag}) continue ;; esac
-            podman rmi -f "localhost/wrapix-${agentSandbox.profile.name}:$_old_tag"
+            podman rmi "localhost/wrapix-${agentSandbox.profile.name}:$_old_tag" 2>/dev/null || true
           done
         fi
       '';

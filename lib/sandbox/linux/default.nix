@@ -144,6 +144,18 @@ in
           echo "      Run 'nix run .#wrapix-notifyd' on host for desktop notifications" >&2
         fi
 
+        # Mount host podman socket for sibling container access (opt-in)
+        PODMAN_SOCKET_ARGS=""
+        if [ -n "''${WRAPIX_PODMAN_SOCKET:-}" ]; then
+          PODMAN_SOCK="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
+          if [ -S "$PODMAN_SOCK" ]; then
+            PODMAN_SOCKET_ARGS="-v $PODMAN_SOCK:/run/podman/podman.sock -e CONTAINER_HOST=unix:///run/podman/podman.sock"
+          else
+            echo "Error: WRAPIX_PODMAN_SOCKET set but socket not found at $PODMAN_SOCK" >&2
+            exit 1
+          fi
+        fi
+
         # Mount deploy key and signing key (not under ~/.ssh/ — see lib/util/ssh.nix)
         DEPLOY_KEY_NAME=${deployKeyExpr}
         DEPLOY_KEY="$HOME/.ssh/deploy_keys/$DEPLOY_KEY_NAME"
@@ -230,7 +242,7 @@ in
           podman tag "localhost/wrapix-${profile.name}:latest" "$IMAGE_ID" 2>/dev/null || true
           podman images --filter "reference=localhost/wrapix-${profile.name}" --format '{{.Tag}}' | while read -r _old_tag; do
             case "$_old_tag" in latest|${imageTagLib.mkImageTag profileImage}) continue ;; esac
-            podman rmi -f "localhost/wrapix-${profile.name}:$_old_tag"
+            podman rmi "localhost/wrapix-${profile.name}:$_old_tag" 2>/dev/null || true
           done
           verbose "Loaded image $IMAGE_ID"
         else
@@ -303,6 +315,7 @@ in
           $VOLUME_ARGS \
           $BEADS_ARGS \
           $DEPLOY_KEY_ARGS \
+          $PODMAN_SOCKET_ARGS \
           $KRUN_ENV_ARGS \
           ''${KRUN_CMD_ENV:+-e "$KRUN_CMD_ENV"} \
           -e "BD_NO_DAEMON=1" \
