@@ -509,7 +509,7 @@ let
       podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
 
       # Copy city.toml to workspace root — entrypoint.sh sed-replaces the
-      # dolt port sentinel here, and stage-gc-home.sh copies it into the
+      # dolt port sentinel here, and stage-home.sh copies it into the
       # staged gc home. Matches live (city.app and modules/city.nix).
       cp -f ${cityToml} city.toml
       chmod u+w city.toml
@@ -711,7 +711,7 @@ let
     sling_bead() {
       [ -n "$BEAD_ID" ] && [ "$BEAD_ID" != "null" ] || return 1
       # Use the gc home already staged by the entrypoint.
-      # Do NOT re-run stage-gc-home.sh here — it rm -rf's the directory,
+      # Do NOT re-run stage-home.sh here — it rm -rf's the directory,
       # which destroys gc's cwd (the running daemon holds the old inode).
       # The provider monitor runs the full pipeline after the worker exits:
       # worker-collect → gate.sh → post-gate.sh (wx-7ttop).
@@ -1533,12 +1533,12 @@ let
     #
     # A stale workspace.provider="claude" causes gc to use its built-in
     # tmux provider for display commands instead of the exec provider.
-    # entrypoint.sh and stage-gc-home.sh strip the field defensively.
+    # entrypoint.sh and stage-home.sh strip the field defensively.
     # ================================================================
 
     verify_no_workspace_provider() {
       # Inject a stale workspace.provider into the workspace city.toml,
-      # then re-run stage-gc-home.sh and verify it's stripped.
+      # then re-run stage-home.sh and verify it's stripped.
       local test_toml="$WS/city.toml.test-y4tx2"
       cp "$WS/city.toml" "$test_toml"
       # Add provider = "claude" under [workspace] if not already there
@@ -1555,7 +1555,7 @@ let
       git init -q "$stage_tmp"
 
       local staged_home
-      staged_home="$(GC_WORKSPACE="$stage_tmp" GC_DOLT_PORT=99999 live stage-gc-home.sh)"
+      staged_home="$(GC_WORKSPACE="$stage_tmp" GC_DOLT_PORT=99999 live stage-home.sh)"
       if grep -q 'provider = "claude"' "$staged_home/city.toml"; then
         echo "FAIL: workspace.provider not stripped from staged city.toml"
         grep provider "$staged_home/city.toml"

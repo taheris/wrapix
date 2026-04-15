@@ -392,17 +392,17 @@ in
         echo "Checking Gas City shell script syntax..."
 
         SCRIPTS=(
-          "${../../lib/city/agent.sh}"
-          "${../../lib/city/dispatch.sh}"
-          "${../../lib/city/entrypoint.sh}"
-          "${../../lib/city/gate.sh}"
-          "${../../lib/city/judge-merge.sh}"
-          "${../../lib/city/post-gate.sh}"
-          "${../../lib/city/provider.sh}"
-          "${../../lib/city/recovery.sh}"
-          "${../../lib/city/scout.sh}"
-          "${../../lib/city/worker-collect.sh}"
-          "${../../lib/city/worker-setup.sh}"
+          "${../../lib/city/scripts/agent.sh}"
+          "${../../lib/city/scripts/dispatch.sh}"
+          "${../../lib/city/scripts/entrypoint.sh}"
+          "${../../lib/city/scripts/gate.sh}"
+          "${../../lib/city/scripts/judge-merge.sh}"
+          "${../../lib/city/scripts/post-gate.sh}"
+          "${../../lib/city/scripts/provider.sh}"
+          "${../../lib/city/scripts/recovery.sh}"
+          "${../../lib/city/scripts/scout.sh}"
+          "${../../lib/city/scripts/worker-collect.sh}"
+          "${../../lib/city/scripts/worker-setup.sh}"
         )
 
         for script in "''${SCRIPTS[@]}"; do
@@ -492,7 +492,7 @@ in
       }
       ''
                 set -euo pipefail
-                SCOUT="${../../lib/city/scout.sh}"
+                SCOUT="${../../lib/city/scripts/scout.sh}"
 
                 echo "Testing scout.sh parse-rules..."
 
@@ -550,7 +550,7 @@ in
       }
       ''
                 set -euo pipefail
-                SCOUT="${../../lib/city/scout.sh}"
+                SCOUT="${../../lib/city/scripts/scout.sh}"
                 TMPDIR=$(mktemp -d)
 
                 echo "Testing scout.sh scan with mock podman..."
@@ -613,7 +613,7 @@ in
       }
       ''
                 set -euo pipefail
-                AGENT="${../../lib/city/agent.sh}"
+                AGENT="${../../lib/city/scripts/agent.sh}"
 
                 echo "Testing agent.sh prompt construction..."
 
@@ -812,7 +812,7 @@ in
   # the exact file used by cityScripts (no copy, no rewrite).
   city-prime-hook = runCommandLocal "city-prime-hook" { } ''
     set -euo pipefail
-    HOOK="${../../lib/city/prime-hook.sh}"
+    HOOK="${../../lib/city/scripts/prime-hook.sh}"
 
     # Unset vars → must fail loudly
     if WRAPIX_CITY_DIR="" GC_AGENT="" bash "$HOOK" 2>/dev/null; then
@@ -843,7 +843,7 @@ in
     runCommandLocal "city-provider-persistent" { nativeBuildInputs = [ bash ]; }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/scripts/provider.sh}"
         TMPDIR=$(mktemp -d)
         STUB_BIN="$TMPDIR/bin"
         mkdir -p "$STUB_BIN"
@@ -1071,7 +1071,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/scripts/provider.sh}"
         TMPDIR=$(mktemp -d)
         STUB_BIN="$TMPDIR/bin"
         mkdir -p "$STUB_BIN"
@@ -1186,7 +1186,7 @@ in
   city-env-parity =
     let
       shellHookNix = readFile ../../lib/city/default.nix;
-      entrypointSrc = readFile ../../lib/city/entrypoint.sh;
+      entrypointSrc = readFile ../../lib/city/scripts/entrypoint.sh;
     in
     runCommandLocal "city-env-parity"
       {
@@ -1198,7 +1198,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/scripts/provider.sh}"
 
         # Extract exported var names from each source.
         # Catches both "export VAR=val" and bare "export VAR".
@@ -1591,7 +1591,7 @@ in
       }
       ''
         set -euo pipefail
-        SCOUT="${../../lib/city/scout.sh}"
+        SCOUT="${../../lib/city/scripts/scout.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing scout.sh create-beads..."
@@ -1670,7 +1670,7 @@ in
       }
       ''
         set -euo pipefail
-        SCOUT="${../../lib/city/scout.sh}"
+        SCOUT="${../../lib/city/scripts/scout.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -1717,7 +1717,7 @@ in
       }
       ''
         set -euo pipefail
-        RECOVERY="${../../lib/city/recovery.sh}"
+        RECOVERY="${../../lib/city/scripts/recovery.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing recovery.sh..."
@@ -1787,7 +1787,7 @@ in
       }
       ''
         set -euo pipefail
-        SCOUT="${../../lib/city/scout.sh}"
+        SCOUT="${../../lib/city/scripts/scout.sh}"
         TMPDIR=$(mktemp -d)
 
         export HOME="$TMPDIR/home"
@@ -1964,7 +1964,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/scripts/provider.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -2013,7 +2013,7 @@ in
       }
       ''
         set -euo pipefail
-        PROVIDER="${../../lib/city/provider.sh}"
+        PROVIDER="${../../lib/city/scripts/provider.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN"
@@ -2052,7 +2052,7 @@ in
       }
       ''
         set -euo pipefail
-        POST_GATE="${../../lib/city/post-gate.sh}"
+        POST_GATE="${../../lib/city/scripts/post-gate.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing post-gate.sh auto-deploy path..."
@@ -2143,7 +2143,7 @@ in
       }
       ''
         set -euo pipefail
-        POST_GATE="${../../lib/city/post-gate.sh}"
+        POST_GATE="${../../lib/city/scripts/post-gate.sh}"
         TMPDIR=$(mktemp -d)
 
         echo "Testing post-gate.sh escalation flow..."
@@ -2272,7 +2272,7 @@ in
       }
       ''
         set -euo pipefail
-        DISPATCH="${../../lib/city/dispatch.sh}"
+        DISPATCH="${../../lib/city/scripts/dispatch.sh}"
         TMPDIR=$(mktemp -d)
         MOCK_BIN="$TMPDIR/bin"
         mkdir -p "$MOCK_BIN" "$TMPDIR/ws/.wrapix/state"
@@ -2367,7 +2367,7 @@ in
       }
       ''
         set -euo pipefail
-        DISPATCH="${../../lib/city/dispatch.sh}"
+        DISPATCH="${../../lib/city/scripts/dispatch.sh}"
 
         echo "Testing dispatch.sh parse_duration..."
 
@@ -2423,7 +2423,7 @@ in
       }
       ''
                 set -euo pipefail
-                ENTRYPOINT="${../../lib/city/entrypoint.sh}"
+                ENTRYPOINT="${../../lib/city/scripts/entrypoint.sh}"
                 TMPDIR=$(mktemp -d)
                 MOCK_BIN="$TMPDIR/bin"
                 mkdir -p "$MOCK_BIN"
@@ -2447,14 +2447,14 @@ in
         MOCK
                 chmod +x "$TMPDIR/recovery.sh"
 
-                # stage-gc-home.sh: return a temp gc home dir
+                # stage-home.sh: return a temp gc home dir
                 GC_HOME="$TMPDIR/gc-home"
                 mkdir -p "$GC_HOME"
-                cat > "$TMPDIR/stage-gc-home.sh" << MOCK
+                cat > "$TMPDIR/stage-home.sh" << MOCK
                 #!/bin/sh
                 echo "$GC_HOME"
         MOCK
-                chmod +x "$TMPDIR/stage-gc-home.sh"
+                chmod +x "$TMPDIR/stage-home.sh"
 
                 # podman: no-op (events watcher will background and be harmless)
                 cat > "$MOCK_BIN/podman" << 'MOCK'

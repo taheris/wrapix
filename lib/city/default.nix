@@ -149,7 +149,7 @@ let
       providerScript = ".gc/scripts/provider.sh";
 
       # Dispatch check script — cooldown-aware scale_check for workers
-      dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (readFile ./dispatch.sh);
+      dispatchScript = pkgs.writeShellScript "wrapix-dispatch" (readFile ./scripts/dispatch.sh);
 
       # Default role formulas — consumers can override by placing files in formulas/
       defaultFormulas = {
@@ -185,7 +185,7 @@ let
         "post-gate.sh"
         "provider.sh"
         "recovery.sh"
-        "stage-gc-home.sh"
+        "stage-home.sh"
         "worker-collect.sh"
         "worker-setup.sh"
       ];
@@ -216,7 +216,7 @@ let
 
       # Promote staged layout to live — atomic rename dance per directory.
       # The running city sees rename events and reloads on the next tick.
-      promoteGcLayout = pkgs.writeShellScript "promote-gc-layout" (readFile ./city-reload.sh);
+      promoteGcLayout = pkgs.writeShellScript "promote-gc-layout" (readFile ./scripts/city-reload.sh);
 
       # Content-addressed store copies for integration tests (Nix sandbox
       # can't reach the source tree, so tests need real store paths).
@@ -224,7 +224,7 @@ let
       # content, not on the position within self.
       scriptsStore = path {
         name = "city-scripts";
-        path = ./.;
+        path = ./scripts;
         filter = path: _type: elem (baseNameOf path) scriptNames;
       };
       promptsStore = path {
@@ -452,10 +452,10 @@ let
       cityScripts = pkgs.symlinkJoin {
         name = "wrapix-city-scripts";
         paths = [
-          (pkgs.writeShellScriptBin "wrapix-agent" (readFile ./agent.sh))
+          (pkgs.writeShellScriptBin "wrapix-agent" (readFile ./scripts/agent.sh))
           (pkgs.writeShellScriptBin "beads-push" (readFile ../../scripts/beads-push))
-          (pkgs.writeShellScriptBin "wrapix-prime-hook" (readFile ./prime-hook.sh))
-          (pkgs.writeShellScriptBin "city-reload" (readFile ./city-reload.sh))
+          (pkgs.writeShellScriptBin "wrapix-prime-hook" (readFile ./scripts/prime-hook.sh))
+          (pkgs.writeShellScriptBin "city-reload" (readFile ./scripts/city-reload.sh))
         ];
       };
 
@@ -472,7 +472,7 @@ let
             dir: prefix:
             map (f: "${prefix}/${f}") (filter (f: (readDir dir).${f} == "regular") (attrNames (readDir dir)));
         in
-        shFiles ./. "lib/city"
+        shFiles ./scripts "lib/city/scripts"
         ++ allFiles ../ralph/cmd "lib/ralph/cmd"
         ++ filesOnly ../ralph/template "lib/ralph/template"
         ++ filesOnly ../ralph/template/partial "lib/ralph/template/partial"

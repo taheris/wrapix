@@ -37,13 +37,16 @@ lib/
 │   ├── agent.sh         # wrapix-agent wrapper (claude abstraction)
 │   ├── scout.sh         # Scout helpers: parse-rules, scan
 │   ├── gate.sh          # Convergence gate: nudge Judge, poll verdict
-│   ├── post-gate.sh     # Post-convergence: merge, cleanup, deploy bead
-│   ├── dispatch.sh      # Cooldown-aware Worker scale_check for gc
-│   ├── entrypoint.sh    # beads-dolt attach, pending reviews, recovery,
-│   │                    # events watcher, gc home staging, gc start
-│   ├── stage-gc-home.sh # Isolate gc from host .beads/
-│   ├── prime-hook.sh    # SessionStart/PreCompact role prompt loader
-│   ├── recovery.sh      # Crash recovery: reconcile orphaned containers
+│   ├── scripts/         # Shell scripts (provider, entrypoint, gate, etc.)
+│   │   ├── provider.sh      # exec:provider — podman lifecycle (start/stop/nudge)
+│   │   ├── entrypoint.sh    # beads-dolt, recovery, events watcher, gc start
+│   │   ├── gate.sh          # Convergence gate: nudge judge, wait for verdict
+│   │   ├── post-gate.sh     # Post-convergence: merge, cleanup, deploy bead
+│   │   ├── dispatch.sh      # Cooldown-aware Worker scale_check for gc
+│   │   ├── stage-home.sh    # Isolate gc from host .beads/
+│   │   ├── prime-hook.sh    # SessionStart/PreCompact role prompt loader
+│   │   ├── recovery.sh      # Crash recovery: reconcile orphaned containers
+│   │   └── ...              # worker-setup, worker-collect, judge-merge, etc.
 │   ├── prompts/         # Per-role system prompts (mayor, scout, judge, worker)
 │   ├── formulas/        # Default role formulas (mayor, scout, worker, judge)
 │   └── orders/          # gc orders (post-gate)
@@ -111,8 +114,8 @@ Scout (watching) → creates bead → Worker (fixes) → Judge (reviews)
 **Key design decisions:**
 
 - gc runs on the host as a per-city systemd service; agent role containers are spawned as siblings by the provider script via the local podman socket
-- Workers get isolated git worktrees at `.wrapix/worktree/gc-<bead-id>`
-- The provider script (`lib/city/provider.sh`) translates gc commands to podman operations
+- Workers get isolated git worktrees at `.wrapix/worktree/<bead-id>`
+- The provider script (`lib/city/scripts/provider.sh`) translates gc commands to podman operations
 - Convergence manages the Worker→Judge loop (max 2 iterations before escalation to the Mayor)
 - Merge is fast-forward only; rebase + prek on divergence
 - `ralph sync` scaffolds the docs/ context hierarchy; scaffolded files are flagged for human review via `bd label add <id> human` and presented by the Mayor on attach

@@ -215,7 +215,7 @@ let
       # beads git worktree — and therefore the github mirror — fails.
       #
       # It is also mounted at /workspace to match the path that agent
-      # containers use (lib/city/provider.sh sets workdir to /workspace).
+      # containers use (lib/city/scripts/provider.sh sets workdir to /workspace).
       # Without this, bd's auto-backup — whose path is resolved server-side —
       # fails with `mkdir /workspace: permission denied` when clients running
       # inside agent containers reference `/workspace/.beads/backup`.

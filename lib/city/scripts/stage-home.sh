@@ -23,7 +23,7 @@
 # Output: prints the gc home path; caller should export GC_CITY to it.
 set -euo pipefail
 
-: "${GC_WORKSPACE:?stage-gc-home.sh requires GC_WORKSPACE}"
+: "${GC_WORKSPACE:?stage-home.sh requires GC_WORKSPACE}"
 DOLT_PORT="${GC_DOLT_PORT:-3306}"
 
 GC_HOME="${GC_WORKSPACE}/.gc/home"

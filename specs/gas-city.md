@@ -197,7 +197,7 @@ In addition to error detection, the scout performs system housekeeping
 during each patrol cycle:
 - **Stale beads:** identifies beads with no recent activity
 - **Orphaned workers:** detects containers with no matching in-progress bead
-- **Worktree cleanup:** removes stale worktrees in `.wrapix/worktree/gc-*`
+- **Worktree cleanup:** removes stale worktrees in `.wrapix/worktree/`
 
 Housekeeping findings are reported via bead notes or flagged for human review
 if action is needed.
@@ -222,7 +222,7 @@ a worker's changes, the judge merges immediately — no handoff to a separate
 script. This naturally serializes merges since the judge processes its queue
 one at a time.
 
-- Linear history only: `git merge --ff-only gc-<bead-id>`
+- Linear history only: `git merge --ff-only <bead-id>`
 - If fast-forward fails (main advanced): rebase the branch onto main, run
   `prek` (pre-commit stage), then fast-forward merge. If tests fail after
   rebase, reject back to a new worker with the failure details.
@@ -230,8 +230,8 @@ one at a time.
   as context — no automatic conflict resolution
 - Judge does not run tests — it reviews code quality against
   `docs/style-guidelines.md` only. `prek` runs tests during rebase.
-- After merge: `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
-  and `git branch -d gc-<bead-id>`. `git worktree remove` cannot be used
+- After merge: `rm -rf .wrapix/worktree/<bead-id>` + `git worktree prune`
+  and `git branch -d <bead-id>`. `git worktree remove` cannot be used
   because the provider rewrites the worktree's `.git` file with a
   container-internal path. On rejection, old branch is also deleted — the
   new worker creates a fresh one.
@@ -547,9 +547,9 @@ This enables cross-container communication without podman:
   gc.routed_to=worker --unassigned` (gc routes beads via its
   `EffectiveSlingQuery` which sets `gc.routed_to=<agent_template>`)
 - The provider script's `Start` handler creates the git worktree:
-  `git worktree add .wrapix/worktree/gc-<bead-id> -b gc-<bead-id>`
+  `git worktree add .wrapix/worktree/<bead-id> -b <bead-id>`
 - The provider rewrites the worktree's `.git` file to
-  `gitdir: /mnt/git/worktrees/gc-<bead-id>` and mounts the main `.git`
+  `gitdir: /mnt/git/worktrees/<bead-id>` and mounts the main `.git`
   at `/mnt/git:rw` so git operations work inside the container
 - Worker container mounts the worktree as its workspace (`/workspace:rw`),
   `.beads/` as read-only, and receives a `.task` file built from the bead
@@ -559,7 +559,7 @@ This enables cross-container communication without podman:
 - gc convergence detects worker completion and hands off to the judge gate
 - After convergence completes (approved or escalated), the judge handles
   merge and worktree cleanup:
-  `rm -rf .wrapix/worktree/gc-<bead-id>` + `git worktree prune`
+  `rm -rf .wrapix/worktree/<bead-id>` + `git worktree prune`
 
 **Crash recovery:**
 - gc runs on the host as a systemd service with `Restart=always`; agent
@@ -568,7 +568,7 @@ This enables cross-container communication without podman:
 - Reconcile against beads state (desired vs actual)
 - Orphaned workers (no matching in-progress bead): stop and remove
 - Workers that finished (commits on branch, bead still open): re-enter convergence
-- Stale worktrees in `.wrapix/worktree/gc-*`: clean up orphans
+- Stale worktrees in `.wrapix/worktree/`: clean up orphans
 - Stale tmux sockets in `.wrapix/tmux/*.sock`: remove sockets for roles
   whose containers are no longer running
 
@@ -738,7 +738,7 @@ and exercises the real stack end-to-end:
 - id: city-integration
   stages: [pre-push]
   entry: nix run .#test-city
-  files: ^(lib/city/|tests/city|specs/gas-city)
+  files: ^(lib/city/scripts/|tests/city|specs/gas-city)
 ```
 
 ### Upgrades
@@ -793,17 +793,17 @@ discovers the provider from `city.toml`.
 |------|-------|--------|
 | Nix API | `lib/city/default.nix` | `mkCity` function |
 | Shared dolt | `lib/beads/default.nix` | Per-workspace `beads-dolt` container + CLI, shared between host `bd` and the city |
-| Provider | `lib/city/provider.sh` | Shell script for `exec:<script>` |
+| Provider | `lib/city/scripts/provider.sh` | Shell script for `exec:<script>` |
 | NixOS module | `modules/city.nix` | `services.wrapix.cities` |
-| Agent wrapper | `lib/city/agent.sh` | `wrapix-agent` CLI abstraction |
+| Agent wrapper | `lib/city/scripts/agent.sh` | `wrapix-agent` CLI abstraction |
 | Formulas | `lib/city/formulas/` | Default mayor, scout, worker, judge formulas |
-| Post-gate order | `lib/city/post-gate.sh` | Event-gated order: notify judge to merge, deploy bead creation |
+| Post-gate order | `lib/city/scripts/post-gate.sh` | Event-gated order: notify judge to merge, deploy bead creation |
 | Orders | `lib/city/orders/post-gate/order.toml` | gc order definition for post-gate event trigger |
-| Gate condition | `lib/city/gate.sh` | Convergence gate: nudge judge, wait for verdict |
-| Recovery | `lib/city/recovery.sh` | Crash recovery: reconcile containers vs bead state |
-| Dispatch | `lib/city/dispatch.sh` | Cooldown-aware worker scale_check for gc |
-| gc home staging | `lib/city/stage-gc-home.sh` | Isolate gc from host `.beads/` |
-| Entrypoint | `lib/city/entrypoint.sh` | `beads-dolt` start+attach, pending reviews, recovery, events watcher, gc home staging, gc start with trap cleanup |
+| Gate condition | `lib/city/scripts/gate.sh` | Convergence gate: nudge judge, wait for verdict |
+| Recovery | `lib/city/scripts/recovery.sh` | Crash recovery: reconcile containers vs bead state |
+| Dispatch | `lib/city/scripts/dispatch.sh` | Cooldown-aware worker scale_check for gc |
+| gc home staging | `lib/city/scripts/stage-home.sh` | Isolate gc from host `.beads/` |
+| Entrypoint | `lib/city/scripts/entrypoint.sh` | `beads-dolt` start+attach, pending reviews, recovery, events watcher, gc home staging, gc start with trap cleanup |
 | Unit tests | `tests/city/unit.nix` | Nix-sandbox tests for all components |
 | Integration tests | `tests/city/integration.nix` | Full ops loop via podman |
 | Flake | `flake.nix` | Add gc dependency, expose mkCity |
@@ -819,7 +819,7 @@ discovers the provider from `city.toml`.
   [verify](tests/city/unit.nix::city-city-toml), [verify](tests/city/unit.nix::city-config-validate)
 - [x] Provider script handles all gc provider methods
   [verify](tests/city/unit.nix::city-shell-syntax), [verify](tests/city/unit.nix::city-provider-worker)
-- [x] Ephemeral workers use git worktrees at `.wrapix/worktree/gc-<bead-id>`
+- [x] Ephemeral workers use git worktrees at `.wrapix/worktree/<bead-id>`
   [verify](tests/city/integration.nix::Phase 1 worker worktree)
 - [x] Persistent roles (mayor, scout, judge) start with tmux as PID 1
   [verify](tests/city/integration.nix::Phase 1 mayor/scout/judge start)

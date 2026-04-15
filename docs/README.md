@@ -33,4 +33,4 @@ development. See `docs/architecture.md` for system design.
 | **tmux-mcp** | MCP server for AI-assisted debugging via tmux panes |
 | **virtio-fs** | Shared filesystem for macOS container VMs |
 | **Worker** | Ephemeral city role: picks up a bead, writes the fix in a worktree |
-| **Worktree** | Per-bead git worktree under `.wrapix/worktree/gc-<bead-id>` |
+| **Worktree** | Per-bead git worktree under `.wrapix/worktree/<bead-id>` |

@@ -8,7 +8,7 @@
 # 2. Runs crash recovery — reconciles orphaned containers and worktrees.
 # 3. Starts a background process watching podman events for service container
 #    lifecycle events (die, oom, restart) and wakes the scout via gc nudge.
-# 4. Stages gc home (via stage-gc-home.sh) and runs gc start --foreground
+# 4. Stages gc home (via stage-home.sh) and runs gc start --foreground
 #    in the background with a trap to clean up dolt on exit.
 #
 # Environment variables (set by mkCity / systemd unit):
@@ -90,7 +90,7 @@ print_pending_reviews
 # Step 2: Crash recovery — reconcile orphaned containers and worktrees
 # ---------------------------------------------------------------------------
 
-# All city scripts (recovery, stage-gc-home, etc.) are co-located in the
+# All city scripts (recovery, stage-home, etc.) are co-located in the
 # same Nix derivation (scriptsDir), so SCRIPT_DIR always has siblings.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SCRIPT_DIR}/recovery.sh"
@@ -133,7 +133,7 @@ start_events_watcher
 # gc home isolates gc from the host's .beads/ — gc writes dolt.auto-start
 # and dolt-server.port to .gc/home/.beads/ instead of corrupting the host.
 export GC_DOLT=skip
-GC_CITY="$("${SCRIPT_DIR}/stage-gc-home.sh")"
+GC_CITY="$("${SCRIPT_DIR}/stage-home.sh")"
 export GC_CITY
 cd "$GC_CITY"
 
