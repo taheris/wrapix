@@ -19,6 +19,7 @@ WORKSPACE="${GC_WORKSPACE:?worker-setup.sh requires GC_WORKSPACE}"
 # Resolve bead — explicit or fallback picker
 bead_id="${GC_BEAD_ID:-}"
 if [[ -z "$bead_id" ]]; then
+  # best-effort: bd may not be reachable yet during early startup
   bead_id="$(cd "${WORKSPACE}" && bd list --metadata-field gc.routed_to=worker --status open,in_progress --json 2>/dev/null \
     | jq -r '.[0].id // empty' 2>/dev/null)" || bead_id=""
 fi
@@ -39,13 +40,14 @@ worktree_path=".wrapix/worktree/gc-${bead_id}"
 
 # Create git worktree on the host
 if [[ ! -d "${WORKSPACE}/${worktree_path}" ]]; then
-  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" >/dev/null 2>&1 || \
-    git -C "${WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}" >/dev/null 2>&1
+  git -C "${WORKSPACE}" worktree add "${worktree_path}" -b "gc-${bead_id}" 2>&1 || \
+    git -C "${WORKSPACE}" worktree add "${worktree_path}" "gc-${bead_id}" 2>&1
 fi
 
 # Build task file from bead description, acceptance criteria, and judge notes
 task_file="${WORKSPACE}/${worktree_path}/.task"
 {
+  # best-effort: bead may have been created without description
   local_json="$(bd show "${bead_id}" --json 2>/dev/null)" || local_json=""
   if [[ -n "$local_json" ]]; then
     # gc sling inline text creates beads where description is missing from JSON

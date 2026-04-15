@@ -58,6 +58,7 @@ has_auto_deploy() {
 
 # Check if the judge classified the change as low-risk.
 is_low_risk() {
+  # best-effort: missing risk_classification defaults to non-low-risk (safe)
   local risk
   risk="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.risk_classification // empty' 2>/dev/null)" || risk=""
   [[ "$risk" == "low" ]]
@@ -92,8 +93,10 @@ handle_escalation() {
   # best-effort: desktop notification for when human is not attached
   notify "[${CITY_NAME}] Convergence escalated: bead ${BEAD_ID} — ${TERMINAL_REASON}"
 
-  # Clean up worktree and branch on escalation
-  cleanup_branch "$BRANCH" "${WORKSPACE}/${WORKTREE_PATH}"
+  # Preserve worktree and branch for debugging — the mayor or human operator
+  # needs the code state to investigate. Cleanup deferred to recovery.sh or
+  # manual rm. (wx-kutwf)
+  echo "post-gate: preserving worktree ${WORKTREE_PATH} and branch ${BRANCH} for inspection"
 }
 
 # ---------------------------------------------------------------------------
@@ -141,7 +144,7 @@ create_deploy_bead() {
     --type=task \
     --priority=2 \
     --labels="deploy,gc-deploy" \
-    --silent 2>/dev/null)" || deploy_id=""
+    --silent)" || deploy_id=""
 
   if [[ -z "$deploy_id" ]]; then
     echo "post-gate: warning — failed to create deploy bead" >&2
@@ -156,10 +159,12 @@ create_deploy_bead() {
     if ! bd update "$deploy_id" --set-metadata "auto_deploy=true"; then
       # Auto-deploy metadata failed — fall through to human approval as safe default
       echo "post-gate: WARNING: auto_deploy metadata failed, falling through to human approval" >&2
+      # best-effort: auto_deploy path failed, human label is fallback safety net
       bd label add "$deploy_id" human 2>/dev/null || true
     fi
   else
     # Default: flag for director approval
+    # best-effort: deploy bead exists but label failure is non-critical
     bd label add "$deploy_id" human 2>/dev/null || true
     notify "[${CITY_NAME}] Deploy approval needed: ${title} (bead ${deploy_id})"
   fi

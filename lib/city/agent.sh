@@ -93,7 +93,7 @@ claude_run() {
       printf 'set -euo pipefail\n'
       printf 'claude'
       for arg in "${claude_flags[@]}"; do printf ' %q' "$arg"; done
-      printf ' %q 2>&1 | tee /workspace/.worker.log\n' "$prompt"
+      printf ' %q 2>&1 | tee /workspace/logs/worker.log\n' "$prompt"
       printf 'rc=${PIPESTATUS[0]}\n'
       printf 'echo "[wrapix-agent] claude exited with code ${rc}" >&2\n'
       printf 'tmux wait-for -S worker-exit\n'

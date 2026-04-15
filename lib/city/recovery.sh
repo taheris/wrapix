@@ -157,8 +157,10 @@ reconcile_finished_workers() {
       local merge_base
       merge_base="$(git -C "$WORKSPACE" merge-base main "$branch" 2>/dev/null)" || merge_base=""
       if [[ -n "$merge_base" ]]; then
-        bd update "$bead_id" --set-metadata "commit_range=${merge_base}..${branch}" 2>/dev/null || true
-        bd update "$bead_id" --set-metadata "branch_name=$branch" 2>/dev/null || true
+        bd update "$bead_id" --set-metadata "commit_range=${merge_base}..${branch}" ||
+          echo "recovery: WARNING: failed to set commit_range on bead $bead_id" >&2
+        bd update "$bead_id" --set-metadata "branch_name=$branch" ||
+          echo "recovery: WARNING: failed to set branch_name on bead $bead_id" >&2
       fi
     fi
   done <<< "$worktrees"

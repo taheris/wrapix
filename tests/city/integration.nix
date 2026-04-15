@@ -126,6 +126,7 @@ let
         echo "fix applied" > fix.txt
         git add fix.txt
         git commit -m "fix: resolve test error"
+        if [[ -n "''${MOCK_WORKER_SLEEP:-}" ]]; then sleep "$MOCK_WORKER_SLEEP"; fi
         ;;
       *)
         # Persistent session mode (mayor, scout, or judge)
@@ -782,6 +783,15 @@ let
     subtest "Wait for post-gate pipeline (deploy bead created)" \
       poll_until 'bd list --json 2>/dev/null | jq -e "[.[] | select(.title | startswith(\"Deploy:\"))] | length > 0"' 120
 
+    # wx-iy1vt: logs persist in host-side .gc/logs/worker/ dir
+    verify_worker_host_logs() {
+      local log_dir="$WS/.gc/logs/worker/$BEAD_ID"
+      [ -d "$log_dir" ] || { echo "FAIL: worker log dir not created at $log_dir"; return 1; }
+      [ -f "$log_dir/monitor.log" ] || { echo "FAIL: monitor.log not in host-side dir"; return 1; }
+      [ -s "$log_dir/monitor.log" ] || { echo "FAIL: monitor.log is empty"; return 1; }
+    }
+    subtest "Worker logs persist in .gc/logs/worker (wx-iy1vt)" verify_worker_host_logs
+
     # Judge merge — post-gate nudges judge via gc session nudge. Called
     # manually since the mock judge does not handle merge nudges.
     judge_merge_phase1() {
@@ -972,13 +982,22 @@ let
     }
     subtest "Post-gate handles escalation (non-approved)" run_post_gate_escalation
 
-    subtest "Verify escalation worktree cleaned up" \
-      test ! -d "$WS/.wrapix/worktree/gc-$BEAD3"
+    # wx-kutwf: worktree and branch preserved for debugging on escalation
+    subtest "Verify escalation worktree preserved for debugging (wx-kutwf)" \
+      test -d "$WS/.wrapix/worktree/gc-$BEAD3"
 
-    verify_escalation_branch_cleaned() {
-      ! git branch | grep "gc-$BEAD3"
+    verify_escalation_branch_preserved() {
+      git branch | grep -q "gc-$BEAD3"
     }
-    subtest "Verify escalation branch cleaned up" verify_escalation_branch_cleaned
+    subtest "Verify escalation branch preserved for debugging (wx-kutwf)" verify_escalation_branch_preserved
+
+    # Clean up manually (simulates what recovery.sh or human would do)
+    cleanup_escalation_worktree() {
+      rm -rf "$WS/.wrapix/worktree/gc-$BEAD3"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$BEAD3" 2>/dev/null || true
+    }
+    subtest "Clean up escalation worktree" cleanup_escalation_worktree
 
     verify_escalation_metadata() {
       local escalated
@@ -1085,7 +1104,7 @@ let
     # Gate should return 1 (no commit_range = not ready).
     verify_gate_rejects_noop() {
       local exit_code=0
-      GC_BEAD_ID="$BEAD5" GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=1 \
+      GC_BEAD_ID="$BEAD5" GC_COMMIT_RANGE_TIMEOUT=2 GC_POLL_INTERVAL=0 GC_POLL_TIMEOUT=1 \
         live gate.sh > /dev/null 2>&1 || exit_code=$?
       [ "$exit_code" -eq 1 ] || { echo "FAIL: gate should exit 1 for no-op worker (got: $exit_code)"; return 1; }
     }
@@ -1212,7 +1231,7 @@ let
       printf '#!/usr/bin/env bash\nexit 0\n' > "$stub_dir/prek"
       chmod +x "$stub_dir/prek"
       local exit_code=0
-      PATH="$stub_dir:$LIVE_PATH" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
+      PATH="$LIVE_PATH:$stub_dir" GC_BEAD_ID="$BEAD8" GC_WORKSPACE="$WS" \
         bash "$WS/.gc/scripts/judge-merge.sh" 2>&1 || exit_code=$?
       rm -rf "$stub_dir"
       [ "$exit_code" -eq 0 ] || { echo "FAIL: judge-merge should exit 0 on rebase success (got: $exit_code)"; return 1; }
@@ -1833,6 +1852,192 @@ let
       done
     }
     subtest "Config drift: entrypoint kills stale containers (wx-i42sb)" config_drift_restart
+
+    # ================================================================
+    # worker-detection-bead-metadata: s-wx-* session names (wx-pq03c)
+    #
+    # gc reconciler assigns session names like s-wx-<id> that don't
+    # match name patterns. The provider queries bead metadata for
+    # agent_template as fallback during start.
+    # ================================================================
+
+    verify_worker_detection_by_bead_metadata() {
+      podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
+      local test_bead
+      bd create --title="Session name detection test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Session name detection test" 2>/dev/null | jq -r '.[0].id')
+      [ -n "$test_bead" ] && [ "$test_bead" != "null" ] || { echo "FAIL: could not create test bead"; return 1; }
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+      bd update "$test_bead" --set-metadata "agent_template=worker"
+
+      # Call with s-wx-<id> session name and empty start JSON (no agent_template)
+      local exit_code=0
+      GC_BEAD_ID="$test_bead" \
+      GC_CITY_NAME="test-city" \
+      GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" \
+      GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" \
+      BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '{}' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start s-wx-$test_bead" \
+        2>&1 || exit_code=$?
+
+      if [ "$exit_code" -ne 0 ]; then
+        echo "FAIL: provider start failed for s-wx-* session (exit $exit_code)"
+        return 1
+      fi
+      [ -d "$WS/.wrapix/worktree/gc-$test_bead" ] || {
+        echo "FAIL: worktree not created for s-wx-* session"
+        return 1
+      }
+
+      # Clean up
+      podman stop "gc-test-city-s-wx-$test_bead" 2>/dev/null || true
+      podman rm -f "gc-test-city-s-wx-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Provider detects worker from bead metadata for s-wx-* names (wx-pq03c)" verify_worker_detection_by_bead_metadata
+
+    # ================================================================
+    # gate-logging: poll progress appears on stderr (wx-lpucs)
+    # ================================================================
+
+    verify_gate_logging() {
+      local stderr_file
+      stderr_file="$(mktemp)"
+      bd create --title="Gate logging test" --type=task --priority=2
+      local bead_log
+      bead_log=$(bd list --json --title "Gate logging test" 2>/dev/null | jq -r '.[0].id')
+      bd update "$bead_log" --status=in_progress
+      # No commit_range — gate will poll and timeout
+      local exit_code=0
+      PATH="$LIVE_PATH" GC_BEAD_ID="$bead_log" GC_COMMIT_RANGE_TIMEOUT=25 GC_POLL_TIMEOUT=1 \
+        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>"$stderr_file" || exit_code=$?
+      grep -q "gate: waiting for commit_range" "$stderr_file" || {
+        echo "FAIL: no commit_range poll logging on stderr"
+        cat "$stderr_file"
+        rm -f "$stderr_file"
+        return 1
+      }
+      rm -f "$stderr_file"
+    }
+    subtest "Gate.sh emits poll progress to stderr (wx-lpucs)" verify_gate_logging
+
+    # ================================================================
+    # gate-configurable-timeout: GC_COMMIT_RANGE_TIMEOUT (wx-kilk0)
+    # ================================================================
+
+    verify_configurable_commit_range_timeout() {
+      bd create --title="Timeout config test" --type=task --priority=2
+      local bead_t
+      bead_t=$(bd list --json --title "Timeout config test" 2>/dev/null | jq -r '.[0].id')
+      bd update "$bead_t" --status=in_progress
+      local start_time end_time elapsed exit_code=0
+      start_time=$(date +%s)
+      PATH="$LIVE_PATH" GC_BEAD_ID="$bead_t" GC_COMMIT_RANGE_TIMEOUT=4 GC_POLL_TIMEOUT=1 \
+        bash "$WS/.gc/scripts/gate.sh" >/dev/null 2>&1 || exit_code=$?
+      end_time=$(date +%s)
+      elapsed=$((end_time - start_time))
+      [ "$exit_code" -ne 0 ] || { echo "FAIL: gate should have failed (no commit_range)"; return 1; }
+      [ "$elapsed" -lt 15 ] || { echo "FAIL: gate took ''${elapsed}s — should respect GC_COMMIT_RANGE_TIMEOUT=4"; return 1; }
+    }
+    subtest "Gate respects GC_COMMIT_RANGE_TIMEOUT (wx-kilk0)" verify_configurable_commit_range_timeout
+
+    # ================================================================
+    # worker-prestart-guard: duplicate start is no-op (wx-tvj7o)
+    # ================================================================
+
+    verify_worker_prestart_guard() {
+      podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
+      local test_bead
+      bd create --title="Pre-start guard test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Pre-start guard test" 2>/dev/null | jq -r '.[0].id')
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+
+      local container_name="gc-test-city-worker-$test_bead"
+      local start_json='{"agent_template":"worker","issue":"'"$test_bead"'"}'
+
+      # First start: MOCK_WORKER_SLEEP keeps mock claude alive so container
+      # is still running when the second start arrives.
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+      GC_SECRET_FLAGS="-e MOCK_WORKER_SLEEP=120" \
+        bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" \
+        2>&1
+
+      # Wait for container to be running (agent.sh starts tmux session)
+      poll_until "podman inspect --format '{{.State.Status}}' $container_name 2>/dev/null | grep -q running" 10
+
+      local cid_before
+      cid_before="$(podman inspect --format '{{.Id}}' "$container_name")"
+
+      # Second start should detect running container and no-op
+      local exit_code=0
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" \
+        2>&1 || exit_code=$?
+      [ "$exit_code" -eq 0 ] || { echo "FAIL: second start should exit 0"; return 1; }
+
+      local cid_after
+      cid_after="$(podman inspect --format '{{.Id}}' "$container_name")"
+      [ "$cid_before" = "$cid_after" ] || { echo "FAIL: container was replaced (IDs differ)"; return 1; }
+
+      # Clean up
+      podman stop "$container_name" 2>/dev/null || true
+      podman rm -f "$container_name" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Worker pre-start guard prevents double-start (wx-tvj7o)" verify_worker_prestart_guard
+
+    # ================================================================
+    # stopped-container-preserved: podman logs available (wx-4041e)
+    # ================================================================
+
+    verify_stopped_container_preserved() {
+      podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
+      local test_bead
+      bd create --title="Container preserve test" --type=task --priority=2
+      test_bead=$(bd list --json --title "Container preserve test" 2>/dev/null | jq -r '.[0].id')
+      bd update "$test_bead" --set-metadata "gc.routed_to=worker"
+
+      local start_json='{"agent_template":"worker","issue":"'"$test_bead"'"}'
+      GC_BEAD_ID="$test_bead" GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+      GC_AGENT_IMAGE="${liveCity.imageName}" GC_PODMAN_NETWORK="$TEST_NETWORK" \
+      GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
+        bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" 2>&1
+
+      poll_until "podman inspect --format '{{.State.Running}}' gc-test-city-worker-$test_bead 2>/dev/null | grep -q true" 15
+
+      # Stop via provider
+      GC_AGENT_TEMPLATE=worker GC_CITY_NAME="test-city" GC_WORKSPACE="$WS" \
+        bash -c "echo '''' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh stop worker-$test_bead" 2>&1
+
+      # Container should still exist (stopped, not removed)
+      podman inspect "gc-test-city-worker-$test_bead" >/dev/null 2>&1 || {
+        echo "FAIL: stopped worker container was removed"
+        return 1
+      }
+
+      # podman logs should still work
+      podman logs "gc-test-city-worker-$test_bead" >/dev/null 2>&1 || {
+        echo "FAIL: cannot read logs from stopped worker container"
+        return 1
+      }
+
+      # Clean up
+      podman rm -f "gc-test-city-worker-$test_bead" 2>/dev/null || true
+      rm -rf "$WS/.wrapix/worktree/gc-$test_bead"
+      git -C "$WS" worktree prune 2>/dev/null || true
+      git -C "$WS" branch -D "gc-$test_bead" 2>/dev/null || true
+    }
+    subtest "Stopped worker container preserved for log inspection (wx-4041e)" verify_stopped_container_preserved
   '';
 
 in

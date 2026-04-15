@@ -2219,13 +2219,12 @@ in
         test -f "$NOTIFY_LOG" || { echo "FAIL: fallback notify not called"; exit 1; }
         echo "  PASS: fallback notification sent"
 
-        # Verify worktree cleaned up
-        ! test -d "$WS/.wrapix/worktree/gc-esc-bead" || { echo "FAIL: worktree not cleaned"; exit 1; }
-        echo "  PASS: worktree cleaned up"
+        # wx-kutwf: worktree and branch preserved for debugging on escalation
+        test -d "$WS/.wrapix/worktree/gc-esc-bead" || { echo "FAIL: worktree should be preserved for debugging (wx-kutwf)"; exit 1; }
+        echo "  PASS: worktree preserved for debugging"
 
-        # Verify branch cleaned up
-        ! git -C "$WS" rev-parse --verify gc-esc-bead 2>/dev/null || { echo "FAIL: branch not cleaned"; exit 1; }
-        echo "  PASS: branch cleaned up"
+        git -C "$WS" rev-parse --verify gc-esc-bead >/dev/null 2>&1 || { echo "FAIL: branch should be preserved for debugging (wx-kutwf)"; exit 1; }
+        echo "  PASS: branch preserved for debugging"
 
         rm -rf "$TMPDIR"
         echo "PASS: post-gate escalation routes through mayor correctly"

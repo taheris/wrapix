@@ -10,32 +10,40 @@
 #   1 — judge rejected (convergence iterates or escalates)
 #
 # Environment variables (set by formula env configuration):
-#   GC_BEAD_ID       — bead being reviewed (required)
-#   GC_POLL_INTERVAL — seconds between verdict polls (default: 10)
-#   GC_POLL_TIMEOUT  — max seconds to wait for verdict (default: 600)
+#   GC_BEAD_ID               — bead being reviewed (required)
+#   GC_POLL_INTERVAL         — seconds between verdict polls (default: 10)
+#   GC_POLL_TIMEOUT          — max seconds to wait for verdict (default: 600)
+#   GC_COMMIT_RANGE_TIMEOUT  — max seconds to wait for commit_range (default: 300)
 set -euo pipefail
 
 BEAD_ID="${GC_BEAD_ID:?gate.sh requires GC_BEAD_ID}"
 POLL_INTERVAL="${GC_POLL_INTERVAL:-10}"
 POLL_TIMEOUT="${GC_POLL_TIMEOUT:-600}"
+COMMIT_RANGE_TIMEOUT="${GC_COMMIT_RANGE_TIMEOUT:-300}"
 
 # ---------------------------------------------------------------------------
 # Step 1: Wait for commit_range metadata
 #
 # The provider's monitor process runs worker-collect.sh after the worker
 # container exits. gc may invoke this gate before worker-collect finishes
-# (race condition). Poll briefly before giving up.
+# (race condition). Poll until timeout. (wx-kilk0)
 # ---------------------------------------------------------------------------
 
 commit_range=""
-for _i in $(seq 1 30); do
+_cr_elapsed=0
+while [[ "$_cr_elapsed" -lt "$COMMIT_RANGE_TIMEOUT" ]]; do
+  # best-effort: bead metadata may not be written yet (polling)
   commit_range="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.commit_range // empty' 2>/dev/null)" || commit_range=""
   [[ -n "$commit_range" ]] && break
+  if (( _cr_elapsed > 0 && _cr_elapsed % 10 == 0 )); then
+    echo "gate: waiting for commit_range on bead $BEAD_ID (${_cr_elapsed}s/${COMMIT_RANGE_TIMEOUT}s)" >&2
+  fi
   sleep 2
+  _cr_elapsed=$((_cr_elapsed + 2))
 done
 
 if [[ -z "$commit_range" ]]; then
-  echo "gate: no commit_range set on bead $BEAD_ID after 60s — worker may not have committed" >&2
+  echo "gate: no commit_range set on bead $BEAD_ID after ${COMMIT_RANGE_TIMEOUT}s — worker may not have committed" >&2
   exit 1
 fi
 
@@ -53,10 +61,15 @@ elapsed=0
 verdict=""
 
 while [[ "$elapsed" -lt "$POLL_TIMEOUT" ]]; do
+  # best-effort: verdict may not be set yet (polling)
   verdict="$(bd show "$BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.review_verdict // empty' 2>/dev/null)" || verdict=""
 
   if [[ "$verdict" == "approve" ]] || [[ "$verdict" == "reject" ]]; then
     break
+  fi
+
+  if (( elapsed > 0 && elapsed % 60 == 0 )); then
+    echo "gate: waiting for verdict on bead $BEAD_ID (${elapsed}s/${POLL_TIMEOUT}s)" >&2
   fi
 
   sleep "$POLL_INTERVAL"

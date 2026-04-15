@@ -74,8 +74,7 @@ is_worker() {
   if [[ "${SESSION}" == worker* || "${SESSION}" == *-worker* ]]; then
     return 0
   fi
-  # Slow path: parse agent_template from gc's start JSON on stdin.
-  # STDIN_DATA is populated for start/nudge/set-meta/process-alive methods.
+  # Parse agent_template from gc's start JSON on stdin.
   if [[ -n "${STDIN_DATA:-}" ]]; then
     local tpl
     tpl="$(echo "$STDIN_DATA" | grep -o '"agent_template" *: *"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')" || tpl=""
@@ -84,7 +83,14 @@ is_worker() {
     fi
   fi
   # Check GC_AGENT_TEMPLATE env var (set by our own start for sub-calls)
-  [[ "${GC_AGENT_TEMPLATE:-}" == "worker" ]]
+  if [[ "${GC_AGENT_TEMPLATE:-}" == "worker" ]]; then
+    return 0
+  fi
+  # Container label fallback — covers non-start methods (stop, is-running, peek)
+  # for s-wx-* session names where name patterns don't match. (wx-pq03c)
+  local _gc_label
+  _gc_label="$(podman inspect --format '{{index .Config.Labels "gc-role"}}' "$(container_name)" 2>/dev/null)" || _gc_label=""
+  [[ "$_gc_label" == "worker" ]]
 }
 
 is_judge() {
@@ -97,12 +103,26 @@ is_mayor() {
 
 # Base role name (mayor, scout, judge, worker) regardless of session prefix.
 # Checks GC_AGENT_TEMPLATE first (set during start), then name patterns.
+is_scout() {
+  [[ "${SESSION}" == scout* || "${SESSION}" == *-scout* ]]
+}
+
 role_name() {
   if [[ "${GC_AGENT_TEMPLATE:-}" == "worker" ]] || is_worker; then echo "worker"
   elif is_mayor; then echo "mayor"
   elif is_judge; then echo "judge"
+  elif is_scout; then echo "scout"
   elif [[ -n "${GC_AGENT_TEMPLATE:-}" ]]; then echo "${GC_AGENT_TEMPLATE}"
-  else echo "scout"
+  else
+    # Container label fallback for roles with non-standard session names (wx-pq03c)
+    local _gc_label
+    _gc_label="$(podman inspect --format '{{index .Config.Labels "gc-role"}}' "$(container_name)" 2>/dev/null)" || _gc_label=""
+    if [[ -n "$_gc_label" ]]; then
+      echo "$_gc_label"
+    else
+      echo "role_name: cannot determine role for session '${SESSION}'" >&2
+      return 1
+    fi
   fi
 }
 
@@ -275,6 +295,19 @@ worker_start() {
   local name bead_id worktree_path
   name="$(container_name)"
 
+  # Pre-start guard: avoid killing an in-progress worker (wx-tvj7o)
+  local _existing_state
+  _existing_state="$(podman inspect --format '{{.State.Status}}' "$name" 2>/dev/null)" || _existing_state=""
+  case "$_existing_state" in
+    running)
+      echo "worker_start: container $name already running — skipping duplicate start" >&2
+      return 0
+      ;;
+    exited|stopped|created)
+      podman rm "$name" 2>/dev/null || true
+      ;;
+  esac
+
   # Resolve script directory (same dir as this provider.sh)
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -282,6 +315,7 @@ worker_start() {
   # Resolve bead ID if not already set (reconciler path doesn't pass issue
   # in start JSON; worker-setup.sh falls back to bd list routed beads).
   if [[ -z "${GC_BEAD_ID:-}" ]]; then
+    # best-effort: bd may not have routed beads yet
     GC_BEAD_ID="$(cd "${GC_WORKSPACE}" && bd list --metadata-field gc.routed_to=worker \
       --status open,in_progress --json 2>/dev/null \
       | jq -r '.[0].id // empty' 2>/dev/null)" || GC_BEAD_ID=""
@@ -300,6 +334,10 @@ worker_start() {
   }
   bead_id="${GC_BEAD_ID}"
   worktree_path=".wrapix/worktree/gc-${bead_id}"
+
+  # Host-side persistent log directory — survives worktree cleanup (wx-iy1vt)
+  local host_log_dir="${GC_WORKSPACE}/.gc/logs/worker/${bead_id}"
+  mkdir -p "$host_log_dir"
 
   local task_file="${GC_WORKSPACE}/${worktree_path}/.task"
 
@@ -322,7 +360,6 @@ worker_start() {
   # shellcheck disable=SC2046,SC2086
   podman run -d \
     --pull=never \
-    --replace \
     --name "$name" \
     --entrypoint "" \
     --network "${GC_PODMAN_NETWORK:?}" \
@@ -338,6 +375,7 @@ worker_start() {
     -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:ro" \
     -v "${beads_staging}:/workspace/.beads" \
     -v "${task_file}:/workspace/.task:ro" \
+    -v "${host_log_dir}:/workspace/logs:rw" \
     ${GC_SECRET_FLAGS:-} \
     -e "BEADS_DOLT_AUTO_START=0" \
     -e "BEADS_DOLT_SERVER_HOST=${dolt_host}" \
@@ -362,7 +400,7 @@ worker_start() {
   # This is the live worker→judge pipeline (wx-7ttop):
   #   worker-collect (set commit_range) → gate.sh (nudge judge, poll verdict)
   #   → post-gate.sh (close bead, deploy bead, notifications).
-  local monitor_log="${GC_WORKSPACE}/${worktree_path}/.monitor.log"
+  local monitor_log="${host_log_dir}/monitor.log"
   (
     # best-effort: container may already be gone (killed externally)
     podman wait "$name" || true
@@ -410,6 +448,14 @@ case "$METHOD" in
         export GC_BEAD_ID="$_gc_issue"
       fi
     fi
+    # Fallback: query bead metadata for agent_template when gc's start JSON
+    # omits it — reconciler writes agent_template before calling start. (wx-pq03c)
+    if [[ -z "${GC_AGENT_TEMPLATE:-}" ]]; then
+      _bead_to_check="${GC_BEAD_ID:-${SESSION}}"
+      GC_AGENT_TEMPLATE="$(cd "${GC_WORKSPACE}" && bd show "${_bead_to_check}" --json 2>/dev/null \
+        | jq -r '.[0].metadata.agent_template // empty' 2>/dev/null)" || GC_AGENT_TEMPLATE=""
+      export GC_AGENT_TEMPLATE
+    fi
     if is_worker; then
       worker_start
     else
@@ -418,10 +464,17 @@ case "$METHOD" in
     ;;
 
   stop)
-    rm -f "$(tmux_sock "$(role_name)")" 2>/dev/null || true
+    _gc_role="$(role_name 2>/dev/null)" || _gc_role=""
+    if [[ -n "$_gc_role" ]]; then
+      rm -f "$(tmux_sock "$_gc_role")" 2>/dev/null || true
+    fi
     name="$(container_name)"
     podman stop "$name" 2>/dev/null || true
-    podman rm -f "$name" 2>/dev/null || true
+    # Workers: preserve stopped container for log inspection (wx-4041e).
+    # Pre-start guard (wx-tvj7o) cleans up before creating new containers.
+    if ! is_worker; then
+      podman rm -f "$name" 2>/dev/null || true
+    fi
     ;;
 
   interrupt)
