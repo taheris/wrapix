@@ -150,6 +150,9 @@ in
           PODMAN_SOCK="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
           if [ -S "$PODMAN_SOCK" ]; then
             PODMAN_SOCKET_ARGS="-v $PODMAN_SOCK:/run/podman/podman.sock -e CONTAINER_HOST=unix:///run/podman/podman.sock"
+            # Tell nested podman commands where the host sees /workspace.
+            # $PROJECT_DIR is the host path (the launcher runs on the host).
+            PODMAN_SOCKET_ARGS="$PODMAN_SOCKET_ARGS -e GC_HOST_WORKSPACE=$PROJECT_DIR"
           else
             echo "Error: WRAPIX_PODMAN_SOCKET set but socket not found at $PODMAN_SOCK" >&2
             exit 1
@@ -174,6 +177,9 @@ in
         BEADS_ARGS=""
         if [ -n "$BEADS_STAGING" ]; then
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
+          if [ -n "''${WRAPIX_PODMAN_SOCKET:-}" ]; then
+            PODMAN_SOCKET_ARGS="$PODMAN_SOCKET_ARGS -e GC_HOST_BEADS=$BEADS_STAGING"
+          fi
         fi
 
         # Session registration for focus-aware notifications (tmux only)

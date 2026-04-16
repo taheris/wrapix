@@ -35,9 +35,21 @@ fi
 beads-dolt start "$GC_WORKSPACE"
 DOLT_CONTAINER="$(beads-dolt name "$GC_WORKSPACE")"
 DOLT_PORT="$(beads-dolt port "$GC_WORKSPACE")"
-DOLT_HOST="127.0.0.1"
 
 beads-dolt attach "${GC_PODMAN_NETWORK:?}" "$GC_WORKSPACE"
+
+# When talking to host podman from inside a container (CONTAINER_HOST),
+# host-loopback ports are invisible from pasta networking.  The dolt
+# container's Unix socket on the shared workspace filesystem bypasses
+# the network entirely — bd reads BEADS_DOLT_SERVER_SOCKET.
+# Role containers on the bridge network still reach dolt via TCP
+# (container hostname), so DOLT_HOST/PORT are set for them too.
+if [[ -n "${CONTAINER_HOST:-}" ]]; then
+  DOLT_HOST="$(podman inspect --format '{{(index .NetworkSettings.Networks "wrapix-dolt").IPAddress}}' "$DOLT_CONTAINER")"
+  export BEADS_DOLT_SERVER_SOCKET="${GC_WORKSPACE}/.gc/dolt.sock"
+else
+  DOLT_HOST="127.0.0.1"
+fi
 
 export BEADS_DOLT_SERVER_HOST="$DOLT_HOST"
 export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"

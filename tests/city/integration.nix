@@ -289,6 +289,11 @@ let
     # the test only sees state it sets itself.
     for _v in ''${!BEADS_@} ''${!BD_@}; do unset "$_v"; done
 
+    # HOME=$WS (below) isolates dolt config but makes $HOME a gc discovery
+    # ceiling — gc walks up from cwd and stops at HOME before checking it.
+    # Override the ceiling so gc finds city.toml in $WS.
+    export GC_CEILING_DIRECTORIES="/"
+
     PASSED=0
     FAILED=0
     GC_PID=""
@@ -449,6 +454,16 @@ let
       return 1
     }
 
+    # Check if dolt is reachable. When CONTAINER_HOST is set (pasta
+    # networking), use the Unix socket on the shared filesystem.
+    dolt_reachable() {
+      if [[ -n "''${CONTAINER_HOST:-}" ]]; then
+        test -S "$WS/.gc/dolt.sock"
+      else
+        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null
+      fi
+    }
+
     # Run a city script via the live .gc/scripts/ symlinks with LIVE_PATH.
     # Every script invocation must go through this to exercise the real
     # invocation path (symlink resolution, live PATH, live env).
@@ -479,7 +494,24 @@ let
         if isDarwin then "cat ${testImage}" else "${testImage}"
       } | podman load && podman tag "localhost/wrapix-${liveCity.sandbox.profile.name}:latest" "${liveCity.imageName}"'
 
-    WS=$(mktemp -d -t citytest-XXXXXX)
+    # When using a remote podman socket (CONTAINER_HOST), bind-mount paths
+    # must exist on the host.  /workspace is shared; /tmp is container-local.
+    if [ -n "''${CONTAINER_HOST:-}" ]; then
+      WS=$(mktemp -d /workspace/.wrapix/citytest-XXXXXX)
+
+      # Derive GC_HOST_WORKSPACE if the launcher didn't set it (bootstrap).
+      if [[ -z "''${GC_HOST_WORKSPACE:-}" ]]; then
+        GC_HOST_WORKSPACE="$(awk '$5 == "/workspace" {print $4; exit}' /proc/self/mountinfo)"
+      fi
+      # Rebase from /workspace root to the test workspace path.
+      export GC_HOST_WORKSPACE="''${GC_HOST_WORKSPACE}''${WS#/workspace}"
+      # The test creates its own .beads/ under $WS — not the outer launcher's
+      # beads staging.  Unset GC_HOST_BEADS so _host_path translates .beads
+      # paths via GC_HOST_WORKSPACE instead.
+      unset GC_HOST_BEADS
+    else
+      WS=$(mktemp -d -t citytest-XXXXXX)
+    fi
     # Resolve symlinks (macOS /tmp -> /private/tmp) so podman VM can mount paths
     WS=$(cd "$WS" && pwd -P)
     export WS
@@ -501,50 +533,19 @@ let
       # Directories the provider mounts into containers
       mkdir -p .wrapix .claude docs
 
-      # --- gc init: scaffolds .beads/ and .gc/ ---
-      # gc init auto-starts its supervisor and blocks; kill the process group
-      # once .beads/metadata.json exists. beads-dolt will then serve the same
-      # data dir as a shared podman container.
-      setsid env PATH="$LIVE_PATH" gc init --file ${cityToml} --skip-provider-readiness </dev/null &
-      _GC_INIT_PID=$!
-      for _i in $(seq 1 60); do
-        [ -f .beads/metadata.json ] && break
-        sleep 0.5
-      done
-      if [ ! -f .beads/metadata.json ]; then
-        echo "FATAL: gc init did not create .beads/metadata.json after 30s"
-        return 1
-      fi
-
+      # --- Scaffold .beads/ and .gc/ (matches nix run .#city live path) ---
+      # bd init --server creates .beads/ with a dolt database that
+      # beads-dolt can serve.  Unlike gc init this needs no systemctl,
+      # so the test works inside containers without systemd.
+      bd init --prefix cg --skip-hooks --skip-agents --non-interactive --server
+      bd dolt stop
+      rm -f .beads/dolt-server.pid .beads/dolt-server.lock .beads/dolt-server.port
       bd config set types.custom "molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,convergence"
 
-      kill -TERM -"$_GC_INIT_PID" 2>/dev/null || true
-      for _i in $(seq 1 30); do
-        kill -0 "$_GC_INIT_PID" 2>/dev/null || break
-        sleep 0.2
-      done
-      kill -9 -"$_GC_INIT_PID" 2>/dev/null || true
-      wait "$_GC_INIT_PID" 2>/dev/null || true
-      gc supervisor stop 2>&1 || true
-      gc unregister "$WS" 2>&1 || true
-
-      # Stop gc's embedded dolt (entrypoint will start beads-dolt on the same dir).
-      if [ -f .beads/dolt-server.pid ]; then
-        kill "$(cat .beads/dolt-server.pid)" 2>/dev/null || true
-      fi
-      if [ -f .beads/dolt-server.port ]; then
-        _EDOLT_PORT=$(cat .beads/dolt-server.port)
-        for _i in $(seq 1 20); do
-          bash -c "echo > /dev/tcp/127.0.0.1/$_EDOLT_PORT" 2>/dev/null || break
-          sleep 0.2
-        done
-      fi
-      rm -f .beads/dolt-server.pid .beads/dolt-server.lock .beads/dolt-server.port
-      # Clean up stale managed dolt state left by gc init's embedded dolt.
-      # Without this, currentDoltPort() sees hasManagedDoltState=true, finds
-      # no live port, and removes .beads/dolt-server.port — breaking gc sling.
-      rm -rf .gc/runtime/packs/*/dolt-state.json 2>/dev/null || true
-      chmod 700 .beads
+      # Pre-create .gc/ layout so gc start never runs auto-init
+      # (matches city.app and modules/city.nix).
+      mkdir -p .gc/cache .gc/system .gc/runtime
+      touch .gc/events.jsonl
 
       podman network create "$TEST_NETWORK" >/dev/null 2>&1 || true
 
@@ -606,7 +607,7 @@ let
       GC_PID=$!
 
       for _i in $(seq 1 100); do
-        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        dolt_reachable && break
         sleep 0.2
       done
 
@@ -619,7 +620,12 @@ let
         return 1
       fi
 
-      export BEADS_DOLT_SERVER_HOST=127.0.0.1
+      if [[ -n "''${CONTAINER_HOST:-}" ]]; then
+        export BEADS_DOLT_SERVER_SOCKET="$WS/.gc/dolt.sock"
+        export BEADS_DOLT_SERVER_HOST=127.0.0.1
+      else
+        export BEADS_DOLT_SERVER_HOST=127.0.0.1
+      fi
       export BEADS_DOLT_SERVER_PORT="$DOLT_PORT"
       export BEADS_DOLT_AUTO_START=0
       # gc CLI commands (gc sling, gc status) resolve the dolt port from
@@ -627,7 +633,8 @@ let
       echo "$DOLT_PORT" > "$WS/.beads/dolt-server.port"
       save DOLT_CONTAINER DOLT_PORT GC_PID \
         GC_CITY_NAME GC_WORKSPACE GC_AGENT_IMAGE GC_PODMAN_NETWORK \
-        BEADS_DOLT_SERVER_HOST BEADS_DOLT_SERVER_PORT BEADS_DOLT_AUTO_START
+        BEADS_DOLT_SERVER_HOST BEADS_DOLT_SERVER_PORT BEADS_DOLT_AUTO_START \
+        BEADS_DOLT_SERVER_SOCKET
     }
     subtest "Start gc daemon" start_gc
 
@@ -943,7 +950,7 @@ let
       # Ensure beads-dolt is still running for remaining scenarios
       beads-dolt start "$WS" >/dev/null 2>&1 || true
       for _i in $(seq 1 50); do
-        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        dolt_reachable && break
         sleep 0.2
       done
       save GC_PID
@@ -1258,6 +1265,7 @@ let
       # Verify checkout succeeded — inside subtest() set -e is disabled,
       # so a stale index.lock from a dying monitor pipeline would cause
       # checkout to fail silently and the commit to land on the wrong branch.
+      git -C "$WS" add .beads/ && git -C "$WS" diff --cached --quiet || git -C "$WS" commit -m "beads: rebase setup"
       git -C "$WS" checkout main 2>/dev/null
       local current_branch
       current_branch="$(git -C "$WS" rev-parse --abbrev-ref HEAD)"
@@ -1286,7 +1294,14 @@ let
     subtest "Judge rebases and merges diverged branch" judge_merge_rebase_success
 
     verify_rebase_merge_landed() {
-      git -C "$WS" log --oneline main | grep -q "rebase success test"
+      git -C "$WS" log --oneline main | grep -q "rebase success test" || {
+        echo "DEBUG rebase-verify: git log --oneline -10 main:"
+        git -C "$WS" log --oneline -10 main
+        echo "DEBUG rebase-verify: HEAD=$(git -C "$WS" rev-parse HEAD) main=$(git -C "$WS" rev-parse main)"
+        echo "DEBUG rebase-verify: branch list:"
+        git -C "$WS" branch -v
+        return 1
+      }
     }
     subtest "Verify rebased commit landed on main" verify_rebase_merge_landed
 
@@ -1334,6 +1349,7 @@ let
       BEAD9=$(bd list --json --title "Gate approve test" 2>/dev/null | jq -r '.[0].id')
       [ -n "$BEAD9" ] && [ "$BEAD9" != "null" ]
       bd update "$BEAD9" --status=in_progress
+      git add .beads/ && git diff --cached --quiet || git commit -m "beads: gate approve setup"
       local merge_base
       merge_base="$(git rev-parse HEAD)"
       git checkout -b gate-approve-branch
@@ -1360,6 +1376,7 @@ let
       BEAD10=$(bd list --json --title "Gate reject test" 2>/dev/null | jq -r '.[0].id')
       [ -n "$BEAD10" ] && [ "$BEAD10" != "null" ]
       bd update "$BEAD10" --status=in_progress
+      git add .beads/ && git diff --cached --quiet || git commit -m "beads: gate reject setup"
       local merge_base
       merge_base="$(git rev-parse HEAD)"
       git checkout -b gate-reject-branch
@@ -1386,6 +1403,7 @@ let
       BEAD11=$(bd list --json --title "Gate renudge test" 2>/dev/null | jq -r '.[0].id')
       [ -n "$BEAD11" ] && [ "$BEAD11" != "null" ]
       bd update "$BEAD11" --status=in_progress
+      git add .beads/ && git diff --cached --quiet || git commit -m "beads: gate renudge setup"
       local merge_base
       merge_base="$(git rev-parse HEAD)"
       git checkout -b gate-renudge-branch
@@ -1430,7 +1448,7 @@ let
       GC_PID=""
       beads-dolt start "$WS" >/dev/null 2>&1 || true
       for _i in $(seq 1 50); do
-        bash -c "echo > /dev/tcp/127.0.0.1/$DOLT_PORT" 2>/dev/null && break
+        dolt_reachable && break
         sleep 0.2
       done
       save GC_PID
@@ -2106,7 +2124,7 @@ let
       GC_BEADS_DOLT_CONTAINER="$DOLT_CONTAINER" BEADS_DOLT_SERVER_PORT="$DOLT_PORT" \
         bash -c "echo '$start_json' | PATH=\"$LIVE_PATH\" bash $WS/.gc/scripts/provider.sh start worker-$test_bead" 2>&1
 
-      poll_until "podman inspect --format '{{.State.Running}}' $CITY_NAME-worker-$test_bead 2>/dev/null | grep -q true" 15
+      poll_until "podman inspect --format '{{.State.Running}}' $CITY_NAME-worker-$test_bead 2>/dev/null | grep -q true" 45
 
       # Stop via provider
       GC_AGENT_TEMPLATE=worker GC_CITY_NAME="$CITY_NAME" GC_WORKSPACE="$WS" \

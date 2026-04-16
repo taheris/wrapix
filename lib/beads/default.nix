@@ -76,6 +76,10 @@ let
       printf '%d\n' $((13306 + 16#$h % 500))
     }
 
+    _socket_path() {
+      echo "''${1:-$PWD}/.gc/dolt.sock"
+    }
+
     _load_image() {
       if podman image exists "$IMAGE" 2>/dev/null; then
         return 0
@@ -89,8 +93,26 @@ let
       done
     }
 
+    # Translate container-local path to host-side path for nested podman.
+    # No-op when GC_HOST_WORKSPACE is unset (normal case).
+    _host_path() {
+      local p="$1"
+      [[ -n "''${GC_HOST_WORKSPACE:-}" ]] || { echo "$p"; return; }
+      local gw="''${GC_WORKSPACE:-/workspace}"
+      if [[ -n "''${GC_HOST_BEADS:-}" && "$p" == "''${gw}/.beads"* ]]; then
+        echo "''${GC_HOST_BEADS}''${p#''${gw}/.beads}"
+        return
+      fi
+      if [[ "$p" == "''${gw}"* ]]; then
+        echo "''${GC_HOST_WORKSPACE}''${p#''${gw}}"
+        return
+      fi
+      echo "$p"
+    }
+
     cmd_name() { _name "''${1:-$PWD}"; }
     cmd_port() { _port "''${1:-$PWD}"; }
+    cmd_socket() { _socket_path "''${1:-$PWD}"; }
 
     cmd_status() {
       local ws="''${1:-$PWD}"
@@ -155,6 +177,39 @@ let
       echo "beads-dolt: warning: port $port still occupied after eviction" >&2
     }
 
+    _clean_data_dir() {
+      local data_dir="$1"
+      find "$data_dir" -name LOCK -delete
+      find "$data_dir" -type d \( -name temptf -o -name tmp \) \
+        -exec sh -c 'rm -rf "$1"/* "$1"/.[!.]* 2>/dev/null || true' _ {} \;
+      rm -f "$data_dir/.doltcfg/privileges.db"
+    }
+
+    # Check if dolt port is reachable. When CONTAINER_HOST is set, the
+    # port is on host loopback (invisible from pasta); probe inside the
+    # dolt container instead.
+    _dolt_reachable() {
+      local name="$1" port="$2"
+      if [[ -n "''${CONTAINER_HOST:-}" ]]; then
+        podman exec "$name" bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null
+      else
+        bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null
+      fi
+    }
+
+    _wait_for_dolt() {
+      local name="$1" port="$2"
+      local retries=50
+      while [ $retries -gt 0 ]; do
+        if _dolt_reachable "$name" "$port"; then
+          return 0
+        fi
+        sleep 0.2
+        retries=$((retries - 1))
+      done
+      return 1
+    }
+
     cmd_start() {
       local ws="''${1:-$PWD}"
       local name port data_dir
@@ -171,28 +226,15 @@ let
 
       if podman container exists "$name"; then
         if podman inspect --format '{{.State.Running}}' "$name" | grep -q true \
-           && bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+           && _dolt_reachable "$name" "$port"; then
           return 0
         fi
         podman rm -f "$name" >/dev/null
       fi
 
       _load_image
-
-      # Drop stale noms locks and dolt's stashed temp file references.
-      # Absolute /tmp paths stashed by a previous dolt process will not
-      # resolve inside the container's tmpfs, breaking sql-server startup.
-      find "$data_dir" -name LOCK -delete
-      find "$data_dir" -type d \( -name temptf -o -name tmp \) \
-        -exec sh -c 'rm -rf "$1"/* "$1"/.[!.]* 2>/dev/null || true' _ {} \;
-
-      # Drop privileges.db so dolt reinitializes root@% with DOLT_ROOT_HOST=%.
-      # Dolt skips root-user creation when privileges.db already exists
-      # (server.go:478). A prior run from gc's embedded dolt (or anything
-      # that didn't set DOLT_ROOT_HOST) leaves root@localhost here, which
-      # locks out TCP clients coming from 10.89.x.x on the podman network.
-      # bd is single-user (root) so there's no privilege state worth keeping.
-      rm -f "$data_dir/.doltcfg/privileges.db"
+      _clean_data_dir "$data_dir"
+      rm -f "$(_socket_path "$ws")"
 
       # Named bridge network so `podman network connect` works later.
       # Rootless podman's default (pasta) rejects multi-network attach.
@@ -221,7 +263,7 @@ let
       # inside agent containers reference `/workspace/.beads/backup`.
       local workspace_mount=()
       if [ "$ws" != "/workspace" ]; then
-        workspace_mount=(-v "$ws:/workspace:rw")
+        workspace_mount=(-v "$(_host_path "$ws"):/workspace:rw")
       fi
       # Subshell closes inherited fds so conmon doesn't hold direnv's
       # pipes open (which blocks direnv from completing).
@@ -240,30 +282,24 @@ let
           -e DOLT_ROOT_HOST="%" \
           --tmpfs /tmp:rw,mode=1777 \
           -p "127.0.0.1:$port:$port" \
-          -v "$data_dir:/data:rw" \
-          -v "$ws:$ws:rw" \
+          -v "$(_host_path "$data_dir"):/data:rw" \
+          -v "$(_host_path "$ws"):$ws:rw" \
           "''${workspace_mount[@]}" \
           "$IMAGE" \
           bash -c '
             set -e
             mkdir -p /tmp/dolthome
-            exec dolt sql-server --data-dir /data -H 0.0.0.0 -P "$1"
-          ' -- "$port" \
+            mkdir -p "$(dirname "$2")"
+            exec dolt sql-server --data-dir /data -H 0.0.0.0 -P "$1" --socket "$2"
+          ' -- "$port" "/workspace/.gc/dolt.sock" \
           >/dev/null
       )
 
-      local retries=50
-      while [ $retries -gt 0 ]; do
-        if bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
-          return 0
-        fi
-        sleep 0.2
-        retries=$((retries - 1))
-      done
-
-      echo "beads-dolt: container did not become ready" >&2
-      podman logs "$name" 2>&1 | tail -10 >&2
-      return 1
+      if ! _wait_for_dolt "$name" "$port"; then
+        echo "beads-dolt: container did not become ready" >&2
+        podman logs "$name" 2>&1 | tail -10 >&2
+        return 1
+      fi
     }
 
     cmd_stop() {
@@ -299,9 +335,10 @@ let
       status) shift; cmd_status "$@" ;;
       port)   shift; cmd_port "$@" ;;
       name)   shift; cmd_name "$@" ;;
+      socket) shift; cmd_socket "$@" ;;
       attach) shift; cmd_attach "$@" ;;
       *)
-        echo "Usage: beads-dolt {start|stop|status|port|name|attach <network>} [workspace]" >&2
+        echo "Usage: beads-dolt {start|stop|status|port|name|socket|attach <network>} [workspace]" >&2
         exit 2
         ;;
     esac

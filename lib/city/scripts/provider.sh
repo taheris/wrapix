@@ -52,6 +52,50 @@ check_env() {
 }
 
 # ---------------------------------------------------------------------------
+# Host-path translation (nested containers via host podman socket)
+# ---------------------------------------------------------------------------
+
+# Rewrite a container-local path to its host-side equivalent.
+# When GC_HOST_WORKSPACE is set (container talking to host podman),
+# paths under $GC_WORKSPACE are translated so the host daemon can
+# resolve bind mounts.  .beads has a separate overlay (GC_HOST_BEADS).
+# No-op when GC_HOST_WORKSPACE is unset (normal host case).
+_host_path() {
+  local p="$1"
+  [[ -n "${GC_HOST_WORKSPACE:-}" ]] || { echo "$p"; return; }
+  if [[ -n "${GC_HOST_BEADS:-}" && "$p" == "${GC_WORKSPACE}/.beads"* ]]; then
+    echo "${GC_HOST_BEADS}${p#${GC_WORKSPACE}/.beads}"
+    return
+  fi
+  if [[ "$p" == "${GC_WORKSPACE}"* ]]; then
+    echo "${GC_HOST_WORKSPACE}${p#${GC_WORKSPACE}}"
+    return
+  fi
+  echo "$p"
+}
+
+# Volume flags for persistent containers (scout, judge, mayor).
+container_volumes_persistent() {
+  local ws_mode="$1" beads_staging="$2"
+  echo "-v $(_host_path "${GC_WORKSPACE}"):/workspace:${ws_mode}"
+  echo "-v $(_host_path "${beads_staging}"):/workspace/.beads"
+  echo "-v $(_host_path "${GC_WORKSPACE}/.gc"):/workspace/.gc:rw"
+  echo "-v $(_host_path "${GC_WORKSPACE}/.wrapix"):/workspace/.wrapix:rw"
+  echo "-v $(_host_path "${GC_WORKSPACE}/.claude"):/workspace/.claude:rw"
+}
+
+# Volume flags for worker containers.
+container_volumes_worker() {
+  local worktree_path="$1" beads_staging="$2" task_file="$3" log_dir="$4"
+  echo "-v $(_host_path "${GC_WORKSPACE}/${worktree_path}"):/workspace:rw"
+  echo "-v $(_host_path "${GC_WORKSPACE}/.git"):/mnt/git:rw"
+  echo "-v $(_host_path "${GC_WORKSPACE}/.wrapix"):/workspace/.wrapix:ro"
+  echo "-v $(_host_path "${beads_staging}"):/workspace/.beads"
+  echo "-v $(_host_path "${task_file}"):/workspace/.task:ro"
+  echo "-v $(_host_path "${log_dir}"):/workspace/logs:rw"
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -244,11 +288,7 @@ persistent_start() {
     --workdir /workspace \
     $(container_labels) \
     $(resource_flags "${SESSION}") \
-    -v "${GC_WORKSPACE:?}:/workspace:${ws_mode}" \
-    -v "${beads_staging}:/workspace/.beads" \
-    -v "${GC_WORKSPACE}/.gc:/workspace/.gc:rw" \
-    -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:rw" \
-    -v "${GC_WORKSPACE}/.claude:/workspace/.claude:rw" \
+    $(container_volumes_persistent "$ws_mode" "$beads_staging") \
     ${GC_SECRET_FLAGS:-} \
     $(container_env "$dolt_host" "$dolt_port") \
     -e "GC_SESSION=exec:/workspace/.gc/scripts/provider.sh" \
@@ -391,12 +431,7 @@ worker_start() {
     --workdir /workspace \
     $(container_labels) \
     $(resource_flags worker) \
-    -v "${GC_WORKSPACE}/${worktree_path}:/workspace:rw" \
-    -v "${GC_WORKSPACE}/.git:/mnt/git:rw" \
-    -v "${GC_WORKSPACE}/.wrapix:/workspace/.wrapix:ro" \
-    -v "${beads_staging}:/workspace/.beads" \
-    -v "${task_file}:/workspace/.task:ro" \
-    -v "${host_log_dir}:/workspace/logs:rw" \
+    $(container_volumes_worker "$worktree_path" "$beads_staging" "$task_file" "$host_log_dir") \
     ${GC_SECRET_FLAGS:-} \
     $(container_env "$dolt_host" "$dolt_port") \
     -e "GC_BEAD_ID=${bead_id}" \

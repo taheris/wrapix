@@ -7,19 +7,19 @@
         ]
       },
       "locked": {
-        "lastModified": 1775967709,
-        "narHash": "sha256-Ha9FdcfH2hFDhdX1VEKzorfL5NBNoVijJwSN2jB4INk=",
-        "ref": "main",
-        "rev": "4e0a654556c5b1bcc1878aa2707fde9b759e469d",
+        "lastModified": 1776368635,
+        "narHash": "sha256-5fCR7yiy1+FWpuUxPRSsSFS3hEhwNtF0f5TTmlrf6mw=",
+        "ref": "feat/unix-socket-support",
+        "rev": "1d0a799660cddf9a7da168e4b8c293295067842a",
         "shallow": true,
         "type": "git",
-        "url": "ssh://git@github.com/steveyegge/beads.git"
+        "url": "ssh://git@github.com/taheris/beads.git"
       },
       "original": {
-        "ref": "main",
+        "ref": "feat/unix-socket-support",
         "shallow": true,
         "type": "git",
-        "url": "ssh://git@github.com/steveyegge/beads.git"
+        "url": "ssh://git@github.com/taheris/beads.git"
       }
     },
     "flake-parts": {
