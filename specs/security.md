@@ -143,7 +143,8 @@ accepting env pointers adds no new attack surface.
 
 #### Agent API Credentials
 
-The agent's API credentials reach the container at **runtime only**. Image
+The agent's API credentials reach the container at **runtime only**. This
+constrains the delivery path, not credential lifetime or revocation. Image
 layers are content-addressed and widely shared, so secret material in a layer
 leaks beyond the session that supplied it.
 
@@ -186,7 +187,14 @@ Acceptable because:
 - The credential is already present in the operator's environment,
   `SpawnConfig`, or an on-host auth file; passing it through adds no new
   host-side exposure.
-- Tokens are session-scoped, with limits set by the provider.
+- Credentials may be session-scoped tokens, OAuth material, or long-lived
+  provider API keys. Wrix treats all such credentials as opaque: the launcher
+  neither inspects nor enforces their lifetime, and sandbox exit does not revoke
+  a credential the agent obtained.
+  Long-lived keys therefore have a blast radius beyond one session. Accepting
+  that risk relies on operator use of available provider controls:
+  least-privilege scopes, spending budgets, rate limits, rotation, and prompt
+  revocation after suspected exposure.
 
 A secrets-file mount (`/run/secrets/oauth_token`) would prevent
 `/proc/environ` exposure but adds complexity for marginal benefit
