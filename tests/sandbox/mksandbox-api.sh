@@ -63,6 +63,13 @@ test_mksandbox_accepts_documented_parameters() {
           };
         }).profile.name
       );
+      staticHostCredential = builtins.tryEval (
+        (lib.mkSandbox {
+          profile = lib.deriveProfile lib.profiles.base {
+            hostEnv = { OPENAI_API_KEY = \"must-not-enter-nix\"; };
+          };
+        }).profile.name
+      );
       staticArgumentCredential = builtins.tryEval (
         (lib.mkSandbox { env = { ANTHROPIC_API_KEY = \"must-not-enter-nix\"; }; }).profile.name
       );
@@ -98,9 +105,11 @@ test_mksandbox_accepts_documented_parameters() {
       profile_name = sandbox.profile.name;
       shell_name = shell.name or \"\";
       env_value = sandbox.profile.env.WRIX_API_CONTRACT or \"\";
+      host_env_value = sandbox.profile.hostEnv.WRIX_API_CONTRACT or \"\";
       runtime_secret_policy = sandbox.profile.runtimeSecrets.WRIX_API_SECRET or \"\";
       base_openai_policy = sandbox.profile.runtimeSecrets.OPENAI_API_KEY or \"\";
       static_profile_credential_accepted = staticProfileCredential.success;
+      static_host_credential_accepted = staticHostCredential.success;
       static_argument_credential_accepted = staticArgumentCredential.success;
       static_agent_credential_accepted = staticAgentCredential.success;
       static_pi_credential_accepted = staticPiCredential.success;
@@ -129,9 +138,11 @@ test_mksandbox_accepts_documented_parameters() {
     .profile_name == "base" and
     (.shell_name | type == "string" and length > 0) and
     .env_value == "1" and
+    .host_env_value == "1" and
     .runtime_secret_policy == "required" and
     .base_openai_policy == "optional" and
     .static_profile_credential_accepted == false and
+    .static_host_credential_accepted == false and
     .static_argument_credential_accepted == false and
     .static_agent_credential_accepted == false and
     .static_pi_credential_accepted == false and

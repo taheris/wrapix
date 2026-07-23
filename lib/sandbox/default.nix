@@ -98,8 +98,11 @@ let
     let
       runtimeSecrets = validateRuntimeSecrets (profile.runtimeSecrets or { });
       staticEnvValidation = validateStaticEnv "profile.env" runtimeSecrets (profile.env or { });
+      hostEnvValidation = validateStaticEnv "profile.hostEnv" runtimeSecrets (profile.hostEnv or { });
     in
-    seq runtimeSecrets (seq staticEnvValidation (profile // { inherit runtimeSecrets; }));
+    seq runtimeSecrets (
+      seq staticEnvValidation (seq hostEnvValidation (profile // { inherit runtimeSecrets; }))
+    );
 
   # Separate profile instance whose buildPackage targets the image platform
   # (linuxPkgs). Used to construct the in-image MCP server binaries that get
@@ -265,6 +268,7 @@ let
         packages = (profile.packages or [ ]) ++ packages;
         mounts = (profile.mounts or [ ]) ++ mounts;
         env = (profile.env or { }) // env;
+        hostEnv = (profile.hostEnv or profile.env or { }) // env;
         runtimeSecrets = (profile.runtimeSecrets or { }) // runtimeSecrets;
         networkAllowlist = (profile.networkAllowlist or [ ]) ++ networkAllowlist;
       }

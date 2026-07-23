@@ -32,7 +32,7 @@ Pi images seed OpenAI Codex subscription defaults, high reasoning, trusted proje
 
 ## Flake Integration
 
-The canonical pattern feeds one profile to both the host devshell and the sandbox image, so `rustc` resolves to the same `/nix/store/...` path on both sides (the prerequisite for cross-boundary sccache hits):
+The canonical pattern feeds one profile to both the host devshell and sandbox image. Linux resolves `rustc` to one store path on both sides; Darwin resolves channel-matched host and Linux-image derivations:
 
 ```nix
 {
@@ -52,7 +52,7 @@ The canonical pattern feeds one profile to both the host devshell and the sandbo
           sandbox = wrix.mkSandbox { profile = rustProfile; };
         in {
           devShells.default = sandbox.devShell { };
-          packages.image    = sandbox.image;
+          packages.image    = sandbox.image.source;
         };
     };
 }

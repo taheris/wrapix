@@ -7,10 +7,11 @@
 #
 #   test_extension_args
 #     rustProfile { toolchain; sha256; packages = [p]; hostPackages = [h];
-#                   env = { K = "v"; ... }; mounts = [m]; networkAllowlist = [a]; }
+#                   env = { K = "v"; ... }; hostEnv = { H = "v"; };
+#                   mounts = [m]; networkAllowlist = [a]; }
 #     lands extension args in the matching profile slots: packages, hostPackages,
-#     mounts, and networkAllowlist appended after the pinned-profile base; env is
-#     right-merged (consumer wins on conflict).
+#     mounts, and networkAllowlist appended after the pinned-profile base; env
+#     and hostEnv are right-merged (consumer wins on conflict).
 #
 # Usage:
 #   tests/profiles/rust-profile-ctor.sh                  # run both tests
@@ -116,6 +117,7 @@ test_extension_args() {
     packages = [ pkgs.hello ];
     hostPackages = [ pkgs.cowsay ];
     env = { CTOR_TEST_KEY = \"ctor_test_value\"; SCCACHE_CACHE_SIZE = \"99G\"; };
+    hostEnv = { CTOR_HOST_ONLY = \"host_value\"; SCCACHE_CACHE_SIZE = \"77G\"; };
     runtimeSecrets = { CTOR_PROVIDER_TOKEN = \"required\"; };
     mounts = [ { source = \"/host/ctor\"; dest = \"/ctn/ctor\"; mode = \"ro\"; optional = true; } ];
     networkAllowlist = [ \"ctor.example.com\" ];
@@ -133,6 +135,9 @@ test_extension_args() {
       networkDiff        = (builtins.length ext.networkAllowlist) - (builtins.length base.networkAllowlist);
       envExtAdded        = ext.env.CTOR_TEST_KEY or null;
       envRightMergeWins  = ext.env.SCCACHE_CACHE_SIZE;
+      hostEnvExtAdded    = ext.hostEnv.CTOR_TEST_KEY or null;
+      hostEnvRightMergeWins = ext.hostEnv.SCCACHE_CACHE_SIZE;
+      hostEnvOnlyAdded   = ext.hostEnv.CTOR_HOST_ONLY or null;
       baseSccacheSize    = base.env.SCCACHE_CACHE_SIZE;
       runtimeSecretPolicy = ext.runtimeSecrets.CTOR_PROVIDER_TOKEN or null;
       baseRuntimeSecretPolicy = ext.runtimeSecrets.OPENAI_API_KEY or null;
@@ -148,7 +153,8 @@ test_extension_args() {
     return 1
   fi
 
-  local packages_diff host_packages_diff mounts_diff network_diff env_added env_override base_sccache \
+  local packages_diff host_packages_diff mounts_diff network_diff env_added env_override \
+    host_env_added host_env_override host_env_only base_sccache \
     runtime_secret_policy base_runtime_secret_policy host_package_present \
     host_package_image_absent image_package_host_absent mount_present network_present \
     base_net_preserved
@@ -158,6 +164,9 @@ test_extension_args() {
   network_diff=$(echo "$result"              | jq -r '.networkDiff')
   env_added=$(echo "$result"                 | jq -r '.envExtAdded')
   env_override=$(echo "$result"              | jq -r '.envRightMergeWins')
+  host_env_added=$(echo "$result"            | jq -r '.hostEnvExtAdded')
+  host_env_override=$(echo "$result"         | jq -r '.hostEnvRightMergeWins')
+  host_env_only=$(echo "$result"             | jq -r '.hostEnvOnlyAdded')
   base_sccache=$(echo "$result"              | jq -r '.baseSccacheSize')
   runtime_secret_policy=$(echo "$result"     | jq -r '.runtimeSecretPolicy')
   base_runtime_secret_policy=$(echo "$result" | jq -r '.baseRuntimeSecretPolicy')
@@ -190,6 +199,18 @@ test_extension_args() {
   fi
   if [[ "$env_override" != "99G" ]]; then
     echo "FAIL: env.SCCACHE_CACHE_SIZE right-merge expected '99G', got '$env_override'" >&2
+    return 1
+  fi
+  if [[ "$host_env_added" != "ctor_test_value" ]]; then
+    echo "FAIL: common env extension did not reach hostEnv: '$host_env_added'" >&2
+    return 1
+  fi
+  if [[ "$host_env_override" != "77G" ]]; then
+    echo "FAIL: hostEnv.SCCACHE_CACHE_SIZE right-merge expected '77G', got '$host_env_override'" >&2
+    return 1
+  fi
+  if [[ "$host_env_only" != "host_value" ]]; then
+    echo "FAIL: hostEnv.CTOR_HOST_ONLY expected 'host_value', got '$host_env_only'" >&2
     return 1
   fi
   if [[ "$base_sccache" != "50G" ]]; then

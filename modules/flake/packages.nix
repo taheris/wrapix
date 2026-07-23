@@ -63,7 +63,7 @@ _:
       mkImagePackages = agent: images: listToAttrs (map (mkImagePackage agent images) sandboxes);
       mkImagePackage = agent: images: p: {
         name = "image-${p.name}${if agent == "direct" then "" else "-${agent}"}";
-        value = images.${p.name};
+        value = images.${p.name}.source;
       };
 
       profileImages = mkProfileImages "direct";

@@ -258,7 +258,6 @@ let
     (mkCiApp testProfileImagesManifestShape "test-profile-images-manifest-shape")
     (mkCiApp testProfileConfigImageSourceKind "test-profile-config-image-source-kind")
     (mkCiApp testProfileConfigWrapper "test-profile-config-wrapper")
-    (mkCiApp testOptionalProfileMount "test-optional-profile-mount")
     (mkCiApp testWrixCliInProfile "test-wrix-cli-in-profile")
     (mkCiApp testSandboxAgentSettings "test-sandbox-agent-settings")
     (mkCiApp testPlaywrightChromiumClosure "test-playwright-chromium-closure")
@@ -439,11 +438,6 @@ let
     name = "test-profile-config-wrapper";
     script = "tests/sandbox/profile-config-wrapper.sh";
     args = [ "test_profile_config_wrapper_contract" ];
-  };
-  testOptionalProfileMount = mkRepoScriptCiApp {
-    name = "test-optional-profile-mount";
-    script = "tests/sandbox/profile-config-wrapper.sh";
-    args = [ "test_missing_optional_profile_mount_is_skipped" ];
   };
   testWrixCliInProfile = mkRepoScriptCiApp {
     name = "test-wrix-cli-in-profile";

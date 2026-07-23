@@ -477,8 +477,7 @@ in
       mkdir $out
     '';
 
-  # Regression guard for wx-1thzk.1: treefmt must be in basePackages so
-  # all sandbox containers inherit the project formatter wrapper.
+  # The image package floor carries the project formatter wrapper.
   profiles-contain-treefmt =
     let
       hasTreefmt = profile: elem treefmt profile.packages;

@@ -204,7 +204,7 @@ in
           prekWrappers.prePushChecks
           prekWrappers.skipIfMissing
         ];
-      env = resolvedProfile.env // serviceEnv // cacheEnv // env;
+      env = (resolvedProfile.hostEnv or resolvedProfile.env) // serviceEnv // cacheEnv // env;
       shellHook = ''
         ${serviceHook}
 

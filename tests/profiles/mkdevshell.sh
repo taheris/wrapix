@@ -9,6 +9,10 @@
 #     mkDevShell { profile = profiles.rust; } exports the rust profile's
 #     shellHook values when the generated hook is sourced.
 #
+#   test_rust_host_env_uses_host_packages
+#     mkDevShell substitutes host-native Rust toolchain and library paths for
+#     the image-platform values carried by profile.env.
+#
 #   test_host_packages_source
 #     mkDevShell { profile; packages = [extra]; } makes profile.hostPackages
 #     and extra tools resolvable on PATH while leaving image packages out.
@@ -149,6 +153,7 @@ source_hook_env() {
     export HOME="$tmp/home"
     export PATH="$bin_dir:$PATH"
     export WRIX_BIN="$bin_dir/wrix"
+    unset SCCACHE_DIR
     apply_env_json "$devshell_env"
     unset NIX_CONFIG
     # shellcheck source=/dev/null
@@ -231,6 +236,7 @@ test_profile_shellhook_spliced() {
   fi
 
   rustc=$(env_value "$env_output" RUSTC)
+  # shellcheck disable=SC2016
   expected_rustc=$(eval_expr_raw '"${lib.profiles.rust.toolchain}/bin/rustc"')
   rustc_wrapper=$(env_value "$env_output" RUSTC_WRAPPER)
   cargo_wrapper=$(env_value "$env_output" CARGO_BUILD_RUSTC_WRAPPER)
@@ -260,6 +266,48 @@ test_profile_shellhook_spliced() {
   }
   [[ "$cargo_incremental" == "0" ]] || {
     echo "FAIL: CARGO_INCREMENTAL should export 0, got '$cargo_incremental'" >&2
+    return 1
+  }
+}
+
+# ============================================================================
+# Rust devshell env uses host-native paths rather than image-platform paths.
+# ============================================================================
+test_rust_host_env_uses_host_packages() {
+  local result
+  # shellcheck disable=SC2016
+  if ! result=$(eval_expr_json '
+    let
+      profile = lib.profiles.rust;
+      shell = lib.mkDevShell { inherit profile; };
+    in {
+      hostPathsMatch =
+        shell.LIBRARY_PATH == "${pkgs.postgresql.lib}/lib" &&
+        shell.OPENSSL_INCLUDE_DIR == "${pkgs.openssl.dev}/include" &&
+        shell.OPENSSL_LIB_DIR == "${pkgs.openssl.out}/lib" &&
+        shell.RUSTC == "${profile.toolchain}/bin/rustc" &&
+        shell.RUST_SRC_PATH == "${profile.toolchain}/lib/rustlib/src/rust/library";
+      platformSplitMatches =
+        if pkgs.stdenv.isDarwin then
+          shell.LIBRARY_PATH != profile.env.LIBRARY_PATH &&
+          shell.OPENSSL_INCLUDE_DIR != profile.env.OPENSSL_INCLUDE_DIR &&
+          shell.OPENSSL_LIB_DIR != profile.env.OPENSSL_LIB_DIR &&
+          shell.RUSTC != profile.env.RUSTC &&
+          shell.RUST_SRC_PATH != profile.env.RUST_SRC_PATH
+        else
+          shell.LIBRARY_PATH == profile.env.LIBRARY_PATH &&
+          shell.OPENSSL_INCLUDE_DIR == profile.env.OPENSSL_INCLUDE_DIR &&
+          shell.OPENSSL_LIB_DIR == profile.env.OPENSSL_LIB_DIR &&
+          shell.RUSTC == profile.env.RUSTC &&
+          shell.RUST_SRC_PATH == profile.env.RUST_SRC_PATH;
+    }
+  '); then
+    echo "FAIL: mkDevShell Rust host env evaluation failed" >&2
+    return 1
+  fi
+
+  jq -e '.hostPathsMatch and .platformSplitMatches' <<<"$result" >/dev/null || {
+    echo "FAIL: Rust devshell env did not use host-platform paths: $result" >&2
     return 1
   }
 }
@@ -385,7 +433,7 @@ test_host_packages_source() {
 }
 
 # ============================================================================
-# env = profile.env // env (right-biased; consumer wins on conflict)
+# env = profile.hostEnv // env (right-biased; consumer wins on conflict)
 # ============================================================================
 test_env_right_merge() {
   local devshell_env hook env_output added_value rustc rustc_wrapper cargo_wrapper
@@ -490,6 +538,7 @@ test_shellhook_order() {
 ALL_TESTS=(
   test_profile_required
   test_profile_shellhook_spliced
+  test_rust_host_env_uses_host_packages
   test_host_packages_source
   test_env_right_merge
   test_shellhook_order

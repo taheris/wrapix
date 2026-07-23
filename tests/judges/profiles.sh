@@ -8,11 +8,6 @@ test_base_profile_functional() {
   judge_criterion "Base profile provides a functional development environment with essential tools (git, curl, basic shell utilities, nftables as the primary firewall backend, and iptables as the fallback backend)"
 }
 
-test_rust_profile() {
-  judge_files "lib/sandbox/profiles.nix"
-  judge_criterion "Rust profile uses fenix (fenix.packages.\${system}.stable.defaultToolchain combined with fenix.stable.rust-src and fenix.stable.rust-analyzer-preview (manifest builds — NOT fenix.packages.\${system}.rust-analyzer which is built from nightly source)), gcc for linking, openssl, pkg-config, postgresql libs, and sccache. RUSTC is the selected toolchain's absolute compiler path; RUST_SRC_PATH, OPENSSL, RUSTC_WRAPPER, CARGO_BUILD_RUSTC_WRAPPER, SCCACHE_DIR, SCCACHE_CACHE_SIZE, and CARGO_INCREMENTAL=0 environment variables are configured. CARGO_HOME and CARGO_TARGET_DIR are not pinned (cargo's \$HOME/.cargo default applies; \$HOME=/home/wrix inside the container). No rustup, RUSTUP_HOME, or rust-overlay."
-}
-
 test_python_profile() {
   judge_files "lib/sandbox/profiles.nix"
   judge_criterion "Python profile includes Python interpreter and can run Python scripts with dependencies"
@@ -20,7 +15,7 @@ test_python_profile() {
 
 test_derive_profile_merge() {
   judge_files "lib/profile/default.nix" "lib/sandbox/profiles.nix"
-  judge_criterion "deriveProfile correctly merges packages, hostPackages, mounts, env, runtimeSecrets, and networkAllowlist from a base profile and extension attrset. packages/hostPackages/mounts/networkAllowlist are concatenated on their own surfaces; env and runtimeSecrets are right-biased (extension wins). Other fields pass through from the extension if set, otherwise the base."
+  judge_criterion "deriveProfile correctly merges packages, hostPackages, mounts, env, hostEnv, runtimeSecrets, and networkAllowlist from a base profile and extension attrset. packages/hostPackages/mounts/networkAllowlist are concatenated on their own surfaces; env applies to image and host surfaces, hostEnv can override the host surface, and runtimeSecrets is right-biased. Other fields pass through from the extension if set, otherwise the base."
 }
 
 test_rust_profile_rebuild_stable() {
@@ -35,7 +30,7 @@ test_rust_analyzer_sysroot() {
 
 test_rust_profile_constructor() {
   judge_files "lib/default.nix" "lib/profile/default.nix" "lib/sandbox/profiles.nix" "lib/sandbox/default.nix"
-  judge_criterion "wrix.rustProfile is a top-level constructor in lib/default.nix (alongside deriveProfile/mkDevShell/mkSandbox) with signature { toolchain, sha256, packages ? [], hostPackages ? [], env ? {}, runtimeSecrets ? {}, mounts ? [], networkAllowlist ? [] }. Both toolchain and sha256 are required (Nix destructuring errors when omitted; no silent unpinned-profile fallback). Internally it consumes fenix.fromToolchainFile via the helper exposed from lib/sandbox/profiles.nix, combines rust-src and fenix.stable.rust-analyzer-preview on top with fenix.combine, then applies extension args using the same merge rules as deriveProfile (packages/hostPackages/mounts/networkAllowlist concatenated on their own surfaces, env and runtimeSecrets right-biased — consumer wins on conflict). Pass-through fields (name/enabledPlugins/shellHook/writableDirs/toolchain/buildPackage) come from the pinned-profile base. profiles.rust.withToolchain is no longer exposed."
+  judge_criterion "wrix.rustProfile is a top-level constructor in lib/default.nix (alongside deriveProfile/mkDevShell/mkSandbox) with signature { toolchain, sha256, packages ? [], hostPackages ? [], env ? {}, hostEnv ? {}, runtimeSecrets ? {}, mounts ? [], networkAllowlist ? [] }. Both toolchain and sha256 are required (Nix destructuring errors when omitted; no silent unpinned-profile fallback). Internally it consumes fenix.fromToolchainFile via the helper exposed from lib/sandbox/profiles.nix, combines rust-src and fenix.stable.rust-analyzer-preview on top with fenix.combine, then applies extension args using the same merge rules as deriveProfile. Pass-through fields (name/enabledPlugins/shellHook/writableDirs/toolchain/buildPackage) come from the pinned-profile base. profiles.rust.withToolchain is no longer exposed."
 }
 
 test_host_sandbox_rustc_same_store_path() {

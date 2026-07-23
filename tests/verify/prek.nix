@@ -39,8 +39,6 @@ let
 in
 {
   "prek.bundle-contents" = repoScript "tests/profiles/prek-hooks-bundle.sh" "test_bundle_contents";
-  "prek.devshell-auto-set" =
-    repoScript "tests/profiles/mkdevshell-prek.sh" "test_auto_set_when_config_present";
   "prek.shims-use-hook-impl" =
     repoScript "tests/profiles/prek-hooks-bundle.sh" "test_shims_use_hook_impl";
   "prek.shims-no-flock" = repoScript "tests/profiles/prek-hooks-bundle.sh" "test_shims_no_flock";

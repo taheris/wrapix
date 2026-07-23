@@ -7,10 +7,6 @@ let
     run_repo_script ${escapeShellArg path} ${escapeShellArg function}
   '';
 
-  serviceScriptWithWrix = script: function: ''
-    run_repo_script_with_wrix ${escapeShellArg "tests/services/${script}.sh"} ${escapeShellArg function}
-  '';
-
   nixEval = target: ''
     local root
     root="$(repo_root)"
@@ -21,6 +17,21 @@ let
         target = builtins.getEnv "VERIFY_TARGET";
       }
     ' >/dev/null
+  '';
+
+  rustCompileRun = ''
+    local root
+    root="$(repo_root)"
+    REPO_ROOT="$root" VERIFY_SYSTEM=${escapeShellArg system} nix build --no-link --impure --no-warn-dirty --expr '
+      let
+        root = builtins.getEnv "REPO_ROOT";
+        system = builtins.getEnv "VERIFY_SYSTEM";
+        flake = builtins.getFlake ("git+file://" + root);
+        pkgs = flake.inputs.nixpkgs.legacyPackages.''${system};
+        profile = flake.legacyPackages.''${system}.lib.profiles.rust;
+      in
+      import (root + "/tests/profiles/rust-compile-run.nix") { inherit pkgs profile; }
+    '
   '';
 
   buildPackage = function: repoScript "tests/profiles/build-package.sh" function;
@@ -37,7 +48,6 @@ in
     nixEval "devshell.flake-module-does-not-own-hooks-path";
   "devshell.flake-module-thin-consumer" = nixEval "devshell.flake-module-thin-consumer";
   "devshell.host-packages-source" = mkDevShell "test_host_packages_source";
-  "devshell.nix-cache" = serviceScriptWithWrix "host-nix-config" "test_mkdevshell_nix_cache";
   "devshell.no-prek-install" = nixEval "devshell.no-prek-install";
   "devshell.prek-auto-set" = mkDevShellPrek "test_auto_set_when_config_present";
   "devshell.prek-derivation-substitute" = mkDevShellPrek "test_derivation_substitute";
@@ -48,6 +58,7 @@ in
   "devshell.prek-stale-config-overwrite" = mkDevShellPrek "test_stale_config_overwrite_with_warning";
   "devshell.profile-required" = mkDevShell "test_profile_required";
   "devshell.profile-shellhook-spliced" = mkDevShell "test_profile_shellhook_spliced";
+  "devshell.rust-host-env" = mkDevShell "test_rust_host_env_uses_host_packages";
   "devshell.shellhook-order" = mkDevShell "test_shellhook_order";
 
   "profiles.base-python-boundary" = corePackages "test_base_python_boundary";
@@ -70,6 +81,7 @@ in
     buildPackage "test_workspace_edit_reuses_dep_cache";
   "profiles.rust-build-package-workspace-edit-skips-cargo-artifacts" =
     buildPackage "test_workspace_edit_skips_cargo_artifacts";
+  "profiles.rust-compile-run" = rustCompileRun;
   "profiles.rust-extension-args" = rustProfileCtor "test_extension_args";
   "profiles.rust-no-nightly-closure" =
     repoScript "tests/profiles/no-nightly-closure.sh" "test_no_nightly_closure";

@@ -9,9 +9,9 @@ Different projects need different toolchains, but every project benefits from a 
 ## Architecture
 
 A profile is a Nix attrset that bundles image packages (`packages`), host
-packages (`hostPackages`), non-secret `env`, `runtimeSecrets`, `mounts`,
-`networkAllowlist`, `shellHook`, plus optional fields and toolchain-specific extras
-(`profile.toolchain` and
+packages (`hostPackages`), image environment (`env`), host environment
+(`hostEnv`), `runtimeSecrets`, `mounts`, `networkAllowlist`, `shellHook`, plus
+optional fields and toolchain-specific extras (`profile.toolchain` and
 `profile.buildPackage` on the rust profile). Built-in profiles ship as
 constants at `profiles.<name>`; per-toolchain pinned variants come from
 top-level constructors (`rustProfile { toolchain; sha256; }`). Profile
@@ -19,22 +19,19 @@ extension uses the universal `deriveProfile` operator — there is no
 on-profile `withX` builder.
 
 Two peer consumers take a profile and produce a consumer-facing artifact:
-`mkSandbox` consumes image-platform `profile.packages` to produce an OCI
-image source and launcher wrapper; `mkDevShell` consumes host-platform
-`profile.hostPackages` to produce a host devshell. Both close the loop on
-toolchain identity by referencing the same `profile.toolchain` derivation.
-That single `/nix/store/...` path lands in the sandbox image at build time,
-in the host devshell's PATH via `mkDevShell`, and in sibling-app
-`runtimeInputs` via direct field access. The shared store path is what makes
-cross-boundary sccache hits possible — the invariants and success criteria
-below exist to keep that identity from drifting.
+`mkSandbox` consumes image-platform `profile.packages` and `profile.env` to
+produce an OCI image source and launcher wrapper; `mkDevShell` consumes
+host-platform `profile.hostPackages`, `profile.hostEnv`, and
+`profile.toolchain` to produce a host devshell. A pinned rust profile resolves
+the same channel and component set for both platforms. On Linux the image and
+host toolchain derivations coincide, enabling cross-boundary sccache hits; on
+Darwin they are platform-specific store paths, while the host devshell,
+`buildPackage`, and sibling-app `runtimeInputs` share the host derivation.
 
-`mkDevShell` additionally manages workspace lifecycle integration: it starts
-`services.md`'s per-workspace service container when beads or the project Nix
-cache is enabled, and it points `core.hooksPath` at the hook derivation selected
-by `prekHooks`; see [Prek hook management](#prek-hook-management) for the
-devshell selection rules. Durable host/Loom Git setup outside devshell entry is
-owned by `cli.md`'s `wrix init`.
+`mkDevShell` delegates workspace-service lifecycle and project-cache behavior
+to `services.md`. It owns the devshell selection of the hook derivation exposed
+by `pre-commit.md`; see [Prek hook management](#prek-hook-management). Durable
+host/Loom Git setup outside devshell entry is owned by `cli.md`'s `wrix init`.
 
 Rust toolchains are baked into the container image at build time, never
 bootstrapped from rustup at container start. fenix supplies proper Nix
@@ -52,17 +49,18 @@ A profile is a Nix attrset produced by the internal `mkProfile` helper. Fields:
 | `packages` | list of derivations | Image-platform packages baked into the container image. This is the image package surface, not the host devshell PATH source. |
 | `hostPackages` | list of derivations | Host-platform packages placed on the `mkDevShell` PATH. This is the host package surface; it does not get baked into the image. |
 | `corePackages` | list of derivations | The wrix-controlled, fixed-per-instance subset of `packages` — the `basePackages` floor plus the profile toolchain (default or pinned). Set at construction by `mkProfile`/`rustProfile`; downstream extension never appends to it. The image builder assigns it to the stable layer tier and treats `packages` − `corePackages` as the downstream-added delta that rides in the volatile leaf tier (see `image-builder.md` § Provenance-Tiered Layering). |
-| `env` | attrset of strings | Non-secret environment defaults set inside the container and baked into image metadata |
+| `env` | attrset of strings | Non-secret image-platform environment defaults set inside the container and baked into image metadata |
+| `hostEnv` | attrset of strings | Non-secret host-platform defaults exported by `mkDevShell`; built-in platform-specific values override their image counterparts here |
 | `runtimeSecrets` | attrset of `"optional"` / `"required"` | Validated environment-variable names whose values the host launcher resolves at runtime; values are absent from the profile, Nix store, and image |
 | `mounts` | list of mount specs | Host → container bind mounts; each `{ source, dest, mode, optional }` |
 | `networkAllowlist` | list of strings | Domains permitted when `WRIX_NETWORK=limit` (merged with base allowlist) |
 | `enabledPlugins` | attrset | Claude Code plugins merged into `~/.claude/settings.json` (e.g. `"rust-analyzer-lsp@claude-plugins-official" = true`) |
-| `shellHook` | shell snippet | Internal alignment hook spliced by `mkDevShell`. Aligns host-side toolchain identity, env, and PATH with the sandbox so `rustc` resolves to the same `/nix/store/...` path on both sides — the prerequisite for cross-boundary sccache hits and shared `target/` artifact reuse. Consumers do not splice this directly; they pass the profile to `mkDevShell { profile = ...; }`. |
+| `shellHook` | shell snippet | Internal host-alignment hook spliced by `mkDevShell`. On Linux it pins the same toolchain store path as the image; on Darwin it pins the host-platform counterpart. Consumers do not splice this directly; they pass the profile to `mkDevShell { profile = ...; }`. |
 | `writableDirs` | list of strings | Linux-only: paths where the launcher stacks a tmpfs with `U=true` so the dir is wrix-owned — needed because podman creates bind-mount parents as root, which blocks writes to sibling files like `.global-cache`/`credentials.toml` |
 
 Mount specs use `optional = true` to mean "skip this bind silently if the host source path does not exist", letting profiles declare cache mounts that no-op on hosts that haven't yet populated them.
 
-`deriveProfile` merges `packages`, `hostPackages`, `mounts`, `env`, `runtimeSecrets`, and `networkAllowlist` (package/mount/allowlist lists concatenated; env and runtime-secret attrsets right-biased). Extension `packages` append to the image package surface only; extension `hostPackages` append to the host devshell surface only. Neither package surface crosses into the other. `corePackages` passes through from the base unchanged, so the wrix-controlled floor + toolchain stays distinguishable from downstream additions for image layer tiering (`image-builder.md` § Provenance-Tiered Layering). Other fields (`name`, `enabledPlugins`, `shellHook`, `writableDirs`) pass through from the extensions attrset if set, otherwise inherit from the base — they are not deep-merged. Callers extending a profile with extra plugins or shell hooks must compose those values themselves.
+`deriveProfile` merges `packages`, `hostPackages`, `mounts`, `env`, `hostEnv`, `runtimeSecrets`, and `networkAllowlist`. Package/mount/allowlist lists concatenate; environment and runtime-secret attrsets right-merge. An `env` extension applies to both image and host surfaces, then an explicit `hostEnv` extension may override only the host value. Extension `packages` append to the image package surface only; extension `hostPackages` append to the host devshell surface only. Neither package surface crosses into the other. `corePackages` passes through from the base unchanged, so the wrix-controlled floor + toolchain stays distinguishable from downstream additions for image layer tiering (`image-builder.md` § Provenance-Tiered Layering). Other fields (`name`, `enabledPlugins`, `shellHook`, `writableDirs`) pass through from the extensions attrset if set, otherwise inherit from the base — they are not deep-merged. Callers extending a profile with extra plugins or shell hooks must compose those values themselves.
 
 The rust profile additionally exposes `toolchain` (the resolved fenix `combine` derivation) and `buildPackage` (a crane-backed Rust package builder); both pass through `deriveProfile` since extensions don't override them. For project-pinned rust toolchains, consumers use the top-level `rustProfile { toolchain; sha256; }` constructor — see [wrix.rustProfile](#wrixrustprofile) and [Rust Profile](#rust-profile) for details.
 
@@ -70,9 +68,9 @@ The rust profile additionally exposes `toolchain` (the resolved fenix `combine` 
 
 ### Base Profile
 
-Curated developer toolkit. The rust and python profiles extend this set. Grouped by purpose:
+Curated image-platform developer toolkit. The rust and python image package surfaces extend this set. Grouped by purpose:
 
-| Category | Packages |
+| Category | Image packages |
 |----------|----------|
 | Shell + POSIX core | bash, coreutils, diffutils, findutils, gawk, gnugrep, gnused, gnutar, gnumake, gzip, less, patch, rsync, tree, unzip, util-linux, whichQuiet, zip |
 | File + text | fd, file, ripgrep, vim |
@@ -87,9 +85,17 @@ Curated developer toolkit. The rust and python profiles extend this set. Grouped
 so `wrix beads push` is available in containers without making the reusable
 profile attrset depend on the wrix workspace build.
 
+The host package surface contains the host-native subset of the table and
+omits Linux-only networking/process tools. It also omits the image-built
+`treefmt` wrapper; this repository's flake devshell supplies its host-native
+wrapper separately.
+
 `whichQuiet` is a local `pkgs.which` wrapper that suppresses `"no X in (PATH)"` noise.
 
-`treefmt` is the project-wide formatter wrapper (nixfmt, rustfmt, shellcheck, deadnix, statix) built via `treefmt-nix.lib.mkWrapper`. Including it in the base profile ensures every consumer gets the same formatters.
+`treefmt` is the project-wide image formatter wrapper (nixfmt, rustfmt,
+shellcheck, deadnix, statix) built via `treefmt-nix.lib.mkWrapper`. Including it
+in `packages` gives every built-in sandbox image the same formatters without
+placing a Linux derivation on Darwin's host PATH.
 
 **Base env:** none. `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, and `OPENAI_API_KEY` are optional runtime-secret declarations, not static env.
 **Base mounts:** none. Host `~/.claude` is intentionally NOT mounted — containers use `$PROJECT_DIR/.claude` so user-level settings stay separate from project-level settings.
@@ -118,7 +124,7 @@ rust-std + clippy + rustfmt + rust-docs.
 | pkg-config | Library discovery |
 | postgresql.lib | Database client libs |
 
-Environment:
+Image environment (`profile.env`):
 
 - `CARGO_HOME` — intentionally **unset**; cargo's `$HOME/.cargo` default applies, which resolves to `/home/wrix/.cargo` inside the container and to the user's host home in `mkDevShell`. The registry/git mount dests below match cargo's container default, so the shared host cache lines up without an explicit env override. Non-mounted CARGO_HOME state (credentials.toml, config.toml, `cargo install` bins) lives on tmpfs on Linux and is ephemeral across container runs — intentional for an agent-style environment.
 - `RUST_SRC_PATH=${toolchain}/lib/rustlib/src/rust/library` — rust-analyzer standard library resolution
@@ -133,7 +139,17 @@ Environment:
 - `CARGO_INCREMENTAL=0` — sccache refuses to cache any `rustc` invocation with `-C incremental=...`; disabling incremental lets every Rust compile flow through sccache instead.
 - `CARGO_TARGET_DIR` — intentionally **unset**; cargo's per-workspace default (`<workspace>/target`) applies. Pinning `CARGO_TARGET_DIR` to a shared path across workspaces defeats cargo's freshness tracking and churns builds.
 
-**Host devshell alignment.** The profile's `shellHook` prepends `${toolchain}/bin` to `PATH` and re-exports `RUSTC` as the toolchain's absolute compiler path alongside `RUSTC_WRAPPER`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE`, and `CARGO_INCREMENTAL=0`. The absolute compiler path lets host dev shells with different toolchain pins share one long-lived sccache server without relying on the server's startup `PATH`. Without the PATH prepend, host PATH falls through to rustup's `rustc` (or whichever appears first), and the diverging sysroot path baked into rlib metadata invalidates every sccache key across the boundary — even when both sides report the same Rust version. Consumers reach this alignment by passing the rust profile to `mkDevShell { profile = ...; }`, which splices `profile.shellHook` automatically — there is no consumer-facing splice path. `rustProfile { toolchain; sha256; }` rebuilds the snippet over the project-pinned toolchain so `packages`, `hostPackages`, `env`, `shellHook`, and `toolchain` (see below) all close over the same derivation.
+**Host devshell alignment.** `profile.hostEnv` replaces image-platform
+`RUSTC`, `RUST_SRC_PATH`, `RUSTC_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`,
+`LIBRARY_PATH`, and `OPENSSL_*` paths with host-platform derivations.
+`profile.shellHook` prepends the host toolchain to `PATH` and gives
+`SCCACHE_DIR` its host default under `$HOME`. The absolute compiler path lets
+host devshells with different toolchain pins share one long-lived sccache
+server without relying on its startup `PATH`. Consumers reach this alignment
+by passing the rust profile to `mkDevShell { profile = ...; }`; there is no
+consumer-facing splice path. `rustProfile { toolchain; sha256; }` rebuilds the
+image and host surfaces from platform-specific fenix package sets for the same
+pinned channel and components.
 
 **Toolchain derivation (`profile.toolchain`).** The rust profile exposes the resolved fenix `combine` derivation as `profile.toolchain` — the same store path interpolated into `shellHook`'s PATH prepend and shared by `buildPackage`'s craneLib. Sibling Nix apps that run cargo (e.g. `pkgs.writeShellApplication { runtimeInputs = [ rustProfile.toolchain ]; ... }`) must point `runtimeInputs` at this field rather than re-instantiating fenix in their own flake. Re-instantiation produces a different `/nix/store/...` path even when fenix versions match, and again when calling `fromToolchainFile` directly (bare `rust-<ver>` vs the `combine`-wrapped `rust-mixed`); sccache hashes the compiler binary, so a divergent path means every cache key misses across the boundary. Both `profiles.rust` (the unpinned default) and `rustProfile { toolchain; sha256; }` (the project-pinned constructor) set this field to the toolchain they were built from.
 
@@ -179,7 +195,7 @@ profile.buildPackage {
   ```
 
 - `cargoArtifacts` is exposed as an output and accepted as an input so workspaces with multiple binaries can share dep compilation across calls. Single-binary callers ignore both directions.
-- `buildPackage` closes over `profile.toolchain` via crane's `overrideToolchain`, so `bin`/`clippy`/`nextest` resolve `rustc` to the same `/nix/store/...` path as the host devshell PATH. On Linux hosts this also matches the sandbox image's baked-in toolchain; on Darwin the image keeps a Linux toolchain while `buildPackage` produces host-platform binaries (see *Host/image toolchain split* above). `rustProfile { toolchain; sha256; }` rebuilds `buildPackage` against the project-pinned toolchain alongside `packages`/`hostPackages`/`env`/`shellHook`/`toolchain`.
+- `buildPackage` closes over `profile.toolchain` via crane's `overrideToolchain`, so `bin`/`clippy`/`nextest` resolve `rustc` to the same `/nix/store/...` path as the host devshell PATH. On Linux hosts this also matches the sandbox image's baked-in toolchain; on Darwin the image keeps a Linux toolchain while `buildPackage` produces host-platform binaries (see *Host/image toolchain split* above). `rustProfile { toolchain; sha256; }` rebuilds `buildPackage` against the project-pinned toolchain alongside `packages`/`hostPackages`/`env`/`hostEnv`/`shellHook`/`toolchain`.
 - Builds are pure — Nix-sandboxed, no `__noChroot`. Sccache covers the host/sandbox/sibling-app cargo paths (where it's mounted from `~/.cache/sccache` and persists across runs); `cargoArtifacts` is the equivalent caching layer for build-sandbox cargo invocations. The two layers do not overlap and do not share cache state.
 - Always builds for `pkgs.stdenv.hostPlatform.system` — no cross-compilation. Returns one `bin` per call — workspaces with multiple binaries call `buildPackage` once per binary, threading the same `cargoArtifacts` through.
 
@@ -295,7 +311,7 @@ let
   };
 in {
   devShells.default = wrix.mkDevShell { profile = rustProfile; };
-  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image;
+  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image.source;
 }
 
 # Same profile drives both a host devshell and a sandbox image
@@ -306,12 +322,11 @@ let
   };
 in {
   devShells.default = wrix.mkDevShell { profile = rustProfile; };
-  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image;
+  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image.source;
 }
 
-# Sibling Nix app that runs cargo: reuse the same toolchain derivation so its
-# `rustc` shares a /nix/store/... path with the sandbox image and the host
-# devshell PATH.
+# Sibling Nix app that runs cargo: reuse the host toolchain derivation. On
+# Linux it also matches the sandbox; Darwin uses a platform-specific image path.
 let
   rustProfile = wrix.rustProfile {
     toolchain = ./rust-toolchain.toml;
@@ -345,10 +360,12 @@ in {
 ## wrix.rustProfile
 
 Top-level constructor for project-pinned rust profiles. Reads a
-`rust-toolchain.toml` and produces a profile attrset whose `packages`,
-`hostPackages`, `env`, `shellHook`, `toolchain`, and `buildPackage` all
-close over the pinned fenix toolchain — the image derivation `mkSandbox`
-bakes into the image and the host derivation `mkDevShell` prepends to PATH.
+`rust-toolchain.toml` and produces a profile attrset whose image
+`packages`/`env` and host
+`hostPackages`/`hostEnv`/`shellHook`/`toolchain`/`buildPackage` resolve the same
+pinned channel and components for their respective platforms. Linux uses one
+toolchain derivation for both surfaces; Darwin uses separate Linux-image and
+Darwin-host derivations.
 
 ```nix
 wrix.rustProfile {
@@ -356,7 +373,8 @@ wrix.rustProfile {
   sha256;                         # REQUIRED — fenix purity hash
   packages         ? [ ];         # appended to image-side profile.packages
   hostPackages     ? [ ];         # appended to host-side profile.hostPackages
-  env              ? { };         # right-merged into profile.env (non-secret)
+  env              ? { };         # right-merged into image + host env (non-secret)
+  hostEnv          ? { };         # right-merged into host env only
   runtimeSecrets   ? { };         # right-merged name → required/optional policy
   mounts           ? [ ];         # appended to profile.mounts
   networkAllowlist ? [ ];         # appended to profile.networkAllowlist
@@ -366,10 +384,10 @@ wrix.rustProfile {
 Both `toolchain` and `sha256` are required. The constructor uses
 `fenix.fromToolchainFile` under the hood, then combines `rust-src` and
 `stable.rust-analyzer-preview` on top of whatever components the toolchain
-file declares. Extension args (`packages`/`hostPackages`/`env`/`runtimeSecrets`/`mounts`/
-`networkAllowlist`) follow the same merge rules as `deriveProfile`: list
-surfaces concatenate independently, while env and runtime-secret attrsets are
-right-biased.
+file declares. Extension args (`packages`/`hostPackages`/`env`/`hostEnv`/
+`runtimeSecrets`/`mounts`/`networkAllowlist`) follow the same merge rules as
+`deriveProfile`: list surfaces concatenate independently, while environment
+and runtime-secret attrsets are right-biased.
 
 **Caveat:** do not list `rust-analyzer` in your `rust-toolchain.toml`
 `components`. The constructor always combines `stable.rust-analyzer-preview`
@@ -396,18 +414,18 @@ sandbox = wrix.mkSandbox {
 sandbox.devShell {
   packages  = [ ... ];        # optional host-only tools
   shellHook = "...";          # optional, appended after profile.shellHook
-  env       = { ... };        # optional, right-merged into profile.env
+  env       = { ... };        # optional, right-merged into host env
   prekHooks = true;           # optional, see Prek hook management below
-  nixCache  = true;           # optional, false disables services.md project cache
+  nixCache  = true;           # optional, configuration owned by services.md
 }
 
 wrix.mkDevShell {
   profile   = rustProfile;   # REQUIRED — any profile attrset
   packages  = [ ... ];        # optional host-only tools appended after profile.hostPackages
   shellHook = "...";          # optional, appended after profile.shellHook
-  env       = { ... };        # optional, right-merged into profile.env
+  env       = { ... };        # optional, right-merged into host env
   prekHooks = true;           # optional, see Prek hook management below
-  nixCache  = true;           # optional, false disables services.md project cache
+  nixCache  = true;           # optional, configuration owned by services.md
 }
 ```
 
@@ -420,12 +438,12 @@ configured `wrix` wrapper.
 `sandbox.devShell { ... }` never accepts `profile` or `sandbox` overrides; it is
 already bound to the sandbox object it came from.
 
-Composition rules (deterministic, no consumer override):
+Composition rules (fixed precedence):
 
 | Field     | Rule                                                                                  |
 |-----------|---------------------------------------------------------------------------------------|
 | packages  | `profile.hostPackages ++ packages` (host-native profile tools are on PATH; image-only packages are not) |
-| env       | `profile.env // env` (consumer wins on conflict)                                       |
+| env       | `profile.hostEnv // env` (consumer wins on conflict; legacy profiles fall back to `profile.env`) |
 | shellHook | `<wrix-internal lifecycle setup> + profile.shellHook + <consumer shellHook>` (fixed order) |
 
 The internal lifecycle setup performs wrix-specific bootstrap (workspace
@@ -437,48 +455,11 @@ rather than the profile-extended one; the consumer's `shellHook` runs last so
 consumer-set env can override profile-set env after the profile's exports have
 fired.
 
-`nixCache` defaults to `true` and enables the standard project cache owned by
-`services.md`; `nixCache = false` is the explicit opt-out. The boolean form
-uses the defaults below; attrset form customizes them:
-
-```nix
-nixCache = {
-  enable = true;
-  requireTrustedNix = true;
-
-  publish = {
-    packages = true;
-    checks = true;
-    devShell = true;
-    includeRoots = [ ];
-    excludeRoots = [ ];
-  };
-
-  warm = {
-    packages = true;
-    checks = false;
-    devShell = true;
-    includeRoots = [ ];
-    excludeRoots = [ ];
-  };
-
-  warnSize = "50G";
-  pendingTtl = "7d";
-  pruneInterval = "24h";
-};
-```
-
-`publish` roots are allowed to enter the cache when built or explicitly
-published. `warm` roots are proactively built by `wrix service cache warm`;
-checks are not warmed unless explicitly requested. `includeRoots` /
-`excludeRoots` are flake installables or explicit flake attr paths, not raw
-`/nix/store` paths, and excludes win. When the cache is enabled, `mkDevShell`
-configures host Nix to pull from the local project cache and to publish
-project-scoped builds back to it; if host Nix ignores the required trust or
-post-build settings, devshell entry fails loud with remediation instead of
-silently running cold. Shell entry does not eagerly evaluate all roots; when
-the publish manifest is missing or stale it prints a short reminder unless
-`WRIX_NIX_CACHE_REMINDER=0` is set.
+`nixCache` accepts the configuration defined by `services.md`. `mkDevShell`
+passes that value to the workspace-service integration without redefining its
+schema, defaults, opt-out behavior, root sets, trust behavior, or retention
+policy. See `services.md` § Project scope and root sets and § Host Nix
+integration and publish hook for the complete contract.
 
 ### Prek hook management
 
@@ -594,11 +575,12 @@ does not create per-server profile variants such as `-tmux` or `-playwright`.
 
 ## Downstream Integration
 
-Cross-boundary sccache hits require the host shell, sandbox image, and any
-sibling Nix app derivations that run cargo to all reference the same
-toolchain derivation. The profile attrset is the carrier — build one via
-`rustProfile { toolchain; sha256; }` and pass the same value to every
-consumer.
+On Linux, cross-boundary sccache hits require the host shell, sandbox image,
+and sibling Nix apps that run cargo to reference one toolchain derivation. On
+Darwin, the host shell and sibling apps share the host derivation while the
+sandbox uses the Linux counterpart, so cross-boundary hits are unavailable.
+The profile attrset carries both surfaces — build one via
+`rustProfile { toolchain; sha256; }` and pass it to every consumer.
 
 For the host devshell, use `mkDevShell`:
 
@@ -610,17 +592,17 @@ let
   };
 in {
   devShells.default = wrix.mkDevShell { profile = rustProfile; };
-  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image;
+  packages.image    = (wrix.mkSandbox { profile = rustProfile; }).image.source;
 }
 ```
 
-`mkDevShell` splices `profile.shellHook` automatically (see
-[mkDevShell](#mkdevshell) for composition rules) — no manual splice, no
-hand-copied env exports, no separate `profile.toolchain` add to
-`packages`. The same profile drives `mkSandbox` so host and sandbox close
-over an identical `/nix/store/.../bin/rustc` derivation, matching sysroot
-paths in rlib metadata, colliding sccache keys, and keeping cargo's
-fingerprints in `/workspace/target/` valid across switches.
+`mkDevShell` applies `profile.hostEnv` and splices `profile.shellHook`
+automatically (see [mkDevShell](#mkdevshell) for composition rules) — no
+manual splice, hand-copied exports, or separate `profile.toolchain` package is
+needed. On Linux, the same profile also gives `mkSandbox` the identical
+`/nix/store/.../bin/rustc`, matching sysroot paths and sccache keys. On Darwin,
+profile pinning guarantees channel/component parity rather than store-path
+identity.
 
 **Sibling Nix apps that run cargo.** `mkDevShell` covers the devshell;
 sibling app derivations are a separate surface. Any
@@ -628,16 +610,13 @@ sibling app derivations are a separate surface. Any
 consumer's flake ships its own `runtimeInputs` and bypasses the devshell.
 If that derivation re-instantiates fenix
 (`inputs.fenix.packages.fromToolchainFile { ... }`), it gets a different
-`/nix/store/...` path than the sandbox/host even when fenix versions
-match, and an additional difference between the bare `rust-<ver>` output
-and the `combine`-wrapped `rust-mixed` the profile builds. sccache hashes
-the compiler binary, so cache keys never collide and an 11 GiB host cache
-populated from inside the sandbox can produce 0 hits when invoked from
-the sibling app.
+`/nix/store/...` path than `profile.toolchain` even when fenix versions match,
+plus the bare `rust-<ver>` versus combine-wrapped `rust-mixed` difference.
+sccache hashes the compiler binary, so host-side cache keys do not collide.
 
-The fix is to point `runtimeInputs` at `rustProfile.toolchain`, which is
-the exact derivation the profile baked into the image and `mkDevShell`
-prepended to PATH:
+Point `runtimeInputs` at `rustProfile.toolchain`, the exact host derivation
+`mkDevShell` prepends to PATH and, on Linux, the derivation baked into the
+image:
 
 ```nix
 packages.test-ci = pkgs.writeShellApplication {
@@ -647,11 +626,11 @@ packages.test-ci = pkgs.writeShellApplication {
 };
 ```
 
-Consumers with their own `rust-toolchain.toml` feed it to `rustProfile`
-once; `rustProfile.toolchain` is then the `combine`-wrapped output of
-THEIR file, identical across sandbox image, host devshell PATH (via
-`mkDevShell`), and sibling-app `runtimeInputs`. They never need to call
-fenix directly.
+Consumers with their own `rust-toolchain.toml` feed it to `rustProfile` once;
+`rustProfile.toolchain` is then the combine-wrapped host output used by the
+host devshell and sibling-app `runtimeInputs`. Linux uses that same output in
+the sandbox image; Darwin uses the channel-matched Linux output. Consumers
+never need to call fenix directly.
 
 **Escape hatch.** If a downstream wants to control `rustc` independently
 of wrix's pin (e.g., to use a different fenix revision on the host), it
@@ -664,12 +643,11 @@ inputs.fenix.url = "git+https://github.com/nix-community/fenix.git?ref=main";
 inputs.wrix.inputs.fenix.follows = "fenix";
 ```
 
-Without aligning toolchain identity through one of these surfaces
-(`mkDevShell` + `mkSandbox` consuming the same profile, `profile.toolchain`
-for sibling apps, or the `follows` escape hatch), host, sandbox, and
-sibling derivations lock fenix to their own revisions, produce different
-`/nix/store/.../bin/rustc` paths, and sccache entries do not cross the
-boundary.
+Without aligning through one of these surfaces (`mkDevShell` + `mkSandbox`
+consuming the same profile, `profile.toolchain` for sibling apps, or the
+`follows` escape hatch), consumers may lock fenix to different revisions and
+produce avoidably different compiler paths. Linux then loses cross-boundary
+sccache reuse; Darwin still benefits from host-devshell/sibling-app alignment.
 
 No downstream gitignore is required for the sandbox cache paths: mount
 dests live under `/home/wrix/` inside the container, not under
@@ -681,22 +659,24 @@ dests live under `/home/wrix/` inside the container, not under
   [judge](../tests/judges/profiles.sh#test_base_profile_functional)
 - Base profile exposes `python3` on both image and host package surfaces for stdlib-only ad hoc scripting, while `uv`, `ruff`, `ty`, `UV_CACHE_DIR`, and the uv cache mount remain Python-profile-only.
   [check](verify:profiles.base-python-boundary)
-- Rust profile can compile and run Rust projects
-  [judge](../tests/judges/profiles.sh#test_rust_profile)
+- Rust profile can compile and run a Cargo project with the toolchain and host package surface it exposes
+  [check](verify:profiles.rust-compile-run)
 - Rust profile toolchain survives nixpkgs updates (no dynamic linker breakage)
   [judge](../tests/judges/profiles.sh#test_rust_profile_rebuild_stable)
 - rust-analyzer can resolve the standard library (RUST_SRC_PATH is set correctly)
   [judge](../tests/judges/profiles.sh#test_rust_analyzer_sysroot)
 - `wrix.rustProfile { toolchain = ./rust-toolchain.toml; sha256 = "..."; }` produces a working profile whose `toolchain` field is a fenix-combine derivation reflecting the file's component set
   [judge](../tests/judges/profiles.sh#test_rust_profile_constructor)
-- `wrix.rustProfile { toolchain; sha256; packages = [p]; hostPackages = [h]; env = { K = "v"; }; runtimeSecrets = { TOKEN = "required"; }; mounts = [m]; networkAllowlist = [a]; }` lands extension args in the matching profile slots (package/mount/allowlist surfaces appended, env and runtime-secret attrsets right-merged)
+- `wrix.rustProfile { toolchain; sha256; packages = [p]; hostPackages = [h]; env = { K = "v"; }; hostEnv = { H = "v"; }; runtimeSecrets = { TOKEN = "required"; }; mounts = [m]; networkAllowlist = [a]; }` lands extension args in the matching profile slots (package/mount/allowlist surfaces appended; environment and runtime-secret attrsets right-merged)
   [check](verify:profiles.rust-extension-args)
 - `wrix.rustProfile {}` (omitting required `toolchain`/`sha256`) errors at evaluation rather than silently producing an unpinned profile
   [check](verify:profiles.rust-required-args)
 - Cargo registry/git mounts and the sccache cache parent are writable so cargo can fetch crates and sccache can cache artifacts without `Read-only file system` errors
   [judge](../tests/judges/profiles.sh#test_cargo_registry_writable)
-- A profile mount with `optional = true` is preserved in `ProfileConfig` and omitted from launch planning when its expanded host source does not exist, on both supported platform paths
-  [system](test-ci:test-optional-profile-mount)
+- A profile mount with `optional = true` is preserved in the Nix-generated `ProfileConfig`
+  [check](test-ci:test-profile-config-wrapper)
+- Both Linux and Darwin launch planners omit an optional profile mount when its expanded host source does not exist
+  [test](command::launch::test::missing_optional_profile_mount_is_skipped_by_platform_planners)
 - Python profile can run Python scripts with dependencies
   [judge](../tests/judges/profiles.sh#test_python_profile)
 - uv cache mount is writable so uv can fetch packages not in the pre-warm set without `Read-only file system` errors
@@ -709,20 +689,20 @@ dests live under `/home/wrix/` inside the container, not under
   [check](verify:profiles.extra-packages-not-core)
 - `deriveProfile p { packages = [image]; hostPackages = [host]; }` keeps image and host package extensions on their respective package surfaces without crossing either direction
   [check](verify:profiles.host-image-package-split)
-- Profiles are composable (can extend extended profiles), and `runtimeSecrets` right-merges validated name-to-policy declarations while preserving built-in optional provider names
+- Profiles are composable (can extend extended profiles); `env` right-merges into image and host surfaces, `hostEnv` may override the host surface, and `runtimeSecrets` right-merges validated name-to-policy declarations while preserving built-in optional provider names
   [check](verify:profiles.nested-derive)
 - `wrix.mkDevShell { profile = wrix.rustProfile { ... }; }` produces a devshell whose env contains an absolute `RUSTC` under `profile.toolchain`, `RUSTC_WRAPPER=sccache`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE`, and `CARGO_INCREMENTAL=0` (the rust profile's `shellHook` was spliced)
   [check](verify:devshell.profile-shellhook-spliced)
+- The rust devshell exports host-platform `RUSTC`, `RUST_SRC_PATH`, `LIBRARY_PATH`, and `OPENSSL_*` paths; on Darwin they differ from the Linux image paths in `profile.env`
+  [check](verify:devshell.rust-host-env)
 - `wrix.mkDevShell { profile; packages = [extra]; }` shell has both `profile.hostPackages` and `extra` available on PATH, while image-only `profile.packages` stay out of the host PATH
   [check](verify:devshell.host-packages-source)
-- `wrix.mkDevShell { profile; env = { K = "v"; }; }` shell has env var `K=v` (right-merge with profile.env, consumer wins on conflict)
+- `wrix.mkDevShell { profile; env = { K = "v"; }; }` shell has env var `K=v` (right-merge with `profile.hostEnv`, consumer wins on conflict)
   [check](verify:devshell.env-right-merge)
 - `wrix.mkDevShell { profile; shellHook = "marker_xyz"; }` shell hook contains both `profile.shellHook` content AND `marker_xyz`, with the consumer hook firing **after** the profile's
   [check](verify:devshell.shellhook-order)
 - Devshell constructors reject missing or ambiguous profile selection: `wrix.mkDevShell {}` without `profile` or `sandbox`, `wrix.mkDevShell { sandbox = ...; profile = ...; }`, and `sandbox.devShell { profile = ...; }` / `sandbox.devShell { sandbox = ...; }` all error at evaluation.
   [check](verify:devshell.profile-required)
-- `wrix.mkDevShell { profile = ...; }` starts the workspace service container by default, exposes the project cache `file://` substituter/trusted key/post-build hook to host Nix, uses the `nixCache` publish/warm schema from `services.md`, and prints a suppressible reminder when the publish manifest is missing or stale; `nixCache = false` suppresses only the cache service, not beads
-  [system](verify:devshell.nix-cache)
 - `wrix.mkDevShell { profile = ...; }` with `.pre-commit-config.yaml` present sets `core.hooksPath` to the default hook bundle on entry
   [system](verify:devshell.prek-auto-set)
 - `wrix.mkDevShell { profile = ...; }` without `.pre-commit-config.yaml` does NOT set `core.hooksPath` on entry
@@ -751,7 +731,7 @@ dests live under `/home/wrix/` inside the container, not under
   [check](verify:profiles.rust-no-nightly-closure)
 - `mkProfileImages { rust = …; }` produces a JSON file whose entry for `rust` is keyed by the image's selected agent and whose selected-agent entry has `ref`, `source`, `source_kind`, and `profile_config` fields, with `source` and `source_kind` resolving to the same image source path and source kind as the corresponding `(wrix.mkSandbox { profile = wrix.profiles.rust; agent = …; }).image`
   [check](test-ci:test-profile-images-manifest-shape)
-- `packages.image-<name>[-<agent>]`, `packages.sandbox-<name>[-<agent>][-mcp]`, `packages.profile-images`, and `packages.profile-images-pi` all evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
+- `packages.image-<name>[-<agent>]` resolves to the matching sandbox's selected `.image.source` (Linux `nix-descriptor`, Darwin `docker-archive`); all sandbox and profile-manifest outputs evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
   [check](verify:profiles.image-flake-outputs)
 - `profiles.rust.buildPackage` is exposed and returns an attrset with `bin`, `clippy`, `nextest`, and `cargoArtifacts` fields
   [check](verify:profiles.rust-build-package-exposed)
@@ -776,17 +756,16 @@ dests live under `/home/wrix/` inside the container, not under
 
 ### Functional
 
-1. **Base Profile** — Core tools included in all environments, including a `python3` interpreter for stdlib-only ad hoc agent scripting
+1. **Base Profile** — Image and host surfaces provide their documented core-tool sets, including `python3` for stdlib-only ad hoc agent scripting
 2. **Language Profiles** — Pre-configured Rust and Python environments
 3. **Profile Extension** — `deriveProfile` API to extend existing profiles
 4. **Package Bundling** — Profiles specify `packages` to include in the container image and `hostPackages` to include in host devshells. A profile also exposes `corePackages`, the wrix-controlled fixed-per-instance subset of image packages, so the image builder can layer wrix-default content separately from downstream additions (see `image-builder.md` § Provenance-Tiered Layering).
-5. **Environment Configuration** — Profiles separate non-secret image environment defaults from runtime-secret name/policy declarations; secret values are launcher inputs, not profile data
+5. **Environment Configuration** — Profiles separate non-secret image (`env`) and host (`hostEnv`) defaults from runtime-secret name/policy declarations; secret values are launcher inputs, not profile data
 6. **Mount Specifications** — Profiles can define default mounts (e.g., cargo cache)
 7. **Toolchain Configuration** — Top-level `rustProfile { toolchain; sha256; ... }` constructor produces a project-pinned rust profile from a `rust-toolchain.toml`
 8. **Rust Package Construction** — Rust profile exposes `buildPackage` for crane-backed Rust packages with split `bin`/`clippy`/`nextest` derivations
 9. **Devshell Construction** — `sandbox.devShell { ... }` is the preferred host devshell entry point when a concrete sandbox exists, and top-level `mkDevShell { profile; ... }` remains available for profile-only shells; both consume `profile.hostPackages` for the host PATH and consumers do not splice `profile.shellHook` directly
 10. **Prek Hook Management** — `mkDevShell` configures `core.hooksPath` from the hook derivation selected by `prekHooks` when `.pre-commit-config.yaml` is present, with `prekHooks = false` as the opt-out. The bundle's contents and shim behavior are owned by `specs/pre-commit.md`.
-11. **Project Nix Cache Integration** — `mkDevShell` enables the `services.md` project cache by default for host pulls and host publishing of project-scoped Nix derivations; `nixCache = false` opts out.
 
 ### Non-Functional
 

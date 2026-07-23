@@ -108,17 +108,7 @@ let
     "ssh.github.com" # git SSH (port 443 fallback)
   ];
 
-  # Helper to create a profile with base packages, mounts, and env merged in.
-  # shellHook is a shell snippet a downstream host devShell splices in to
-  # align host-side toolchain identity,
-  # env, and PATH with the sandbox — e.g. prepending the rust profile's
-  # `${toolchain}/bin` so host `rustc` resolves to the same /nix/store/... path
-  # the sandbox uses, the prerequisite for cross-boundary sccache hits.
-  # corePackages is the wrix-controlled, fixed-per-instance package set (the
-  # base toolkit plus any toolchain a constructor pins). It is the tier-1
-  # membership key for provenance-tiered image layering: downstream extension
-  # grows `packages` only, never `corePackages`, so the leaf delta an image
-  # rebuilds on is `packages` − `corePackages`.
+  # Construct a profile with separate image and host package/environment surfaces.
   mkProfile =
     {
       name,
@@ -126,6 +116,7 @@ let
       corePackages ? [ ],
       hostPackages ? [ ],
       env ? { },
+      hostEnv ? { },
       runtimeSecrets ? { },
       mounts ? [ ],
       networkAllowlist ? [ ],
@@ -144,6 +135,7 @@ let
       packages = basePackages ++ corePackages ++ packages;
       hostPackages = hostBasePackages ++ hostPackages;
       env = baseEnv // env;
+      hostEnv = baseEnv // hostEnv;
       runtimeSecrets = baseRuntimeSecrets // runtimeSecrets;
       mounts = baseMounts ++ mounts;
       networkAllowlist = baseNetworkAllowlist ++ networkAllowlist;
@@ -297,6 +289,7 @@ let
       hostPackages = [
         hostToolchain
         hostPkgs.cargo-nextest
+        hostPkgs.gcc
         hostPkgs.openssl
         hostPkgs.openssl.dev
         hostPkgs.pkg-config
@@ -319,6 +312,18 @@ let
         RUST_SRC_PATH = "${imageToolchain}/lib/rustlib/src/rust/library";
         SCCACHE_CACHE_SIZE = "50G";
         SCCACHE_DIR = "/home/wrix/.cache/sccache";
+      };
+
+      hostEnv = {
+        CARGO_BUILD_RUSTC_WRAPPER = "${hostPkgs.sccache}/bin/sccache";
+        CARGO_INCREMENTAL = "0";
+        LIBRARY_PATH = "${hostPkgs.postgresql.lib}/lib";
+        OPENSSL_INCLUDE_DIR = "${hostPkgs.openssl.dev}/include";
+        OPENSSL_LIB_DIR = "${hostPkgs.openssl.out}/lib";
+        RUSTC = "${hostToolchain}/bin/rustc";
+        RUSTC_WRAPPER = "${hostPkgs.sccache}/bin/sccache";
+        RUST_SRC_PATH = "${hostToolchain}/lib/rustlib/src/rust/library";
+        SCCACHE_CACHE_SIZE = "50G";
       };
 
       mounts = [
@@ -348,36 +353,18 @@ let
         "index.crates.io"
       ];
 
-      # Linux-only: stack a tmpfs at CARGO_HOME and .cache so the dirs are
-      # wrix-owned. Without this, podman creates them as root to anchor the
-      # registry/git/sccache binds, and cargo/sccache (as wrix) can't write
-      # their own files there. The .cache tmpfs also keeps sccache functional
-      # when the optional ~/.cache/sccache host mount is absent.
-      # Darwin is unaffected: the entrypoint mkdirs these paths itself as
-      # namespaced-root-mapped-to-HOST_UID, so they're already writable.
+      # Linux tmpfs parents stay writable when optional cache mounts are absent.
       writableDirs = [
         "/home/wrix/.cargo"
         "/home/wrix/.cache"
       ];
 
-      # Align host with the sandbox so cross-boundary cache hits work.
-      # PATH prepend pins host `rustc` to the same fenix derivation the sandbox
-      # bakes in — without it, host falls through to rustup and the diverging
-      # sysroot baked into rlib metadata invalidates every sccache key.
-      #
-      # SCCACHE_DIR must stay set in profile.env (the image's
-      # XDG_CACHE_HOME=/var/cache would otherwise send sccache to
-      # /var/cache/sccache, missing the host mount). On the host devshell,
-      # mkDevShell merges profile.env into mkShell's env, so the container
-      # path /home/wrix/.cache/sccache leaks into the host. Match-and-unset
-      # so the :- default falls through to $HOME/.cache/sccache; user-set
-      # overrides survive.
+      # Host defaults remain overrideable while PATH pins the selected toolchain.
       shellHook = ''
-        [[ "''${SCCACHE_DIR:-}" = "/home/wrix/.cache/sccache" ]] && unset SCCACHE_DIR
         export PATH="${hostToolchain}/bin:$PATH"
-        export RUSTC="${hostToolchain}/bin/rustc"
-        export RUSTC_WRAPPER="${hostPkgs.sccache}/bin/sccache"
-        export CARGO_BUILD_RUSTC_WRAPPER="${hostPkgs.sccache}/bin/sccache"
+        export RUSTC="''${RUSTC:-${hostToolchain}/bin/rustc}"
+        export RUSTC_WRAPPER="''${RUSTC_WRAPPER:-${hostPkgs.sccache}/bin/sccache}"
+        export CARGO_BUILD_RUSTC_WRAPPER="''${CARGO_BUILD_RUSTC_WRAPPER:-${hostPkgs.sccache}/bin/sccache}"
         export SCCACHE_DIR="''${SCCACHE_DIR:-$HOME/.cache/sccache}"
         export SCCACHE_CACHE_SIZE="''${SCCACHE_CACHE_SIZE:-50G}"
         export CARGO_INCREMENTAL="''${CARGO_INCREMENTAL:-0}"

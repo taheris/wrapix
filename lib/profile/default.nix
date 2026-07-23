@@ -11,6 +11,10 @@
       hostPackages = (baseProfile.hostPackages or [ ]) ++ (extensions.hostPackages or [ ]);
       mounts = (baseProfile.mounts or [ ]) ++ (extensions.mounts or [ ]);
       env = (baseProfile.env or { }) // (extensions.env or { });
+      hostEnv =
+        (baseProfile.hostEnv or baseProfile.env or { })
+        // (extensions.env or { })
+        // (extensions.hostEnv or { });
       runtimeSecrets = (baseProfile.runtimeSecrets or { }) // (extensions.runtimeSecrets or { });
       networkAllowlist = (baseProfile.networkAllowlist or [ ]) ++ (extensions.networkAllowlist or [ ]);
     };
@@ -22,6 +26,7 @@
       packages ? [ ],
       hostPackages ? [ ],
       env ? { },
+      hostEnv ? { },
       runtimeSecrets ? { },
       mounts ? [ ],
       networkAllowlist ? [ ],
@@ -37,6 +42,7 @@
       packages = base.packages ++ packages;
       hostPackages = (base.hostPackages or [ ]) ++ hostPackages;
       env = base.env // env;
+      hostEnv = (base.hostEnv or { }) // env // hostEnv;
       runtimeSecrets = (base.runtimeSecrets or { }) // runtimeSecrets;
       mounts = base.mounts ++ mounts;
       networkAllowlist = base.networkAllowlist ++ networkAllowlist;

@@ -20,7 +20,7 @@ All git hooks for prek-using wrix repositories are served from a single Nix-stor
 
 Each shim uses `prek hook-impl --hook-type=<stage>` rather than `prek run` because git passes positional args that `prek run` would mistake for hook/project selectors.
 
-`mkDevShell` (see `profiles.md` § Prek hook management) sets `core.hooksPath` to the bundle on every devshell entry whenever `.pre-commit-config.yaml` is present. `wrix init` (see `cli.md`) applies the same bundle for ordinary host Git and Loom driver worktrees outside the devshell. Profile container images install the same bundle via the container entrypoint (see `image-builder.md` § Hook installation).
+`mkDevShell` consumes the bundle through the devshell hook-selection contract in `profiles.md` § Prek hook management. `wrix init` (see `cli.md`) applies the same bundle for ordinary host Git and Loom driver worktrees outside the devshell. Profile container images install the same bundle via the container entrypoint (see `image-builder.md` § Hook installation).
 
 Consumers do not vendor shims, do not set `core.hooksPath` themselves, and do not run `prek install`. Git never reads `.git/hooks/` while `core.hooksPath` is set, so whatever lands there (e.g. `bd hooks install`) is inert — no chmod-lockdown is needed and no `prek install -f` runs from any wrix lifecycle.
 
@@ -115,8 +115,6 @@ See `image-builder.md` § Hook installation for the build-side mechanism (which 
 
 - The `wrix.prekHooks` derivation contains executable shims for `pre-commit`, `pre-push`, `prepare-commit-msg`, `post-checkout`, and `post-merge`
   [check](verify:prek.bundle-contents)
-- `mkDevShell` sets `core.hooksPath` to the `wrix.prekHooks` store path on every devshell entry when `.pre-commit-config.yaml` is present
-  [system](verify:prek.devshell-auto-set)
 - The pre-commit and pre-push shims both invoke `prek hook-impl --hook-type=<stage>` (not `prek run`, which would mistake git's positional args for hook/project selectors)
   [system](verify:prek.shims-use-hook-impl)
 - No shim sources `lock.sh`, calls `_prek_acquire_lock`, or invokes `flock`; every shim invokes `prek hook-impl --hook-type=<its-stage>` and pins the Nix-store `prek` package on `PATH`

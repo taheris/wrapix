@@ -9,10 +9,9 @@
 #    `ref`, `source`, `source_kind`, and `profile_config` fields, with `source`
 #    and `source_kind` matching the corresponding `mkSandbox` image metadata.
 #
-# 2. test_flake_outputs_present — `packages.image-<name>[-<agent>]`,
-#    `packages.sandbox-<name>[-<agent>][-mcp]`, `packages.profile-images`,
-#    and `packages.profile-images-pi` evaluate for every built-in profile
-#    (base, rust, python), and `packages.default` resolves to `sandbox-rust-pi`.
+# 2. test_flake_outputs_present — `packages.image-<name>[-<agent>]` resolves
+#    to the matching sandbox image's selected source, all sandbox and manifest
+#    outputs evaluate, and `packages.default` resolves to `sandbox-rust-pi`.
 #
 # 3. test_runtime_manifest_retains_store_context — the Pi runtime manifest
 #    exported to Loom retains Nix context on `source` and `profile_config`.
@@ -165,6 +164,41 @@ test_flake_outputs_present() {
     for out in "${outputs[@]}"; do
         if ! nix eval --raw --no-warn-dirty "$flake_url#$out.outPath" >/dev/null 2>&1; then
             echo "packages.$out failed to evaluate" >&2
+            return 1
+        fi
+    done
+
+    local system expected_sources actual_source expected_source
+    system=$(nix eval --raw --impure --no-warn-dirty --expr 'builtins.currentSystem')
+    if ! expected_sources=$(nix eval --json --impure --no-warn-dirty --expr "
+      let
+        flake = builtins.getFlake \"$flake_url\";
+        lib = flake.legacyPackages.${system}.lib;
+        sourceFor = profile: agent:
+          toString (lib.mkSandbox { inherit profile agent; }).image.source;
+      in {
+        image-base = sourceFor lib.profiles.base \"direct\";
+        image-base-claude = sourceFor lib.profiles.base \"claude\";
+        image-base-pi = sourceFor lib.profiles.base \"pi\";
+        image-rust = sourceFor lib.profiles.rust \"direct\";
+        image-rust-claude = sourceFor lib.profiles.rust \"claude\";
+        image-rust-pi = sourceFor lib.profiles.rust \"pi\";
+        image-python = sourceFor lib.profiles.python \"direct\";
+        image-python-claude = sourceFor lib.profiles.python \"claude\";
+        image-python-pi = sourceFor lib.profiles.python \"pi\";
+      }
+    "); then
+        echo "matching sandbox image sources failed to evaluate" >&2
+        return 1
+    fi
+    for out in "${outputs[@]}"; do
+        if [[ "$out" != image-* ]]; then
+            continue
+        fi
+        actual_source=$(nix eval --raw --no-warn-dirty "$flake_url#$out.outPath")
+        expected_source=$(jq -r --arg out "$out" '.[$out]' <<<"$expected_sources")
+        if [[ "$actual_source" != "$expected_source" ]]; then
+            echo "packages.$out ($actual_source) != matching sandbox.image.source ($expected_source)" >&2
             return 1
         fi
     done

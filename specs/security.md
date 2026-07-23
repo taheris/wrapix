@@ -153,9 +153,10 @@ leaks beyond the session that supplied it.
 
 The environment surface is split into static defaults and runtime secrets:
 
-- `profile.env`, `mkSandbox.env`, and agent-settings env are non-secret static
-  defaults. They enter Nix evaluation and may be serialized into a Nix-store
-  `ProfileConfig`, OCI config `Env`, or agent-settings image layer. Nix rejects
+- `profile.env`, `profile.hostEnv`, `mkSandbox.env`, and agent-settings env are
+  non-secret static defaults. They enter Nix evaluation and may be serialized
+  into a Nix-store `ProfileConfig`, OCI config `Env`, or agent-settings image
+  layer. Nix rejects
   known provider credential names and every declared runtime-secret name from
   these static surfaces.
 - `runtimeSecrets` is a typed attrset from validated environment-variable name
@@ -336,7 +337,7 @@ this section is the index, not a restatement.
   [test](../crates/wrix-sandbox/tests/launch.rs::declared_custom_runtime_secret_reaches_run_environment)
 - A missing `"required"` runtime-secret source fails before the container starts
   [test](../crates/wrix-sandbox/tests/launch.rs::required_runtime_secret_fails_before_container_start)
-- `profile.env`, `mkSandbox.env`, and agent-settings env reject known provider credential names, and `runtimeSecrets` rejects invalid names or policies at Nix evaluation
+- `profile.env`, `profile.hostEnv`, `mkSandbox.env`, and agent-settings env reject known provider credential names, and `runtimeSecrets` rejects invalid names or policies at Nix evaluation
   [check](verify:sandbox.mksandbox-api)
 - A declared runtime secret supplied through `SpawnConfig.env` satisfies required-source policy and is redacted in launcher dry-run output
   [test](../crates/wrix-sandbox/tests/spawn_config.rs::provider_credentials_in_spawn_config_are_redacted)

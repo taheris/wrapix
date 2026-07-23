@@ -70,6 +70,7 @@ test_nested_derive_profile() {
           WRIX_COMPOSE_A = "first";
           WRIX_COMPOSE_B = "first";
         };
+        hostEnv.WRIX_HOST_ONLY = "first";
         runtimeSecrets = {
           FIRST_PROVIDER_TOKEN = "optional";
           SHARED_PROVIDER_TOKEN = "optional";
@@ -83,6 +84,7 @@ test_nested_derive_profile() {
           WRIX_COMPOSE_B = "second";
           WRIX_COMPOSE_C = "second";
         };
+        hostEnv.WRIX_HOST_ONLY = "second";
         runtimeSecrets = {
           SECOND_PROVIDER_TOKEN = "optional";
           SHARED_PROVIDER_TOKEN = "required";
@@ -101,6 +103,10 @@ test_nested_derive_profile() {
       envA = second.env.WRIX_COMPOSE_A;
       envB = second.env.WRIX_COMPOSE_B;
       envC = second.env.WRIX_COMPOSE_C;
+      hostEnvA = second.hostEnv.WRIX_COMPOSE_A;
+      hostEnvB = second.hostEnv.WRIX_COMPOSE_B;
+      hostEnvC = second.hostEnv.WRIX_COMPOSE_C;
+      hostOnly = second.hostEnv.WRIX_HOST_ONLY;
       runtimeSecrets = second.runtimeSecrets;
       hasHelloLeaf = hasPackage "hello" (leaf second);
       hasCowsayLeaf = hasPackage "cowsay" (leaf second);
@@ -122,6 +128,10 @@ test_nested_derive_profile() {
   [[ "$(json_field "$result" envA)" == "first" ]] || fail "first-level env value was not preserved"
   [[ "$(json_field "$result" envB)" == "second" ]] || fail "second-level env did not right-override first-level env"
   [[ "$(json_field "$result" envC)" == "second" ]] || fail "second-level env value was not added"
+  [[ "$(json_field "$result" hostEnvA)" == "first" ]] || fail "common env was not inherited by hostEnv"
+  [[ "$(json_field "$result" hostEnvB)" == "second" ]] || fail "common env did not right-override hostEnv"
+  [[ "$(json_field "$result" hostEnvC)" == "second" ]] || fail "new common env value was not added to hostEnv"
+  [[ "$(json_field "$result" hostOnly)" == "second" ]] || fail "hostEnv did not right-merge across derivation"
   jq -e '.mounts == ["/mnt/first", "/mnt/second"]' <<<"$result" >/dev/null || fail "mounts were not concatenated in order"
   jq -e '.allowlist | index("first.example") and index("second.example")' <<<"$result" >/dev/null || fail "network allowlist did not include both extensions"
   jq -e '
