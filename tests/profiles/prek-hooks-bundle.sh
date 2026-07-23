@@ -15,10 +15,13 @@
 #     invokes flock; every shim invokes hook-impl and pins the Nix-store
 #     prek package on PATH.
 #
-#   test_pre_push_stamp_written_and_consumed
-#     The materialized pre-push shim writes .wrix/push-verified for the
-#     current HEAD after a passing pre-push check, then consumes that stamp
-#     on a retry of the same HEAD.
+#   test_pre_push_exact_transaction_stamp_written_and_consumed
+#     The materialized pre-push shim writes .wrix/push-verified after a
+#     passing check, then consumes it on the exact same push transaction.
+#
+#   test_pre_push_stamp_rejects_different_transaction
+#     A stamp cannot approve a push with a different remote identity or ref
+#     transaction, even when HEAD is unchanged.
 #
 #   test_pre_push_stale_stamp_removed_on_failure
 #     A stale stamp is removed before a failing check and cannot approve a
@@ -205,6 +208,19 @@ SCRIPT
   git -C "$worktree" commit -q -m initial
 }
 
+run_pre_push_transaction() {
+  local bundle="$1"
+  local worktree="$2"
+  local remote_name="$3"
+  local remote_location="$4"
+  local ref_transaction="$5"
+
+  (
+    cd "$worktree"
+    printf '%s\n' "$ref_transaction" | "$bundle/pre-push" "$remote_name" "$remote_location"
+  )
+}
+
 run_pre_push_for_head() {
   local bundle="$1"
   local worktree="$2"
@@ -214,10 +230,10 @@ run_pre_push_for_head() {
 
   head_sha="$(git -C "$worktree" rev-parse HEAD)"
   ref_line="refs/heads/main $head_sha refs/heads/main $old_sha"
-  (cd "$worktree" && printf '%s\n' "$ref_line" | "$bundle/pre-push" origin example)
+  run_pre_push_transaction "$bundle" "$worktree" origin example "$ref_line"
 }
 
-assert_pre_push_stamp_written_and_consumed() {
+assert_pre_push_exact_transaction_stamp_written_and_consumed() {
   local bundle="$1"
   local worktree="$2"
   local branch="$3"
@@ -243,9 +259,6 @@ assert_pre_push_stamp_written_and_consumed() {
   elif [[ ! -f "$stamp" ]]; then
     echo "FAIL: $label pre-push did not write $stamp" >&2
     failed=$((failed + 1))
-  elif [[ "$(<"$stamp")" != "$head_sha" ]]; then
-    echo "FAIL: $label pre-push stamp did not contain HEAD sha" >&2
-    failed=$((failed + 1))
   fi
 
   if [[ "$failed" -eq 0 ]]; then
@@ -268,7 +281,7 @@ assert_pre_push_stamp_written_and_consumed() {
   [[ "$failed" -eq 0 ]]
 }
 
-test_pre_push_stamp_written_and_consumed() {
+test_pre_push_exact_transaction_stamp_written_and_consumed() {
   local bundle
   if ! bundle=$(require_bundle "$@"); then
     echo "FAIL: nix build lib.prekHooks failed" >&2
@@ -301,18 +314,130 @@ YAML
   git -C "$main" add .
   git -C "$main" commit -q -m initial
 
-  if ! assert_pre_push_stamp_written_and_consumed "$bundle" "$main" main main-worktree; then
+  if ! assert_pre_push_exact_transaction_stamp_written_and_consumed "$bundle" "$main" main main-worktree; then
     failed=$((failed + 1))
   fi
 
   git -C "$main" worktree add -q -b linked "$linked"
-  if ! assert_pre_push_stamp_written_and_consumed "$bundle" "$linked" linked linked-worktree; then
+  if ! assert_pre_push_exact_transaction_stamp_written_and_consumed "$bundle" "$linked" linked linked-worktree; then
     failed=$((failed + 1))
   fi
 
   rm -rf "$work"
   [[ "$failed" -eq 0 ]]
 }
+
+# ============================================================================
+test_pre_push_stamp_rejects_different_transaction() (
+  local bundle
+  if ! bundle=$(require_bundle "$@"); then
+    echo "FAIL: nix build lib.prekHooks failed" >&2
+    return 1
+  fi
+
+  local work
+  local worktree
+  local stamp
+  local count_file
+  local output
+  local head_sha
+  local previous_sha
+  local zero_sha="0000000000000000000000000000000000000000"
+  local canonical_ref
+  local extra_ref
+  local index
+  local -a variant_labels
+  local -a variant_remote_names
+  local -a variant_remote_locations
+  local -a variant_ref_transactions
+
+  work="$(mktemp -d)"
+  worktree="$work/worktree"
+  stamp="$worktree/.wrix/push-verified"
+  count_file="$worktree/.git/pre-push-count"
+  output="$work/pre-push.out"
+  trap 'rm -rf "$work"' EXIT
+
+  init_pre_push_probe_repo "$worktree"
+  previous_sha="$(git -C "$worktree" rev-parse HEAD)"
+  printf 'second\n' >"$worktree/tracked.txt"
+  git -C "$worktree" add tracked.txt
+  git -C "$worktree" commit -q -m second
+  head_sha="$(git -C "$worktree" rev-parse HEAD)"
+  canonical_ref="refs/heads/main $head_sha refs/heads/main $zero_sha"
+  extra_ref="refs/heads/topic $previous_sha refs/heads/topic $zero_sha"
+
+  variant_labels=(
+    remote-name
+    remote-location
+    local-ref
+    local-object
+    remote-ref
+    remote-object
+    ref-set
+  )
+  variant_remote_names=(
+    mirror
+    origin
+    origin
+    origin
+    origin
+    origin
+    origin
+  )
+  variant_remote_locations=(
+    example
+    alternate
+    example
+    example
+    example
+    example
+    example
+  )
+  variant_ref_transactions=(
+    "$canonical_ref"
+    "$canonical_ref"
+    "refs/heads/topic $head_sha refs/heads/main $zero_sha"
+    "refs/heads/main $previous_sha refs/heads/main $zero_sha"
+    "refs/heads/main $head_sha refs/heads/topic $zero_sha"
+    "refs/heads/main $head_sha refs/heads/main $previous_sha"
+    "$canonical_ref"$'\n'"$extra_ref"
+  )
+
+  for index in "${!variant_labels[@]}"; do
+    rm -rf "$worktree/.wrix"
+    rm -f "$count_file"
+
+    if ! run_pre_push_transaction "$bundle" "$worktree" origin example "$canonical_ref" >"$output" 2>&1; then
+      echo "FAIL: ${variant_labels[$index]} setup transaction failed" >&2
+      cat "$output" >&2
+      return 1
+    fi
+    if [[ ! -f "$stamp" || "$(<"$count_file")" != "1" ]]; then
+      echo "FAIL: ${variant_labels[$index]} setup did not mint one approval" >&2
+      return 1
+    fi
+
+    if ! run_pre_push_transaction \
+      "$bundle" \
+      "$worktree" \
+      "${variant_remote_names[$index]}" \
+      "${variant_remote_locations[$index]}" \
+      "${variant_ref_transactions[$index]}" >"$output" 2>&1; then
+      echo "FAIL: ${variant_labels[$index]} variant transaction failed" >&2
+      cat "$output" >&2
+      return 1
+    fi
+    if [[ "$(<"$count_file")" != "2" ]]; then
+      echo "FAIL: ${variant_labels[$index]} variant reused a different transaction's approval" >&2
+      return 1
+    fi
+    if [[ ! -f "$stamp" ]]; then
+      echo "FAIL: ${variant_labels[$index]} checked transaction did not mint a replacement approval" >&2
+      return 1
+    fi
+  done
+)
 
 # ============================================================================
 test_pre_push_stale_stamp_removed_on_failure() (
@@ -393,7 +518,7 @@ test_pre_push_stamp_cannot_revive_after_return_to_sha() (
     echo "FAIL: returning to the previously stamped HEAD reused the old approval" >&2
     return 1
   fi
-  if [[ ! -f "$stamp" || "$(<"$stamp")" != "$first_sha" ]]; then
+  if [[ ! -f "$stamp" ]]; then
     echo "FAIL: fresh check after returning to the old HEAD did not write a new stamp" >&2
     return 1
   fi
@@ -498,7 +623,8 @@ ALL_TESTS=(
   test_bundle_contents
   test_shims_use_hook_impl
   test_shims_no_flock
-  test_pre_push_stamp_written_and_consumed
+  test_pre_push_exact_transaction_stamp_written_and_consumed
+  test_pre_push_stamp_rejects_different_transaction
   test_pre_push_stale_stamp_removed_on_failure
   test_pre_push_stamp_cannot_revive_after_return_to_sha
   test_no_verify_bypasses_pre_commit_and_pre_push

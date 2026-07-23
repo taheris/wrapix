@@ -43,7 +43,9 @@ in
     repoScript "tests/profiles/prek-hooks-bundle.sh" "test_shims_use_hook_impl";
   "prek.shims-no-flock" = repoScript "tests/profiles/prek-hooks-bundle.sh" "test_shims_no_flock";
   "prek.pre-push-stamp" =
-    repoScript "tests/profiles/prek-hooks-bundle.sh" "test_pre_push_stamp_written_and_consumed";
+    repoScript "tests/profiles/prek-hooks-bundle.sh" "test_pre_push_exact_transaction_stamp_written_and_consumed";
+  "prek.pre-push-stamp-transaction-scope" =
+    repoScript "tests/profiles/prek-hooks-bundle.sh" "test_pre_push_stamp_rejects_different_transaction";
   "prek.pre-push-stale-stamp" =
     repoScript "tests/profiles/prek-hooks-bundle.sh" "test_pre_push_stale_stamp_removed_on_failure";
   "prek.pre-push-stamp-cannot-revive" =

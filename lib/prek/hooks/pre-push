@@ -5,20 +5,24 @@ _worktree_root=$(git rev-parse --show-toplevel)
 _wrix_dir="$_worktree_root/.wrix"
 _stamp_file="$_wrix_dir/push-verified"
 _head_sha=$(git rev-parse HEAD)
+_remote_name="${1:-}"
+_remote_location="${2:-}"
+_stdin=$(cat)
 
-# A stamp is single-use even when it does not match the current HEAD.
+# NUL delimiters keep every Git-supplied identity field unambiguous.
+_approval_id="$(
+    printf '%s\0' "wrix-push-verified-v1" "$_head_sha" "$_remote_name" "$_remote_location" "$_stdin" |
+        git hash-object --stdin
+)"
+
+# A stamp is single-use even when it does not match this push transaction.
 if [[ -f "$_stamp_file" ]]; then
-    _stamped_sha="$(<"$_stamp_file")"
+    _stamped_approval_id="$(<"$_stamp_file")"
     rm -f "$_stamp_file"
-    if [[ "$_stamped_sha" == "$_head_sha" ]]; then
+    if [[ "$_stamped_approval_id" == "$_approval_id" ]]; then
         exit 0
     fi
-    unset _stamped_sha
 fi
-
-# Save stdin — git writes ref lines once and hook-impl needs them to
-# determine which files changed across the push range.
-_stdin=$(cat)
 
 if [[ -z "$_stdin" ]]; then
     exit 0
@@ -26,17 +30,11 @@ fi
 
 mkdir -p "$_wrix_dir"
 
-# Run pre-push hooks via hook-impl (not `prek run`) so the ref range
-# from stdin is parsed correctly — same code path git would use, but
-# decoupled from the SSH connection.
+# hook-impl parses Git's positional arguments and ref transaction; prek run does not.
 _hook_dir="$(dirname "$0")"
 printf '%s\n' "$_stdin" | prek hook-impl --hook-type=pre-push \
     --hook-dir "$_hook_dir" \
     --script-version 4 \
     -- "$@" || exit 1
 
-# Tests passed — stamp in case the SSH connection died during tests.
-# Exit 0 lets git try the original connection. If it's still alive, the
-# push succeeds in one shot. If it's dead, the user re-runs git push
-# and the stamp makes it instant.
-printf '%s\n' "$_head_sha" > "$_stamp_file"
+printf '%s\n' "$_approval_id" > "$_stamp_file"

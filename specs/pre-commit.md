@@ -26,9 +26,9 @@ Consumers do not vendor shims, do not set `core.hooksPath` themselves, and do no
 
 ## Pre-Push Stamp Dance
 
-The pre-push shim runs prek's pre-push checks then writes the current HEAD SHA to `.wrix/push-verified` and exits 0. If the SSH connection survived the check, git completes the push on it; otherwise the user re-runs `git push` and the stamp short-circuits on a fresh connection. This avoids SSH idle timeouts during long test suites.
+The pre-push shim captures Git's remote name and location arguments plus the complete ordered ref transaction from standard input. It derives an approval identity from those values, the current HEAD object ID, and every local and remote ref name and object ID. After prek's checks pass, the shim writes that identity to `.wrix/push-verified` and exits 0. If the connection died during the checks, re-running the exact push transaction can short-circuit on a fresh connection.
 
-The stamp is single-use, scoped to a specific HEAD SHA, and consumed on the next pre-push invocation that matches. It is not a long-lived approval token — a different HEAD or a stale-SHA mismatch invalidates it and the full check runs again.
+The stamp is single-use: the next pre-push invocation consumes it whether or not its approval identity matches. Only an exact match short-circuits; a different HEAD, remote identity, ref name, ref object ID, or ref set runs the full checks. The hook cannot observe whether the network push ultimately succeeded, so an unconsumed exact-transaction approval may persist indefinitely and survive either push outcome. It has no expiry and does not prove an SSH failure or identify one network attempt; its safety comes from exact transaction binding and one-use consumption rather than age.
 
 ## Hook-Entry Wrappers
 
@@ -68,7 +68,7 @@ If `<tool>` resolves on `PATH`, `exec` the command. If absent, exit 0 silently. 
 
 ### Relationship to `push-verified`
 
-The `.wrix/push-verified` stamp is a within-attempt retry safety net: the pre-push shim writes it automatically on success and consumes it only when a subsequent push retries the same HEAD after SSH death. `pre-push-checks` is a different layer — a per-entry opt-in skip when an external loom run has already validated the commit. Both can be active simultaneously. Long-term removal of `push-verified` is deferred until the marker mechanism covers the SSH-retry case too.
+The `.wrix/push-verified` stamp is an exact-transaction, one-use approval: the pre-push shim writes it automatically after successful checks, but cannot know the later network outcome. `pre-push-checks` is a different layer — a per-entry opt-in skip when an external loom run has already validated the commit. Both can be active simultaneously. The stamp is not evidence of SSH failure and is not bounded to one network attempt. Long-term removal of `push-verified` is deferred until the marker mechanism covers the SSH-retry case too.
 
 ## Hook Installation in Profile Containers
 
@@ -82,8 +82,10 @@ The `.wrix/push-verified` stamp is a within-attempt retry safety net: the pre-pu
   [system](verify:prek.shims-use-hook-impl)
 - No shim sources `lock.sh`, calls `_prek_acquire_lock`, or invokes `flock`; every shim invokes `prek hook-impl --hook-type=<its-stage>` and pins the Nix-store `prek` package on `PATH`
   [system](verify:prek.shims-no-flock)
-- The pre-push shim writes `.wrix/push-verified` after successful checks and consumes it on the next invocation for the same HEAD
+- The pre-push shim writes `.wrix/push-verified` after successful checks, binding the approval to the current HEAD, the remote name and location, and the complete ordered ref transaction; the next exact transaction consumes the stamp and skips checks once
   [system](verify:prek.pre-push-stamp)
+- A same-HEAD invocation with a different remote name, remote location, local or remote ref name, local or remote object ID, or ref set consumes the old stamp and runs the checks
+  [system](verify:prek.pre-push-stamp-transaction-scope)
 - A stamp for a different HEAD is removed before checks run, and failed checks leave no approval stamp
   [system](verify:prek.pre-push-stale-stamp)
 - Returning to a previously stamped HEAD after an intervening HEAD failed its checks runs the checks again rather than reviving the old approval
@@ -128,7 +130,7 @@ The `.wrix/push-verified` stamp is a within-attempt retry safety net: the pre-pu
 1. **Bundle ownership** — `wrix.prekHooks` owns every staged hook shim; consumers do not vendor or override unless they substitute the whole bundle via `mkDevShell { prekHooks = <derivation>; }`.
 2. **`core.hooksPath` management** — The bundle is the hook path consumed by Wrix-owned install surfaces. `profiles.md` owns devshell installation and `cli.md` owns `wrix init`; consumers do not run `prek install` or maintain hook shims themselves.
 3. **Hook stages** — the shim bundle covers pre-commit, pre-push, prepare-commit-msg, post-checkout, and post-merge.
-4. **Stamp-file dance** — pre-push writes `.wrix/push-verified` after a successful check so a subsequent push can short-circuit if the SSH connection died during validation. See § Pre-Push Stamp Dance for the full mechanic.
+4. **Stamp-file dance** — pre-push writes `.wrix/push-verified` after a successful check as a one-use approval for the exact current HEAD, remote identity, and pushed ref transaction. The approval has no expiry, survives either eventual network outcome, and does not prove the connection died. See § Pre-Push Stamp Dance for the full mechanic.
 5. **Marker-aware short-circuit** — each pre-push entry supplies stable hook id, entry, and range metadata through `bin/pre-push-checks`; the wrapper consults `loom gate verify-marker` to skip only the exact covered command.
 6. **Graceful degrade in wrappers** — `pre-push-checks` executes the wrapped command when the marker, hook id, or Loom binary is absent, or when marker validation fails. `skip-if-missing` exits 0 silently when `<tool>` is absent from `PATH`. Neither wrapper exits non-zero on a missing-input path.
 7. **Container hook parity** — once installed through the image-builder-owned surface, the shared bundle dispatches configured hooks equivalently inside the container and on the host.
