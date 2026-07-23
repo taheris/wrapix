@@ -5,6 +5,7 @@ PLAYWRIGHT_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAYWRIGHT_REPO_ROOT="${PLAYWRIGHT_REPO_ROOT:-$(cd "${PLAYWRIGHT_HELPER_DIR}/../../.." && pwd)}"
 PLAYWRIGHT_SYSTEM="${PLAYWRIGHT_SYSTEM:-$(nix eval --raw --impure --expr 'builtins.currentSystem')}"
 PLAYWRIGHT_EVAL_NIX="${PLAYWRIGHT_REPO_ROOT}/tests/mcp/playwright/eval.nix"
+PLAYWRIGHT_SERVER_CONFIG_FILE="${PLAYWRIGHT_SERVER_CONFIG_FILE:-}"
 
 playwright_require_linux() {
     if [[ "$PLAYWRIGHT_SYSTEM" != *-linux ]]; then
@@ -69,52 +70,6 @@ playwright_config_path() {
     printf '%s\n' "$config_path"
 }
 
-playwright_config_json() {
-    local user_data_dir="$1"
-    local headless="${2:-true}"
-    local width="${3:-1280}"
-    local height="${4:-720}"
-    local config_json="{}"
-    if [[ $# -ge 5 ]]; then
-        config_json="$5"
-    fi
-
-    playwright_eval_raw config-json \
-        --argstr userDataDir "$user_data_dir" \
-        --argstr headless "$headless" \
-        --argstr width "$width" \
-        --argstr height "$height" \
-        --argstr configJson "$config_json"
-}
-
-playwright_chromium_executable_target() {
-    local chrome_path="$1"
-
-    if [[ -L "$chrome_path" ]]; then
-        readlink "$chrome_path"
-        return 0
-    fi
-
-    printf '%s\n' "$chrome_path"
-}
-
-playwright_chromium_path_is_derived_from_browsers() {
-    local chrome_path="$1"
-    local browsers_path="$2"
-    local target
-
-    target=$(playwright_chromium_executable_target "$chrome_path") || return 1
-    case "$target" in
-        "$browsers_path"/chromium-*/chrome-linux/chrome | "$browsers_path"/chromium-*/chrome-linux64/chrome)
-            return 0
-            ;;
-        *)
-            printf 'chromium path %s does not resolve under playwright-browsers %s\n' "$target" "$browsers_path" >&2
-            return 1
-            ;;
-    esac
-}
-
 playwright_server_args() {
     local user_data_dir="$1"
     local headless="${2:-true}"
@@ -126,6 +81,11 @@ playwright_server_args() {
         config_json="$5"
     fi
 
+    if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
+        jq -er '.mcpServers.playwright.args[]' "$PLAYWRIGHT_SERVER_CONFIG_FILE"
+        return
+    fi
+
     playwright_config_path "$user_data_dir" "$headless" "$width" "$height" "$config_json" >/dev/null || return 1
     args_json=$(playwright_eval_raw server-args-json \
         --argstr userDataDir "$user_data_dir" \
@@ -134,6 +94,29 @@ playwright_server_args() {
         --argstr height "$height" \
         --argstr configJson "$config_json") || return 1
     jq -r '.[]' <<<"$args_json"
+}
+
+playwright_server_env_json() {
+    local user_data_dir="$1"
+    local headless="${2:-true}"
+    local width="${3:-1280}"
+    local height="${4:-720}"
+    local config_json="{}"
+    if [[ $# -ge 5 ]]; then
+        config_json="$5"
+    fi
+
+    if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
+        jq -ec '.mcpServers.playwright.env' "$PLAYWRIGHT_SERVER_CONFIG_FILE"
+        return
+    fi
+
+    playwright_eval_raw server-env-json \
+        --argstr userDataDir "$user_data_dir" \
+        --argstr headless "$headless" \
+        --argstr width "$width" \
+        --argstr height "$height" \
+        --argstr configJson "$config_json"
 }
 
 playwright_server_env() {
@@ -147,12 +130,7 @@ playwright_server_env() {
         config_json="$5"
     fi
 
-    env_json=$(playwright_eval_raw server-env-json \
-        --argstr userDataDir "$user_data_dir" \
-        --argstr headless "$headless" \
-        --argstr width "$width" \
-        --argstr height "$height" \
-        --argstr configJson "$config_json") || return 1
+    env_json=$(playwright_server_env_json "$user_data_dir" "$headless" "$width" "$height" "$config_json") || return 1
     jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$env_json"
 }
 
@@ -160,8 +138,13 @@ playwright_find_mcp() {
     local package_path
     local mcp_bin
 
-    package_path=$(playwright_build_package playwright-mcp) || return 1
-    mcp_bin="${package_path}/bin/playwright-mcp"
+    if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
+        mcp_bin=$(jq -er '.mcpServers.playwright.command' "$PLAYWRIGHT_SERVER_CONFIG_FILE") || return 1
+        mcp_bin=$(command -v "$mcp_bin") || return 1
+    else
+        package_path=$(playwright_build_package playwright-mcp) || return 1
+        mcp_bin="${package_path}/bin/playwright-mcp"
+    fi
     if [[ ! -x "$mcp_bin" ]]; then
         printf 'playwright-mcp binary is not executable: %s\n' "$mcp_bin" >&2
         return 1
@@ -169,31 +152,15 @@ playwright_find_mcp() {
     printf '%s\n' "$mcp_bin"
 }
 
-playwright_find_node() {
-    local node_bin
+playwright_find_python() {
+    local python_bin
 
-    if node_bin=$(command -v node); then
-        printf '%s\n' "$node_bin"
+    if python_bin=$(command -v python3); then
+        printf '%s\n' "$python_bin"
         return 0
     fi
 
     local package_path
-    package_path=$(nix build 'nixpkgs#nodejs' --no-link --print-out-paths) || return 1
-    printf '%s/bin/node\n' "$package_path"
-}
-
-playwright_sandbox_package_names_json() {
-    playwright_eval_raw sandbox-profile-package-names-json "$@"
-}
-
-playwright_sandbox_package_paths_json() {
-    playwright_eval_raw sandbox-profile-package-paths-json "$@"
-}
-
-playwright_sandbox_package_closure() {
-    playwright_build_mode sandbox-package-closure "$@"
-}
-
-playwright_sandbox_image() {
-    playwright_build_mode sandbox-image "$@"
+    package_path=$(nix build 'nixpkgs#python3' --no-link --print-out-paths) || return 1
+    printf '%s/bin/python3\n' "$package_path"
 }

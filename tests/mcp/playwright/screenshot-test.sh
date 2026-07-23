@@ -61,7 +61,7 @@ stop_http_server() {
 }
 
 start_http_server() {
-    local node_bin="$1"
+    local python_bin="$1"
     local serve_dir="${TEMP_DIR}/www"
     local port_file="${TEMP_DIR}/http_port"
     local retries=20
@@ -77,28 +77,21 @@ start_http_server() {
 </html>
 HTML
 
-    cat >"${TEMP_DIR}/server.js" <<'JS'
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const dir = process.argv[2];
-const server = http.createServer((req, res) => {
-  const file = path.join(dir, req.url === "/" ? "index.html" : req.url);
-  try {
-    const data = fs.readFileSync(file);
-    res.writeHead(200, {"Content-Type": "text/html"});
-    res.end(data);
-  } catch {
-    res.writeHead(404);
-    res.end("not found");
-  }
-});
-server.listen(0, "127.0.0.1", () => {
-  fs.writeFileSync(process.argv[3], String(server.address().port));
-});
-JS
+    cat >"${TEMP_DIR}/server.py" <<'PY'
+import functools
+import http.server
+import pathlib
+import sys
 
-    "$node_bin" "${TEMP_DIR}/server.js" "$serve_dir" "$port_file" >"${TEMP_DIR}/http.stdout" 2>"${TEMP_DIR}/http.stderr" &
+serve_dir = sys.argv[1]
+port_file = pathlib.Path(sys.argv[2])
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=serve_dir)
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+port_file.write_text(str(server.server_port), encoding="utf-8")
+server.serve_forever()
+PY
+
+    "$python_bin" "${TEMP_DIR}/server.py" "$serve_dir" "$port_file" >"${TEMP_DIR}/http.stdout" 2>"${TEMP_DIR}/http.stderr" &
     HTTP_PID=$!
 
     while [[ ! -f "$port_file" ]]; do
@@ -179,9 +172,9 @@ test_screenshot_returns_png() {
     log_test "test_screenshot_returns_png: generated config navigates and captures PNG"
 
     new_temp_dir
-    local node_bin port id response server_name nav_error call_error b64_data decoded_file decoded_header data_len
-    node_bin=$(playwright_find_node) || return 1
-    port=$(start_http_server "$node_bin") || return 1
+    local python_bin port id response server_name nav_error call_error b64_data decoded_file decoded_header data_len
+    python_bin=$(playwright_find_python) || return 1
+    port=$(start_http_server "$python_bin") || return 1
     log_info "HTTP server on port $port"
 
     start_mcp_server "${TEMP_DIR}/user-data" || return 1

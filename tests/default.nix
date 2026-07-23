@@ -115,6 +115,18 @@ let
       ;
   };
 
+  playwrightMcpTests = import ./mcp/playwright/check.nix {
+    inherit
+      pkgs
+      system
+      linuxPkgs
+      crane
+      fenix
+      treefmt
+      ;
+    serviceCli = wrix.rustPackage.wrix;
+  };
+
   # TOML utility tests
   tomlTests = import ./toml.nix { inherit pkgs; };
 
@@ -275,6 +287,8 @@ let
     }) ciApps
   );
   testAppDerivations = ciAppDerivations // {
+    playwright-mcp-registry = playwrightMcpTests.registryTripleCheck;
+    playwright-mcp-sandbox = playwrightMcpTests.sandbox.package;
     test-notify = testNotify;
   };
 
@@ -457,25 +471,10 @@ let
       "x86_64-linux"
     else
       system;
-  mkPlaywrightCiApp =
-    name: script: function:
-    mkRepoScriptCiApp {
-      inherit name script;
-      args = [ function ];
-      environment = "export PLAYWRIGHT_SYSTEM=${escapeShellArg ciLinuxSystem}";
-    };
-  testPlaywrightChromiumClosure =
-    mkPlaywrightCiApp "test-playwright-chromium-closure" "tests/mcp/playwright/build-test.sh"
-      "test_image_contains_chromium";
-  testPlaywrightChromiumExecutablePath =
-    mkPlaywrightCiApp "test-playwright-chromium-executable-path" "tests/mcp/playwright/smoke-test.sh"
-      "test_chromium_executable_path_derives_from_playwright_browsers";
-  testPlaywrightMandatoryFlags =
-    mkPlaywrightCiApp "test-playwright-mandatory-flags" "tests/mcp/playwright/smoke-test.sh"
-      "test_mandatory_flags_are_non_overridable";
-  testPlaywrightUserOptionsConfig =
-    mkPlaywrightCiApp "test-playwright-user-options-config" "tests/mcp/playwright/smoke-test.sh"
-      "test_user_options_reach_serialized_config";
+  testPlaywrightChromiumClosure = playwrightMcpTests.chromiumImageCheck;
+  testPlaywrightChromiumExecutablePath = playwrightMcpTests.executablePathCheck;
+  testPlaywrightMandatoryFlags = playwrightMcpTests.mandatoryFlagsCheck;
+  testPlaywrightUserOptionsConfig = playwrightMcpTests.userOptionsCheck;
 
   testBeadsLiveSystem = writeShellScriptBin "test-beads-live-system" ''
     set -euo pipefail

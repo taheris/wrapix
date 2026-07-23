@@ -20,7 +20,6 @@ let
     else
       system;
   pkgs = flake.inputs.nixpkgs.legacyPackages.${linuxSystem};
-  wrixLib = flake.legacyPackages.${system}.lib;
   inherit (pkgs.lib) getName recursiveUpdate;
 
   parseBool =
@@ -47,7 +46,6 @@ let
     };
     inherit config;
   };
-  configJSON = serverDef.passthru.mkConfig mcpOptions;
   serverConfig = serverDef.mkServerConfig mcpOptions;
   configPath = builtins.elemAt serverConfig.args 1;
   configRealizer = pkgs.runCommand "playwright-mcp-config-realizer" { } ''
@@ -147,39 +145,15 @@ let
     EOF
         cc -shared -fPIC deny-network.c -ldl -o "$out/lib/libwrix-deny-network.so"
   '';
-  sandbox = wrixLib.mkSandbox {
-    profile = wrixLib.profiles.base;
-    mcp = {
-      playwright = mcpOptions;
-    };
-  };
-  sandboxPackageClosure = pkgs.closureInfo {
-    rootPaths = sandbox.profile.packages;
-  };
   outputs = {
-    config-json = builtins.toJSON configJSON;
     config-path = configPath;
     config-realizer = configRealizer;
     server-args-json = builtins.toJSON serverConfig.args;
     server-command = serverConfig.command;
     server-env-json = builtins.toJSON serverConfig.env;
-    server-registry-json = builtins.toJSON {
-      inherit (serverDef) name;
-      packageNames = map getName serverDef.packages;
-      mkServerConfigIsFunction = builtins.isFunction serverDef.mkServerConfig;
-      sampleConfig = {
-        inherit (serverConfig) command args env;
-      };
-    };
-    chromium-executable-path = configJSON.browser.launchOptions.executablePath;
     network-deny-preload = networkDenyPreload;
     package = packageByName;
     package-path = toString packageByName;
-    sandbox-image = sandbox.image;
-    sandbox-image-path = toString sandbox.image;
-    sandbox-profile-package-names-json = builtins.toJSON (map getName sandbox.profile.packages);
-    sandbox-profile-package-paths-json = builtins.toJSON (map toString sandbox.profile.packages);
-    sandbox-package-closure = sandboxPackageClosure;
   };
 in
 outputs.${mode} or (throw "unknown playwright eval mode '${mode}'")

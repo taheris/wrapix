@@ -114,53 +114,6 @@ mcp_notify() {
     sleep 0.1
 }
 
-assert_json() {
-    local file="$1"
-    local filter="$2"
-    local message="$3"
-
-    if jq -e "$filter" "$file" >/dev/null; then
-        log_info "$message"
-        return 0
-    fi
-
-    log_fail "$message"
-    jq . "$file" >&2
-    return 1
-}
-
-assert_json_arg() {
-    local file="$1"
-    local arg_name="$2"
-    local arg_value="$3"
-    local filter="$4"
-    local message="$5"
-
-    if jq -e --arg "$arg_name" "$arg_value" "$filter" "$file" >/dev/null; then
-        log_info "$message"
-        return 0
-    fi
-
-    log_fail "$message"
-    jq . "$file" >&2
-    return 1
-}
-
-assert_json_text() {
-    local json="$1"
-    local filter="$2"
-    local message="$3"
-
-    if jq -e "$filter" <<<"$json" >/dev/null; then
-        log_info "$message"
-        return 0
-    fi
-
-    log_fail "$message"
-    jq . <<<"$json" >&2
-    return 1
-}
-
 assert_representative_tools() {
     local response="$1"
     local tools
@@ -195,101 +148,6 @@ assert_representative_tools() {
         return 1
     fi
     log_info "Server reported $tool_count tools"
-}
-
-test_chromium_executable_path_derives_from_playwright_browsers() {
-    log_test "test_chromium_executable_path_derives_from_playwright_browsers: generated config uses packaged Chromium"
-
-    new_temp_dir
-    local user_data_dir="${TEMP_DIR}/user-data"
-    local config_file
-    local chrome_path
-    local browsers_path
-    local chrome_target
-    config_file=$(playwright_config_path "$user_data_dir") || return 1
-    chrome_path=$(jq -r '.browser.launchOptions.executablePath' "$config_file") || return 1
-    browsers_path=$(playwright_build_package playwright-browsers) || return 1
-    chrome_target=$(playwright_chromium_executable_target "$chrome_path") || return 1
-
-    if ! playwright_chromium_path_is_derived_from_browsers "$chrome_path" "$browsers_path"; then
-        log_fail "Chromium path is not derived from playwright-browsers: $chrome_path"
-        log_fail "Chromium target: $chrome_target"
-        log_fail "playwright-browsers path: $browsers_path"
-        return 1
-    fi
-    log_info "Chromium path resolves under playwright-browsers"
-
-    if [[ ! -x "$chrome_path" ]]; then
-        log_fail "Configured chromium path is not executable: $chrome_path"
-        return 1
-    fi
-    log_info "Chromium path is executable"
-
-    log_pass "test_chromium_executable_path_derives_from_playwright_browsers"
-}
-
-test_chromium_executable_path_does_not_embed_linux_arch() {
-    log_test "test_chromium_executable_path_does_not_embed_linux_arch: Linux configs use an architecture-neutral executable"
-
-    local linux_system
-    local config_json
-    local chrome_path
-    for linux_system in x86_64-linux aarch64-linux; do
-        config_json=$(PLAYWRIGHT_SYSTEM="$linux_system" playwright_config_json "/tmp/wrix-playwright-${linux_system}") || return 1
-        chrome_path=$(jq -r '.browser.launchOptions.executablePath' <<<"$config_json") || return 1
-
-        if [[ "$chrome_path" == *"/chrome-linux64/chrome" || "$chrome_path" == *"/chrome-linux/chrome" ]]; then
-            log_fail "Chromium path embeds a Linux browser archive layout for $linux_system: $chrome_path"
-            return 1
-        fi
-        if [[ "$chrome_path" != /nix/store/*-playwright-chromium-executable/bin/chrome ]]; then
-            log_fail "Chromium path for $linux_system does not use the derived executable helper: $chrome_path"
-            return 1
-        fi
-        log_info "Chromium path for $linux_system is architecture-neutral"
-    done
-
-    log_pass "test_chromium_executable_path_does_not_embed_linux_arch"
-}
-
-test_mandatory_flags_are_non_overridable() {
-    log_test "test_mandatory_flags_are_non_overridable: generated config prepends automatic Chromium flags"
-
-    new_temp_dir
-    local user_data_dir="${TEMP_DIR}/user-data"
-    local extra_config
-    local config_file
-    extra_config=$(jq -nc '{launchOptions:{args:["--config-arg"],channel:"chrome",executablePath:"/bad/top",headless:true},browser:{launchOptions:{args:["--browser-arg"],channel:"chrome",executablePath:"/bad/browser",headless:true}}}') || return 1
-    config_file=$(playwright_config_path "$user_data_dir" false 1280 720 "$extra_config") || return 1
-
-    assert_json "$config_file" '.browser.launchOptions.args == ["--no-sandbox","--disable-dev-shm-usage","--disable-gpu","--config-arg","--browser-arg"]' "mandatory flags lead launchOptions.args and user args append" || return 1
-    assert_json "$config_file" '.browser.launchOptions.channel == "chromium"' "channel remains non-overridable" || return 1
-    assert_json "$config_file" '.browser.launchOptions.headless == false' "headless option cannot be overridden by config" || return 1
-    assert_json "$config_file" '.browser.launchOptions.executablePath != "/bad/top" and .browser.launchOptions.executablePath != "/bad/browser"' "executablePath remains non-overridable" || return 1
-
-    log_pass "test_mandatory_flags_are_non_overridable"
-}
-
-test_user_options_reach_serialized_config() {
-    log_test "test_user_options_reach_serialized_config: headless viewport and passthrough config are serialized"
-
-    new_temp_dir
-    local user_data_dir="${TEMP_DIR}/user-data"
-    local extra_config
-    local config_file
-    extra_config=$(jq -nc '{browser:{browserName:"firefox",launchOptions:{slowMo:0},contextOptions:{acceptDownloads:false,viewport:{width:1,height:1}}},timeouts:{action:4321}}') || return 1
-    config_file=$(playwright_config_path "$user_data_dir" false 1440 900 "$extra_config") || return 1
-
-    assert_json "$config_file" '.browser.browserName == "chromium"' "browserName is pinned to chromium" || return 1
-    assert_json_arg "$config_file" dir "$user_data_dir" ".browser.userDataDir == \$dir" "userDataDir reaches generated config" || return 1
-    assert_json "$config_file" '.browser.launchOptions.headless == false' "headless option reaches launchOptions" || return 1
-    assert_json "$config_file" '.browser.launchOptions.slowMo == 0' "launchOptions fields pass through" || return 1
-    assert_json "$config_file" '.browser.contextOptions.viewport == {"width":1440,"height":900}' "viewport option reaches browser.contextOptions" || return 1
-    assert_json "$config_file" '.browser.contextOptions.acceptDownloads == false' "contextOptions fields pass through" || return 1
-    assert_json "$config_file" '.contextOptions == null' "contextOptions are not emitted at the unsupported top level" || return 1
-    assert_json "$config_file" '.timeouts.action == 4321' "top-level config fields pass through" || return 1
-
-    log_pass "test_user_options_reach_serialized_config"
 }
 
 test_viewport_option_reaches_live_browser() {
@@ -330,22 +188,6 @@ test_viewport_option_reaches_live_browser() {
 
     stop_mcp_server
     log_pass "test_viewport_option_reaches_live_browser"
-}
-
-test_registry_triple_shape() {
-    log_test "test_registry_triple_shape: server definition exposes the MCP registry triple"
-
-    local registry_json
-    registry_json=$(playwright_eval_raw server-registry-json) || return 1
-
-    assert_json_text "$registry_json" '.name == "playwright"' "registry name is playwright" || return 1
-    assert_json_text "$registry_json" '.packageNames | index("playwright-mcp")' "registry packages include playwright-mcp" || return 1
-    assert_json_text "$registry_json" '.packageNames | index("playwright-browsers")' "registry packages include playwright-browsers" || return 1
-    assert_json_text "$registry_json" '.packageNames | index("playwright-chromium-executable")' "registry packages include chromium executable helper" || return 1
-    assert_json_text "$registry_json" '.mkServerConfigIsFunction == true' "mkServerConfig is a function" || return 1
-    assert_json_text "$registry_json" '.sampleConfig.command == "playwright-mcp" and .sampleConfig.args[0] == "--config"' "mkServerConfig returns a Playwright MCP command with config args" || return 1
-
-    log_pass "test_registry_triple_shape"
 }
 
 test_network_guard_blocks_ipv4_connect() {
@@ -411,11 +253,16 @@ test_offline_startup() {
 
     new_temp_dir
     local env_json
+    local expected_user_data_dir
     local preload_dir
     local network_log
     local user_data_dir="${TEMP_DIR}/user-data"
-    env_json=$(playwright_eval_raw server-env-json --argstr userDataDir "$user_data_dir") || return 1
-    if ! jq -e --arg user_data_dir "$user_data_dir" '
+    env_json=$(playwright_server_env_json "$user_data_dir") || return 1
+    expected_user_data_dir="$user_data_dir"
+    if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
+        expected_user_data_dir=$(jq -er '.PLAYWRIGHT_MCP_USER_DATA_DIR' <<<"$env_json") || return 1
+    fi
+    if ! jq -e --arg user_data_dir "$expected_user_data_dir" '
         .PLAYWRIGHT_MCP_ISOLATED == "0"
         and .PLAYWRIGHT_MCP_USER_DATA_DIR == $user_data_dir
         and .PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD == "1"
@@ -479,12 +326,7 @@ test_offline_startup() {
 }
 
 ALL_TESTS=(
-    test_chromium_executable_path_derives_from_playwright_browsers
-    test_chromium_executable_path_does_not_embed_linux_arch
-    test_mandatory_flags_are_non_overridable
-    test_user_options_reach_serialized_config
     test_viewport_option_reaches_live_browser
-    test_registry_triple_shape
     test_network_guard_blocks_ipv4_connect
     test_mcp_initialize
     test_offline_startup
