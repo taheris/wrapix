@@ -1,4 +1,6 @@
-# shellcheck shell=bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # Batched wrapper: processes files in groups of 25 to avoid OOM when
 # the full set is passed in a single invocation.
 # treefmt calls: shellcheck-batched --severity=warning file1.sh file2.sh ...
@@ -13,8 +15,7 @@ for arg in "$@"; do
 done
 
 rc=0
-for (( i=0; i<${#files[@]}; i+=25 )); do
-  # shellcheck disable=SC2086
-  shellcheck "${opts[@]}" "${files[@]:i:25}" || rc=$?
+for ((i = 0; i < "${#files[@]}"; i += 25)); do
+  shellcheck "${opts[@]}" "${files[@]:i:25}" || rc="$?"
 done
-exit $rc
+exit "$rc"

@@ -150,9 +150,7 @@ dockerTools.buildLayeredImage {
 
   contents = tierContents;
 
-  # Pin prekHooksBundle into this tier's closure without symlinking its hooks
-  # into the image root — the entrypoint reaches it by store path via this env
-  # var (specs/pre-commit.md § Bead-Container Hook Installation).
+  # Pin the bundle for entrypoint installation (specs/image-builder.md § Hook Installation).
   config.Env = [
     "WRIX_PREK_HOOKS=${prekHooksBundle}"
   ];

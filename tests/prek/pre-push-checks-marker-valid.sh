@@ -47,7 +47,7 @@ git -C "$WORK" remote add origin "$TEST_TMP/remote"
 git -C "$WORK" update-ref refs/remotes/origin/main HEAD
 git -C "$WORK" config branch.main.remote origin
 git -C "$WORK" config branch.main.merge refs/heads/main
-echo '{}' > "$WORK/.loom/marker.json"
+printf 'opaque to wrix; loom owns this schema\n' >"$WORK/.loom/marker.json"
 
 SENTINEL="$TEST_TMP/sentinel"
 HOOK_ENTRY="$TOUCH_BIN $SENTINEL"

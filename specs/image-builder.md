@@ -131,7 +131,7 @@ Every profile image carries the prek surfaces defined by `pre-commit.md` § Hook
 
 - the `wrix.prekHooks` bundle is materialized in the image closure and exposed to the entrypoint as the hook path;
 - the wrapper binaries defined by `pre-commit.md` § Hook-Entry Wrappers are available on the profile image `PATH`;
-- the platform entrypoint (`lib/sandbox/{linux,darwin}/entrypoint.sh`) sets `core.hooksPath` on `/workspace/.git` to the `wrix.prekHooks` store path when `.pre-commit-config.yaml` is present, mirroring `mkDevShell`'s host-side step.
+- the platform entrypoint sets `core.hooksPath` for the Git repository at `/workspace` to the `wrix.prekHooks` store path when `.pre-commit-config.yaml` is present, whether `.git` is a directory or a linked-worktree file.
 
 Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by `pre-commit.md`. The image builder does not inject `SKIP=` env vars, stub missing tools on `PATH`, or maintain a hook-id skip list.
 
@@ -184,10 +184,12 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
   [check](test-ci:test-image-entrypoint-command)
 - `wrix.prekHooks`, `wrix.prePushChecks`, and `wrix.skipIfMissing` all land in every profile image's store closure
   [check](test-ci:test-prek-hooks-closure)
-- The Linux entrypoint sets `core.hooksPath` on `/workspace/.git` to the `wrix.prekHooks` store path when `.pre-commit-config.yaml` is present
-  [check](verify:images.linux-entrypoint-core-hooks-path)
-- The Darwin entrypoint mirrors the Linux entrypoint's `core.hooksPath` setup for `/workspace/.git`
-  [check](verify:images.darwin-entrypoint-core-hooks-path)
+- The Linux entrypoint sets `core.hooksPath` for the `/workspace` Git repository to the `wrix.prekHooks` store path when `.pre-commit-config.yaml` is present
+  [system](verify:images.linux-entrypoint-core-hooks-path)
+- The Darwin entrypoint mirrors the Linux entrypoint's `core.hooksPath` setup for the `/workspace` Git repository
+  [system](verify:images.darwin-entrypoint-core-hooks-path)
+- Both entrypoints configure `core.hooksPath` when `/workspace` is a linked worktree represented by a `.git` file
+  [system](verify:images.linked-worktree-core-hooks-path)
 - Every wrix-managed Nix-built image source covered by this spec exposes the platform source kind (`nix-descriptor` on Linux, `docker-archive` on Darwin), including service/support images such as `wrix-builder`
   [check](test-ci:test-wrix-images-source-kind)
 - Wrix-managed images carry wrix-managed image labels, including `wrix.managed=true` and `wrix.image.kind`; profile images also carry `wrix.profile.name` and `wrix.agent.kind`
@@ -203,7 +205,7 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
 4. **Nix configuration** — `flakes` and `nix-command` are enabled; the in-container Nix sandbox is disabled (the outer container is the boundary).
 5. **CA certificates** — `pkgs.cacert` is included and `SSL_CERT_FILE` resolves to it.
 6. **Entrypoint embedding** — Linux starts with `lib/sandbox/linux/entrypoint.sh`; Darwin embeds both `network-bootstrap.sh` and `entrypoint.sh`, starts with the immutable bootstrap, and reaches the agent entrypoint only after dropping `NET_ADMIN`.
-7. **Hook installation** — every profile image carries `wrix.prekHooks` plus `wrix.prePushChecks` and `wrix.skipIfMissing` on `PATH`; the entrypoint configures `core.hooksPath` on `/workspace/.git` when `.pre-commit-config.yaml` is present. See `pre-commit.md` for the wrapper contracts.
+7. **Hook installation** — every profile image carries `wrix.prekHooks` plus `wrix.prePushChecks` and `wrix.skipIfMissing` on `PATH`; the entrypoint configures `core.hooksPath` for the `/workspace` repository when `.pre-commit-config.yaml` is present, including when `.git` is a linked-worktree file. See `pre-commit.md` for the wrapper contracts.
 8. **Profile-image provenance-tiered layering** — each profile image is a four-tier graph (base → stable-profile → agent → leaf). Each tier's layer membership is fixed by its own closed contents and removes or skips the union of all lower tiers' closures, so a tier-3 (leaf) change leaves tier-0, tier-1, and tier-2 blobs byte-identical. Tier membership: the wrix floor + profile toolchain + wrix-generated content is tier 1 (keyed on `corePackages`, see `profiles.md`); the single selected `agentPkg` runtime is tier 2; downstream-appended packages and per-invocation generated files are tier 3. The agent tier rides *above* the toolchain so an agent-version bump never re-ships the heavier toolchain (which sits lowest, dragged only by a base change). Linux represents the graph as a descriptor plus OCI layer metadata; Darwin may represent it as a tar-loadable `fromImage` chain until Darwin per-blob install is verified. Service/support images follow the same source-kind contract but may define their own layer graph.
 9. **Linux descriptor source** — the Linux source artifact is a small descriptor containing the ordered layer descriptors, config digest metadata, and a prebuilt OCI layout reference. It is not a Docker archive, OCI archive, raw OCI layout path, or stream script. Runtime preflight and install dispatch are owned by `sandbox.md`.
 10. **Store/DB consistency** — the image's Nix database registers *exactly* its on-disk contents closure: no orphaned (on-disk but unregistered) path and no dangling (registered but absent) path, in either direction. The registered set is derived from the materialized path list copied into the image layers, not the build derivation's full closure (which includes unmaterialized intermediates like the `wrix-*-profile-env` buildEnv). This prevents a build from trusting a registered-but-missing path (`No such file or directory`, unrecoverable without store surgery); the no-orphan direction is no longer a correctness requirement now that the runtime user owns the store, but registering over exactly the materialized contents secures it for free. The registration rides as a single DB file in the leaf customisation layer — it copies up no store path and does not perturb the provenance-tiered graph. Runtime acceptance is owned by `sandbox.md`.

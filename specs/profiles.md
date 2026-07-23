@@ -703,6 +703,8 @@ dests live under `/home/wrix/` inside the container, not under
   [check](verify:devshell.shellhook-order)
 - Devshell constructors reject missing or ambiguous profile selection: `wrix.mkDevShell {}` without `profile` or `sandbox`, `wrix.mkDevShell { sandbox = ...; profile = ...; }`, and `sandbox.devShell { profile = ...; }` / `sandbox.devShell { sandbox = ...; }` all error at evaluation.
   [check](verify:devshell.profile-required)
+- `wrix.mkDevShell { profile = ...; }` places the `pre-push-checks` and `skip-if-missing` wrappers on the host devshell PATH
+  [check](verify:prek.wrappers-on-devshell-path)
 - `wrix.mkDevShell { profile = ...; }` with `.pre-commit-config.yaml` present sets `core.hooksPath` to the default hook bundle on entry
   [system](verify:devshell.prek-auto-set)
 - `wrix.mkDevShell { profile = ...; }` without `.pre-commit-config.yaml` does NOT set `core.hooksPath` on entry

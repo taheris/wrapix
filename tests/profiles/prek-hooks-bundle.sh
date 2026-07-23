@@ -20,6 +20,14 @@
 #     current HEAD after a passing pre-push check, then consumes that stamp
 #     on a retry of the same HEAD.
 #
+#   test_pre_push_stale_stamp_removed_on_failure
+#     A stale stamp is removed before a failing check and cannot approve a
+#     later push.
+#
+#   test_pre_push_stamp_cannot_revive_after_return_to_sha
+#     Returning to a previously approved HEAD after an intervening failure
+#     runs the checks again rather than reviving the old approval.
+#
 #   test_no_verify_bypasses_pre_commit_and_pre_push
 #     Git bypasses otherwise-blocking hooks from the materialized bundle when
 #     commit or push is invoked with --no-verify.
@@ -160,6 +168,55 @@ test_shims_no_flock() {
 }
 
 # ============================================================================
+init_pre_push_probe_repo() {
+  local worktree="$1"
+
+  mkdir -p "$worktree"
+  git -C "$worktree" init -q -b main
+  git -C "$worktree" config user.email test@example.com
+  git -C "$worktree" config user.name Test
+  cat >"$worktree/.pre-commit-config.yaml" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: pre-push-probe
+        name: pre-push-probe
+        entry: .git/pre-push-probe
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+YAML
+  cat >"$worktree/.git/pre-push-probe" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [[ -f .git/pre-push-count ]]; then
+  count="$(<.git/pre-push-count)"
+fi
+printf '%s\n' "$((count + 1))" >.git/pre-push-count
+if [[ -f .git/pre-push-fail ]]; then
+  exit 1
+fi
+SCRIPT
+  chmod +x "$worktree/.git/pre-push-probe"
+  printf 'first\n' >"$worktree/tracked.txt"
+  git -C "$worktree" add .
+  git -C "$worktree" commit -q -m initial
+}
+
+run_pre_push_for_head() {
+  local bundle="$1"
+  local worktree="$2"
+  local head_sha
+  local old_sha="0000000000000000000000000000000000000000"
+  local ref_line
+
+  head_sha="$(git -C "$worktree" rev-parse HEAD)"
+  ref_line="refs/heads/main $head_sha refs/heads/main $old_sha"
+  (cd "$worktree" && printf '%s\n' "$ref_line" | "$bundle/pre-push" origin example)
+}
+
 assert_pre_push_stamp_written_and_consumed() {
   local bundle="$1"
   local worktree="$2"
@@ -256,6 +313,91 @@ YAML
   rm -rf "$work"
   [[ "$failed" -eq 0 ]]
 }
+
+# ============================================================================
+test_pre_push_stale_stamp_removed_on_failure() (
+  local bundle
+  if ! bundle=$(require_bundle "$@"); then
+    echo "FAIL: nix build lib.prekHooks failed" >&2
+    return 1
+  fi
+
+  local work
+  local worktree
+  local stamp
+  local output
+  work="$(mktemp -d)"
+  worktree="$work/worktree"
+  stamp="$worktree/.wrix/push-verified"
+  output="$work/pre-push.out"
+  trap 'rm -rf "$work"' EXIT
+
+  init_pre_push_probe_repo "$worktree"
+  mkdir -p "$worktree/.wrix"
+  printf '%s\n' "0000000000000000000000000000000000000001" >"$stamp"
+  : >"$worktree/.git/pre-push-fail"
+
+  if run_pre_push_for_head "$bundle" "$worktree" >"$output" 2>&1; then
+    echo "FAIL: stale-stamp pre-push unexpectedly passed" >&2
+    cat "$output" >&2
+    return 1
+  fi
+  if [[ -e "$stamp" ]]; then
+    echo "FAIL: stale stamp survived a failing pre-push check" >&2
+    return 1
+  fi
+  if [[ "$(<"$worktree/.git/pre-push-count")" != "1" ]]; then
+    echo "FAIL: failing pre-push check did not run exactly once" >&2
+    return 1
+  fi
+)
+
+# ============================================================================
+test_pre_push_stamp_cannot_revive_after_return_to_sha() (
+  local bundle
+  if ! bundle=$(require_bundle "$@"); then
+    echo "FAIL: nix build lib.prekHooks failed" >&2
+    return 1
+  fi
+
+  local work
+  local worktree
+  local first_sha
+  local stamp
+  local output
+  work="$(mktemp -d)"
+  worktree="$work/worktree"
+  stamp="$worktree/.wrix/push-verified"
+  output="$work/pre-push.out"
+  trap 'rm -rf "$work"' EXIT
+
+  init_pre_push_probe_repo "$worktree"
+  first_sha="$(git -C "$worktree" rev-parse HEAD)"
+  run_pre_push_for_head "$bundle" "$worktree" >"$output" 2>&1
+
+  printf 'second\n' >"$worktree/tracked.txt"
+  git -C "$worktree" add tracked.txt
+  git -C "$worktree" commit -q -m second
+  : >"$worktree/.git/pre-push-fail"
+  if run_pre_push_for_head "$bundle" "$worktree" >"$output" 2>&1; then
+    echo "FAIL: intervening pre-push unexpectedly passed" >&2
+    cat "$output" >&2
+    return 1
+  fi
+
+  git -C "$worktree" reset -q --hard "$first_sha"
+  rm -f "$worktree/.git/pre-push-fail"
+  run_pre_push_for_head "$bundle" "$worktree" >"$output" 2>&1
+
+  if [[ "$(<"$worktree/.git/pre-push-count")" != "3" ]]; then
+    echo "FAIL: returning to the previously stamped HEAD reused the old approval" >&2
+    return 1
+  fi
+  if [[ ! -f "$stamp" || "$(<"$stamp")" != "$first_sha" ]]; then
+    echo "FAIL: fresh check after returning to the old HEAD did not write a new stamp" >&2
+    return 1
+  fi
+)
 
 # ============================================================================
 test_no_verify_bypasses_pre_commit_and_pre_push() (
@@ -357,6 +499,8 @@ ALL_TESTS=(
   test_shims_use_hook_impl
   test_shims_no_flock
   test_pre_push_stamp_written_and_consumed
+  test_pre_push_stale_stamp_removed_on_failure
+  test_pre_push_stamp_cannot_revive_after_return_to_sha
   test_no_verify_bypasses_pre_commit_and_pre_push
 )
 

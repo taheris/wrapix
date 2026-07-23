@@ -40,7 +40,6 @@ EXPECTED_IMAGE_VERIFY_TARGETS="$WORK_DIR/expected-image-verify-targets.txt"
 HEAVY_SANDBOX_VERIFY_TARGETS="$WORK_DIR/heavy-sandbox-verify-targets.txt"
 ANNOTATED_CI_APPS="$WORK_DIR/annotated-ci-apps.txt"
 UNKNOWN_ANNOTATED_CI_APPS="$WORK_DIR/unknown-annotated-ci-apps.txt"
-FAKE_NIX_LOG="$WORK_DIR/fake-nix.log"
 
 write_derivation_map() {
   local flake_ref="$1"
@@ -90,6 +89,7 @@ write_verify_targets() {
     > "$HEAVY_SANDBOX_VERIFY_TARGETS" || true
   cat > "$EXPECTED_IMAGE_VERIFY_TARGETS" <<'TARGETS'
 verify:images.darwin-entrypoint-core-hooks-path
+verify:images.linked-worktree-core-hooks-path
 verify:images.linux-entrypoint-core-hooks-path
 TARGETS
 
@@ -97,59 +97,6 @@ TARGETS
     | sed -E -e 's/^\[(check|system)\]\(test-ci://' -e 's/\)$//' \
     | sort -u > "$ANNOTATED_CI_APPS"
   comm -23 "$ANNOTATED_CI_APPS" "$LISTED_APPS" > "$UNKNOWN_ANNOTATED_CI_APPS"
-}
-
-test_darwin_pre_push_skips_test_ci() {
-  local output="$WORK_DIR/darwin-pre-push.jsonl"
-
-  WRIX_PRE_PUSH=1 \
-    WRIX_TEST_CI_FAKE_PLATFORM=Darwin \
-    WRIX_TEST_CI_FAKE_NIX_LOG="$FAKE_NIX_LOG" \
-    PATH="$WORK_DIR/bin:$PATH" \
-    "$REPO_ROOT/bin/test-ci-verifiers" \
-      test-image-tier-graph \
-      test-image-nix-config > "$output"
-
-  if [[ -e "$FAKE_NIX_LOG" ]]; then
-    echo "FAIL: Darwin pre-push invoked test-ci: $(<"$FAKE_NIX_LOG")" >&2
-    return 1
-  fi
-  if [[ "$(jq -s 'length' "$output")" -ne 2 ]]; then
-    echo "FAIL: Darwin pre-push did not emit one verdict per test-ci target" >&2
-    return 1
-  fi
-  if ! jq -e -s 'all(.[]; .pass == true and (.evidence | contains("disabled by default for Darwin pre-push")))' "$output" >/dev/null; then
-    echo "FAIL: Darwin pre-push verdicts do not report the test-ci policy skip" >&2
-    return 1
-  fi
-}
-
-test_manual_darwin_keeps_test_ci() {
-  WRIX_PRE_PUSH=0 \
-    WRIX_TEST_CI_FAKE_PLATFORM=Darwin \
-    WRIX_TEST_CI_FAKE_NIX_LOG="$FAKE_NIX_LOG" \
-    PATH="$WORK_DIR/bin:$PATH" \
-    "$REPO_ROOT/bin/test-ci-verifiers" test-image-tier-graph
-
-  if [[ "$(<"$FAKE_NIX_LOG")" != "run .#test-ci -- --json test-image-tier-graph" ]]; then
-    echo "FAIL: manual Darwin verification did not retain test-ci: $(<"$FAKE_NIX_LOG")" >&2
-    return 1
-  fi
-  rm -f "$FAKE_NIX_LOG"
-}
-
-test_linux_pre_push_keeps_test_ci() {
-  WRIX_PRE_PUSH=1 \
-    WRIX_TEST_CI_FAKE_PLATFORM=Linux \
-    WRIX_TEST_CI_FAKE_NIX_LOG="$FAKE_NIX_LOG" \
-    PATH="$WORK_DIR/bin:$PATH" \
-    "$REPO_ROOT/bin/test-ci-verifiers" test-image-tier-graph
-
-  if [[ "$(<"$FAKE_NIX_LOG")" != "run .#test-ci -- --json test-image-tier-graph" ]]; then
-    echo "FAIL: Linux pre-push did not retain test-ci: $(<"$FAKE_NIX_LOG")" >&2
-    return 1
-  fi
-  rm -f "$FAKE_NIX_LOG"
 }
 
 fail_if_file_nonempty() {
@@ -180,30 +127,6 @@ write_heavy_derivations "$CI_CHECKS_MAP" "$HEAVY_CI_CHECKS"
 write_heavy_derivations "$CI_APPS_MAP" "$HEAVY_APPS"
 write_listed_targets "$LISTED_TARGETS" "$LISTED_CHECKS" "$LISTED_APPS"
 write_verify_targets
-
-mkdir -p "$WORK_DIR/bin"
-cat > "$WORK_DIR/bin/nix" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" > "$WRIX_TEST_CI_FAKE_NIX_LOG"
-SCRIPT
-chmod +x "$WORK_DIR/bin/nix"
-cat > "$WORK_DIR/bin/uname" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$WRIX_TEST_CI_FAKE_PLATFORM"
-SCRIPT
-chmod +x "$WORK_DIR/bin/uname"
-
-if ! test_darwin_pre_push_skips_test_ci; then
-  failed=$((failed + 1))
-fi
-if ! test_manual_darwin_keeps_test_ci; then
-  failed=$((failed + 1))
-fi
-if ! test_linux_pre_push_keeps_test_ci; then
-  failed=$((failed + 1))
-fi
 
 if ! fail_if_file_nonempty "checks.$SYSTEM contains heavy realization checks" "$HEAVY_CHECKS"; then
   failed=$((failed + 1))

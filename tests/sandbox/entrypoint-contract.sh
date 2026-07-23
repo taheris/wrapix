@@ -381,13 +381,32 @@ test_runtime_mcp_registration_is_discovered_by_selected_claude() {
 
 run_core_hooks_path_case() {
   local platform="$1"
-  local workspace="$TEST_TMP/hooks-$platform/workspace"
-  local stdout_path="$TEST_TMP/hooks-$platform.out"
-  local stderr_path="$TEST_TMP/hooks-$platform.err"
-  local git_log="$TEST_TMP/hooks-$platform.git.log"
-  local hooks_path="$TEST_TMP/hooks-$platform/prek-hooks"
+  local git_layout="${2:-directory}"
+  local workspace="$TEST_TMP/hooks-$platform-$git_layout/workspace"
+  local stdout_path="$TEST_TMP/hooks-$platform-$git_layout.out"
+  local stderr_path="$TEST_TMP/hooks-$platform-$git_layout.err"
+  local git_log="$TEST_TMP/hooks-$platform-$git_layout.git.log"
+  local hooks_path="$TEST_TMP/hooks-$platform-$git_layout/prek-hooks"
 
-  mkdir -p "$workspace/.git" "$hooks_path"
+  mkdir -p "$hooks_path"
+  case "$git_layout" in
+    directory)
+      mkdir -p "$workspace/.git"
+      ;;
+    linked-worktree)
+      local primary="$TEST_TMP/hooks-$platform-$git_layout/primary"
+      mkdir -p "$primary"
+      git -C "$primary" init -q -b main
+      git -C "$primary" -c user.name=Test -c user.email=test@example.invalid \
+        commit --allow-empty -qm initial
+      git -C "$primary" -c core.hooksPath=/dev/null \
+        worktree add -q -b linked "$workspace"
+      ;;
+    *)
+      fail "unknown git layout: $git_layout"
+      return 1
+      ;;
+  esac
   printf 'repos: []\n' >"$workspace/.pre-commit-config.yaml"
   : >"$git_log"
 
@@ -417,6 +436,16 @@ test_darwin_core_hooks_path() {
   require_command jq
   run_core_hooks_path_case darwin
   printf 'PASS: darwin entrypoint configures core.hooksPath when pre-commit config is present\n' >&2
+}
+
+test_linked_worktree_core_hooks_path_both() {
+  require_command git
+  require_command jq
+  local platform
+  for platform in linux darwin; do
+    run_core_hooks_path_case "$platform" linked-worktree
+  done
+  printf 'PASS: both entrypoints configure core.hooksPath in linked worktrees\n' >&2
 }
 
 test_darwin_entrypoint_rejects_net_admin() {
@@ -457,6 +486,7 @@ ALL_TESTS=(
   test_runtime_mcp_registration_uses_claude_user_config_both_entrypoints
   test_linux_core_hooks_path
   test_darwin_core_hooks_path
+  test_linked_worktree_core_hooks_path_both
   test_darwin_entrypoint_rejects_net_admin
 )
 

@@ -41,7 +41,7 @@ missing_id_rc=0
 (
   cd "$WORK"
   PATH="$TEST_TMP/loom-bin:$PRE_PUSH_CHECKS_DIR:$GIT_DIR" \
-    pre-push-checks "$TOUCH_BIN" "$MISSING_ID_SENTINEL"
+    pre-push-checks -- "$TOUCH_BIN" "$MISSING_ID_SENTINEL"
 ) || missing_id_rc=$?
 
 if [[ "$missing_id_rc" -ne 0 ]]; then

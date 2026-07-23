@@ -69,8 +69,7 @@ let
   };
 
   # Bundle referenced from config.Env WRIX_PREK_HOOKS so the entrypoint can
-  # point `core.hooksPath` at it (specs/pre-commit.md § Bead-Container Hook
-  # Installation).
+  # install it as specified by specs/image-builder.md § Hook Installation.
   prekHooksBundle = import ../prek/bundle.nix { inherit pkgs; };
 
   # `pre-push-checks` and `skip-if-missing` wrappers — co-located on PATH so

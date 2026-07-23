@@ -6,10 +6,14 @@ _wrix_dir="$_worktree_root/.wrix"
 _stamp_file="$_wrix_dir/push-verified"
 _head_sha=$(git rev-parse HEAD)
 
-# Second push: stamp valid for current HEAD — consume it and let git push.
-if [[ -f "$_stamp_file" ]] && [[ "$(<"$_stamp_file")" == "$_head_sha" ]]; then
+# A stamp is single-use even when it does not match the current HEAD.
+if [[ -f "$_stamp_file" ]]; then
+    _stamped_sha="$(<"$_stamp_file")"
     rm -f "$_stamp_file"
-    exit 0
+    if [[ "$_stamped_sha" == "$_head_sha" ]]; then
+        exit 0
+    fi
+    unset _stamped_sha
 fi
 
 # Save stdin — git writes ref lines once and hook-impl needs them to
