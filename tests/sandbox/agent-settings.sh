@@ -29,6 +29,10 @@ result=$(nix eval --impure --no-warn-dirty --json --expr "
       agent = \"direct\";
       agentSettings = { env.WRIX_AGENT_SETTINGS_PROBE = \"direct\"; };
     }).package.drvPath);
+    direct = lib.mkSandbox {
+      profile = lib.profiles.base;
+      agent = \"direct\";
+    };
     claude = lib.mkSandbox {
       profile = lib.profiles.base;
       agent = \"claude\";
@@ -52,6 +56,15 @@ result=$(nix eval --impure --no-warn-dirty --json --expr "
   in
   {
     directRejected = directAttempt.success == false;
+    directConfigAbsent = direct.image.claudeConfigJson == null
+      && direct.image.claudeSettingsJson == null
+      && direct.image.piSettingsJson == null;
+    claudeConfigScoped = claude.image.claudeConfigJson != null
+      && claude.image.claudeSettingsJson != null
+      && claude.image.piSettingsJson == null;
+    piConfigScoped = pi.image.claudeConfigJson == null
+      && pi.image.claudeSettingsJson == null
+      && pi.image.piSettingsJson != null;
     claudeModel = claudeSettings.env.ANTHROPIC_MODEL or \"\";
     claudeProbe = claudeSettings.env.WRIX_AGENT_SETTINGS_PROBE or \"\";
     piEditorPadding = piSettings.editorPaddingX or null;
@@ -63,6 +76,9 @@ result=$(nix eval --impure --no-warn-dirty --json --expr "
 
 if ! jq -e '
   .directRejected == true and
+  .directConfigAbsent == true and
+  .claudeConfigScoped == true and
+  .piConfigScoped == true and
   .claudeModel == "wrix-agent-settings-probe" and
   .claudeProbe == "1" and
   .piEditorPadding == 1 and
@@ -73,4 +89,4 @@ if ! jq -e '
   fail "agentSettings contract failed: $result"
 fi
 
-printf 'PASS: agent settings merge and Pi UI/telemetry defaults are preserved\n' >&2
+printf 'PASS: agent settings and selected-agent config scoping are preserved\n' >&2

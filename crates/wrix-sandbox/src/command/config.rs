@@ -6,7 +6,7 @@ use serde_json::Value;
 use thiserror::Error;
 use wrix_core::deploy_key::{Name as KeyName, ParseError as KeyNameParseError};
 
-use crate::image::{Digest, SourceKind};
+use crate::image::{Digest, ImageRef, ImageRefParseError, SourceKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Platform {
@@ -66,7 +66,7 @@ pub struct ProfileConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Profile {
-    pub name: String,
+    pub name: ProfileName,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
@@ -75,6 +75,42 @@ pub struct Profile {
     pub writable_dirs: Vec<String>,
     #[serde(default)]
     pub network_allowlist: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileName(String);
+
+impl ProfileName {
+    pub fn parse(value: &str) -> Result<Self, ProfileNameParseError> {
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
+            return Err(ProfileNameParseError {
+                value: value.to_owned(),
+            });
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl fmt::Display for ProfileName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProfileName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Display, Error)]
+/// invalid profile name: {value}
+pub struct ProfileNameParseError {
+    value: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -96,7 +132,7 @@ pub enum MountMode {
 
 #[derive(Clone, Debug)]
 pub struct Image {
-    pub reference: String,
+    pub reference: ImageRef,
     pub source: String,
     pub source_kind: SourceKind,
     pub digest: Option<Digest>,
@@ -174,7 +210,7 @@ pub struct NixCacheService {
 #[derive(Clone, Debug, Deserialize)]
 pub struct SpawnConfig {
     #[serde(default)]
-    pub image_ref: Option<String>,
+    pub image_ref: Option<ImageRef>,
     #[serde(default)]
     pub image_source: Option<String>,
     #[serde(default)]
@@ -210,8 +246,14 @@ pub enum ConfigError {
     UnsupportedProfileConfigSchema { schema: i64 },
     /// ProfileConfig schema must be 1
     MissingProfileConfigSchema,
+    /// ProfileConfig profile.name must be a non-empty identifier
+    MissingProfileName,
+    /// {source}
+    InvalidProfileName { source: ProfileNameParseError },
     /// ProfileConfig image.ref must be a non-empty string
     MissingImageRef,
+    /// {source}
+    InvalidImageRef { source: ImageRefParseError },
     /// ProfileConfig image.source must be a non-empty string
     MissingImageSource,
     /// ProfileConfig image.source_kind must be {expected} on {platform}
@@ -303,14 +345,27 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
         return Err(ConfigError::UnsupportedProfileConfigSchema { schema });
     }
 
+    let profile_name = value
+        .get("profile")
+        .and_then(Value::as_object)
+        .and_then(|fields| fields.get("name"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or(ConfigError::MissingProfileName)
+        .and_then(|value| {
+            ProfileName::parse(value).map_err(|source| ConfigError::InvalidProfileName { source })
+        })?;
+
     let expected = platform.expected_source_kind();
     let image = value.get("image").and_then(Value::as_object);
     let reference = image
         .and_then(|fields| fields.get("ref"))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or(ConfigError::MissingImageRef)?
-        .to_owned();
+        .ok_or(ConfigError::MissingImageRef)
+        .and_then(|value| {
+            ImageRef::parse(value).map_err(|source| ConfigError::InvalidImageRef { source })
+        })?;
     let source = image
         .and_then(|fields| fields.get("source"))
         .and_then(Value::as_str)
@@ -349,7 +404,7 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
     let raw = serde_json::from_value::<RawProfileConfig>(value)
         .map_err(|source| ConfigError::InvalidProfileConfigSchemaShape { source })?;
     let RawProfileConfig {
-        profile,
+        mut profile,
         image,
         resources,
         security,
@@ -359,6 +414,7 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
         deploy_key,
         runtime_secrets,
     } = security.unwrap_or_default();
+    profile.name = profile_name;
     let deploy_key = deploy_key
         .map(|value| {
             KeyName::parse(&value).map_err(|source| ConfigError::InvalidDeployKeyName { source })
@@ -541,7 +597,8 @@ mod test {
     use serde_json::json;
 
     use super::{
-        AgentKind, ConfigError, Platform, SourceKind, parse_profile_value, parse_spawn_value,
+        AgentKind, ConfigError, Platform, ProfileName, SourceKind, parse_profile_value,
+        parse_spawn_value,
     };
 
     #[test]
@@ -589,6 +646,44 @@ mod test {
         let agent = serde_json::from_str::<AgentKind>("\"pi\"").unwrap();
         assert_eq!(source, SourceKind::NixDescriptor);
         assert_eq!(agent, AgentKind::Pi);
+    }
+
+    #[test]
+    fn profile_name_rejects_whitespace() {
+        assert!(ProfileName::parse("rust profile").is_err());
+
+        let value = json!({
+            "schema": 1,
+            "profile": { "name": "rust profile" },
+            "image": {
+                "ref": "wrix:test",
+                "source": "/nix/store/fake",
+                "source_kind": "nix-descriptor"
+            },
+            "agent": { "kind": "direct" }
+        });
+        assert!(matches!(
+            parse_profile_value(value, Platform::Linux),
+            Err(ConfigError::InvalidProfileName { .. })
+        ));
+    }
+
+    #[test]
+    fn image_ref_rejects_whitespace() {
+        let value = json!({
+            "schema": 1,
+            "profile": { "name": "rust" },
+            "image": {
+                "ref": "wrix image:test",
+                "source": "/nix/store/fake",
+                "source_kind": "nix-descriptor"
+            },
+            "agent": { "kind": "direct" }
+        });
+        assert!(matches!(
+            parse_profile_value(value, Platform::Linux),
+            Err(ConfigError::InvalidImageRef { .. })
+        ));
     }
 
     #[test]

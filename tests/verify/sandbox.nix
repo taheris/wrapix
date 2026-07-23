@@ -53,6 +53,9 @@ in
 
   "sandbox.entrypoint-agent-dispatch" = entrypoint "test_agent_dispatch_both_entrypoints";
 
+  "sandbox.entrypoint-deploy-key-public" =
+    entrypoint "test_deploy_key_public_derivation_both_entrypoints";
+
   "sandbox.entrypoint-workspace-bin-prepend" = entrypoint "test_workspace_bin_path_prepend_both";
 
   "sandbox.filesystem-isolation" = sandboxScriptAll "filesystem-isolation";

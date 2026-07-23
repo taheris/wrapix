@@ -66,12 +66,12 @@ test_platform_dispatch_current_system() {
   printf 'PASS: mkSandbox dispatches current platform image/source-kind and launcher metadata\n' >&2
 }
 
-test_unsupported_system_error() {
-  local out_file err_file rc
-  require_command nix
+assert_unsupported_system() {
+  local system="$1"
+  local out_file="$TEST_TMP/unsupported-$system.out"
+  local err_file="$TEST_TMP/unsupported-$system.err"
+  local rc
 
-  out_file="$TEST_TMP/unsupported.out"
-  err_file="$TEST_TMP/unsupported.err"
   set +e
   nix eval --impure --no-warn-dirty --expr "
     let
@@ -87,7 +87,7 @@ test_unsupported_system_error() {
       linuxPkgs = flake.inputs.nixpkgs.legacyPackages.\${linuxSystem};
       unsupported = import (root + \"/lib\") {
         inherit pkgs linuxPkgs;
-        system = \"riscv64-linux\";
+        system = \"$system\";
         inherit (flake.inputs) crane fenix;
         treefmt = flake.formatter.\${current};
       };
@@ -98,13 +98,22 @@ test_unsupported_system_error() {
   set -e
 
   if [[ "$rc" -eq 0 ]]; then
-    fail "unsupported-system mkSandbox evaluation unexpectedly succeeded: $(<"$out_file")"
+    fail "$system mkSandbox evaluation unexpectedly succeeded: $(<"$out_file")"
   fi
-  if ! grep -qF 'Unsupported system: riscv64-linux' "$err_file"; then
-    fail "unsupported-system error did not name the unsupported system: $(<"$err_file")"
+  if ! grep -qF "Unsupported system: $system" "$err_file"; then
+    fail "$system error did not name the unsupported system: $(<"$err_file")"
   fi
+}
 
-  printf 'PASS: mkSandbox errors at evaluation on unsupported systems\n' >&2
+test_unsupported_system_error() {
+  local system
+  require_command nix
+
+  for system in riscv64-linux x86_64-darwin; do
+    assert_unsupported_system "$system" || return 1
+  done
+
+  printf 'PASS: mkSandbox rejects unsupported Linux and non-Apple-Silicon Darwin systems\n' >&2
 }
 
 ALL_TESTS=(

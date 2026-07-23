@@ -1,97 +1,61 @@
 #!/usr/bin/env bash
-# Verifier for criterion 108 of specs/sandbox.md:
-#
-#   Host filesystem outside /workspace and declared mounts is not visible
-#   inside the container.
-#
-# Runs directly against the host's rootless podman: builds the test sandbox
-# image, loads it, then runs a container that:
-#   1. CAN read $WORKSPACE/testfile.txt via the -v bind mount;
-#   2. CANNOT read a sentinel file on the host (placed outside the bind);
-#   3. CANNOT see host users in /etc/passwd (image's fakeNss owns it).
-#
-#   Linux + rootless podman + nix  -> exercise the image
-#   Darwin                         -> exit 77 (macOS path covered by tests/darwin/*)
-#   non-Linux non-Darwin           -> exit 77
-#   nix or podman missing          -> exit 77
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-# shellcheck source=tests/lib/podman-image.sh
-source "$SCRIPT_DIR/../lib/podman-image.sh"
+# shellcheck source=tests/lib/live-sandbox.sh
+source "$SCRIPT_DIR/../lib/live-sandbox.sh"
 
-skip() {
-  echo "SKIP: $1" >&2
-  exit 77
-}
-
-uname_s=$(uname -s)
-[[ "$uname_s" = "Linux" ]] || skip "Linux-only verifier (uname=$uname_s); macOS covered by tests/darwin/*"
-command -v nix    >/dev/null 2>&1 || skip "nix not on PATH"
-command -v podman >/dev/null 2>&1 || skip "podman not on PATH"
-# Nested rootless podman can't load OCI images (overlayfs deadlock); skip vs hang.
-[[ -e /run/.containerenv ]] && skip "nested container: podman load unavailable"
-
-cd "$REPO_ROOT"
-
-IMAGE_STREAM=$(nix build --no-link --print-out-paths --no-warn-dirty .#test-image-base)
-
-WORKSPACE=$(mktemp -d -t wrix-fs-isolation.XXXXXX)
-HOST_SENTINEL=$(mktemp -t wrix-fs-isolation-host-secret.XXXXXX)
-echo 'host-secret' > "$HOST_SENTINEL"
-echo 'workspace-content' > "$WORKSPACE/testfile.txt"
+TEST_TMP="$(mktemp -d -t wrix-fs-isolation.XXXXXX)"
+IMAGE_REF=""
 
 cleanup() {
-  rm -rf "$WORKSPACE" "$HOST_SENTINEL"
-  if podman image exists "$IMAGE_REF"; then
-    podman rmi "$IMAGE_REF" >/dev/null
+  if [[ -n "$IMAGE_REF" ]]; then
+    wrix_remove_image_ref "$IMAGE_REF" >/dev/null 2>&1 || true # best-effort: cleanup must not mask the verifier result.
   fi
+  rm -rf "$TEST_TMP"
 }
 trap cleanup EXIT
 
-IMAGE_REF=$(wrix_unique_image_ref "wrix-test-filesystem-isolation")
-wrix_load_test_image "$IMAGE_STREAM" "wrix-base-claude" "$IMAGE_REF"
-
-# 1. Workspace bind mount is readable.
-result=$(podman run --rm --network=pasta --userns=keep-id \
-  --entrypoint /bin/bash \
-  -v "$WORKSPACE:/workspace:rw" \
-  -w /workspace \
-  "$IMAGE_REF" \
-  -c "cat /workspace/testfile.txt")
-[[ "$result" == *workspace-content* ]] || {
-  echo "FAIL: workspace bind mount not readable: $result" >&2
+fail() {
+  local message="$1"
+  printf 'FAIL: %s\n' "$message" >&2
   exit 1
 }
 
-# 2. The host's sentinel path is NOT exposed inside the container — only
-# /workspace is bind-mounted, so the same absolute path inside is empty.
-if podman run --rm --network=pasta --userns=keep-id \
-    --entrypoint /bin/bash \
-    -v "$WORKSPACE:/workspace:rw" \
-    "$IMAGE_REF" \
-    -c "cat $HOST_SENTINEL" 2>/dev/null | grep -q host-secret; then
-  echo "FAIL: container could read host path $HOST_SENTINEL" >&2
-  exit 1
-fi
+wrix_require_live_sandbox
+cd "$REPO_ROOT"
 
-# 3. Container /etc/passwd is the image's fakeNss, not the host's.
-container_passwd=$(podman run --rm --network=pasta --userns=keep-id \
-  --entrypoint /bin/bash \
-  -v "$WORKSPACE:/workspace:rw" \
-  "$IMAGE_REF" \
-  -c "cat /etc/passwd")
-if [[ "$container_passwd" != *wrix* ]]; then
-  echo "FAIL: container /etc/passwd missing image fakeNss wrix entry" >&2
-  echo "$container_passwd" >&2
-  exit 1
-fi
-host_user=$(id -un)
-if [[ "$container_passwd" == *"$host_user"* ]] && [[ "$host_user" != "wrix" ]]; then
-  echo "FAIL: container /etc/passwd leaked host user $host_user" >&2
-  exit 1
-fi
+launcher=$(wrix_build_live_launcher)
+image_source=$(wrix_realize_test_image_source direct)
+workspace="$TEST_TMP/workspace"
+host_sentinel="$TEST_TMP/host-secret"
+profile_config="$TEST_TMP/profile.json"
+mkdir -p "$workspace"
+printf 'workspace-content\n' >"$workspace/testfile.txt"
+printf 'host-secret\n' >"$host_sentinel"
 
-echo "PASS: filesystem-isolation" >&2
+case "$(uname -s)" in
+  Linux) IMAGE_REF="localhost/wrix-test-filesystem-isolation-$$:latest" ;;
+  Darwin) IMAGE_REF="wrix-test-filesystem-isolation-$$:latest" ;;
+  *) wrix_live_skip "unsupported live sandbox host: $(uname -s)" ;;
+esac
+wrix_write_profile_config "$profile_config" "$IMAGE_REF" "$image_source" direct
+
+# shellcheck disable=SC2016 # The in-container shell expands its positional argument.
+command=(
+  "$launcher/bin/wrix" --profile-config "$profile_config" run "$workspace"
+  /bin/bash -c '
+    set -euo pipefail
+    [[ "$(< /workspace/testfile.txt)" == "workspace-content" ]]
+    [[ ! -e "$1" ]] || { printf "HOST-VISIBLE\n"; exit 91; }
+    grep -q "^wrix:" /etc/passwd
+    printf "FILESYSTEM-ISOLATED\n"
+  ' probe "$host_sentinel"
+)
+printf -v command_line '%q ' "${command[@]}"
+result=$(wrix_run_with_pty "$command_line")
+
+[[ "$result" == *FILESYSTEM-ISOLATED* ]] || fail "launcher-backed probe did not complete: $result"
+[[ "$result" != *HOST-VISIBLE* ]] || fail "launcher exposed host path outside declared mounts: $host_sentinel"
+printf 'PASS: launcher mount plan exposes only workspace and declared mounts\n' >&2

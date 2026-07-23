@@ -674,24 +674,19 @@ let
         '';
   };
 
-  digestSkipLauncher = if isLinux then serviceCli else null;
+  digestSkipLauncher = serviceCli;
 
-  # Linux-only verifier for the runtime digest-preflight short-circuit. Drives
-  # the live generated Linux launcher under both `wrix run` and `wrix spawn`,
-  # with shim podman + skopeo binaries standing in for external runtimes.
-  # The live launcher cases pre-seed the platform store's content digest;
-  # the installer must short-circuit before source execution, skopeo copies,
-  # tar materialization, or any `*-load` CLI call. Darwin's digest preflight
-  # is verified separately by its own platform-resident verifier.
+  # Drive each platform launcher against a pre-seeded runtime shim and require
+  # digest preflight to bypass source execution and every install transport.
   imageInstallDigestSkipTest = pkgs.writeShellApplication {
     name = "test-image-install-digest-skip";
-    runtimeInputs = optionals isLinux [
+    runtimeInputs = [
       pkgs.coreutils
-      pkgs.gawk
       pkgs.git
       pkgs.gnugrep
       pkgs.jq
-    ];
+    ]
+    ++ optionals isLinux [ pkgs.gawk ];
     text =
       if isLinux then
         ''
@@ -981,11 +976,106 @@ let
         ''
       else
         ''
-          # Darwin's digest-preflight short-circuit lives in lib/sandbox/darwin/default.nix
-          # and is exercised by its own platform-resident verifier; the shared
-          # `imageLoadStep` snippet driven here is Linux-only (podman + skopeo).
-          echo "test-image-install-digest-skip: skipped on this platform (Linux-only shim)" >&2
-          exit 0
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/bin" "$tmp/home" "$tmp/state" "$tmp/workspace"
+          : >"$tmp/state/container.log"
+          : >"$tmp/state/skopeo.log"
+
+          DESIRED_DIGEST="sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          export DESIRED_DIGEST
+          image_source="$tmp/image-source"
+          cat >"$image_source" <<'IMAGE_SOURCE'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : >"$WRIX_DIGEST_SKIP_STATE/source-executed"
+          exit 99
+          IMAGE_SOURCE
+          chmod +x "$image_source"
+
+          cat >"$tmp/bin/container" <<'CONTAINER_SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf '%s\n' "$*" >>"$WRIX_DIGEST_SKIP_STATE/container.log"
+          case "$1 $2" in
+            'image list')
+              if [[ "$*" == *'--format json'* ]]; then
+                printf '[]\n'
+              else
+                printf 'REPOSITORY TAG ID\nwrix-digestskip live sha256:image-id\n'
+              fi
+              ;;
+            'image inspect')
+              printf '[{"id":"sha256:image-id","digest":"%s","labels":{"wrix.managed":"true"}}]\n' "$DESIRED_DIGEST"
+              ;;
+            run*) : >"$WRIX_DIGEST_SKIP_STATE/container-ran" ;;
+            *) ;;
+          esac
+          CONTAINER_SHIM
+          chmod +x "$tmp/bin/container"
+
+          cat >"$tmp/bin/skopeo" <<'SKOPEO_SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf '%s\n' "$*" >>"$WRIX_DIGEST_SKIP_STATE/skopeo.log"
+          exit 97
+          SKOPEO_SHIM
+          chmod +x "$tmp/bin/skopeo"
+
+          cat >"$tmp/bin/route" <<'ROUTE_SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf 'interface: en0\n'
+          ROUTE_SHIM
+          chmod +x "$tmp/bin/route"
+
+          profile_config="$tmp/profile.json"
+          jq -n \
+            --arg source "$image_source" \
+            --arg digest "$DESIRED_DIGEST" \
+            '{
+              schema: 1,
+              system: "test",
+              profile: { name: "digestskip", env: {}, mounts: [], writable_dirs: [], network_allowlist: [] },
+              image: { ref: "wrix-digestskip:live", source: $source, source_kind: "docker-archive", digest: $digest },
+              agent: { kind: "direct" },
+              resources: { cpus: null, memory_mb: 4096, pids_limit: 4096 },
+              security: { deploy_key: null },
+              services: { beads: { enable: "auto" }, nix_cache: { enable: false } }
+            }' >"$profile_config"
+
+          PATH="$tmp/bin:$PATH" \
+          HOME="$tmp/home" \
+          WRIX_DIGEST_SKIP_STATE="$tmp/state" \
+          WRIX_IMAGE_KEEP_FILE="$tmp/state/image-mru.json" \
+            ${digestSkipLauncher}/bin/wrix --profile-config "$profile_config" run "$tmp/workspace" true
+
+          if [[ -s "$tmp/state/skopeo.log" ]]; then
+            echo "Darwin digest hit invoked skopeo" >&2
+            cat "$tmp/state/skopeo.log" >&2
+            exit 1
+          fi
+          if [[ -e "$tmp/state/source-executed" ]]; then
+            echo "Darwin digest hit executed the image source" >&2
+            exit 1
+          fi
+          if [[ ! -e "$tmp/state/container-ran" ]]; then
+            echo "Darwin digest hit did not reach container run" >&2
+            cat "$tmp/state/container.log" >&2
+            exit 1
+          fi
+          if ! grep -qF -- "image inspect wrix-digestskip:live" "$tmp/state/container.log"; then
+            echo "Darwin digest preflight did not inspect the stored image" >&2
+            cat "$tmp/state/container.log" >&2
+            exit 1
+          fi
+          if grep -qE '^image load($| )' "$tmp/state/container.log"; then
+            echo "Darwin digest hit invoked container image load" >&2
+            cat "$tmp/state/container.log" >&2
+            exit 1
+          fi
+
+          echo "test-image-install-digest-skip: PASS"
         '';
   };
 

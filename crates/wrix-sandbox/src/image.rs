@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeSet,
     env, fs, io,
-    io::Write,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Output, Stdio},
 };
@@ -504,7 +503,14 @@ fn prune(
         if store.image_in_use(runtime, &image.target)? {
             continue;
         }
-        store.delete_image(runtime, &image.target)?;
+        if let Err(error) = store.delete_image(runtime, &image.target) {
+            tracing::warn!(
+                ?runtime,
+                image_target = %image.target,
+                error = %error,
+                "could not prune stale image"
+            );
+        }
     }
     Ok(())
 }
@@ -577,12 +583,11 @@ fn read_records(path: &Path) -> Result<Vec<Record>, Error> {
     match serde_json::from_str::<Vec<Record>>(&content) {
         Ok(records) => Ok(records),
         Err(source) => {
-            let mut sink = io::stderr().lock();
-            writeln!(
-                sink,
-                "wrix: resetting invalid image MRU {}: {source}",
-                path.display()
-            )?;
+            tracing::warn!(
+                mru_path = %path.display(),
+                error = %source,
+                "resetting invalid image MRU"
+            );
             Ok(Vec::new())
         }
     }
@@ -718,20 +723,28 @@ impl Store for CommandStore {
     }
 
     fn tag(&mut self, runtime: Runtime, source: &str, target: &str) -> Result<(), Error> {
-        let output = match runtime {
-            Runtime::Podman => run_output("podman", &["tag", source, target])?,
-            Runtime::Container => run_output("container", &["image", "tag", source, target])?,
+        let (program, output) = match runtime {
+            Runtime::Podman => ("podman", run_output("podman", &["tag", source, target])?),
+            Runtime::Container => (
+                "container",
+                run_output("container", &["image", "tag", source, target])?,
+            ),
         };
         if output.status.success() {
             return Ok(());
         }
-        let mut sink = io::stderr().lock();
-        writeln!(
-            sink,
-            "wrix: could not tag image {source} as {target}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )?;
-        Ok(())
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        tracing::error!(
+            ?runtime,
+            image_source = %source,
+            image_target = %target,
+            error = %stderr,
+            "failed to tag image"
+        );
+        Err(Error::ProcessFailed {
+            program: program.to_owned(),
+            stderr,
+        })
     }
 
     fn linux_store_ref(&mut self, image_ref: &str) -> Result<String, Error> {
@@ -859,27 +872,20 @@ impl Store for CommandStore {
     }
 
     fn delete_image(&mut self, runtime: Runtime, target: &str) -> Result<(), Error> {
-        let output = match runtime {
-            Runtime::Podman => run_output("podman", &["rmi", target])?,
-            Runtime::Container => run_output("container", &["image", "delete", target])?,
+        let (program, output) = match runtime {
+            Runtime::Podman => ("podman", run_output("podman", &["rmi", target])?),
+            Runtime::Container => (
+                "container",
+                run_output("container", &["image", "delete", target])?,
+            ),
         };
         if output.status.success() {
             return Ok(());
         }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let mut sink = io::stderr().lock();
-        if stderr.contains("in use") || stderr.contains("is using") {
-            writeln!(
-                sink,
-                "prune-stale-images: {target} pinned by a container — upgrades on next start"
-            )?;
-        } else {
-            writeln!(
-                sink,
-                "prune-stale-images: could not remove {target}: {stderr}"
-            )?;
-        }
-        Ok(())
+        Err(Error::ProcessFailed {
+            program: program.to_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
     }
 }
 

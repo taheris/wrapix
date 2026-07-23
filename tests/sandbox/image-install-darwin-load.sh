@@ -35,7 +35,9 @@ cat >"$tmp/bin/container" <<'CONTAINER_SHIM'
 set -euo pipefail
 printf '%s\n' "$*" >>"${WRIX_TEST_STATE:?}/container.log"
 case "${1:-} ${2:-}" in
-  'image list') ;;
+  'image list')
+    [[ "$*" != *'--format json'* ]] || printf '[]\n'
+    ;;
   'image inspect') exit 1 ;;
   'image load')
     [[ "${3:-}" == "--input" ]]
@@ -43,8 +45,13 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "${4:-}" >"$WRIX_TEST_STATE/loaded-path"
     printf 'Loaded: untagged@sha256:%064d\n' 0
     ;;
-  'image tag') ;;
-  'run ') : >"$WRIX_TEST_STATE/container-ran" ;;
+  'image tag')
+    [[ "${WRIX_TEST_FAIL_TAG:-0}" != "1" ]] || { printf 'tag failed\n' >&2; exit 42; }
+    ;;
+  'image delete')
+    [[ "${WRIX_TEST_FAIL_DELETE:-0}" != "1" ]] || { printf 'delete failed\n' >&2; exit 43; }
+    ;;
+  run*) : >"$WRIX_TEST_STATE/container-ran" ;;
   *) ;;
 esac
 CONTAINER_SHIM
@@ -81,8 +88,33 @@ grep -qF -- "--insecure-policy copy --quiet docker-archive:$image_source oci-arc
   || fail "Darwin live launcher did not convert the Docker archive with skopeo"
 grep -qF -- "image load --input $loaded_path" "$tmp/container.log" \
   || fail "Darwin live launcher did not pass the converted OCI archive to container image load"
-grep -qF -- "image tag untagged@sha256:$(printf '%064d' 0) wrix-darwin:test" "$tmp/container.log" \
+untagged_ref="untagged@sha256:$(printf '%064d' 0)"
+grep -qF -- "image tag $untagged_ref wrix-darwin:test" "$tmp/container.log" \
   || fail "Darwin live launcher did not tag the loaded OCI image"
+grep -qF -- "image delete $untagged_ref" "$tmp/container.log" \
+  || fail "Darwin live launcher did not remove the temporary untagged image"
 grep -qF -- "run --rm --cap-add CAP_NET_ADMIN" "$tmp/container.log" \
   || fail "Darwin live launcher did not grant temporary NET_ADMIN for firewall setup"
-printf 'PASS: Darwin live Rust launcher converts and loads a Docker archive\n'
+
+: >"$tmp/container.log"
+rm -f "$tmp/container-ran"
+if PATH="$tmp/bin:$PATH" HOME="$tmp/home" WRIX_TEST_STATE="$tmp" WRIX_TEST_FAIL_TAG=1 \
+  "$wrix" --profile-config "$profile_config" run "$tmp/workspace" true >/dev/null 2>&1; then
+  fail "Darwin launcher continued after stable image tag failure"
+fi
+if grep -qF -- "image delete $untagged_ref" "$tmp/container.log"; then
+  fail "Darwin launcher deleted the temporary image after tag failure"
+fi
+[[ ! -e "$tmp/container-ran" ]] || fail "Darwin launcher started a container after tag failure"
+
+: >"$tmp/container.log"
+rm -f "$tmp/container-ran"
+if PATH="$tmp/bin:$PATH" HOME="$tmp/home" WRIX_TEST_STATE="$tmp" WRIX_TEST_FAIL_DELETE=1 \
+  "$wrix" --profile-config "$profile_config" run "$tmp/workspace" true >/dev/null 2>&1; then
+  fail "Darwin launcher continued after temporary image deletion failure"
+fi
+grep -qF -- "image tag $untagged_ref wrix-darwin:test" "$tmp/container.log" \
+  || fail "Darwin deletion-failure case did not first create the stable tag"
+[[ ! -e "$tmp/container-ran" ]] || fail "Darwin launcher started a container after deletion failure"
+
+printf 'PASS: Darwin image load requires stable tagging before temporary cleanup\n'

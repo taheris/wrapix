@@ -1,6 +1,9 @@
 mod common;
 
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, ffi::OsString, fs};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use serde_json::{Value, json};
 use wrix_sandbox::command::Command;
@@ -19,13 +22,17 @@ fn documented_spawn_config_fields_render_into_launch_plan() -> TestResult {
             "image_ref": "wrix-override:test",
             "image_source": "/nix/store/fake-override",
             "image_source_kind": common::expected_source_kind(),
-            "env": [["FOO", "bar"], ["EMPTY", ""]],
+            "env": [["FOO", "bar"], ["EMPTY", ""], ["WRIX_MCP", "spawn-selected"]],
             "agent_args": ["--print", "hello"],
             "mounts": [{"host_path": path_text(&mount_host), "container_path": "/mnt/schema", "read_only": true}]
         }),
     )?;
 
-    let run = fixture.run("documented", &config)?;
+    let run = fixture.run_with_env(
+        "documented",
+        &config,
+        vec![(String::from("WRIX_MCP"), OsString::from("ambient-host"))],
+    )?;
 
     assert!(run.success, "{}", run.stderr);
     assert!(run.stderr.is_empty(), "{}", run.stderr);
@@ -37,6 +44,7 @@ fn documented_spawn_config_fields_render_into_launch_plan() -> TestResult {
         "IMAGE_OVERRIDE_SOURCE=/nix/store/fake-override",
         "ENV=FOO=bar",
         "ENV=EMPTY=",
+        "ENV=WRIX_MCP=spawn-selected",
         "CMD=--print",
         "CMD=hello",
         "/mnt/schema",
@@ -51,6 +59,7 @@ fn documented_spawn_config_fields_render_into_launch_plan() -> TestResult {
         "IMAGE_OVERRIDE_SOURCE_KIND={}",
         common::expected_source_kind()
     )));
+    assert!(!run.stdout.contains("ambient-host"));
     Ok(())
 }
 
@@ -69,12 +78,50 @@ fn consumer_spawn_config_fields_are_mounted_for_entrypoint() -> TestResult {
         }),
     )?;
 
-    let run = fixture.run("consumer-fields", &config)?;
+    let runtime = write_runtime_shims(fixture.root.path())?;
+    let run = common::run_child(
+        "spawn_config_child",
+        fixture.root.path(),
+        "consumer-fields",
+        ChildSpec {
+            command: Command::Spawn,
+            profile_config: Some(fixture.profile_config.clone()),
+            args: vec![
+                String::from("--spawn-config"),
+                config.display().to_string(),
+                String::from("--stdio"),
+            ],
+            env: vec![
+                (String::from("PATH"), runtime.path),
+                (
+                    String::from("WRIX_TEST_RUNTIME_STATE"),
+                    runtime.state.into_os_string(),
+                ),
+                (
+                    String::from("WRIX_TEST_CONSUMER_ENTRYPOINT"),
+                    runtime.entrypoint.into_os_string(),
+                ),
+                (String::from("WRIX_GIT_SIGN"), OsString::from("0")),
+            ],
+            dry_run: false,
+        },
+    )?;
 
     assert!(run.success, "{}", run.stderr);
-    assert!(run.stdout.contains("ENV=WRIX_SPAWN_CONFIG="));
-    assert!(run.stdout.contains(&config.display().to_string()));
-    assert!(run.stdout.contains("spawn-config.json:ro"));
+    assert!(
+        fixture
+            .root
+            .path()
+            .join("runtime-state/consumer-ran")
+            .is_file()
+    );
+    assert!(
+        fixture
+            .root
+            .path()
+            .join("runtime-state/read-only-mount")
+            .is_file()
+    );
     Ok(())
 }
 
@@ -274,6 +321,15 @@ impl SpawnFixture {
     }
 
     fn run(&self, label: &str, spawn_config: &std::path::Path) -> TestResult<common::ChildRun> {
+        self.run_with_env(label, spawn_config, Vec::new())
+    }
+
+    fn run_with_env(
+        &self,
+        label: &str,
+        spawn_config: &std::path::Path,
+        env: Vec<(String, OsString)>,
+    ) -> TestResult<common::ChildRun> {
         common::run_child(
             "spawn_config_child",
             self.root.path(),
@@ -286,10 +342,60 @@ impl SpawnFixture {
                     spawn_config.display().to_string(),
                     String::from("--stdio"),
                 ],
-                env: Vec::new(),
+                env,
+                dry_run: true,
             },
         )
     }
+}
+
+struct RuntimeFixture {
+    path: OsString,
+    state: std::path::PathBuf,
+    entrypoint: std::path::PathBuf,
+}
+
+fn write_runtime_shims(root: &std::path::Path) -> TestResult<RuntimeFixture> {
+    let bin = root.join("runtime-bin");
+    let state = root.join("runtime-state");
+    let entrypoint = root.join("consumer-entrypoint");
+    fs::create_dir_all(&bin)?;
+    fs::create_dir_all(&state)?;
+    write_executable(&entrypoint, include_str!("fixtures/consumer-entrypoint.sh"))?;
+    write_executable(
+        &bin.join("podman"),
+        include_str!("fixtures/podman-spawn-runtime.sh"),
+    )?;
+    write_executable(
+        &bin.join("container"),
+        include_str!("fixtures/container-spawn-runtime.sh"),
+    )?;
+    write_executable(
+        &bin.join("route"),
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'interface: en0\\n'\n",
+    )?;
+    write_executable(
+        &bin.join("skopeo"),
+        "#!/usr/bin/env bash\nset -euo pipefail\nexit 99\n",
+    )?;
+
+    let inherited_path = std::env::var_os("PATH").ok_or("PATH is missing")?;
+    let mut path_entries = vec![bin];
+    path_entries.extend(std::env::split_paths(&inherited_path));
+    let path = std::env::join_paths(path_entries)?;
+    Ok(RuntimeFixture {
+        path,
+        state,
+        entrypoint,
+    })
+}
+
+fn write_executable(path: &std::path::Path, content: &str) -> TestResult {
+    fs::write(path, content)?;
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions)?;
+    Ok(())
 }
 
 fn spawn_mount_lines(output: &str) -> Vec<&str> {

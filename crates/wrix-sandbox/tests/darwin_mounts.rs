@@ -48,28 +48,37 @@ fn mount_classifier_handles_profile_and_spawn_mounts_uniformly() -> TestResult {
             .iter()
             .any(|mount| mount.container == "/mnt/wrix/file0")
     );
+    assert!(plan.mounts.iter().all(|mount| !mount.read_only));
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::net::UnixListener;
+    Ok(())
+}
 
-        let socket_path = root.path().join("mount.sock");
-        let _listener = UnixListener::bind(&socket_path)?;
-        let error = classify_darwin_mounts(
-            &[],
-            &[SpawnMount {
-                host_path: socket_path.display().to_string(),
-                container_path: String::from("/run/test.sock"),
-                read_only: false,
-            }],
-            &staging,
-        )
-        .unwrap_err();
-        let message = error.to_string();
-        assert!(message.contains(&socket_path.display().to_string()));
-        assert!(message.contains("/run/test.sock"));
-        assert!(message.contains("Unix-socket mount source rejected"));
-    }
+#[cfg(unix)]
+#[test]
+fn mount_classifier_rejects_unix_sockets() -> TestResult {
+    use std::os::unix::net::UnixListener;
 
+    let root = tempfile::Builder::new()
+        .prefix("darwin-socket-mount")
+        .tempdir()?;
+    let socket_path = root.path().join("mount.sock");
+    let staging = root.path().join("staging");
+    fs::create_dir_all(&staging)?;
+    let _listener = UnixListener::bind(&socket_path)?;
+
+    let error = classify_darwin_mounts(
+        &[],
+        &[SpawnMount {
+            host_path: socket_path.display().to_string(),
+            container_path: String::from("/run/test.sock"),
+            read_only: false,
+        }],
+        &staging,
+    )
+    .unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains(&socket_path.display().to_string()));
+    assert!(message.contains("/run/test.sock"));
+    assert!(message.contains("Unix-socket mount source rejected"));
     Ok(())
 }

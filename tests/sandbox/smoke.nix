@@ -263,58 +263,19 @@ in
     mkdir "$out"
   '';
 
-  # Verify Darwin entrypoint script syntax and mount handling logic
   darwin-entrypoint-syntax =
-    runCommandLocal "smoke-darwin-entrypoint"
-      {
-        nativeBuildInputs = [
-          bash
-          pkgs.coreutils
-        ];
-      }
+    runCommandLocal "smoke-darwin-entrypoint" { nativeBuildInputs = [ bash ]; }
       ''
-        echo "Checking Darwin entrypoint syntax..."
         bash -n ${../../lib/sandbox/darwin/entrypoint.sh}
         bash -n ${../../lib/sandbox/darwin/network-bootstrap.sh}
-
-        echo "Verifying entrypoint handles mount env vars..."
-        # Test that entrypoint processes WRIX_DIR_MOUNTS correctly
-        SCRIPT="${../../lib/sandbox/darwin/entrypoint.sh}"
-        grep -q 'WRIX_DIR_MOUNTS' "$SCRIPT" || { echo "Missing WRIX_DIR_MOUNTS handling"; exit 1; }
-        grep -q 'WRIX_FILE_MOUNTS' "$SCRIPT" || { echo "Missing WRIX_FILE_MOUNTS handling"; exit 1; }
-
-        # Verify entrypoint uses fixed wrix user
-        grep -q 'USER="wrix"' "$SCRIPT" || { echo "entrypoint should set USER=wrix"; exit 1; }
-        grep -q 'HOME="/home/wrix"' "$SCRIPT" || { echo "entrypoint should set HOME=/home/wrix"; exit 1; }
-        grep -q 'WRIX_AGENT" = "pi".*WRIX_STDIO' "$SCRIPT" || { echo "Pi RPC mode must be gated by WRIX_STDIO"; exit 1; }
-        grep -q 'pi || MAIN_EXIT' "$SCRIPT" || { echo "Pi interactive mode must run plain pi"; exit 1; }
-        grep -q '.pi/agent/sessions' "$SCRIPT" || { echo "Pi sessions directory must be initialized"; exit 1; }
-        grep -q 'WRIX_PI_AUTH_JSON' "$SCRIPT" || { echo "Pi auth mount must be linked into agent config"; exit 1; }
-        ! grep -q '/workspace/.pi/agent/\*' "$SCRIPT" || { echo "Pi must not import arbitrary workspace agent config"; exit 1; }
-        grep -q 'WRIX_STDIO=1' ${../../lib/sandbox/darwin/default.nix} || { echo "Darwin launcher must forward WRIX_STDIO"; exit 1; }
-
-        echo "Darwin entrypoint validation passed"
-        mkdir $out
+        mkdir "$out"
       '';
 
-  # Verify Linux entrypoint script syntax
   linux-entrypoint-syntax =
-    runCommandLocal "smoke-linux-entrypoint"
-      {
-        nativeBuildInputs = [ bash ];
-      }
+    runCommandLocal "smoke-linux-entrypoint" { nativeBuildInputs = [ bash ]; }
       ''
-        echo "Checking Linux entrypoint syntax..."
         bash -n ${../../lib/sandbox/linux/entrypoint.sh}
-        SCRIPT="${../../lib/sandbox/linux/entrypoint.sh}"
-        grep -q 'WRIX_AGENT" = "pi".*WRIX_STDIO' "$SCRIPT" || { echo "Pi RPC mode must be gated by WRIX_STDIO"; exit 1; }
-        grep -q 'pi || MAIN_EXIT' "$SCRIPT" || { echo "Pi interactive mode must run plain pi"; exit 1; }
-        grep -q '.pi/agent/sessions' "$SCRIPT" || { echo "Pi sessions directory must be initialized"; exit 1; }
-        grep -q 'WRIX_PI_AUTH_JSON' "$SCRIPT" || { echo "Pi auth mount must be linked into agent config"; exit 1; }
-        ! grep -q '/workspace/.pi/agent/\*' "$SCRIPT" || { echo "Pi must not import arbitrary workspace agent config"; exit 1; }
-
-        echo "Linux entrypoint validation passed"
-        mkdir $out
+        mkdir "$out"
       '';
 
   # Verify Pi defaults and image config are scoped to the Pi agent tier.
@@ -476,7 +437,7 @@ in
       mkdir $out
     '';
 
-  # The image package floor carries the project formatter wrapper.
+  # Every profile inherits the project formatter wrapper from base packages.
   profiles-contain-treefmt =
     let
       hasTreefmt = profile: elem treefmt profile.packages;

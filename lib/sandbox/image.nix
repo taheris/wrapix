@@ -42,6 +42,7 @@
 }:
 
 let
+  inherit (builtins) toJSON;
   inherit (pkgs.lib)
     concatStringsSep
     mapAttrsToList
@@ -99,23 +100,24 @@ let
     installPhase = "mkdir -p $out/bin && cp krun-relay $out/bin/";
   };
 
-  # Generate Claude JSON files from Nix attribute sets
-  claudeConfigJson = pkgs.writeText "claude-config.json" (builtins.toJSON claudeConfig);
-  claudeSettingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON claudeSettings);
-  piSettingsJson = pkgs.writeText "pi-settings.json" (builtins.toJSON piSettings);
+  # Generate only the selected agent's configuration inputs.
+  claudeConfigJson =
+    if agent == "claude" then pkgs.writeText "claude-config.json" (toJSON claudeConfig) else null;
+  claudeSettingsJson =
+    if agent == "claude" then pkgs.writeText "claude-settings.json" (toJSON claudeSettings) else null;
+  piSettingsJson =
+    if agent == "pi" then pkgs.writeText "pi-settings.json" (toJSON piSettings) else null;
 
-  mcpAvailableJson = pkgs.writeText "wrix-mcp-available.json" (
-    builtins.toJSON {
-      schema = 1;
-      runtime_selection = mcpRuntime;
-      servers = mapAttrsToList (name: config: {
-        inherit name;
-        inherit (config) command;
-        args = config.args or [ ];
-        env = config.env or { };
-      }) mcpServerConfigs;
-    }
-  );
+  mcpAvailableJson = pkgs.writeText "wrix-mcp-available.json" (toJSON {
+    schema = 1;
+    runtime_selection = mcpRuntime;
+    servers = mapAttrsToList (name: config: {
+      inherit name;
+      inherit (config) command;
+      args = config.args or [ ];
+      env = config.env or { };
+    }) mcpServerConfigs;
+  });
 
   # Agent runtime selection. Exactly one agent package rides the agent tier —
   # new runtimes plug in by extending the supported `agent` values. No
@@ -328,8 +330,10 @@ let
         chmod +x krun-relay
       ''}
 
-      cp ${claudeConfigJson} etc/wrix/claude-config.json
-      cp ${claudeSettingsJson} etc/wrix/claude-settings.json
+      ${optionalString (agent == "claude") ''
+        cp ${claudeConfigJson} etc/wrix/claude-config.json
+        cp ${claudeSettingsJson} etc/wrix/claude-settings.json
+      ''}
 
       ${optionalString (agent == "pi") ''
         mkdir -p etc/wrix/pi-agent/extensions
@@ -414,7 +418,7 @@ let
     };
   };
   descriptorMetadataFile = pkgs.writeText "${imageName}-descriptor-metadata.json" (
-    builtins.toJSON descriptorMetadata
+    toJSON descriptorMetadata
   );
   descriptorDigestFile = "${ociLayout}/wrix/config-digest";
   nixDescriptorSource =

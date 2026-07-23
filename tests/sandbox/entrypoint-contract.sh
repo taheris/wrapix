@@ -261,6 +261,7 @@ printf 'PATH_PROBE_RAN\n'
 EOF
     chmod +x "$workspace/bin/path-probe"
 
+    # shellcheck disable=SC2016 # The entrypoint's inner shell expands these variables.
     if ! run_entrypoint "$platform" direct "$stdout_path" "$stderr_path" "$workspace" \
       bash -c 'printf "PATH=%s\n" "$PATH"; printf "PROBE=%s\n" "$(command -v path-probe)"; path-probe'; then
       fail "$platform entrypoint failed: $(<"$stderr_path")"
@@ -344,6 +345,39 @@ test_agent_config_homes_both_entrypoints() {
   printf 'PASS: both entrypoints seed claude and pi config homes separately\n' >&2
 }
 
+test_deploy_key_public_derivation_both_entrypoints() {
+  require_command jq
+  require_command ssh-keygen
+  local key="$TEST_TMP/deploy-key"
+  local expected platform
+
+  ssh-keygen -q -t ed25519 -N '' -f "$key"
+  expected=$(ssh-keygen -y -f "$key")
+  rm -f "$key.pub"
+  export WRIX_DEPLOY_KEY="$key"
+  for platform in linux darwin; do
+    local workspace="$TEST_TMP/deploy-key-$platform/workspace"
+    local stdout_path="$TEST_TMP/deploy-key-$platform.out"
+    local stderr_path="$TEST_TMP/deploy-key-$platform.err"
+    local output
+    # shellcheck disable=SC2016 # The entrypoint's inner shell expands the mounted key path.
+    if ! run_entrypoint "$platform" direct "$stdout_path" "$stderr_path" "$workspace" \
+      bash -c 'ssh-keygen -y -f "$WRIX_DEPLOY_KEY"'; then
+      unset WRIX_DEPLOY_KEY
+      fail "$platform deploy-key derivation failed: $(<"$stderr_path")"
+      return 1
+    fi
+    output=$(<"$stdout_path")
+    if [[ "$output" != "$expected" ]]; then
+      unset WRIX_DEPLOY_KEY
+      fail "$platform derived the wrong deploy public key"
+      return 1
+    fi
+  done
+  unset WRIX_DEPLOY_KEY
+  printf 'PASS: both entrypoints can derive the unmounted deploy public key\n' >&2
+}
+
 test_runtime_mcp_registration_uses_claude_user_config_both_entrypoints() {
   require_command jq
   local platform agent canonical_manifest=""
@@ -356,6 +390,7 @@ test_runtime_mcp_registration_uses_claude_user_config_both_entrypoints() {
       case_dir="$TEST_TMP/$platform-$agent-$(basename "$stdout_path" .out)"
       home_dir="$case_dir/home"
 
+      # shellcheck disable=SC2016 # The entrypoint's inner shell expands the manifest path.
       if ! WRIX_TEST_MCP_RUNTIME=1 \
         WRIX_TEST_MCP_SELECTION=tmux \
         WRIX_TEST_MCP_TMUX_AUDIT=/workspace/.debug-audit.log \
@@ -407,6 +442,7 @@ test_runtime_mcp_registration_uses_claude_user_config_both_entrypoints() {
   local explicit_stdout="$TEST_TMP/explicit-mcp.out"
   local explicit_stderr="$TEST_TMP/explicit-mcp.err"
   local explicit_manifest
+  # shellcheck disable=SC2016 # The entrypoint's inner shell expands the manifest path.
   if ! WRIX_TEST_MCP_RUNTIME=1 \
     WRIX_TEST_MCP_RUNTIME_SELECTION=false \
     WRIX_TEST_MCP_SELECTION=unselected \
@@ -555,6 +591,7 @@ ALL_TESTS=(
   test_workspace_bin_path_prepend_both
   test_agent_dispatch_both_entrypoints
   test_agent_config_homes_both_entrypoints
+  test_deploy_key_public_derivation_both_entrypoints
   test_runtime_mcp_registration_uses_claude_user_config_both_entrypoints
   test_linux_core_hooks_path
   test_darwin_core_hooks_path

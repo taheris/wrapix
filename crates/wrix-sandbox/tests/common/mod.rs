@@ -17,6 +17,7 @@ pub struct ChildSpec {
     pub profile_config: Option<PathBuf>,
     pub args: Vec<String>,
     pub env: Vec<(String, OsString)>,
+    pub dry_run: bool,
 }
 
 pub struct ChildRun {
@@ -75,7 +76,6 @@ pub fn run_child(
         .env("WRIX_SANDBOX_STDERR", &stderr)
         .env("WRIX_SANDBOX_STATUS", &status)
         .env("WRIX_SANDBOX_ARG_COUNT", spec.args.len().to_string())
-        .env("WRIX_DRY_RUN", "1")
         .env("HOME", root.join("home"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         .env("XDG_RUNTIME_DIR", root.join("runtime"))
@@ -102,6 +102,11 @@ pub fn run_child(
         .env_remove("CUSTOM_PROVIDER_TOKEN")
         .env_remove("WRIX_REQUIRED_SECRET_TEST_VALUE")
         .env_remove("TMUX");
+    if spec.dry_run {
+        command.env("WRIX_DRY_RUN", "1");
+    } else {
+        command.env_remove("WRIX_DRY_RUN");
+    }
     if let Some(profile_config) = spec.profile_config {
         command.env("WRIX_SANDBOX_PROFILE_CONFIG", profile_config);
     }

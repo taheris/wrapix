@@ -6,6 +6,14 @@ let
   workspace = rustProfile.buildPackage {
     src = ../..;
     cargoLock = ../../Cargo.lock;
+    extraSrcs = {
+      "crates/wrix-sandbox/tests/fixtures/consumer-entrypoint.sh" =
+        ../../crates/wrix-sandbox/tests/fixtures/consumer-entrypoint.sh;
+      "crates/wrix-sandbox/tests/fixtures/container-spawn-runtime.sh" =
+        ../../crates/wrix-sandbox/tests/fixtures/container-spawn-runtime.sh;
+      "crates/wrix-sandbox/tests/fixtures/podman-spawn-runtime.sh" =
+        ../../crates/wrix-sandbox/tests/fixtures/podman-spawn-runtime.sh;
+    };
     nativeBuildInputs = [ pkgs.git ];
 
     meta = {

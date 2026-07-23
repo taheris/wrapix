@@ -710,10 +710,8 @@ in
         #                       the host user that owns the baked store and lands
         #                       /workspace files as the host UID. claude refuses
         #                       --dangerously-skip-permissions as root, so set
-        #                       IS_SANDBOX=1 (claude's escape hatch) instead of
-        #                       libfakeuid: that getuid->1000 spoof blanks claude's
-        #                       TUI when really root here. Works on ANY host uid
-        #                       (it maps to container-0).
+        #                       IS_SANDBOX=1 instead of spoofing the UID. This
+        #                       works with every host UID mapped to container-0.
         if [[ -n "$RUNTIME_ARGS" ]]; then
           USERNS_ARGS="--userns=keep-id"
         else
@@ -765,10 +763,8 @@ in
         [[ -n "$BEADS_DOLT_CONTAINER_SOCKET" ]] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_SOCKET=$BEADS_DOLT_CONTAINER_SOCKET")
         [[ -n "$KRUN_CMD_ENV" ]] && ENV_ARGS+=(-e "$KRUN_CMD_ENV")
         # default boundary: the process is the store-owning rootless container-0
-        # (see USERNS_ARGS above). Tell claude it is sandboxed so it permits
-        # --dangerously-skip-permissions as root, rather than spoofing the uid
-        # with libfakeuid — that spoof blanks claude's TUI here. krun sets
-        # IS_SANDBOX=1 from inside krun-init.sh instead.
+        # Tell claude the default container-root process is sandboxed so it
+        # permits root execution without UID spoofing. krun sets this itself.
         [[ -z "$RUNTIME_ARGS" ]] && ENV_ARGS+=(-e "IS_SANDBOX=1")
 
         RUN_IMAGE="$IMAGE_REF"

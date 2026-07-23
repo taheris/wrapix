@@ -22,10 +22,7 @@ let
     ;
   inherit (pkgs.lib) concatStringsSep makeBinPath optionals;
 
-  isDarwin = elem system [
-    "aarch64-darwin"
-    "x86_64-darwin"
-  ];
+  isDarwin = elem system [ "aarch64-darwin" ];
   isLinux = elem system [
     "aarch64-linux"
     "x86_64-linux"

@@ -14,9 +14,7 @@ PODMAN_IMAGE_REFS=()
 cleanup() {
   local ref
   for ref in "${PODMAN_IMAGE_REFS[@]}"; do
-    if command -v podman >/dev/null 2>&1 && podman image exists "$ref"; then
-      podman rmi "$ref" >/dev/null 2>&1 || true # best-effort: cleanup must not mask the verifier result when an image is pinned.
-    fi
+    wrix_remove_image_ref "$ref" >/dev/null 2>&1 || true # best-effort: cleanup must not mask the verifier result.
   done
   rm -rf "$TEST_TMP"
 }
@@ -41,30 +39,27 @@ test_linux_container_starts() {
   wrix_require_live_sandbox_linux
   cd "$REPO_ROOT"
 
-  local image_source workspace image_ref result
-  image_source=$(nix build --no-link --print-out-paths --no-warn-dirty .#test-image-base)
+  local command_line image_ref image_source launcher profile_config result workspace
+  local -a command
+  launcher=$(wrix_build_live_launcher)
+  image_source=$(wrix_realize_test_image_source direct)
   workspace="$TEST_TMP/linux-workspace"
+  profile_config="$TEST_TMP/linux-profile.json"
   mkdir -p "$workspace"
   image_ref=$(wrix_unique_image_ref "wrix-test-container-starts")
   PODMAN_IMAGE_REFS+=("$image_ref")
-  wrix_load_test_image "$image_source" "wrix-base-claude" "$image_ref"
+  wrix_write_profile_config "$profile_config" "$image_ref" "$image_source" direct
 
-  result=$(podman run --rm --network=pasta --userns=keep-id \
-    --entrypoint /bin/bash \
-    -v "$workspace:/workspace:rw" \
-    -w /workspace \
-    "$image_ref" \
-    -c "echo container-started")
+  command=(
+    "$launcher/bin/wrix" --profile-config "$profile_config" run "$workspace"
+    /bin/bash -c 'printf "container-started\n"; grep localhost /etc/hosts'
+  )
+  printf -v command_line '%q ' "${command[@]}"
+  result=$(wrix_run_with_pty "$command_line")
   assert_contains "linux start" "$result" "container-started" || return 1
-
-  result=$(podman run --rm --network=pasta --userns=keep-id \
-    --entrypoint /bin/bash \
-    -v "$workspace:/workspace:rw" \
-    "$image_ref" \
-    -c "grep localhost /etc/hosts")
   assert_contains "linux loopback" "$result" "localhost" || return 1
 
-  printf 'PASS: linux container-start\n' >&2
+  printf 'PASS: packaged Linux launcher completes bootstrap and command dispatch\n' >&2
 }
 
 test_darwin_container_starts() {

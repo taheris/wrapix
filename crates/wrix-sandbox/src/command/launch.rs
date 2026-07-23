@@ -17,7 +17,7 @@ use wrix_core::{
 };
 
 use crate::image::{
-    self, CommandStore, Digest, InstallRequest, RetentionRequest, Runtime, SourceKind,
+    self, CommandStore, Digest, ImageRef, InstallRequest, RetentionRequest, Runtime, SourceKind,
 };
 
 use super::config::{
@@ -99,6 +99,10 @@ pub enum LaunchError {
     SpawnPiAuthMissing { path: String },
     /// WRIX_UNSAFE_PODMAN_SOCKET set but socket not found at {path}
     UnsafePodmanSocketMissing { path: String },
+    /// path expansion requires environment variable {name}
+    PathExpansionEnvMissing { name: &'static str },
+    /// path expansion environment variable {name} is not valid Unicode
+    PathExpansionEnvNotUnicode { name: &'static str },
     /// /dev/kvm not found. A microVM boundary requires KVM support.
     KvmMissing,
     /// krun runtime not found. A microVM boundary requires crun with libkrun.
@@ -158,13 +162,14 @@ fn complete_with_cleanup<T>(
 }
 
 pub fn execute(request: &Request, stdout: &mut impl Write) -> Result<ExitCode, LaunchError> {
+    let network_mode = NetworkMode::from_env()?;
     let dry_run = env_flag("WRIX_DRY_RUN");
     let services = if !dry_run || env_flag("WRIX_DRY_RUN_SERVICES") {
         ServicesState::load(request)?
     } else {
         ServicesState::default()
     };
-    let plan = Plan::new(request, services)?;
+    let plan = Plan::new(request, services, network_mode)?;
     if dry_run {
         plan.write_dry_run(stdout)?;
         return Ok(ExitCode::SUCCESS);
@@ -175,7 +180,7 @@ pub fn execute(request: &Request, stdout: &mut impl Write) -> Result<ExitCode, L
 struct Plan<'a> {
     request: &'a Request,
     workspace: PathBuf,
-    image_ref: String,
+    image_ref: ImageRef,
     image_source: String,
     image_source_kind: SourceKind,
     image_digest: Option<Digest>,
@@ -219,6 +224,7 @@ struct RenderedMount {
 pub struct DarwinBindMount {
     pub host: String,
     pub container: String,
+    pub read_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -305,7 +311,7 @@ struct HostPodmanSocket {
 }
 
 struct ImageSource {
-    ref_name: String,
+    ref_name: ImageRef,
     source: String,
     kind: SourceKind,
     digest: Option<Digest>,
@@ -429,9 +435,11 @@ struct GitIdentity {
 }
 
 impl<'a> Plan<'a> {
-    fn new(request: &'a Request, services: ServicesState) -> Result<Self, LaunchError> {
-        let network_mode = NetworkMode::from_env()?;
-
+    fn new(
+        request: &'a Request,
+        services: ServicesState,
+        network_mode: NetworkMode,
+    ) -> Result<Self, LaunchError> {
         let profile = &request.profile_config;
         let source = match &request.kind {
             Kind::Run(_run) => ImageSource {
@@ -442,9 +450,10 @@ impl<'a> Plan<'a> {
             },
             Kind::Spawn(spawn) => {
                 let config = &spawn.config;
-                let ref_name = non_empty_override(config.image_ref.as_deref())
-                    .unwrap_or(profile.image.reference.as_str())
-                    .to_owned();
+                let ref_name = config
+                    .image_ref
+                    .clone()
+                    .unwrap_or_else(|| profile.image.reference.clone());
                 let source = non_empty_override(config.image_source.as_deref())
                     .unwrap_or(profile.image.source.as_str())
                     .to_owned();
@@ -495,7 +504,11 @@ impl<'a> Plan<'a> {
             ),
         };
         let runtime_secret_env = resolve_runtime_secret_env(&profile.security, &spawn_env)?;
-        let runtime_passthrough_env = resolve_runtime_passthrough_env()?;
+        let runtime_passthrough_env = if matches!(&request.kind, Kind::Run(_)) {
+            resolve_runtime_passthrough_env()?
+        } else {
+            Vec::new()
+        };
         let host_podman_socket = if Platform::CURRENT == Platform::Linux {
             host_podman_socket_from_env()?
         } else {
@@ -738,7 +751,10 @@ impl<'a> Plan<'a> {
                     command.arg("-e").arg(format!("{key}={value}"));
                 }
             }
-            command.arg("-w").arg("/workspace").arg(&self.image_ref);
+            command
+                .arg("-w")
+                .arg("/workspace")
+                .arg(self.image_ref.as_str());
             if krun.is_none() {
                 command.args(&self.agent_args);
             }
@@ -786,15 +802,10 @@ impl<'a> Plan<'a> {
                 .arg("-v")
                 .arg(format!("{}:/workspace", self.workspace.display()));
             for mount in &darwin_mounts.mounts {
-                command
-                    .arg("-v")
-                    .arg(format!("{}:{}", mount.host, mount.container));
+                command.arg("-v").arg(mount.podman_arg());
             }
             if let Some(credentials) = &credentials {
-                let key_mount = credentials.mount();
-                command
-                    .arg("-v")
-                    .arg(format!("{}:{}", key_mount.host, key_mount.container));
+                command.arg("-v").arg(credentials.mount().podman_arg());
             }
             for (key, value) in self.env_pairs(
                 credentials.as_ref(),
@@ -818,7 +829,7 @@ impl<'a> Plan<'a> {
             }
             command
                 .arg("--")
-                .arg(&self.image_ref)
+                .arg(self.image_ref.as_str())
                 .args(&self.agent_args)
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
@@ -922,7 +933,7 @@ impl<'a> Plan<'a> {
             &mut store,
             &InstallRequest {
                 runtime,
-                image_ref: &self.image_ref,
+                image_ref: self.image_ref.as_str(),
                 image_source: &self.image_source,
                 source_kind: self.image_source_kind,
                 digest: self.image_digest.as_ref(),
@@ -938,7 +949,7 @@ impl<'a> Plan<'a> {
             &mut store,
             &RetentionRequest {
                 runtime,
-                image_ref: &self.image_ref,
+                image_ref: self.image_ref.as_str(),
                 image_source: &self.image_source,
                 source_kind: self.image_source_kind,
                 digest: self.image_digest.as_ref(),
@@ -1183,7 +1194,7 @@ impl<'a> Plan<'a> {
 
     fn override_ref_for_dry_run(&self) -> &str {
         match &self.request.kind {
-            Kind::Spawn(spawn) => spawn.config.image_ref.as_deref().unwrap_or(""),
+            Kind::Spawn(spawn) => spawn.config.image_ref.as_ref().map_or("", ImageRef::as_str),
             Kind::Run(_) => "",
         }
     }
@@ -1328,6 +1339,7 @@ impl From<DarwinMounts> for DarwinMountPlan {
                 .map(|mount| DarwinBindMount {
                     host: mount.host,
                     container: mount.container,
+                    read_only: mount.mode == MountMode::Ro,
                 })
                 .collect(),
             dir_mappings: mounts.dir_mappings,
@@ -1366,7 +1378,7 @@ fn darwin_mounts_from_rendered(
 
 impl DarwinMounts {
     fn push(&mut self, mount: &RenderedMount, staging_root: &Path) -> Result<(), LaunchError> {
-        let source = expand_path(&mount.host);
+        let source = expand_path(&mount.host)?;
         if !source.exists() {
             if mount.optional {
                 return Ok(());
@@ -1447,7 +1459,7 @@ impl DarwinMounts {
             writeln!(stdout, "FILE_MOUNTS={value}")?;
         }
         for mount in &self.mounts {
-            writeln!(stdout, "MOUNT=-v {}:{}", mount.host, mount.container)?;
+            writeln!(stdout, "MOUNT=-v {}", mount.podman_arg())?;
         }
         Ok(())
     }
@@ -1657,7 +1669,7 @@ fn render_profile_mount(
     mount: &ProfileMount,
     staging: &Staging,
 ) -> Result<Option<RenderedMount>, LaunchError> {
-    let source = expand_path(&mount.source);
+    let source = expand_path(&mount.source)?;
     if !source.exists() {
         if mount.optional {
             return Ok(None);
@@ -2332,14 +2344,31 @@ fn home_dir() -> PathBuf {
     env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
 }
 
-fn expand_path(input: &str) -> PathBuf {
-    let home = env::var("HOME").unwrap_or_default();
-    let user = env::var("USER").unwrap_or_default();
-    let expanded = input
-        .replacen('~', &home, 1)
-        .replace("$HOME", &home)
-        .replace("$USER", &user);
-    PathBuf::from(expanded)
+fn expand_path(input: &str) -> Result<PathBuf, LaunchError> {
+    let mut expanded = input.to_owned();
+    if input.starts_with('~') || input.contains("$HOME") {
+        let home = expansion_env("HOME")?;
+        if let Some(suffix) = expanded.strip_prefix('~') {
+            expanded = format!("{home}{suffix}");
+        }
+        expanded = expanded.replace("$HOME", &home);
+    }
+    if input.contains("$USER") {
+        expanded = expanded.replace("$USER", &expansion_env("USER")?);
+    }
+    Ok(PathBuf::from(expanded))
+}
+
+fn expansion_env(name: &'static str) -> Result<String, LaunchError> {
+    match env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        Ok(_) | Err(env::VarError::NotPresent) => {
+            Err(LaunchError::PathExpansionEnvMissing { name })
+        }
+        Err(env::VarError::NotUnicode(_value)) => {
+            Err(LaunchError::PathExpansionEnvNotUnicode { name })
+        }
+    }
 }
 
 fn stable_mount_index(path: &Path) -> u64 {

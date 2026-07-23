@@ -112,11 +112,8 @@ fi
 echo "PROBE-OK"
 PROBE
 
-# Mirror the launcher's default-boundary invocation: no keep-id (rootless
-# container-root owns the store), IS_SANDBOX=1 (claude's root-permission escape
-# hatch, used instead of the libfakeuid getuid spoof that blanks its TUI here —
-# wx-nsage), and a wrix passwd entry (lib/sandbox/linux/default.nix). No
-# network: --verify reads only the baked store.
+# Match the launcher default boundary without UID spoofing. The verification
+# reads only the baked store, so this invocation needs no network.
 set +e
 output=$(podman run --rm --network=none \
   --passwd-entry "wrix:*:$(id -u):$(id -g)::/home/wrix:/bin/bash" \

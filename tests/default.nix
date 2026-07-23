@@ -526,13 +526,9 @@ in
       program = "${sandboxImageChecks.claudeRuntimeNoopTest}/bin/test-claude-runtime-noop";
     };
 
-    # Linux-only verifier for the launcher's digest-preflight install skip
-    # (specs/sandbox.md § Image install path; specs/image-builder.md). Drives
-    # the shared `imageLoadStep` snippet through shim podman + skopeo binaries
-    # and asserts the second install short-circuits when the image's content
-    # digest is already present. Darwin prints a skip notice.
+    # Cross-platform verifier for the launcher's digest-preflight install skip.
     image-install-digest-skip = {
-      meta.description = "Verify launcher digest-preflight short-circuits image install (Linux only)";
+      meta.description = "Verify launcher digest-preflight short-circuits image install";
       type = "app";
       program = "${sandboxImageChecks.imageInstallDigestSkipTest}/bin/test-image-install-digest-skip";
     };

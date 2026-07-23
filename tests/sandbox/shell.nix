@@ -27,9 +27,7 @@ in
         mkdir "$out"
       '';
 
-  # Security test: expand_path only expands safe variables
-  # This is a positive security finding (wx-560) - the function prevents
-  # command injection by only expanding ~, $HOME, and $USER.
+  # Verify expansion is limited to the supported path variables.
   expand-path-safe = runCommandLocal "test-expand-path-safe" { } ''
     set -euo pipefail
 

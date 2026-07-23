@@ -163,11 +163,8 @@ echo "[probe] mutated baked store path without EPERM" >&2
 echo "PROBE-OK"
 PROBE
 
-# Mirror the launcher's default-boundary invocation: no keep-id (rootless
-# container-root owns the store), IS_SANDBOX=1 (claude's root-permission escape
-# hatch, used instead of the libfakeuid getuid spoof that blanks its TUI here —
-# wx-nsage), a wrix passwd entry, and a writable tmpfs HOME
-# (lib/sandbox/linux/default.nix).
+# Match the launcher default boundary: container-root owns the store and
+# IS_SANDBOX permits root execution without UID spoofing.
 set +e
 output=$(podman run --rm --network=pasta \
   --passwd-entry "wrix:*:$(id -u):$(id -g)::/home/wrix:/bin/bash" \

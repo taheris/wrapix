@@ -58,6 +58,7 @@ fn profile_config_agent_cannot_be_overridden_by_env() -> TestResult {
             profile_config: Some(profile_config),
             args: vec![workspace_arg(&workspace), String::from("true")],
             env: vec![(String::from("WRIX_AGENT"), "pi".into())],
+            dry_run: true,
         },
     )?;
 

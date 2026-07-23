@@ -566,6 +566,7 @@ fn run_launch(
             profile_config: Some(profile_config.to_path_buf()),
             args: vec![workspace.display().to_string(), String::from("true")],
             env,
+            dry_run: true,
         },
     )
 }
@@ -590,6 +591,7 @@ fn run_spawn_launch(
                 String::from("--stdio"),
             ],
             env,
+            dry_run: true,
         },
     )
 }

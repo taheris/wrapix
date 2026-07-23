@@ -152,6 +152,89 @@ fn darwin_docker_archive_sources_tag_loaded_image() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn darwin_tag_failure_preserves_temporary_image() -> TestResult {
+    let root = tempfile::Builder::new()
+        .prefix("image-darwin-tag-failure")
+        .tempdir()?;
+    let archive = root.path().join("image.tar");
+    fs::write(&archive, b"fake archive")?;
+    let loaded_ref = format!("untagged@{}", digest('1').as_str());
+    let mut store = FakeStore {
+        loaded_archive_ref: Some(loaded_ref.clone()),
+        tag_error: true,
+        ..FakeStore::default()
+    };
+
+    let result = image::install(
+        &mut store,
+        &InstallRequest {
+            runtime: Runtime::Container,
+            image_ref: "wrix-darwin:test",
+            image_source: &archive.display().to_string(),
+            source_kind: SourceKind::DockerArchive,
+            digest: Some(&digest('e')),
+        },
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        store.calls,
+        vec![
+            Call::LoadArchive {
+                archive: archive.display().to_string(),
+            },
+            Call::Tag {
+                source: loaded_ref,
+                target: String::from("wrix-darwin:test"),
+            },
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn darwin_delete_failure_stops_install() -> TestResult {
+    let root = tempfile::Builder::new()
+        .prefix("image-darwin-delete-failure")
+        .tempdir()?;
+    let archive = root.path().join("image.tar");
+    fs::write(&archive, b"fake archive")?;
+    let loaded_ref = format!("untagged@{}", digest('2').as_str());
+    let mut store = FakeStore {
+        loaded_archive_ref: Some(loaded_ref.clone()),
+        delete_error: true,
+        ..FakeStore::default()
+    };
+
+    let result = image::install(
+        &mut store,
+        &InstallRequest {
+            runtime: Runtime::Container,
+            image_ref: "wrix-darwin:test",
+            image_source: &archive.display().to_string(),
+            source_kind: SourceKind::DockerArchive,
+            digest: Some(&digest('d')),
+        },
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        store.calls,
+        vec![
+            Call::LoadArchive {
+                archive: archive.display().to_string(),
+            },
+            Call::Tag {
+                source: loaded_ref.clone(),
+                target: String::from("wrix-darwin:test"),
+            },
+            Call::Delete { target: loaded_ref },
+        ]
+    );
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Call {
     Tag {
@@ -180,6 +263,8 @@ struct FakeStore {
     calls: Vec<Call>,
     docker_archive_digest: Option<String>,
     loaded_archive_ref: Option<String>,
+    tag_error: bool,
+    delete_error: bool,
 }
 
 impl FakeStore {
@@ -218,6 +303,9 @@ impl Store for FakeStore {
             source: source.to_owned(),
             target: target.to_owned(),
         });
+        if self.tag_error {
+            return Err(io::Error::other("tag failed").into());
+        }
         Ok(())
     }
 
@@ -301,6 +389,9 @@ impl Store for FakeStore {
         self.calls.push(Call::Delete {
             target: target.to_owned(),
         });
+        if self.delete_error {
+            return Err(io::Error::other("delete failed").into());
+        }
         Ok(())
     }
 }
