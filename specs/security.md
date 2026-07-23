@@ -1,7 +1,8 @@
 # Security
 
 Cross-cutting security invariants for wrix sandboxes: threat model,
-credential surfaces, network exfil baseline, and audit anchor.
+credential surfaces, network exfil baseline, audit anchor, and scoped component
+diagnostics.
 
 ## Problem Statement
 
@@ -250,17 +251,29 @@ timestamp-prefixed JSON file under `/workspace/.wrix/log/` containing:
 - `agent_session_dir` — pointer to the selected agent's transcript directory
 
 The index is the **audit anchor**; the agent transcript is the
-**audit content**. The index is the smallest artefact that makes a session
-findable post-hoc (by bead, by time, by exit code); the agent
-transcript is the only place rich enough to reason about what the
-agent intended at each step.
+**audit content**. Together they are Wrix's authoritative security audit
+surface. The index is the smallest artefact that makes a session findable
+post-hoc (by bead, by time, by exit code); the agent transcript is the only
+place rich enough to reason about what the agent intended at each step.
 
-Wrix deliberately does not synthesize a parallel
-syscall-level / tool-call-level audit log. The agent transcript
-already contains intent + reasoning + outcome at the granularity that
-matters for policy leakage; OS-level audit (strace, process tree)
-would only add value against an adversarial agent that hides its
-actions from its own transcript — a different threat class.
+Wrix deliberately does not synthesize a parallel global syscall-level or
+tool-call-level audit log. The agent transcript already contains intent,
+reasoning, and outcome at the granularity that matters for policy leakage;
+OS-level audit (strace, process tree) would only add value against an
+adversarial agent that hides its actions from its own transcript — a different
+threat class.
+
+Individual components may expose focused diagnostic artifacts as an explicit,
+default-off feature that the operator enables by configuring a destination.
+These artifacts supplement component debugging; they are not authoritative
+Wrix audit content. Wrix does not automatically enable them, index them under
+`.wrix/log/`, synthesize them with other tool calls, or aggregate them into its
+security audit surface.
+
+The component spec owns its diagnostic configuration, record format, emission
+behavior, and disclosure of secret-bearing content. The operator who enables
+the feature owns the configured destination and resulting artifacts, including
+access control, retention, and deletion.
 
 ### Component-Specific Security (Cross-References)
 
@@ -286,6 +299,8 @@ this section is the index, not a restatement.
 - **Unsafe host Podman socket opt-in** (Linux-only socket mount mechanics,
   legacy-env rejection, and fail-loud missing-socket behavior) —
   `sandbox.md`
+- **tmux component diagnostics** (configuration, record format, secret-bearing
+  fields, and operator retention responsibility) — `tmux-mcp.md`
 
 ## Success Criteria
 
@@ -329,6 +344,11 @@ this section is the index, not a restatement.
   documented types, `agent_session_dir` resolves to an existing directory, and
   same-workspace sessions starting within one UTC second retain distinct files.
   [system](verify:security.audit-trail-anchor)
+- Explicit, default-off component diagnostics remain separate from the agent
+  transcript and session-metadata index: they are not automatically enabled,
+  indexed, synthesized, or aggregated as authoritative Wrix audit content, and
+  their component/operator ownership boundary is explicit.
+  [judge](../tests/judges/security.sh#test_scoped_component_diagnostics_policy)
 - Host provider credentials declared through `runtimeSecrets` reach the selected runtime while `ProfileConfig` and assembled image content contain no secret values
   [system](verify:security.provider-credential-env)
 - Launcher dry-run output identifies built-in provider credential env names but redacts their values
@@ -380,6 +400,11 @@ this section is the index, not a restatement.
    session-metadata index whose complete field set identifies the session and
    whose `agent_session_dir` points at the directory containing the selected
    agent's transcript for that session.
+7. **Scoped component diagnostics** — a component may emit operator-enabled,
+   default-off diagnostics without changing the authoritative audit anchor.
+   Wrix does not automatically index, synthesize, or aggregate those artifacts;
+   the component owns their contract and the operator owns their destination,
+   access control, retention, and deletion.
 
 ### Non-Functional
 
@@ -399,9 +424,10 @@ this section is the index, not a restatement.
 - **Additional key-path validation** (ownership checks, path-prefix
   restrictions, mode checks on parent-supplied env paths). The
   trust-posture invariant explicitly forbids these.
-- **Syscall-level or tool-call-level audit synthesis** by wrix
-  itself. The agent transcript is the ground truth; wrix only
-  writes the metadata index that makes it findable.
+- **Global syscall-level or tool-call-level audit synthesis and diagnostic
+  aggregation** into Wrix's security audit surface. Explicit, default-off
+  component diagnostics are permitted by the scoped exception above but remain
+  non-authoritative and separate from the transcript and metadata index.
 - **Adversarial-agent threat model** — an agent that deliberately
   evades its own transcript. The audit-anchor invariant does not
   defend against this.

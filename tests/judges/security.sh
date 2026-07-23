@@ -5,3 +5,8 @@ test_agent_transcript_audit_fit() {
   judge_files "specs/security.md" "lib/sandbox/linux/entrypoint.sh" "lib/sandbox/darwin/entrypoint.sh"
   judge_criterion "The selected agent's own persisted transcript is fit-for-purpose audit content for the stated policy-leakage threat model. PASS only if the threat model is explicitly limited to a misbehaving but non-adversarial agent, the selected transcript locations preserve intent/reasoning and outcomes needed for post-hoc policy-leakage review, the metadata index makes each transcript findable, and the spec does not claim this mechanism detects an adversarial agent that hides actions from its transcript."
 }
+
+test_scoped_component_diagnostics_policy() {
+  judge_files "specs/security.md" "specs/tmux-mcp.md" "lib/mcp/tmux/default.nix" "lib/mcp/tmux/tmux-mcp/src/audit/mod.rs"
+  judge_criterion "The security and tmux-mcp contracts consistently preserve the agent transcript plus .wrix/log session index as Wrix's authoritative security audit surface while allowing only explicit, default-off component diagnostics. PASS only if Wrix does not automatically enable, index, synthesize, or aggregate the diagnostics; tmux-mcp owns configuration, format, and emission; the enabling operator owns the destination, access control, retention, and deletion; and the tmux contract discloses that unredacted commands, keystrokes, and optional full captures may contain credentials or other secrets."
+}
