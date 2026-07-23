@@ -7,7 +7,7 @@ wrix_builder_write_sshd_config() {
 
   cat > "$output_path" <<EOF
 Port 22
-ListenAddress 127.0.0.1
+ListenAddress 0.0.0.0
 HostKey /etc/ssh/ssh_host_ed25519_key
 AuthorizedKeysFile /home/%u/.ssh/authorized_keys
 PasswordAuthentication no

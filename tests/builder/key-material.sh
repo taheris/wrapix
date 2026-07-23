@@ -684,6 +684,26 @@ test_fake_ssh_models_service_readiness() {
   fi
 }
 
+test_start_publishes_ssh_only_on_host_loopback() {
+  local test_root="$TEST_TMP/ssh-publication"
+
+  require_command ssh-keygen
+  require_command base64
+  require_command tar
+  prepare_builder_fixture "$test_root"
+
+  run_builder "$test_root" start
+
+  assert_file_contains \
+    "$test_root/container.log" \
+    "-p 127.0.0.1:2222:22" \
+    "wrix-builder start did not publish SSH on host loopback"
+  assert_file_lacks \
+    "$test_root/container.log" \
+    "-p 0.0.0.0:" \
+    "wrix-builder start published SSH on a wildcard host address"
+}
+
 test_generates_per_user_ed25519_material() {
   local test_root="$TEST_TMP/generate"
   local keys_dir="$test_root/home/.local/share/wrix/builder-keys"
@@ -943,6 +963,7 @@ main() {
   run_one test_fake_container_inspect_matches_apple_shape
   run_one test_fake_container_models_process_readiness
   run_one test_fake_ssh_models_service_readiness
+  run_one test_start_publishes_ssh_only_on_host_loopback
   run_one test_generates_per_user_ed25519_material
   run_one test_loads_image_through_source_kind_contract
   run_one test_builder_cleanup_is_wrix_scoped

@@ -26,7 +26,7 @@ The builder runs under Apple's `container` CLI (Virtualization.framework microVM
 
 ### Trust Model
 
-The container boundary is the isolation primitive; Nix's internal sandbox is disabled inside the container (`sandbox = false`) to avoid nested namespace complexity, and the `builder` user is trusted by the nix-daemon. This is appropriate because SSH binds to `127.0.0.1` only, password authentication is disabled, and the SSH key is reachable only by the host user who started the builder.
+The container boundary is the isolation primitive; Nix's internal sandbox is disabled inside the container (`sandbox = false`) to avoid nested namespace complexity, and the `builder` user is trusted by the nix-daemon. The host publishes SSH on `127.0.0.1` only, while sshd listens on the guest's IPv4 interfaces so Apple's port forwarding can reach it. Password authentication is disabled, and the SSH key is reachable only by the host user who started the builder.
 
 ### Image-source contract
 
@@ -63,7 +63,7 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 
 - The `wrix-builder` integration suite passes on macOS 26+ (`start` waits for nix-daemon and authenticated SSH, status, remote `nixpkgs#hello` build using the generated native-system configuration, store persistence across `stop`/`start`, pure `config` snippet evaluation); skips with exit 77 on non-Darwin or older macOS
   [system](verify:linux-builder.integration)
-- sshd inside the container has `PasswordAuthentication no` and binds the listener to `127.0.0.1`
+- The host publishes SSH on `127.0.0.1:2222` only, while sshd has `PasswordAuthentication no` and listens on guest `0.0.0.0:22` so Apple port forwarding can reach it
   [check](test-ci:test-linux-builder-sshd-hardening)
 - Builder host and client SSH keys are generated under the host user's `~/.local/share/wrix/builder-keys/` directory with private keys mode `600`
   [system](verify:linux-builder.key-material-generation)
@@ -81,7 +81,7 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 
 1. **Container lifecycle** — `wrix-builder start` / `stop` / `status` manage a single Apple `container` instance named for the builder.
 2. **Persistent Nix store** — `/nix` is bind-mounted from `~/.local/share/wrix/builder-nix/`; the first `start` seeds it from the image's initial store, subsequent starts reuse it.
-3. **SSH access** — sshd listens on 22 inside the container; the Apple `container` CLI forwards `127.0.0.1:2222` on the host to it. Authentication is key-based only.
+3. **SSH access** — sshd listens on `0.0.0.0:22` inside the isolated builder VM; the Apple `container` CLI forwards `127.0.0.1:2222` on the host to it. Authentication is key-based only.
 4. **Route and known_hosts setup** — `wrix-builder setup` runs sudo-required host configuration so the nix-daemon can reach the listener and trust the host key.
 5. **Key management** — host and client SSH keys are generated on first run, stored under `~/.local/share/wrix/builder-keys/`, and never regenerated unless the user opts in.
 6. **nix-darwin integration** — `wrix-builder config` emits a pure buildMachines snippet for the native Linux system, using the identity installed by `wrix-builder setup`.
@@ -90,7 +90,7 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 
 1. **Minimal overhead** — uses the Apple `container` CLI's microVM directly; no extra VM management layer.
 2. **Single-user design** — one builder per host user. Not suitable for multi-tenant or shared build infrastructure.
-3. **Localhost only** — sshd binds to `127.0.0.1`; the builder is never reachable from the network.
+3. **Localhost only** — the host-side SSH publication binds to `127.0.0.1`; no wildcard or external host address exposes the builder.
 
 ## Out of Scope
 

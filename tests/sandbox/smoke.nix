@@ -409,7 +409,7 @@ in
         }
 
         require_directive port 22
-        require_directive listenaddress 127.0.0.1
+        require_directive listenaddress 0.0.0.0
         require_directive passwordauthentication no
         require_directive permitrootlogin no
         require_directive allowusers builder
@@ -418,33 +418,24 @@ in
         mkdir "$out"
       '';
 
-  # Verify builder SSH port is bound to localhost only
-  # Security property: prevents remote access to builder SSH service
-  # Binding to 127.0.0.1 instead of 0.0.0.0 ensures only local connections
   builder-ssh-localhost-only =
     runCommandLocal "smoke-builder-ssh-localhost"
       {
-        nativeBuildInputs = [ bash ];
+        nativeBuildInputs = [
+          bash
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.gnused
+          pkgs.gnutar
+          jq
+          pkgs.openssh
+        ];
       }
       ''
-        echo "Checking builder SSH port is localhost-only..."
-        SCRIPT="${../../lib/builder/default.nix}"
-
-        # Verify SSH port is bound to 127.0.0.1 (localhost), not 0.0.0.0 or unbound
-        # The pattern should be: -p "127.0.0.1:$SSH_PORT:22"
-        grep -q '127\.0\.0\.1:\$SSH_PORT:22' "$SCRIPT" || { echo "FAIL: SSH port must bind to 127.0.0.1 (localhost only)"; exit 1; }
-        echo "PASS: SSH port bound to localhost only"
-
-        # Verify there's no 0.0.0.0 binding (which would allow remote access)
-        if grep -q '0\.0\.0\.0:\$SSH_PORT' "$SCRIPT"; then
-          echo "FAIL: SSH port must NOT bind to 0.0.0.0 (allows remote access)"
-          exit 1
-        fi
-        echo "PASS: No 0.0.0.0 binding found"
-
-        echo ""
-        echo "Builder SSH localhost binding validation passed"
-        mkdir $out
+        WRIX_BUILDER_BIN="${wrixBuilder}/bin/wrix-builder" \
+          REPO_ROOT="${../..}" \
+          bash "${../../tests/builder/key-material.sh}" test_start_publishes_ssh_only_on_host_loopback
+        mkdir "$out"
       '';
 
   # Verify mkSandbox accepts mcp parameter and configures servers correctly

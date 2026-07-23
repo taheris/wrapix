@@ -76,11 +76,14 @@ in
   sshdHardeningTest = writeShellApplication {
     name = "test-linux-builder-sshd-hardening";
     runtimeInputs = [
+      bash
       coreutils
       gawk
       gnugrep
+      gnused
       gnutar
       jq
+      openssh
     ];
     text = ''
       fail() {
@@ -136,12 +139,15 @@ in
       wrix_builder_write_sshd_config builder "$config"
 
       require_directive port 22
-      require_directive listenaddress 127.0.0.1
+      require_directive listenaddress 0.0.0.0
       require_directive passwordauthentication no
       require_directive permitrootlogin no
       require_directive allowusers builder
       require_directive authorizedkeysfile /home/%u/.ssh/authorized_keys
       require_directive hostkey /etc/ssh/ssh_host_ed25519_key
+
+      WRIX_BUILDER_BIN='${darwinTransportBuilder}/bin/wrix-builder' \
+        bash ${./key-material.sh} test_start_publishes_ssh_only_on_host_loopback
 
       echo "test-linux-builder-sshd-hardening: PASS"
     '';

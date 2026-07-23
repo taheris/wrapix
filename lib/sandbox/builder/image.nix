@@ -66,7 +66,7 @@ let
   # Note: entrypoint.sh regenerates this at runtime to handle persistent store mounts
   sshdConfig = writeTextDir "etc/ssh/sshd_config" ''
     Port 22
-    ListenAddress 127.0.0.1
+    ListenAddress 0.0.0.0
     HostKey /etc/ssh/ssh_host_ed25519_key
     AuthorizedKeysFile /home/%u/.ssh/authorized_keys
     PasswordAuthentication no
