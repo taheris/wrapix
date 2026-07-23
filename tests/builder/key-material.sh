@@ -532,7 +532,7 @@ run_builder() {
 
   PATH="$test_root/bin:$PATH" \
     HOME="$test_root/home" \
-    XDG_DATA_HOME="" \
+    XDG_DATA_HOME="$test_root/xdg-data" \
     XDG_CACHE_HOME="" \
     SUDO_USER="" \
     WRIX_BUILDER_FAKE_STATE="$test_root/state" \

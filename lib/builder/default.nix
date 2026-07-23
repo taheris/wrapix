@@ -52,9 +52,8 @@ let
         BUILDER_HOST_HOME=$(resolve_user_home "$SUDO_USER")
       fi
 
-      XDG_DATA_HOME="''${XDG_DATA_HOME:-$BUILDER_HOST_HOME/.local/share}"
       XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$BUILDER_HOST_HOME/.cache}"
-      WRIX_DATA="$XDG_DATA_HOME/wrix"
+      WRIX_DATA="$BUILDER_HOST_HOME/.local/share/wrix"
       WRIX_CACHE="$XDG_CACHE_HOME/wrix"
 
       BUILDER_KEYS_DIR="$WRIX_DATA/builder-keys"
@@ -550,7 +549,7 @@ let
         local state
 
         if [[ "$(id -u)" -ne 0 ]]; then
-          sudo XDG_DATA_HOME="$XDG_DATA_HOME" "$0" setup-ssh
+          sudo "$0" setup-ssh
           return
         fi
 
