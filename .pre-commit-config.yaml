@@ -31,8 +31,8 @@ repos:
       - id: nix-flake-check
         name: nix flake check
         entry: >-
-          bin/pre-push-checks --hook-id nix-flake-check --
-          nix flake check
+          bin/pre-push-checks --hook-id nix-flake-check
+          --hook-entry 'nix flake check' -- nix flake check
         language: system
         pass_filenames: false
         always_run: true
@@ -41,9 +41,9 @@ repos:
       - id: loom-gate-verify
         name: loom gate verify
         entry: >-
-          bin/pre-push-checks --hook-id loom-gate-verify --
-          skip-if-missing loom --
-          env WRIX_PRE_PUSH=1 loom gate verify --diff @{upstream}..HEAD
+          bin/pre-push-checks --hook-id loom-gate-verify
+          --hook-entry 'skip-if-missing loom -- env WRIX_PRE_PUSH=1 loom gate verify --diff @{upstream}..HEAD' --
+          skip-if-missing loom -- env WRIX_PRE_PUSH=1 loom gate verify --diff @{upstream}..HEAD
         language: system
         pass_filenames: false
         always_run: true

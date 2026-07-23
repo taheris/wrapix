@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies pre-push-checks falls through when the hook id is absent.
+# Verifies pre-push-checks falls through when marker metadata is incomplete.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,28 +34,41 @@ mkdir -p "$WORK/.loom"
 git -C "$WORK" init -q
 echo '{}' >"$WORK/.loom/marker.json"
 
-SENTINEL="$TEST_TMP/sentinel"
+MISSING_ID_SENTINEL="$TEST_TMP/missing-id-sentinel"
+MISSING_ENTRY_SENTINEL="$TEST_TMP/missing-entry-sentinel"
 
-rc=0
+missing_id_rc=0
 (
   cd "$WORK"
   PATH="$TEST_TMP/loom-bin:$PRE_PUSH_CHECKS_DIR:$GIT_DIR" \
-    pre-push-checks "$TOUCH_BIN" "$SENTINEL"
-) || rc=$?
+    pre-push-checks "$TOUCH_BIN" "$MISSING_ID_SENTINEL"
+) || missing_id_rc=$?
 
-if [[ "$rc" -ne 0 ]]; then
-  echo "FAIL: wrapper exited $rc; expected 0 (touch should succeed)" >&2
+if [[ "$missing_id_rc" -ne 0 ]]; then
+  echo "FAIL: wrapper without hook id exited $missing_id_rc; expected 0" >&2
   exit 1
 fi
 
-if [[ ! -e "$SENTINEL" ]]; then
-  echo "FAIL: sentinel '$SENTINEL' was not created; expected wrapper to fall through" >&2
+missing_entry_rc=0
+(
+  cd "$WORK"
+  PATH="$TEST_TMP/loom-bin:$PRE_PUSH_CHECKS_DIR:$GIT_DIR" \
+    pre-push-checks --hook-id missing-entry -- "$TOUCH_BIN" "$MISSING_ENTRY_SENTINEL"
+) || missing_entry_rc=$?
+
+if [[ "$missing_entry_rc" -ne 0 ]]; then
+  echo "FAIL: wrapper without hook entry exited $missing_entry_rc; expected 0" >&2
+  exit 1
+fi
+
+if [[ ! -e "$MISSING_ID_SENTINEL" || ! -e "$MISSING_ENTRY_SENTINEL" ]]; then
+  echo "FAIL: incomplete metadata did not fall through to both wrapped commands" >&2
   exit 1
 fi
 
 if [[ -e "$LOOM_CALL_LOG" ]]; then
-  echo "FAIL: loom shim was invoked despite missing metadata: $(<"$LOOM_CALL_LOG")" >&2
+  echo "FAIL: loom shim was invoked despite incomplete metadata: $(<"$LOOM_CALL_LOG")" >&2
   exit 1
 fi
 
-printf 'PASS: hook id absent → wrapper execed wrapped command\n'
+printf 'PASS: incomplete marker metadata → wrapper execed wrapped command\n'

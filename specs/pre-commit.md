@@ -50,13 +50,13 @@ The stamp is single-use, scoped to a specific HEAD SHA, and consumed on the next
 Wraps a slow check with a marker-aware, per-hook short-circuit. Contract:
 
 ```
-bin/pre-push-checks --hook-id <id> [--hook-entry <entry>] [--push-range <range>] -- <command> [args…]
+bin/pre-push-checks --hook-id <id> --hook-entry <entry> [--push-range <range>] -- <command> [args…]
 ```
 
 Resolution order:
 
 1. If `.loom/marker.json` is absent in the current working directory, execute the wrapped command.
-2. If a hook id is present and entry metadata is omitted, derive the stable entry identity from the wrapped command. If the hook id is absent, execute the wrapped command without a marker shortcut.
+2. If the hook id or explicit entry metadata is absent, execute the wrapped command without a marker shortcut.
 3. Resolve an omitted push range from the current upstream, falling back to the literal `@{u}..HEAD` range when no upstream is configured.
 4. If `loom` is missing from `PATH`, execute the wrapped command.
 5. Otherwise, invoke `loom gate verify-marker` with the hook id, hook entry, and push range:
@@ -65,12 +65,13 @@ Resolution order:
 
 The wrapper does **not** read or interpret `marker.json`. Schema, mint, and validation are owned by the downstream Loom project; Wrix supplies the hook identity, entry, and range to `loom gate verify-marker` and acts on its exit code.
 
-Loom-managed `.pre-commit-config.yaml` entries use folded YAML for readability; the wrapper derives marker metadata from the wrapped command:
+Loom-managed `.pre-commit-config.yaml` entries use folded YAML for readability and repeat the exact wrapped command as explicit marker metadata:
 
 ```yaml
 - id: cargo-clippy
   entry: >-
-    bin/pre-push-checks --hook-id cargo-clippy --
+    bin/pre-push-checks --hook-id cargo-clippy
+    --hook-entry 'cargo clippy --workspace --all-targets -- -D warnings' --
     cargo clippy --workspace --all-targets -- -D warnings
   language: system
   stages: [pre-push]
@@ -126,7 +127,7 @@ See `image-builder.md` § Hook installation for the build-side mechanism (which 
   [check](verify:prek.wrappers-on-devshell-path)
 - Wrix's own `.pre-commit-config.yaml` matches the § Reference Hook Configuration stage→hook mapping, with hooks for `pre-commit` and `pre-push` only and no `prepare-commit-msg`, `post-checkout`, or `post-merge` hook entries
   [check](verify:prek.config-stage-set)
-- Every Wrix pre-push entry uses `bin/pre-push-checks`, passes its own id, derives exact entry metadata from the wrapped command, and separates wrapper arguments from the command
+- Every Wrix pre-push entry uses `bin/pre-push-checks`, passes its own id and exact wrapped command as explicit entry metadata, and separates wrapper arguments from the command
   [system](verify:prek.config-wrapper-contract)
 - `pre-push-checks` passes the hook id, entry, and push range to `loom gate verify-marker` and exits 0 without running the wrapped command when marker validation succeeds
   [system](verify:prek.pre-push-checks-marker-valid)
@@ -134,7 +135,7 @@ See `image-builder.md` § Hook installation for the build-side mechanism (which 
   [system](verify:prek.pre-push-checks-marker-stale)
 - `pre-push-checks` execs the wrapped command when `.loom/marker.json` is absent
   [system](verify:prek.pre-push-checks-no-marker)
-- `pre-push-checks` derives omitted entry metadata from the wrapped command and execs without consulting Loom when the hook id is absent
+- `pre-push-checks` execs without consulting Loom when the hook id or explicit entry metadata is absent
   [system](verify:prek.pre-push-checks-no-metadata)
 - `pre-push-checks` execs the wrapped command when `loom gate verify-marker` is not on `PATH`
   [system](verify:prek.pre-push-checks-no-loom)
@@ -142,7 +143,7 @@ See `image-builder.md` § Hook installation for the build-side mechanism (which 
   [system](verify:prek.skip-if-missing-present)
 - `skip-if-missing <tool> -- <cmd>` exits 0 without running `<cmd>` when `<tool>` is absent from `PATH`
   [system](verify:prek.skip-if-missing-absent)
-- Wrix's own `nix-flake-check` hook is the first pre-push entry, requires `nix` to be present, and wraps `nix flake check` with canonical derived marker metadata
+- Wrix's own `nix-flake-check` hook is the first pre-push entry, requires `nix` to be present, and wraps `nix flake check` with canonical explicit marker metadata
   [system](verify:prek.config-wrapper-contract)
 - A pre-commit hook configured in `.pre-commit-config.yaml` fires when `git commit` runs inside a profile container
   [system](verify:prek.container-pre-commit)
