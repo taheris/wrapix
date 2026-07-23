@@ -60,9 +60,10 @@ The service container has a caller-independent lifecycle invariant: stopping the
 
 ### Service image source
 
-The `<repo>-service` container image is a wrix-managed Nix-built image and follows `image-builder.md`'s source-kind contract. On Linux, `wrix service start` installs the service image through the shared wrix runtime image installer from an archive-less `nix-descriptor` source into `containers-storage`. On Darwin, it converts the `docker-archive` fallback to a temporary OCI archive before using Apple's `container image load` path.
-
-The service image carries wrix-managed labels (`wrix.managed=true`, `wrix.image.kind=service`) so the shared runtime image cleanup path can prune stale wrix images without touching user images. Service image cleanup uses the wrix image-retention policy owned by `sandbox.md`; this spec owns only that service lifecycle uses the shared image source-kind contract and labels the service image.
+The `<repo>-service` container image is a wrix-managed Nix-built image.
+`image-builder.md` owns its source metadata and ownership labels, while
+`sandbox.md` owns installation and retention through the shared runtime image
+path. This spec owns only the service lifecycle's use of that image path.
 
 ### Service Command Ownership
 
@@ -150,7 +151,9 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
   [test](../crates/wrix-service/tests/lifecycle.rs::workspace_identity_is_stable_and_collision_resistant)
 - `mkDevShell` starts the service container by default for the project cache, `nixCache = false` suppresses cache-only startup, and any service container survives the process that evaluated the shell hook
   [system](verify:services.devshell-start-independent)
-- On Linux, `wrix service start` installs the service image through the shared runtime image installer from an archive-less `nix-descriptor` source; on Darwin it uses the tar-loadable `docker-archive` fallback
+- `wrix service start` delegates service-image installation to the shared
+  runtime image installer using the source metadata defined by
+  `image-builder.md`, with no service-specific install path
   [system](verify:services.start-loads-image-source)
 - The service image carries wrix-managed image labels, including `wrix.managed=true` and `wrix.image.kind=service`
   [system](verify:services.image-labels)
@@ -206,7 +209,10 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
 1. **Workspace identity** — services are keyed by the canonical repository root for paths inside a Git checkout, and by the canonical current path otherwise. Container names use `<repo>-service`; ports and state/cache roots derive from the identity path hash. Loom-managed paths under `.loom/` use the outer repository identity.
 2. **Service command surface** — public service/cache orchestration is exposed through `wrix service ...` under the root CLI owned by `cli.md`, not through standalone `wrix-svc`, `beads-dolt`, or `beads-push` binaries. Separable internals are proper Rust crates/helper binaries, not hidden public subcommands.
 3. **Lifecycle management** — `wrix service start` is idempotent and caller-independent; `stop`, `status`, `logs`, and endpoint queries operate on the selected workspace only. Cache-only starts in temp-directory scratch workspaces are no-ops rather than persistent service containers.
-4. **Service image source** — the service image follows the shared wrix-managed image source-kind contract and runtime image installer: Linux uses an archive-less `nix-descriptor` source, Darwin uses the tar-loadable `docker-archive` fallback, and the image is labelled with `wrix.managed=true` plus `wrix.image.kind=service`.
+4. **Service image source** — `wrix service start` installs the selected service
+   image through the shared runtime image installer. `image-builder.md` owns
+   source metadata and labels; `sandbox.md` owns install dispatch and image
+   retention.
 5. **Dolt hosting** — when `.beads/dolt` exists, the service container runs the Dolt SQL server for beads and publishes the endpoint in the shape `beads.md` expects.
 6. **Cache enablement** — `mkDevShell` enables the standard project cache by default; `nixCache = false` disables it.
 7. **Host cache pull** — enabled host devshells configure Nix to use `file://<cache-root>` plus the generated public key and `builders-use-substitutes = true`.
