@@ -8,6 +8,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::Value;
+use wrix_core::deploy_key::{Name as KeyName, ParseError as KeyNameParseError};
 
 const GITHUB_KNOWN_HOSTS: &str = concat!(
     "github.com ssh-ed25519 ",
@@ -72,30 +73,8 @@ fn is_help(arg: &str) -> bool {
     matches!(arg, "--help" | "-h" | "help")
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct KeyName(String);
-
-impl KeyName {
-    fn parse(value: &str, origin: &'static str) -> Result<Self, Error> {
-        let value = value.trim();
-        if value.is_empty()
-            || value.contains('/')
-            || value.contains('\\')
-            || value.chars().any(char::is_whitespace)
-        {
-            return Err(Error::InvalidKeyName {
-                origin,
-                value: value.to_owned(),
-            });
-        }
-        Ok(Self(value.to_owned()))
-    }
-}
-
-impl fmt::Display for KeyName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
+fn parse_key_name(value: &str, origin: &'static str) -> Result<KeyName, Error> {
+    KeyName::parse(value).map_err(|source| Error::InvalidKeyName { origin, source })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -497,12 +476,12 @@ fn parse_flags(args: &[String]) -> Result<Flags, Error> {
                     flag: "--key",
                     value_name: "<name>",
                 })?;
-                flags.key_name = Some(KeyName::parse(value, "--key")?);
+                flags.key_name = Some(parse_key_name(value, "--key")?);
                 index += 2;
             }
             value if value.starts_with("--key=") => {
                 let value = value.trim_start_matches("--key=");
-                flags.key_name = Some(KeyName::parse(value, "--key")?);
+                flags.key_name = Some(parse_key_name(value, "--key")?);
                 index += 1;
             }
             "--remote" => {
@@ -1931,7 +1910,7 @@ fn derive_key_name(root: &Path) -> Result<KeyName, Error> {
         })?;
     let hostname = hostname()?;
     let key = format!("{repo}-{hostname}");
-    KeyName::parse(&key, "derived default")
+    parse_key_name(&key, "derived default")
 }
 
 fn hostname() -> Result<String, Error> {
@@ -1977,8 +1956,7 @@ fn load_profile_policy(path: Option<&Path>) -> Result<ProfilePolicy, Error> {
         .and_then(Value::as_object)
         .and_then(|security| security.get("deploy_key"))
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| KeyName::parse(value, "ProfileConfig security.deploy_key"))
+        .map(|value| parse_key_name(value, "ProfileConfig security.deploy_key"))
         .transpose()?;
     Ok(ProfilePolicy { deploy_key })
 }
@@ -2005,7 +1983,7 @@ fn parse_file_policy(path: &Path, content: &str) -> Result<FilePolicy, Error> {
             .git
             .deploy_key
             .as_deref()
-            .map(|value| KeyName::parse(value, "wrix.git.deploy_key"))
+            .map(|value| parse_key_name(value, "wrix.git.deploy_key"))
             .transpose()?,
         signing: raw.wrix.git.sign_commits.map(SigningPolicy::from_bool),
         remote: raw
@@ -2041,8 +2019,11 @@ enum Error {
     },
     /// unexpected wrix init argument: {value}
     UnexpectedArgument { value: String },
-    /// {origin} must be a non-empty key name without whitespace or path separators: {value}
-    InvalidKeyName { origin: &'static str, value: String },
+    /// invalid {origin}: {source}
+    InvalidKeyName {
+        origin: &'static str,
+        source: KeyNameParseError,
+    },
     /// {origin} must be a non-empty Git remote name without whitespace: {value}
     InvalidRemoteName { origin: &'static str, value: String },
     /// --deploy cannot be used with --offline because deploy provisioning requires online verification
@@ -2244,7 +2225,7 @@ mod test {
         ];
         let flags = parse_flags(&args).unwrap();
         assert_eq!(flags.deploy, DeployPolicy::Provision);
-        assert_eq!(flags.key_name, Some(KeyName(String::from("repo-key"))));
+        assert_eq!(flags.key_name, Some(KeyName::parse("repo-key").unwrap()));
         assert_eq!(flags.remote, Some(RemoteName(String::from("upstream"))));
         assert_eq!(flags.verification, Some(VerificationPolicy::Offline));
         assert_eq!(flags.signing, Some(SigningPolicy::Disabled));
@@ -2267,7 +2248,7 @@ online_verify = false
         let policy = parse_file_policy(Path::new("wrix.toml"), content).unwrap();
         assert_policy(
             &policy,
-            Some(&KeyName(String::from("toml-key"))),
+            Some(&KeyName::parse("toml-key").unwrap()),
             Some(SigningPolicy::Disabled),
             Some(&RemoteName(String::from("upstream"))),
             Some(HookPolicy::Disabled),

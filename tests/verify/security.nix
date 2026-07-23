@@ -21,5 +21,7 @@ in
 
   "security.nested-key-propagation" = securityScript "nested-key-propagation";
 
+  "security.pi-auth-isolation" = securityScript "pi-auth-isolation";
+
   "security.provider-credential-env" = securityScript "provider-credential-env";
 }

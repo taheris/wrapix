@@ -11,7 +11,10 @@ use displaydoc::Display;
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
-use wrix_core::path::Workspace;
+use wrix_core::{
+    deploy_key::{Name as KeyName, ParseError as KeyNameParseError},
+    path::Workspace,
+};
 
 use crate::image::{
     self, CommandStore, Digest, InstallRequest, RetentionRequest, Runtime, SourceKind,
@@ -86,6 +89,10 @@ pub enum LaunchError {
     RequiredRuntimeSecretMissing { name: EnvName },
     /// runtime secret {name} is not valid Unicode in the host environment
     RuntimeSecretNotUnicode { name: EnvName },
+    /// runtime environment variable {name} is not valid Unicode
+    RuntimeEnvironmentNotUnicode { name: &'static str },
+    /// derived deploy key name is invalid: {source}
+    InvalidDerivedDeployKeyName { source: KeyNameParseError },
     /// WRIX_PI_AUTH_FILE={path}: file does not exist
     PiAuthMissing { path: String },
     /// wrix spawn: Pi auth file not found at {path} — run 'pi' and /login on the host, or set WRIX_PI_AUTH_FILE to an existing auth.json
@@ -176,6 +183,7 @@ struct Plan<'a> {
     agent_args: Vec<String>,
     spawn_env: Vec<(String, String)>,
     runtime_secret_env: Vec<(String, String)>,
+    runtime_passthrough_env: Vec<(String, String)>,
     spawn_mounts: Vec<RenderedMount>,
     services: ServicesState,
     host_podman_socket: Option<HostPodmanSocket>,
@@ -487,6 +495,7 @@ impl<'a> Plan<'a> {
             ),
         };
         let runtime_secret_env = resolve_runtime_secret_env(&profile.security, &spawn_env)?;
+        let runtime_passthrough_env = resolve_runtime_passthrough_env()?;
         let host_podman_socket = if Platform::CURRENT == Platform::Linux {
             host_podman_socket_from_env()?
         } else {
@@ -504,6 +513,7 @@ impl<'a> Plan<'a> {
             agent_args,
             spawn_env,
             runtime_secret_env,
+            runtime_passthrough_env,
             spawn_mounts,
             services,
             host_podman_socket,
@@ -569,7 +579,7 @@ impl<'a> Plan<'a> {
             for (key, value) in self.launcher_identity_env_pairs() {
                 writeln!(stdout, "ENV={key}={value}")?;
             }
-            for (key, value) in Self::runtime_passthrough_env_pairs() {
+            for (key, value) in &self.runtime_passthrough_env {
                 writeln!(stdout, "ENV={key}={value}")?;
             }
             for (key, value) in &self.runtime_secret_env {
@@ -579,7 +589,7 @@ impl<'a> Plan<'a> {
                 writeln!(stdout, "ENV=WRIX_SPAWN_CONFIG={path}")?;
             }
             if let Some(auth) = &pi_auth {
-                let path = auth.container_path(Platform::CURRENT);
+                let path = PiAuth::container_path(Platform::CURRENT);
                 writeln!(stdout, "ENV=WRIX_PI_AUTH_JSON={path}")?;
                 if Platform::CURRENT == Platform::Linux {
                     writeln!(stdout, "MOUNT=-v {}", auth.linux_mount().podman_arg())?;
@@ -712,8 +722,8 @@ impl<'a> Plan<'a> {
             for (key, value) in self.env_pairs(
                 credentials.as_ref(),
                 pi_auth
-                    .as_ref()
-                    .map(|auth| auth.container_path(Platform::Linux)),
+                    .is_some()
+                    .then_some(PiAuth::container_path(Platform::Linux)),
             ) {
                 command.arg("-e").arg(format!("{key}={value}"));
             }
@@ -789,8 +799,8 @@ impl<'a> Plan<'a> {
             for (key, value) in self.env_pairs(
                 credentials.as_ref(),
                 pi_auth
-                    .as_ref()
-                    .map(|auth| auth.container_path(Platform::Darwin)),
+                    .is_some()
+                    .then_some(PiAuth::container_path(Platform::Darwin)),
             ) {
                 command.arg("-e").arg(format!("{key}={value}"));
             }
@@ -813,7 +823,11 @@ impl<'a> Plan<'a> {
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());
-            Ok(status_to_exit(command.status()?))
+            let status = command.status()?;
+            if let Some(auth) = &pi_auth {
+                auth.sync_darwin(staging)?;
+            }
+            Ok(status_to_exit(status))
         })
     }
 
@@ -860,7 +874,7 @@ impl<'a> Plan<'a> {
             mounts.mounts.push(spawn_mount);
         }
         if let Some(auth) = pi_auth {
-            mounts.mounts.push(auth.darwin_mount());
+            mounts.mounts.push(auth.darwin_mount(staging)?);
         }
         Ok(mounts)
     }
@@ -937,15 +951,15 @@ impl<'a> Plan<'a> {
     fn credential_sources(&self) -> Result<Option<CredentialSources>, LaunchError> {
         let name = deploy_key_name(
             &self.workspace,
-            self.request.profile_config.security.deploy_key.as_deref(),
-        );
-        let deploy = resolve_key("WRIX_DEPLOY_KEY", &name, false)?;
+            self.request.profile_config.security.deploy_key.as_ref(),
+        )?;
+        let deploy = resolve_key("WRIX_DEPLOY_KEY", name.as_str(), false)?;
         let signing_name = format!("{name}-signing");
         let signing = resolve_key("WRIX_SIGNING_KEY", &signing_name, true)?;
         if self.spawn() {
             if deploy.is_none() {
                 return Err(LaunchError::SpawnDeployKeyMissing {
-                    path: default_key_path(&name).display().to_string(),
+                    path: default_key_path(name.as_str()).display().to_string(),
                 });
             }
             if env::var("WRIX_GIT_SIGN").unwrap_or_else(|_| String::from("1")) != "0"
@@ -972,7 +986,7 @@ impl<'a> Plan<'a> {
         };
         let key_root = staging.root.join("deploy_keys");
         fs::create_dir_all(&key_root)?;
-        let deploy_target = key_root.join(&sources.name);
+        let deploy_target = key_root.join(sources.name.as_str());
         fs::copy(&sources.deploy, &deploy_target)?;
         let signing_target = if let Some(path) = sources.signing {
             let target = key_root.join(format!("{}-signing", sources.name));
@@ -1034,7 +1048,7 @@ impl<'a> Plan<'a> {
             .iter()
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect::<Vec<_>>();
-        pairs.extend(Self::runtime_passthrough_env_pairs());
+        pairs.extend(self.runtime_passthrough_env.iter().cloned());
         pairs.extend(self.runtime_secret_env.iter().cloned());
         if self.spawn() {
             pairs.extend(self.spawn_env.iter().cloned());
@@ -1109,19 +1123,6 @@ impl<'a> Plan<'a> {
             pairs.extend(credential_env_pairs(credentials));
         }
         pairs
-    }
-
-    fn runtime_passthrough_env_pairs() -> Vec<(String, String)> {
-        const PASSTHROUGH: [&str; 4] = [
-            "WRIX_MCP",
-            "WRIX_MCP_TMUX_AUDIT",
-            "WRIX_MCP_TMUX_AUDIT_FULL",
-            "WRIX_VERBOSE",
-        ];
-        PASSTHROUGH
-            .iter()
-            .filter_map(|name| env::var(name).ok().map(|value| ((*name).to_owned(), value)))
-            .collect()
     }
 
     fn dry_run_env_value<'b>(&self, name: &str, value: &'b str) -> &'b str {
@@ -1550,13 +1551,13 @@ impl ServicesState {
 struct CredentialSources {
     deploy: PathBuf,
     signing: Option<PathBuf>,
-    name: String,
+    name: KeyName,
 }
 
 struct Credentials {
     deploy: PathBuf,
     signing: Option<PathBuf>,
-    name: String,
+    name: KeyName,
 }
 
 struct PiAuth {
@@ -1573,29 +1574,27 @@ impl PiAuth {
         }
     }
 
-    fn darwin_mount(&self) -> RenderedMount {
-        let host = self
-            .host
-            .parent()
-            .map_or_else(|| self.host.clone(), Path::to_path_buf);
-        RenderedMount {
+    fn darwin_mount(&self, staging: &Staging) -> Result<RenderedMount, LaunchError> {
+        let host = staging.root.join("pi-auth");
+        fs::create_dir_all(&host)?;
+        fs::copy(&self.host, host.join("auth.json"))?;
+        Ok(RenderedMount {
             host: host.display().to_string(),
             container: String::from(DARWIN_PI_AUTH_DIR),
             mode: MountMode::Rw,
             optional: false,
-        }
+        })
     }
 
-    fn container_path(&self, platform: Platform) -> String {
+    fn sync_darwin(&self, staging: &Staging) -> Result<(), LaunchError> {
+        fs::copy(staging.root.join("pi-auth/auth.json"), &self.host)?;
+        Ok(())
+    }
+
+    fn container_path(platform: Platform) -> String {
         match platform {
             Platform::Linux => String::from("/mnt/wrix/file/pi-auth.json"),
-            Platform::Darwin => {
-                let name = self.host.file_name().map_or_else(
-                    || String::from("auth.json"),
-                    |name| name.to_string_lossy().into_owned(),
-                );
-                format!("{DARWIN_PI_AUTH_DIR}/{name}")
-            }
+            Platform::Darwin => format!("{DARWIN_PI_AUTH_DIR}/auth.json"),
         }
     }
 }
@@ -2048,6 +2047,26 @@ fn resolve_runtime_secret_env(
     Ok(resolved)
 }
 
+fn resolve_runtime_passthrough_env() -> Result<Vec<(String, String)>, LaunchError> {
+    const PASSTHROUGH: [&str; 4] = [
+        "WRIX_MCP",
+        "WRIX_MCP_TMUX_AUDIT",
+        "WRIX_MCP_TMUX_AUDIT_FULL",
+        "WRIX_VERBOSE",
+    ];
+    let mut resolved = Vec::new();
+    for name in PASSTHROUGH {
+        match env::var(name) {
+            Ok(value) => resolved.push((name.to_owned(), value)),
+            Err(env::VarError::NotPresent) => {}
+            Err(env::VarError::NotUnicode(_value)) => {
+                return Err(LaunchError::RuntimeEnvironmentNotUnicode { name });
+            }
+        }
+    }
+    Ok(resolved)
+}
+
 fn env_value(name: &str) -> Option<String> {
     match env::var(name) {
         Ok(value) if !value.is_empty() => Some(value),
@@ -2245,16 +2264,17 @@ fn ensure_krun() -> Result<(), LaunchError> {
     Err(LaunchError::KrunMissing)
 }
 
-fn deploy_key_name(workspace: &Path, configured: Option<&str>) -> String {
-    if let Some(name) = configured.filter(|name| !name.is_empty()) {
-        return name.to_owned();
+fn deploy_key_name(workspace: &Path, configured: Option<&KeyName>) -> Result<KeyName, LaunchError> {
+    if let Some(name) = configured {
+        return Ok(name.clone());
     }
     let workspace_name = workspace
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or("workspace");
-    format!("{}-{}", workspace_name, host_label())
+    KeyName::parse(&format!("{}-{}", workspace_name, host_label()))
+        .map_err(|source| LaunchError::InvalidDerivedDeployKeyName { source })
 }
 
 fn host_label() -> String {
@@ -2334,6 +2354,8 @@ fn stable_mount_index(path: &Path) -> u64 {
 #[cfg(test)]
 mod test {
     use std::path::{Path, PathBuf};
+
+    use wrix_core::deploy_key::Name as KeyName;
 
     use super::{
         DarwinMounts, DarwinNetwork, DarwinSplitRoute, HostPodmanSocket, LaunchError, NetworkMode,
@@ -2591,18 +2613,41 @@ mod test {
     }
 
     #[test]
-    fn darwin_pi_auth_mounts_parent_at_internal_staging_path() {
+    fn darwin_pi_auth_stages_only_selected_file_and_syncs_updates() {
+        let root = scratch_dir("darwin-pi-auth");
+        let host_dir = root.join("host");
+        let staging_root = root.join("stage");
+        std::fs::create_dir_all(&host_dir).unwrap();
+        std::fs::create_dir_all(&staging_root).unwrap();
+        std::fs::write(host_dir.join("auth.json"), b"original\n").unwrap();
+        std::fs::write(host_dir.join("sibling-secret"), b"private\n").unwrap();
         let auth = PiAuth {
-            host: PathBuf::from("/host/pi/auth.json"),
+            host: host_dir.join("auth.json"),
         };
+        let staging = Staging { root: staging_root };
 
-        let mount = auth.darwin_mount();
+        let mount = auth.darwin_mount(&staging).unwrap();
 
-        assert_eq!(mount.host, "/host/pi");
+        assert_eq!(
+            mount.host,
+            staging.root.join("pi-auth").display().to_string()
+        );
         assert_eq!(mount.container, "/mnt/wrix/pi-agent-auth");
         assert_eq!(
-            auth.container_path(Platform::Darwin),
+            std::fs::read_dir(&mount.host).unwrap().count(),
+            1,
+            "Darwin auth staging exposed a sibling file"
+        );
+        assert_eq!(
+            PiAuth::container_path(Platform::Darwin),
             "/mnt/wrix/pi-agent-auth/auth.json"
+        );
+        std::fs::write(staging.root.join("pi-auth/auth.json"), b"updated\n").unwrap();
+        auth.sync_darwin(&staging).unwrap();
+        assert_eq!(std::fs::read(&auth.host).unwrap(), b"updated\n");
+        assert_eq!(
+            std::fs::read(host_dir.join("sibling-secret")).unwrap(),
+            b"private\n"
         );
     }
 
@@ -2634,10 +2679,9 @@ mod test {
 
     #[test]
     fn deploy_key_name_prefers_profile_config_value() {
-        assert_eq!(
-            deploy_key_name(Path::new("/workspace/repo"), Some("custom-key")),
-            "custom-key"
-        );
+        let configured = KeyName::parse("custom-key").unwrap();
+        let name = deploy_key_name(Path::new("/workspace/repo"), Some(&configured)).unwrap();
+        assert_eq!(name.as_str(), "custom-key");
     }
 
     fn scratch_dir(name: &str) -> PathBuf {

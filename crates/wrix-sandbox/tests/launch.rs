@@ -132,6 +132,92 @@ fn spawn_requires_resolved_keys_but_run_allows_missing_keys() -> TestResult {
     assert!(missing_signing.stderr.contains("repo-key-signing"));
     assert_no_launch_plan(&missing_signing.stdout);
 
+    let signing_disabled = run_spawn_launch(
+        root.path(),
+        "spawn-signing-disabled",
+        &profile_config,
+        &spawn_config,
+        vec![(String::from("WRIX_GIT_SIGN"), OsString::from("0"))],
+    )?;
+    assert!(signing_disabled.success, "{}", signing_disabled.stderr);
+
+    Ok(())
+}
+
+#[test]
+fn profile_config_rejects_unsafe_deploy_key_names_before_staging() -> TestResult {
+    let root = tempfile::Builder::new()
+        .prefix("unsafe-deploy-key-name")
+        .tempdir()?;
+    let workspace = root.path().join("workspace");
+    let profile_config = root.path().join("profile.json");
+    fs::create_dir_all(&workspace)?;
+
+    for (index, name) in [
+        ".",
+        "..",
+        "../escaped",
+        "/tmp/escaped",
+        "nested/key",
+        "nested\\key",
+        "two words",
+        " repo-key",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        common::write_profile_config(
+            &profile_config,
+            &ProfileFixture {
+                deploy_key: Some(name.to_owned()),
+                ..ProfileFixture::default()
+            },
+        )?;
+        let run = run_launch(
+            root.path(),
+            &format!("unsafe-key-{index}"),
+            &profile_config,
+            &workspace,
+            Vec::new(),
+        )?;
+        assert!(!run.success, "unsafe key name was accepted: {name}");
+        assert!(run.stderr.contains("security.deploy_key"), "{}", run.stderr);
+        assert_no_launch_plan(&run.stdout);
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_runtime_passthrough_fails_loudly() -> TestResult {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = tempfile::Builder::new()
+        .prefix("non-unicode-runtime-env")
+        .tempdir()?;
+    let workspace = root.path().join("workspace");
+    let profile_config = root.path().join("profile.json");
+    fs::create_dir_all(&workspace)?;
+    common::write_profile_config(&profile_config, &ProfileFixture::default())?;
+
+    let run = run_launch(
+        root.path(),
+        "non-unicode-runtime-env",
+        &profile_config,
+        &workspace,
+        vec![(
+            String::from("WRIX_MCP"),
+            OsString::from_vec(vec![b't', b'm', b'u', b'x', 0xff]),
+        )],
+    )?;
+
+    assert!(!run.success);
+    assert!(
+        run.stderr
+            .contains("runtime environment variable WRIX_MCP is not valid Unicode")
+    );
+    assert_no_launch_plan(&run.stdout);
     Ok(())
 }
 
@@ -369,6 +455,12 @@ fn pi_auth_file_uses_platform_delivery_path() -> TestResult {
     fs::create_dir_all(&workspace)?;
     fs::create_dir_all(auth.parent().ok_or("auth path has no parent")?)?;
     fs::write(&auth, "{}\n")?;
+    fs::write(
+        auth.parent()
+            .ok_or("auth path has no parent")?
+            .join("sibling"),
+        "must not be mounted\n",
+    )?;
     common::write_profile_config(
         &profile_config,
         &ProfileFixture {
@@ -390,18 +482,26 @@ fn pi_auth_file_uses_platform_delivery_path() -> TestResult {
 
     assert!(run.success, "{}", run.stderr);
     if cfg!(target_os = "macos") {
-        assert!(run.stdout.contains(&format!(
-            "MOUNT=-v {}:/mnt/wrix/pi-agent-auth",
-            auth.parent().ok_or("auth path has no parent")?.display()
-        )));
+        let mount = run
+            .stdout
+            .lines()
+            .find(|line| line.ends_with("/pi-auth:/mnt/wrix/pi-agent-auth"))
+            .ok_or("Darwin Pi auth did not use isolated staging")?;
+        assert!(mount.starts_with("MOUNT=-v "));
+        assert!(
+            !mount.contains(
+                &auth
+                    .parent()
+                    .ok_or("auth path has no parent")?
+                    .display()
+                    .to_string()
+            )
+        );
         assert!(
             run.stdout
                 .contains("ENV=WRIX_PI_AUTH_JSON=/mnt/wrix/pi-agent-auth/auth.json")
         );
-        assert!(!run.stdout.contains(&format!(
-            "MOUNT=-v {}:/mnt/wrix/pi-agent-auth",
-            auth.display()
-        )));
+        assert!(!run.stdout.contains("sibling"));
     } else {
         assert!(run.stdout.contains(&format!(
             "MOUNT=-v {}:/mnt/wrix/file/pi-auth.json",

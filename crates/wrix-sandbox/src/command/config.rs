@@ -4,6 +4,7 @@ use displaydoc::Display;
 use serde::{Deserialize, Deserializer, de};
 use serde_json::Value;
 use thiserror::Error;
+use wrix_core::deploy_key::{Name as KeyName, ParseError as KeyNameParseError};
 
 use crate::image::{Digest, SourceKind};
 
@@ -118,7 +119,7 @@ pub struct Resources {
 
 #[derive(Clone, Debug)]
 pub struct Security {
-    pub deploy_key: Option<String>,
+    pub deploy_key: Option<KeyName>,
     pub runtime_secrets: BTreeMap<EnvName, RuntimeSecretPolicy>,
 }
 
@@ -227,6 +228,8 @@ pub enum ConfigError {
     MissingAgentKind,
     /// ProfileConfig profile.env cannot contain runtime credential {name}
     StaticCredentialInProfileEnv { name: EnvName },
+    /// invalid ProfileConfig security.deploy_key: {source}
+    InvalidDeployKeyName { source: KeyNameParseError },
     /// invalid ProfileConfig schema: {source}
     InvalidProfileConfigSchemaShape { source: serde_json::Error },
     /// spawn-config file not found: {path}
@@ -356,6 +359,11 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
         deploy_key,
         runtime_secrets,
     } = security.unwrap_or_default();
+    let deploy_key = deploy_key
+        .map(|value| {
+            KeyName::parse(&value).map_err(|source| ConfigError::InvalidDeployKeyName { source })
+        })
+        .transpose()?;
     if let Some(name) = profile.env.keys().find(|name| {
         is_known_credential_env(name)
             || runtime_secrets
@@ -377,7 +385,7 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
         agent: Agent { kind },
         resources: resources.unwrap_or_default(),
         security: Security {
-            deploy_key: deploy_key.filter(|value| !value.is_empty()),
+            deploy_key,
             runtime_secrets,
         },
         services: Services {
@@ -601,10 +609,36 @@ mod test {
         });
         let config = parse_profile_value(value, Platform::Linux).unwrap();
         assert_eq!(config.profile.env.get("FOO"), Some(&String::from("bar")));
-        assert_eq!(config.security.deploy_key, Some(String::from("repo-key")));
+        assert_eq!(
+            config
+                .security
+                .deploy_key
+                .as_ref()
+                .map(super::KeyName::as_str),
+            Some("repo-key")
+        );
         let (name, policy) = config.security.runtime_secrets.first_key_value().unwrap();
         assert_eq!(name.as_str(), "CUSTOM_TOKEN");
         assert_eq!(*policy, super::RuntimeSecretPolicy::Required);
+    }
+
+    #[test]
+    fn profile_config_rejects_unsafe_deploy_key_names() {
+        for name in ["", ".", "..", "/tmp/key", "nested/key", "nested\\key"] {
+            let value = json!({
+                "schema": 1,
+                "profile": { "name": "base" },
+                "image": {
+                    "ref": "wrix:test",
+                    "source": "/nix/store/fake",
+                    "source_kind": "nix-descriptor"
+                },
+                "agent": { "kind": "direct" },
+                "security": { "deploy_key": name }
+            });
+            let error = parse_profile_value(value, Platform::Linux).unwrap_err();
+            assert!(matches!(error, ConfigError::InvalidDeployKeyName { .. }));
+        }
     }
 
     #[test]

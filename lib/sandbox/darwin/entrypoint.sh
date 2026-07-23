@@ -473,7 +473,8 @@ write_session_log() {
   local agent_session_dir
   agent_session_dir=$(wrix_session_dir_for_agent)
   mkdir -p "$agent_session_dir" /workspace/.wrix/log
-  local log_file="/workspace/.wrix/log/${SESSION_START_ISO//[:.]/-}.json"
+  local log_file
+  log_file=$(mktemp --suffix=.json "/workspace/.wrix/log/${SESSION_START_ISO//[:.]/-}.XXXXXX")
 
   jq -n \
     --arg start "$SESSION_START_ISO" \

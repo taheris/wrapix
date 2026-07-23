@@ -104,7 +104,10 @@ rule the child would boot without keys (the parent's `$HOME` has no
 `~/.ssh/deploy_keys/`), agents would produce unsigned commits, and
 `git push` would fail.
 
-**In-container destination is fixed.** Regardless of which source
+**In-container destination is fixed.** `ProfileConfig.security.deploy_key` is
+parsed at the configuration boundary into a validating deploy-key-name
+identifier. It accepts one non-empty filename component and rejects whitespace,
+path separators, and dot traversal before staging. Regardless of which source
 won, the launcher mounts the key at `/etc/wrix/keys/<name>`
 (`<name>-signing` for the signing key) inside the container and sets
 the child's `WRIX_DEPLOY_KEY` / `WRIX_SIGNING_KEY` env vars to
@@ -172,9 +175,11 @@ store. For Pi, the launcher resolves `WRIX_PI_AUTH_FILE` or falls back to
 for first `/login` use when it is missing; non-interactive `wrix spawn` fails
 loudly when the file is absent. The launcher mounts only that credential path
 into Pi's `~/.pi/agent/auth.json` when `WRIX_AGENT=pi`. Linux uses a single-file
-bind; macOS mounts the auth file's parent directory at an internal staging path
-because Apple Container/VirtioFS is directory-oriented, then exposes only the
-selected auth file to Pi.
+bind. Because Apple Container/VirtioFS is directory-oriented, macOS copies the
+selected auth file into an otherwise empty per-launch staging directory, mounts
+that directory at an internal path, and synchronizes only the selected file
+back after the session. Sibling files beside the host auth file never enter the
+sandbox.
 
 Acceptable because:
 
@@ -209,12 +214,9 @@ the secret into the container.
 
 ### Network Exfil Baseline
 
-Sandbox networking has an always-on local-network isolation baseline owned by
-`sandbox.md`: no inbound sandbox ports, IPv6 disabled/blocked for v1, and no
-outbound access to LAN/private/host-local/VPN/special ranges except exact
-wrix-owned endpoint and DNS exceptions. `WRIX_NETWORK=open` allows public
-internet outbound under that baseline. `WRIX_NETWORK=limit` further restricts
-public egress to a merged allowlist.
+The sandbox network modes and always-on isolation baseline are owned by
+`sandbox.md`. This spec relies on that contract and defines only the
+credential-exfiltration rubric for allowlist membership.
 
 The **base allowlist** every profile inherits for `limit` mode is enumerated
 by `profiles.md`; this spec owns the *rubric* the membership must satisfy.
@@ -237,8 +239,8 @@ Policy-leakage detection is anchored in the selected **agent's own
 session transcript**. Claude uses `/workspace/.claude/`, Pi uses
 `/workspace/.pi/agent/sessions`, and direct mode uses `/workspace` as
 the transcript root for the externally supplied runner. At session end,
-wrix writes a **session-metadata index** to
-`/workspace/.wrix/log/<timestamp>.json` containing:
+wrix writes a **session-metadata index** to a collision-resistant,
+timestamp-prefixed JSON file under `/workspace/.wrix/log/` containing:
 
 - `timestamp_start`, `timestamp_end`, `duration_seconds`
 - `exit_code`, `mode`
@@ -311,16 +313,20 @@ this section is the index, not a restatement.
   launcher exits non-zero with a stderr message naming the missing
   path, before the container is started.
   [test](../crates/wrix-sandbox/tests/launch.rs::missing_key_env_paths_fail_before_container_start)
-- Under `wrix spawn`, when a deploy key or signing key does not
-  resolve (no env pointer and no `$HOME/.ssh/deploy_keys/` fallback),
-  the launcher exits non-zero with a stderr message naming the
-  unresolved key, before the container is started; interactive
-  `wrix run` still boots without keys under the same condition.
+- `ProfileConfig.security.deploy_key` accepts only a validated, single-component
+  deploy-key name; absolute paths, separators, whitespace, and dot traversal
+  fail during config parsing before credential staging.
+  [test](../crates/wrix-sandbox/tests/launch.rs::profile_config_rejects_unsafe_deploy_key_names_before_staging)
+- Under `wrix spawn`, when the deploy key does not resolve (no env pointer and
+  no `$HOME/.ssh/deploy_keys/` fallback), the launcher exits non-zero before
+  the container starts. An unresolved signing key does the same unless
+  `WRIX_GIT_SIGN=0` explicitly disables signing. Both failures name the
+  unresolved key, while interactive `wrix run` permits the no-mount case.
   [test](../crates/wrix-sandbox/tests/launch.rs::spawn_requires_resolved_keys_but_run_allows_missing_keys)
-- After a sandbox session, a session-metadata index file exists under
-  `/workspace/.wrix/log/`; its `timestamp_start`, `timestamp_end`,
-  `exit_code`, `mode`, and `agent_session_dir` fields are populated;
-  and `agent_session_dir` resolves to an existing directory.
+- Every sandbox session contributes exactly one collision-resistant
+  session-metadata index under `/workspace/.wrix/log/`; all audit-index fields have their
+  documented types, `agent_session_dir` resolves to an existing directory, and
+  same-workspace sessions starting within one UTC second retain distinct files.
   [system](verify:security.audit-trail-anchor)
 - Host provider credentials declared through `runtimeSecrets` reach the selected runtime while `ProfileConfig` and assembled image content contain no secret values
   [system](verify:security.provider-credential-env)
@@ -336,8 +342,13 @@ this section is the index, not a restatement.
   [test](../crates/wrix-sandbox/tests/spawn_config.rs::provider_credentials_in_spawn_config_are_redacted)
 - Linux delivers Pi's selected auth file as a single-file runtime bind
   [test](../crates/wrix-sandbox/tests/launch.rs::pi_auth_file_uses_platform_delivery_path)
-- Darwin mounts the Pi auth file's parent at an internal staging directory and points Pi at only the selected filename
-  [test](command::launch::test::darwin_pi_auth_mounts_parent_at_internal_staging_path)
+- On Darwin, an assembled sandbox sees only the selected Pi auth file in its
+  internal staging directory, cannot read sibling host files, and synchronizes
+  auth updates back only to the selected host file.
+  [system](verify:security.pi-auth-isolation)
+- The selected agent transcript is fit-for-purpose audit content for the stated
+  policy-leakage threat model without claiming adversarial-agent detection.
+  [judge](../tests/judges/security.sh#test_agent_transcript_audit_fit)
 
 ## Requirements
 
@@ -346,12 +357,13 @@ this section is the index, not a restatement.
 1. **Host-source resolution precedence** — launcher resolves each
    key's host source by env-first, `$HOME/.ssh/deploy_keys/`-second;
    independently per key; fails loud if env is set but file does not
-   exist. Under `wrix spawn`, an unresolved key (no env, no fallback)
-   is also fail-loud; interactive `run` permits the no-mount
-   fall-through. (See *Credential Surfaces*.)
-2. **In-container destination fixed** — `/etc/wrix/keys/<name>` for
-   the deploy key, `/etc/wrix/keys/<name>-signing` for the signing
-   key; the launcher always sets `WRIX_DEPLOY_KEY` /
+   exist. Under `wrix spawn`, an unresolved deploy key is fail-loud, as is an
+   unresolved signing key unless `WRIX_GIT_SIGN=0`; interactive `run` permits
+   the no-mount fall-through. (See *Credential Surfaces*.)
+2. **In-container destination fixed** — the launcher parses `<name>` as a
+   validated deploy-key-name identifier before staging, mounts the deploy key
+   at `/etc/wrix/keys/<name>` and the signing key at
+   `/etc/wrix/keys/<name>-signing`, and always sets `WRIX_DEPLOY_KEY` /
    `WRIX_SIGNING_KEY` in the child's env to those in-container
    paths. Host source paths do not cross the boundary.
 3. **Platform symmetry** — Linux and macOS launchers implement the
@@ -363,9 +375,10 @@ this section is the index, not a restatement.
    verification, and fail rather than falling back to ambient user
    SSH identities or trust-on-first-use host keys.
 5. **Agent credentials** — provider keys cross the boundary only through declared runtime environment delivery, while Pi auth crosses through the platform-specific file delivery described in *Credential Surfaces*. Runtime declarations serialize only validated names plus required/optional policy; neither channel contributes secret values to Nix evaluation, `ProfileConfig`, image config, or image layers.
-6. **Audit anchor** — every sandbox session writes a session-metadata
-   index whose `agent_session_dir` field points at the directory
-   containing the selected agent's transcript for that session.
+6. **Audit anchor** — every sandbox session writes one uniquely named
+   session-metadata index whose complete field set identifies the session and
+   whose `agent_session_dir` points at the directory containing the selected
+   agent's transcript for that session.
 
 ### Non-Functional
 

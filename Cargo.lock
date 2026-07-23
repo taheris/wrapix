@@ -508,6 +508,7 @@ dependencies = [
  "toml",
  "wrix-beads",
  "wrix-cache",
+ "wrix-core",
  "wrix-sandbox",
  "wrix-service",
 ]

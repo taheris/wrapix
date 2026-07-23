@@ -80,15 +80,11 @@ The applied Git state includes:
 
 The Git transport and signing helpers are context-aware. They keep repo-local Git config stable across host checkouts, profile containers, and linked worktrees by resolving key paths at runtime instead of storing host-only or container-only private-key paths in Git config. The helper command or trampoline recorded in Git config is part of the CLI contract because Git executes it outside an interactive Wrix process.
 
-Deploy-key resolution order:
-
-1. `WRIX_DEPLOY_KEY`, when set and pointing at an existing file.
-2. `$HOME/.ssh/deploy_keys/<key-name>`, where `<key-name>` is the selected deploy key name.
-3. Fail non-zero. Wrix-managed Git operations must not fall through to the user's default SSH keys, SSH agent identities, or `~/.ssh/config` identities.
-
-Signing-key resolution follows the same rule with `WRIX_SIGNING_KEY` and `<key-name>-signing`. When signing is enabled, a missing signing key is a hard failure; `--no-sign` or `wrix.git.sign_commits = false` is the explicit opt-out.
-
-The transport helper invokes SSH with a Wrix-pinned GitHub known-hosts file and with strict noninteractive options: user SSH config disabled, `BatchMode=yes`, `IdentitiesOnly=yes`, `StrictHostKeyChecking=yes`, and no runtime `ssh-keyscan` or trust-on-first-use fallback. The pinned known-hosts file may live at `/etc/ssh/ssh_known_hosts` in containers or in Wrix-managed repo/Nix state on the host, but it is never learned by appending to the user's `~/.ssh/known_hosts` during init verification.
+The deploy/signing-key resolution order, explicit signing opt-out, strict GitHub
+host verification, and prohibition on ambient SSH identities are owned by
+`security.md` § Credential Surfaces. The helpers installed by `wrix init`
+implement that policy at Git execution time while keeping the selected key name
+and helper locations stable across invocation contexts.
 
 If Wrix creates or repairs SSH directories or compatibility config files, directory modes are `0700` and `config` / `known_hosts` file modes are `0600`. Helper correctness must not depend on whether OpenSSH would otherwise read `$HOME/.ssh/config` or an effective-user home such as `/root/.ssh/config`.
 
@@ -120,7 +116,10 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [test](../crates/wrix-cli/tests/init_config.rs::defaults_and_overrides)
 - `wrix init` writes shared/common Git config that is inherited by a `.loom/integration`-style linked worktree, and that config contains no absolute host deploy-key path, container `/etc/wrix/keys` private-key path, host-only/container-only helper path, or host-only/container-only allowed-signers path.
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::common_config_inherited_by_loom_integration)
-- With `$HOME` and the effective-user home differing, the Git transport helper resolves `WRIX_DEPLOY_KEY` first, `$HOME/.ssh/deploy_keys/<key-name>` second, fails when neither exists, invokes SSH with strict pinned-host-key options without using user SSH config, default identities, or `StrictHostKeyChecking=no`, and leaves any Wrix-created SSH directories at `0700` plus `config` / `known_hosts` files at `0600`.
+- With `$HOME` and the effective-user home differing, the Git transport helper
+  conforms to the credential-resolution, host-verification, and ambient-identity
+  policy owned by `security.md`, and leaves Wrix-created SSH directories at
+  `0700` plus compatibility `config` / `known_hosts` files at `0600`.
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::strict_context_aware_ssh_helper)
 - SSH commit signing is enabled by default; a missing `<key-name>-signing` key fails hard, `--no-sign` disables signing explicitly, and a signed test commit verifies against the generated allowed-signers file.
   [test](../crates/wrix-cli/tests/init_signing.rs::signing_required_by_default)
@@ -141,9 +140,12 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
 4. **Optional config** — `wrix.toml` is read only when present and stores override policy only. Defaults must not require a tracked Wrix config file. `--no-hooks` is the invocation-scoped form of `wrix.init.prek_hooks = false`.
 5. **Init apply-and-verify** — `wrix init` applies repository-local Git transport, signing, hook, and known-host state, then verifies the result before exiting success.
 6. **Common worktree inheritance** — init writes shared/common Git config when possible so linked worktrees, including `.loom/integration`, inherit Wrix transport/signing/hook policy.
-7. **Context-aware key resolution** — Git helpers resolve env-provided keys first, `$HOME/.ssh/deploy_keys/` keys second, and otherwise fail. Signing keys follow the same rule with `-signing` suffix.
+7. **Context-aware key resolution** — Git helpers implement the credential
+   resolution and ambient-identity policy owned by `security.md`.
 8. **Signing default** — SSH commit signing is enabled by default. Missing signing material is a hard failure unless the operator disables signing explicitly by flag or config.
-9. **Strict GitHub SSH** — Git transport uses pinned GitHub host keys, strict host-key checking, batch mode, and identities-only SSH. It never uses trust-on-first-use or ambient user SSH identities.
+9. **Strict GitHub SSH** — Git transport implements the host-verification
+   policy owned by `security.md`; this spec owns helper installation and
+   verification through `wrix init`.
 10. **Deploy provisioning** — `wrix init --deploy` provisions a deploy key and, unless signing is disabled, a signing key for GitHub repositories, then runs the normal init verification path. `--deploy` is invalid under `--offline` or `wrix.init.online_verify = false` because provisioning requires remote API calls.
 11. **Offline mode** — `--offline` and `wrix.init.online_verify = false` disable network/API verification only; local config, key, permission, signing, helper, and hook checks still run, but offline success does not assert GitHub reachability or repository authorization.
 
