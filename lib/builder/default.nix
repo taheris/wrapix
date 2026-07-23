@@ -18,6 +18,7 @@
 
 let
   shellLib = import ../util/shell.nix { inherit pkgs; };
+  builderSystem = linuxPkgs.stdenv.hostPlatform.system;
 
   builderImage = import ../sandbox/builder/image.nix {
     pkgs = linuxPkgs;
@@ -69,6 +70,7 @@ let
       BUILDER_IMAGE_SOURCE="${builderImage.source}"
       BUILDER_IMAGE_SOURCE_KIND="${builderImage.source_kind}"
       BUILDER_IMAGE_DIGEST="${builderImage.digest}"
+      BUILDER_SYSTEM="${builderSystem}"
       SSH_PORT=2222
 
       usage() {
@@ -151,6 +153,34 @@ let
         fi
       }
 
+      builder_ssh_ready() {
+        ssh \
+          -p "$SSH_PORT" \
+          -i "$CLIENT_KEY" \
+          -o BatchMode=yes \
+          -o ConnectTimeout=1 \
+          -o IdentitiesOnly=yes \
+          -o StrictHostKeyChecking=yes \
+          -o UserKnownHostsFile="$CLIENT_KNOWN_HOSTS" \
+          builder@localhost true >/dev/null 2>&1
+      }
+
+      wait_for_builder_services() {
+        local i
+
+        for i in {1..120}; do
+          if container exec "$CONTAINER_NAME" pgrep -x nix-daemon >/dev/null 2>&1 && builder_ssh_ready; then
+            return 0
+          fi
+          if [[ "$i" -lt 120 ]]; then
+            sleep 1
+          fi
+        done
+
+        echo "Error: nix-daemon and SSH did not become ready within 120 seconds" >&2
+        cleanup_container "$CONTAINER_NAME"
+        return 1
+      }
 
       builder_image_digest() {
         local digest_source="$BUILDER_IMAGE_DIGEST"
@@ -409,15 +439,7 @@ let
           "$BUILDER_IMAGE"
 
         echo "Waiting for services to start..."
-        for i in {1..120}; do
-          if container exec "$CONTAINER_NAME" pgrep -x nix-daemon >/dev/null 2>&1; then
-            break
-          fi
-          if [[ "$i" -eq 120 ]]; then
-            echo "Warning: nix-daemon did not start within 120 seconds"
-          fi
-          sleep 1
-        done
+        wait_for_builder_services
 
         echo ""
         echo "Builder started successfully!"
@@ -497,35 +519,22 @@ let
         cat <<NIXCONFIG
     # Add to nix-darwin configuration:
 
-    # Run wrix-builder setup before evaluating this module; setup installs:
-    #   $SYSTEM_CLIENT_KEY
-    #   $SYSTEM_HOST_KEY
+    # Run wrix-builder setup before using this module's builder.
 
     {
-      environment.etc."ssh/ssh_config.d/100-wrix-builder.conf".text = '''
-        Host wrix-builder
-          Hostname localhost
-          Port 2222
-          User builder
-          HostKeyAlias wrix-builder
-          IdentityFile $SYSTEM_CLIENT_KEY
-      ''';
-
       nix.buildMachines = [
         {
-          hostName = "wrix-builder";
-          systems = [ "aarch64-linux" ];
+          hostName = "localhost:2222";
+          systems = [ "$BUILDER_SYSTEM" ];
           protocol = "ssh-ng";
+          sshUser = "builder";
+          sshKey = "$SYSTEM_CLIENT_KEY";
           maxJobs = 4;
+          speedFactor = 1;
           supportedFeatures = [ "big-parallel" "benchmark" ];
-          publicHostKey = builtins.readFile $SYSTEM_HOST_KEY;
         }
       ];
     }
-
-    # Or import runtime paths from wrix flake:
-    # sshKey: inputs.wrix.packages.<system>.wrix-builder.sshKey
-    # publicHostKeyFile: inputs.wrix.packages.<system>.wrix-builder.publicHostKeyFile
     NIXCONFIG
       }
 

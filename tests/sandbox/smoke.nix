@@ -346,6 +346,7 @@ in
           pkgs.gnugrep
           pkgs.gnutar
           jq
+          pkgs.nix
           pkgs.openssh
         ];
       }
@@ -353,9 +354,16 @@ in
         echo "Checking builder key structure..."
         for test_name in \
           test_fake_container_inspect_matches_apple_shape \
+          test_fake_container_models_process_readiness \
+          test_fake_ssh_models_service_readiness \
           test_generates_per_user_ed25519_material \
           test_builder_cleanup_is_wrix_scoped \
           test_setup_routes_parses_spaced_apple_network_json \
+          test_config_flake_evaluates_without_impure_host_reads \
+          test_config_uses_native_linux_builder_system \
+          test_config_uses_setup_installed_ssh_identity \
+          test_start_fails_when_nix_daemon_is_unavailable \
+          test_start_fails_when_ssh_is_unavailable \
           test_preserves_existing_private_keys; do
           WRIX_BUILDER_BIN="${wrixBuilder}/bin/wrix-builder" \
             REPO_ROOT="${../..}" \

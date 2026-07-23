@@ -1,10 +1,10 @@
 # Linux Builder
 
-Remote Nix builder running in an Apple `container` VM on macOS, exposed via `ssh-ng://` so the host nix-daemon can dispatch `aarch64-linux` builds without leaving the local machine.
+Remote Nix builder running in an Apple `container` VM on macOS, exposed via `ssh-ng://` so the host nix-daemon can dispatch native-architecture Linux builds without leaving the local machine.
 
 ## Problem Statement
 
-macOS users need `aarch64-linux` builds for container images, cross-platform CI, and Linux-only code paths. Apple Silicon can run Linux VMs efficiently, but wiring a Nix remote builder (persistent store, SSH keys, route configuration, nix-darwin integration) by hand is fiddly. The Linux Builder packages all of that as a single `wrix-builder` CLI.
+macOS users need Linux builds for container images, cross-platform CI, and Linux-only code paths. Macs can run same-architecture Linux VMs efficiently, but wiring a Nix remote builder (persistent store, SSH keys, route configuration, nix-darwin integration) by hand is fiddly. The Linux Builder packages all of that as a single `wrix-builder` CLI.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ nix-daemon                         sshd (:22)
 ~/.local/share/wrix/builder-nix/ ◄───┘
 ```
 
-The builder runs under Apple's `container` CLI (Virtualization.framework microVM, same boundary class as wrix sandboxes on macOS — see `specs/security.md`). `/nix` is bind-mounted from `~/.local/share/wrix/builder-nix/` so the store persists across container restarts. SSH host and client keys live next to the store under `builder-keys/`.
+The builder runs under Apple's `container` CLI (Virtualization.framework microVM, same boundary class as wrix sandboxes on macOS — see `specs/security.md`). Its image system follows the macOS host architecture: `aarch64-linux` on Apple Silicon and `x86_64-linux` on Intel. `/nix` is bind-mounted from `~/.local/share/wrix/builder-nix/` so the store persists across container restarts. SSH host and client keys live next to the store under `builder-keys/`.
 
 ### Trust Model
 
@@ -55,13 +55,13 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 
 ## Setup Process
 
-1. `wrix-builder start` creates the container with the VirtioFS `/nix` mount; first start copies `/nix-image/*` to initialize the store
-2. `wrix-builder setup` adds the host route and SSH `known_hosts` entry (sudo required)
-3. User adds `builders = ssh-ng://builder@localhost:2222 aarch64-linux` to `~/.config/nix/nix.conf` (or runs the snippet from `wrix-builder config` in a nix-darwin module)
+1. `wrix-builder start` exports the bootstrap image's initial `/nix` through a temporary container on first use, then creates the builder with the persistent VirtioFS `/nix` mount
+2. `wrix-builder setup` adds the host route, installs the client identity under `/etc/nix`, and adds the SSH host key to root's `known_hosts` (sudo required)
+3. User adds `builders = ssh-ng://builder@localhost:2222 <native-linux-system> /etc/nix/wrix_builder_ed25519 4 1 big-parallel,benchmark` to `~/.config/nix/nix.conf` or uses the pure nix-darwin module printed by `wrix-builder config`
 
 ## Success Criteria
 
-- The `wrix-builder` integration suite passes on macOS 26+ (start, status, SSH, nix-daemon, remote `nixpkgs#hello` build, store persistence across `stop`/`start`, `config` snippet); skips with exit 77 on non-Darwin or older macOS
+- The `wrix-builder` integration suite passes on macOS 26+ (`start` waits for nix-daemon and authenticated SSH, status, remote `nixpkgs#hello` build using the generated native-system configuration, store persistence across `stop`/`start`, pure `config` snippet evaluation); skips with exit 77 on non-Darwin or older macOS
   [system](verify:linux-builder.integration)
 - sshd inside the container has `PasswordAuthentication no` and binds the listener to `127.0.0.1`
   [check](test-ci:test-linux-builder-sshd-hardening)
@@ -84,7 +84,7 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 3. **SSH access** — sshd listens on 22 inside the container; the Apple `container` CLI forwards `127.0.0.1:2222` on the host to it. Authentication is key-based only.
 4. **Route and known_hosts setup** — `wrix-builder setup` runs sudo-required host configuration so the nix-daemon can reach the listener and trust the host key.
 5. **Key management** — host and client SSH keys are generated on first run, stored under `~/.local/share/wrix/builder-keys/`, and never regenerated unless the user opts in.
-6. **nix-darwin integration** — `wrix-builder config` emits the buildMachines snippet for use in nix-darwin modules.
+6. **nix-darwin integration** — `wrix-builder config` emits a pure buildMachines snippet for the native Linux system, using the identity installed by `wrix-builder setup`.
 
 ### Non-Functional
 
@@ -94,7 +94,7 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
 
 ## Out of Scope
 
-- `x86_64-linux` builds (would require emulation)
+- Cross-architecture or emulated Linux builds
 - Multi-user builder access
 - Remote builders over network (localhost only)
 - Linux-host equivalents (the builder is the macOS workaround for cross-platform builds; Linux hosts build natively)

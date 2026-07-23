@@ -328,6 +328,9 @@ JSON
     fi
     case "$3" in
       pgrep)
+        if [[ "${5:-}" == "${WRIX_BUILDER_FAKE_MISSING_PROCESS:-}" ]]; then
+          exit 1
+        fi
         exit 0
         ;;
       tar)
@@ -380,6 +383,18 @@ set -euo pipefail
 exit 0
 SLEEP
   chmod +x "$bin_dir/sleep"
+
+  printf '#!%s\n' "$bash_bin" >"$bin_dir/ssh"
+  cat >>"$bin_dir/ssh" <<'SSH'
+set -euo pipefail
+
+log_file="${WRIX_BUILDER_FAKE_LOG:?}"
+printf 'ssh|%s\n' "$*" >>"$log_file"
+if [[ "${WRIX_BUILDER_FAKE_SSH_UNAVAILABLE:-false}" == true ]]; then
+  exit 255
+fi
+SSH
+  chmod +x "$bin_dir/ssh"
 
   printf '#!%s\n' "$bash_bin" >"$bin_dir/route"
   cat >>"$bin_dir/route" <<'ROUTE'
@@ -500,6 +515,7 @@ run_fake_container() {
   WRIX_BUILDER_FAKE_STATE="$test_root/state" \
     WRIX_BUILDER_FAKE_LOG="$test_root/container.log" \
     WRIX_BUILDER_FAKE_TAR_ROOT="$test_root/tar-root" \
+    WRIX_BUILDER_FAKE_MISSING_PROCESS="${WRIX_BUILDER_FAKE_MISSING_PROCESS:-}" \
     "$test_root/bin/container" "$@"
 }
 
@@ -522,6 +538,8 @@ run_builder() {
     WRIX_BUILDER_FAKE_STATE="$test_root/state" \
     WRIX_BUILDER_FAKE_LOG="$test_root/container.log" \
     WRIX_BUILDER_FAKE_TAR_ROOT="$test_root/tar-root" \
+    WRIX_BUILDER_FAKE_MISSING_PROCESS="${WRIX_BUILDER_FAKE_MISSING_PROCESS:-}" \
+    WRIX_BUILDER_FAKE_SSH_UNAVAILABLE="${WRIX_BUILDER_FAKE_SSH_UNAVAILABLE:-false}" \
     WRIX_BUILDER_SSH_KEYGEN="$keygen_bin" \
     WRIX_BUILDER_BASE64="$base64_bin" \
     WRIX_BUILDER_SKOPEO="$test_root/bin/skopeo" \
@@ -584,6 +602,42 @@ assert_file_lacks() {
   fi
 }
 
+expected_linux_system() {
+  local machine
+
+  machine="$(uname -m)"
+  case "$machine" in
+    arm64 | aarch64)
+      printf 'aarch64-linux\n'
+      ;;
+    x86_64)
+      printf 'x86_64-linux\n'
+      ;;
+    *)
+      fail "unsupported test machine architecture: $machine"
+      ;;
+  esac
+}
+
+evaluate_builder_config() {
+  local builder
+  local config_dir="$1"
+
+  require_command nix
+  builder="$(build_wrix_builder)"
+  mkdir -p "$config_dir/home"
+  "$builder" config >"$config_dir/builder-config.nix"
+  cat >"$config_dir/flake.nix" <<'NIX'
+{
+  outputs = { ... }: {
+    builderConfig = import ./builder-config.nix;
+  };
+}
+NIX
+  HOME="$config_dir/home" nix --extra-experimental-features "nix-command flakes" \
+    eval --json --no-write-lock-file "path:$config_dir#builderConfig"
+}
+
 test_fake_container_inspect_matches_apple_shape() {
   local inspect_output
   local test_root="$TEST_TMP/inspect-contract"
@@ -604,6 +658,30 @@ test_fake_container_inspect_matches_apple_shape() {
   fi
   [[ "$inspect_output" == *$'\n'* ]] \
     || fail "fake container inspect output is not pretty-printed like Apple container"
+}
+
+test_fake_container_models_process_readiness() {
+  local test_root="$TEST_TMP/process-readiness-contract"
+
+  prepare_builder_fixture "$test_root"
+  run_fake_container "$test_root" run --name wrix-builder fake-image >/dev/null
+  run_fake_container "$test_root" exec wrix-builder pgrep -x nix-daemon
+  if WRIX_BUILDER_FAKE_MISSING_PROCESS=nix-daemon \
+    run_fake_container "$test_root" exec wrix-builder pgrep -x nix-daemon; then
+    fail "fake container reported a configured missing process as ready"
+  fi
+}
+
+test_fake_ssh_models_service_readiness() {
+  local test_root="$TEST_TMP/ssh-readiness-contract"
+
+  prepare_builder_fixture "$test_root"
+  WRIX_BUILDER_FAKE_LOG="$test_root/container.log" "$test_root/bin/ssh" builder@localhost true
+  if WRIX_BUILDER_FAKE_LOG="$test_root/container.log" \
+    WRIX_BUILDER_FAKE_SSH_UNAVAILABLE=true \
+    "$test_root/bin/ssh" builder@localhost true; then
+    fail "fake SSH reported a configured unavailable service as ready"
+  fi
 }
 
 test_generates_per_user_ed25519_material() {
@@ -749,6 +827,72 @@ test_setup_routes_parses_spaced_apple_network_json() {
     "builder route setup did not add the upper vmnet split route"
 }
 
+test_config_flake_evaluates_without_impure_host_reads() {
+  evaluate_builder_config "$TEST_TMP/config-pure" >/dev/null
+}
+
+test_config_uses_native_linux_builder_system() {
+  local config_json
+  local expected_system
+
+  config_json="$(evaluate_builder_config "$TEST_TMP/config-system")"
+  expected_system="$(expected_linux_system)"
+  if ! jq -e --arg expected_system "$expected_system" \
+    '.nix.buildMachines[0].systems == [$expected_system]' <<<"$config_json" >/dev/null; then
+    fail "builder config does not advertise native system $expected_system"
+  fi
+}
+
+test_config_uses_setup_installed_ssh_identity() {
+  local config_json
+
+  config_json="$(evaluate_builder_config "$TEST_TMP/config-identity")"
+  if ! jq -e '
+    .nix.buildMachines[0] as $machine
+    | $machine.sshUser == "builder"
+      and $machine.sshKey == "/etc/nix/wrix_builder_ed25519"
+      and ($machine | has("publicHostKey") | not)
+  ' <<<"$config_json" >/dev/null; then
+    fail "builder config does not use the setup-installed SSH identity"
+  fi
+}
+
+test_start_fails_when_nix_daemon_is_unavailable() {
+  local output
+  local test_root="$TEST_TMP/nix-daemon-unavailable"
+
+  prepare_builder_fixture "$test_root"
+  if output="$(WRIX_BUILDER_FAKE_MISSING_PROCESS=nix-daemon run_builder "$test_root" start 2>&1)"; then
+    fail "wrix-builder start succeeded without nix-daemon"
+  fi
+  [[ "$output" == *"Error: nix-daemon and SSH did not become ready"* ]] \
+    || fail "wrix-builder start did not report service readiness failure"
+  [[ "$output" != *"Builder started successfully!"* ]] \
+    || fail "wrix-builder start reported success without nix-daemon"
+  assert_file_contains \
+    "$test_root/container.log" \
+    "container|rm wrix-builder" \
+    "wrix-builder start did not clean up after nix-daemon readiness failure"
+}
+
+test_start_fails_when_ssh_is_unavailable() {
+  local output
+  local test_root="$TEST_TMP/ssh-unavailable"
+
+  prepare_builder_fixture "$test_root"
+  if output="$(WRIX_BUILDER_FAKE_SSH_UNAVAILABLE=true run_builder "$test_root" start 2>&1)"; then
+    fail "wrix-builder start succeeded without SSH"
+  fi
+  [[ "$output" == *"Error: nix-daemon and SSH did not become ready"* ]] \
+    || fail "wrix-builder start did not report service readiness failure"
+  [[ "$output" != *"Builder started successfully!"* ]] \
+    || fail "wrix-builder start reported success without SSH"
+  assert_file_contains \
+    "$test_root/container.log" \
+    "container|rm wrix-builder" \
+    "wrix-builder start did not clean up after SSH readiness failure"
+}
+
 test_preserves_existing_private_keys() {
   local test_root="$TEST_TMP/preserve"
   local keys_dir="$test_root/home/.local/share/wrix/builder-keys"
@@ -797,10 +941,17 @@ main() {
   fi
 
   run_one test_fake_container_inspect_matches_apple_shape
+  run_one test_fake_container_models_process_readiness
+  run_one test_fake_ssh_models_service_readiness
   run_one test_generates_per_user_ed25519_material
   run_one test_loads_image_through_source_kind_contract
   run_one test_builder_cleanup_is_wrix_scoped
   run_one test_setup_routes_parses_spaced_apple_network_json
+  run_one test_config_flake_evaluates_without_impure_host_reads
+  run_one test_config_uses_native_linux_builder_system
+  run_one test_config_uses_setup_installed_ssh_identity
+  run_one test_start_fails_when_nix_daemon_is_unavailable
+  run_one test_start_fails_when_ssh_is_unavailable
   run_one test_preserves_existing_private_keys
 }
 

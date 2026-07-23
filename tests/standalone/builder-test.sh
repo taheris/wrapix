@@ -32,33 +32,69 @@ run_builder_setup() {
   fi
 }
 
+expected_linux_system() {
+  local machine
+
+  machine="$(uname -m)"
+  case "$machine" in
+    arm64 | aarch64)
+      printf 'aarch64-linux\n'
+      ;;
+    x86_64)
+      printf 'x86_64-linux\n'
+      ;;
+    *)
+      echo "FAIL: Unsupported macOS architecture: $machine" >&2
+      return 1
+      ;;
+  esac
+}
+
 assert_builder_config_output() {
   local config_file="$1"
-  local assertion_file="$2"
+  local flake_file="$2"
+  local config_dir
+  local config_json
+  local expected_system
 
-  cat >"$assertion_file" <<NIX
-let
-  module = import $config_file;
-  machine = builtins.head module.nix.buildMachines;
-  sshConfig = module.environment.etc."ssh/ssh_config.d/100-wrix-builder.conf".text;
-in
-  assert builtins.isAttrs module;
-  assert builtins.isAttrs module.environment.etc;
-  assert builtins.isString sshConfig;
-  assert sshConfig != "";
-  assert builtins.isList module.nix.buildMachines;
-  assert builtins.length module.nix.buildMachines == 1;
-  assert machine.hostName == "wrix-builder";
-  assert machine.protocol == "ssh-ng";
-  assert machine.systems == [ "aarch64-linux" ];
-  assert machine.maxJobs == 4;
-  assert machine.supportedFeatures == [ "big-parallel" "benchmark" ];
-  assert machine ? publicHostKey;
-  true
+  config_dir="$(dirname "$config_file")"
+  mkdir -p "$config_dir/home"
+  cat >"$flake_file" <<'NIX'
+{
+  outputs = { ... }: {
+    builderConfig = import ./builder-config.nix;
+  };
+}
 NIX
 
-  nix-instantiate --parse "$config_file" >/dev/null
-  nix-instantiate --eval --strict "$assertion_file" >/dev/null
+  config_json="$(HOME="$config_dir/home" \
+    nix --extra-experimental-features "nix-command flakes" \
+    eval --json --no-write-lock-file "path:$config_dir#builderConfig")"
+  expected_system="$(expected_linux_system)"
+  if ! jq -e --arg expected_system "$expected_system" '
+    .nix.buildMachines[0] as $machine
+    | (.nix.buildMachines | length) == 1
+      and $machine.hostName == "localhost:2222"
+      and $machine.protocol == "ssh-ng"
+      and $machine.systems == [$expected_system]
+      and $machine.sshUser == "builder"
+      and $machine.sshKey == "/etc/nix/wrix_builder_ed25519"
+      and $machine.maxJobs == 4
+      and $machine.speedFactor == 1
+      and $machine.supportedFeatures == ["big-parallel", "benchmark"]
+      and ($machine | has("publicHostKey") | not)
+  ' <<<"$config_json" >/dev/null; then
+    jq . <<<"$config_json" >&2
+    return 1
+  fi
+  printf '%s\n' "$config_json"
+}
+
+builder_spec_from_config() {
+  jq -r '
+    .nix.buildMachines[0]
+    | "\(.protocol)://\(.sshUser)@\(.hostName) \(.systems | join(",")) \(.sshKey) \(.maxJobs) \(.speedFactor) \(.supportedFeatures | join(","))"
+  '
 }
 
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" # best-effort: allow direct script runs outside a git checkout.
@@ -161,26 +197,45 @@ else
   FAILED=1
 fi
 
-# Test 7: Remote build test
+# Test 7: Config output
 echo ""
-echo "Test 7: Remote build (nixpkgs#hello)"
-SYSTEM_CLIENT_KEY="/etc/nix/wrix_builder_ed25519"
-REMOTE_BUILD_OUTPUT="$TMP_DIR/remote-build.log"
-if nix build \
-  --builders "ssh-ng://builder@localhost:2222 aarch64-linux $SYSTEM_CLIENT_KEY 4 1" \
-  --max-jobs 0 \
-  --no-link \
-  nixpkgs#hello >"$REMOTE_BUILD_OUTPUT" 2>&1; then
-  echo "  PASS: Remote build succeeded"
+echo "Test 7: Config command"
+CONFIG_FILE="$TMP_DIR/builder-config.nix"
+CONFIG_FLAKE="$TMP_DIR/flake.nix"
+CONFIG_JSON=""
+if "$BUILDER" config >"$CONFIG_FILE" && CONFIG_JSON="$(assert_builder_config_output "$CONFIG_FILE" "$CONFIG_FLAKE")"; then
+  echo "  PASS: Config is a pure nix-darwin module for the native builder"
 else
-  echo "  FAIL: Remote build failed"
-  print_output "$REMOTE_BUILD_OUTPUT"
+  echo "  FAIL: Config command did not output a pure nix-darwin module"
+  print_output "$CONFIG_FILE"
   FAILED=1
 fi
 
-# Test 8: Store persistence across restart
+# Test 8: Remote build test
 echo ""
-echo "Test 8: Store persistence"
+echo "Test 8: Remote build (nixpkgs#hello)"
+REMOTE_BUILD_OUTPUT="$TMP_DIR/remote-build.log"
+if [[ -n "$CONFIG_JSON" ]]; then
+  BUILDER_SPEC="$(builder_spec_from_config <<<"$CONFIG_JSON")"
+  if nix build \
+    --builders "$BUILDER_SPEC" \
+    --max-jobs 0 \
+    --no-link \
+    nixpkgs#hello >"$REMOTE_BUILD_OUTPUT" 2>&1; then
+    echo "  PASS: Remote build succeeded"
+  else
+    echo "  FAIL: Remote build failed"
+    print_output "$REMOTE_BUILD_OUTPUT"
+    FAILED=1
+  fi
+else
+  echo "  FAIL: Remote build skipped because builder config was invalid"
+  FAILED=1
+fi
+
+# Test 9: Store persistence across restart
+echo ""
+echo "Test 9: Store persistence"
 echo "  Building a test derivation..."
 PERSISTENCE_BUILD_OUTPUT="$TMP_DIR/persistence-build.log"
 if TEST_STORE_PATH=$("$BUILDER" ssh "nix build --no-link --print-out-paths nixpkgs#hello" 2>"$PERSISTENCE_BUILD_OUTPUT"); then
@@ -214,19 +269,6 @@ if TEST_STORE_PATH=$("$BUILDER" ssh "nix build --no-link --print-out-paths nixpk
 else
   echo "  FAIL: Could not build test derivation"
   print_output "$PERSISTENCE_BUILD_OUTPUT"
-  FAILED=1
-fi
-
-# Test 9: Config output
-echo ""
-echo "Test 9: Config command"
-CONFIG_FILE="$TMP_DIR/builder-config.nix"
-CONFIG_ASSERTION="$TMP_DIR/builder-config-assertion.nix"
-if "$BUILDER" config >"$CONFIG_FILE" && assert_builder_config_output "$CONFIG_FILE" "$CONFIG_ASSERTION"; then
-  echo "  PASS: Config outputs a parseable nix-darwin module snippet"
-else
-  echo "  FAIL: Config command did not output a valid nix-darwin module snippet"
-  print_output "$CONFIG_FILE"
   FAILED=1
 fi
 
