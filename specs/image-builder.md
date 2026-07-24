@@ -144,6 +144,8 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
   [check](test-ci:test-image-digest-no-tar)
 - Each profile image is a four-tier graph — leaf atop `wrix-agent-<agent>-<name>`, atop `wrix-stable-profile-<name>`, atop `wrix-base-image` — with Linux represented as descriptor layers and Darwin represented as a tar-loadable fallback
   [check](test-ci:test-image-tier-graph)
+- Every derivation in `profile.packages`, including fixed core packages and downstream-appended packages, is materialized in the emitted image's `/nix/store` layers
+  [check](test-ci:test-profile-packages-bundled)
 - A deterministic layer-membership verifier proves each non-base profile-image tier removes or skips the union of all lower tiers' closures, so no tier re-emits a store path a lower tier already ships
   [check](test-ci:test-image-tier-membership)
 - `wrix-base-image`'s derivation hash is invariant under changes to profile-level inputs — `profile.packages`, `profile.env`, MCP configs, the merged Claude settings JSON, and the agent runtime selection

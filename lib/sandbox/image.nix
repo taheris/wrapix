@@ -451,11 +451,12 @@ let
           ];
         }
         ''
-          export HOME=$TMPDIR
+          set -euo pipefail
+          export HOME="$TMPDIR"
           skopeo --insecure-policy copy --quiet \
             "docker-archive:${rawImage}" "oci:$TMPDIR/image-oci:latest"
           skopeo inspect --raw "oci:$TMPDIR/image-oci:latest" \
-            | jq -r '.config.digest' > $out
+            | jq -r '.config.digest' > "$out"
         ''
     else
       descriptorDigestFile;

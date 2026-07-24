@@ -241,6 +241,7 @@ let
     (mkCiApp sandboxImageChecks.imageCaCertificatesTest "test-image-ca-certificates")
     (mkCiApp sandboxImageChecks.imageEntrypointCommandTest "test-image-entrypoint-command")
     (mkCiApp sandboxImageChecks.imageAgentMarkerTest "test-image-agent-marker")
+    (mkCiApp sandboxImageChecks.profilePackagesBundledTest "test-profile-packages-bundled")
     (mkCiApp sandboxImageChecks.imageTierMembershipTest "test-image-tier-membership")
     (mkCiApp sandboxImageChecks.wrixImagesSourceKindTest "test-wrix-images-source-kind")
     (mkCiApp sandboxImageChecks.wrixImageLabelsTest "test-wrix-image-labels")
@@ -592,6 +593,12 @@ in
       meta.description = "Verify profile images declare the selected agent in /etc/wrix/image-agent.";
       type = "app";
       program = "${sandboxImageChecks.imageAgentMarkerTest}/bin/test-image-agent-marker";
+    };
+
+    profile-packages-bundled = {
+      meta.description = "Verify profile package derivations are materialized in emitted image layers.";
+      type = "app";
+      program = "${sandboxImageChecks.profilePackagesBundledTest}/bin/test-profile-packages-bundled";
     };
 
     image-tier-membership = {

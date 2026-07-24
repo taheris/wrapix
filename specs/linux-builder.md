@@ -30,7 +30,7 @@ The container boundary is the isolation primitive; Nix's internal sandbox is dis
 
 ### Image-source contract
 
-The `wrix-builder` bootstrap image is a wrix-managed support image consumed by the macOS builder. It exposes the shared `{ ref, source, source_kind, digest }` image-source contract and retains wrix ownership labels. The packaged CLI uses the contract fields to choose the source-kind load transport before invoking Apple's `container image load`; this spec owns that lifecycle and persistent-store seeding, while `image-builder.md` owns the source-kind metadata and label schema.
+The `wrix-builder` bootstrap image follows the support-image metadata and label contract owned by `image-builder.md`. The packaged CLI uses that metadata to choose the load transport before invoking Apple's `container image load`; this spec owns the lifecycle and persistent-store seeding.
 
 ## CLI Surface
 
@@ -69,9 +69,6 @@ The `wrix-builder` bootstrap image is a wrix-managed support image consumed by t
   [system](verify:linux-builder.key-material-generation)
 - Re-running builder key-material initialization preserves existing private keys
   [system](verify:linux-builder.key-material-idempotent)
-- The `wrix-builder` bootstrap image exposes the shared image-source contract while retaining wrix ownership labels
-  [check](test-ci:test-linux-builder-image-source-kind)
-
 - `wrix-builder start` routes the bootstrap image through the `source_kind` load transport before invoking Apple's `container image load`
   [system](test-ci:test-linux-builder-source-kind-load-transport)
 

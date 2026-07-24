@@ -17,7 +17,6 @@ let
     concatStringsSep
     elem
     filterAttrs
-    hasAttr
     mapAttrsToList
     optionalString
     optionals
@@ -115,6 +114,38 @@ let
             echo "FAIL: $label archive did not contain manifest.json" >&2
             exit 1
         fi
+    }
+
+    prepare_image_artifact() {
+        local label="$1"
+        local source_kind="$2"
+        local source="$3"
+        local dest="$4"
+        local layers="$5"
+        local config_digest config_file layout manifest_digest manifest_file
+        mkdir -p "$dest"
+        case "$source_kind" in
+            nix-descriptor)
+                layout=$(jq -er '.oci_layout' "$source")
+                manifest_digest=$(jq -er '.manifests[0].digest' "$layout/index.json")
+                manifest_file="$layout/blobs/sha256/''${manifest_digest#sha256:}"
+                config_digest=$(jq -er '.config.digest' "$manifest_file")
+                ln -s "$layout/blobs" "$dest/blobs"
+                ln -s "$layout/blobs/sha256/''${config_digest#sha256:}" "$dest/config.json"
+                jq -r '.layers[].digest | sub("^sha256:"; "blobs/sha256/")' \
+                    "$manifest_file" >"$layers"
+                ;;
+            docker-archive)
+                unpack_archive "$label" "$source" "$dest"
+                config_file=$(jq -er '.[0].Config' "$dest/manifest.json")
+                ln -s "$config_file" "$dest/config.json"
+                write_layers "$dest" "$layers"
+                ;;
+            *)
+                echo "FAIL: $label has unsupported source kind: $source_kind" >&2
+                exit 1
+                ;;
+        esac
     }
 
     materialize_archive() {
@@ -1099,29 +1130,35 @@ let
 
   imageTierGraphTest = pkgs.writeShellApplication {
     name = "test-image-tier-graph";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnutar
+      pkgs.jq
+    ];
     text = ''
-      source_kind='${defaultImage.source_kind}'
-      base='${discardContext defaultImage.baseImage}'
-      stable='${discardContext defaultImage.stableProfileImage}'
-      agent='${discardContext defaultImage.agentImage}'
-      leaf='${discardContext defaultImage}'
+      ${archiveShellHelpers}
 
+      source_kind='${defaultImage.source_kind}'
       if [[ "$source_kind" != "${expectedImageSourceKind}" ]]; then
           echo "FAIL: expected source_kind=${expectedImageSourceKind}, got $source_kind" >&2
           exit 1
       fi
-      for tier in "$base" "$stable" "$agent" "$leaf"; do
-          if [[ "$tier" != /nix/store/* ]]; then
-              echo "FAIL: tier path is not store-resident: $tier" >&2
-              exit 1
-          fi
-      done
-      if [[ "$stable" != *wrix-stable-profile-* || "$agent" != *wrix-agent-* || "$leaf" != *wrix-* ]]; then
-          echo "FAIL: tier names do not expose base -> stable-profile -> agent -> leaf graph" >&2
-          exit 1
-      fi
 
-      echo "test-image-tier-graph: PASS"
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      unpack_archive "tier 0" "${defaultImage.baseImage}" "$tmp/tier0"
+      unpack_archive "tier 1" "${defaultImage.stableProfileImage}" "$tmp/tier1"
+      unpack_archive "tier 2" "${defaultImage.agentImage}" "$tmp/tier2"
+      unpack_archive "leaf" "${defaultImage}" "$tmp/leaf"
+      for tier in tier0 tier1 tier2 leaf; do
+          write_layers "$tmp/$tier" "$tmp/$tier.layers"
+      done
+
+      write_owned_layers "tier 1" "$tmp/tier0.layers" "$tmp/tier1.layers" "$tmp/tier1.owned"
+      write_owned_layers "tier 2" "$tmp/tier1.layers" "$tmp/tier2.layers" "$tmp/tier2.owned"
+      write_owned_layers "leaf" "$tmp/tier2.layers" "$tmp/leaf.layers" "$tmp/leaf.owned"
+
+      echo "test-image-tier-graph: PASS (base -> stable-profile -> agent -> leaf layer prefixes verified)"
     '';
   };
 
@@ -1510,72 +1547,52 @@ let
     mapAttrsToList (
       name: expected:
       let
-        labels = expected.image.labels or (throw "${name} image labels are missing");
+        profile = expected.profile or "";
+        agent = expected.agent or "";
       in
       ''
-        check_label "${name}" "wrix.managed" "${labels."wrix.managed" or ""}" "true"
-        check_label "${name}" "wrix.image.kind" "${labels."wrix.image.kind" or ""}" "${expected.kind}"
-      ''
-      + optionalString (expected.kind == "profile") ''
-        check_label "${name}" "wrix.profile.name" "${
-          labels."wrix.profile.name" or ""
-        }" "${expected.profile}"
-        check_label "${name}" "wrix.agent.kind" "${labels."wrix.agent.kind" or ""}" "${expected.agent}"
+        check_artifact_labels "${name}" "${expected.image.source_kind}" "${toString expected.image.source}" "${expected.kind}" "${profile}" "${agent}"
       ''
     ) imageLabelMatrix
   );
-  descriptorLabelChecks = concatStringsSep "\n" (
-    optionals isLinux (
-      mapAttrsToList (
-        name: entry:
-        let
-          inherit (entry) image;
-          inherit (image) labels;
-          source = toString image.source;
-        in
-        ''
-          check_descriptor_label "${name}" "${source}" "wrix.managed" "${labels."wrix.managed"}"
-          check_descriptor_label "${name}" "${source}" "wrix.image.kind" "${labels."wrix.image.kind"}"
-        ''
-        + optionalString (hasAttr "wrix.profile.name" labels) ''
-          check_descriptor_label "${name}" "${source}" "wrix.profile.name" "${labels."wrix.profile.name"}"
-        ''
-        + optionalString (hasAttr "wrix.agent.kind" labels) ''
-          check_descriptor_label "${name}" "${source}" "wrix.agent.kind" "${labels."wrix.agent.kind"}"
-        ''
-      ) sourceKindMatrix
-    )
-  );
   wrixImageLabelsTest = pkgs.writeShellApplication {
     name = "test-wrix-image-labels";
-    runtimeInputs = [ pkgs.jq ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnutar
+      pkgs.jq
+    ];
     text = ''
-      check_label() {
+      ${archiveShellHelpers}
+
+      check_artifact_labels() {
           local name="$1"
-          local key="$2"
-          local actual="$3"
-          local expected="$4"
-          if [[ -z "$actual" || "$actual" != "$expected" ]]; then
-              echo "FAIL: $name label $key=$actual, expected $expected" >&2
+          local source_kind="$2"
+          local source="$3"
+          local expected_kind="$4"
+          local expected_profile="$5"
+          local expected_agent="$6"
+          local image_dir="$tmp/$name"
+          prepare_image_artifact "$name" "$source_kind" "$source" "$image_dir" "$image_dir.layers"
+          if ! jq -e \
+              --arg kind "$expected_kind" \
+              --arg profile "$expected_profile" \
+              --arg agent "$expected_agent" \
+              '(.config.Labels // {}) as $labels |
+               $labels["wrix.managed"] == "true" and
+               $labels["wrix.image.kind"] == $kind and
+               ($profile == "" or $labels["wrix.profile.name"] == $profile) and
+               ($agent == "" or $labels["wrix.agent.kind"] == $agent)' \
+              "$image_dir/config.json" >/dev/null; then
+              echo "FAIL: $name installed OCI config does not carry the expected labels" >&2
+              jq '.config.Labels // {}' "$image_dir/config.json" >&2
               exit 1
           fi
       }
 
-      check_descriptor_label() {
-          local name="$1"
-          local source_path="$2"
-          local key="$3"
-          local expected="$4"
-          local actual
-          actual=$(jq -r --arg key "$key" '.config.labels[$key] // empty' "$source_path")
-          if [[ "$actual" != "$expected" ]]; then
-              echo "FAIL: $name descriptor label $key=$actual, expected $expected" >&2
-              exit 1
-          fi
-      }
-
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
       ${imageLabelChecks}
-      ${descriptorLabelChecks}
 
       echo "test-wrix-image-labels: PASS"
     '';
@@ -1585,14 +1602,21 @@ let
     name = "test-agent-direct-runner";
     runtimeInputs = [
       pkgs.coreutils
+      pkgs.gawk
       pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.jq
     ];
     text = ''
-      closure_file=${defaultImageClosure}/store-paths
+      ${archiveShellHelpers}
 
-      if ! grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$closure_file"; then
-          echo "FAIL: default agent=direct image closure does not contain loom-direct-runner" >&2
-          echo "  closure: $closure_file" >&2
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      prepare_image_artifact "direct" "${defaultImage.source_kind}" "${toString defaultImage.source}" "$tmp/image" "$tmp/image.layers"
+      list_layer_store_paths "$tmp/image" "$tmp/image.layers" >"$tmp/image.paths"
+
+      if ! grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$tmp/image.paths"; then
+          echo "FAIL: emitted agent=direct image does not contain loom-direct-runner" >&2
           exit 1
       fi
 
@@ -1604,16 +1628,23 @@ let
     name = "test-agent-claude-runtime";
     runtimeInputs = [
       pkgs.coreutils
+      pkgs.gawk
       pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.jq
     ];
     text = ''
-      closure_file=${claudeImageClosure}/store-paths
+      ${archiveShellHelpers}
+
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      prepare_image_artifact "claude" "${claudeImage.source_kind}" "${toString claudeImage.source}" "$tmp/image" "$tmp/image.layers"
+      list_layer_store_paths "$tmp/image" "$tmp/image.layers" >"$tmp/image.paths"
       claude_code_path=${claudeCodePkg}
 
-      if ! grep -qxF "$claude_code_path" "$closure_file"; then
-          echo "FAIL: claude-code missing from claude sandbox closure" >&2
+      if ! grep -qxF "$claude_code_path" "$tmp/image.paths"; then
+          echo "FAIL: emitted agent=claude image does not contain claude-code" >&2
           echo "  expected: $claude_code_path" >&2
-          echo "  closure : $closure_file" >&2
           exit 1
       fi
 
@@ -1670,38 +1701,44 @@ let
       }).image;
   };
   prekSurfaceChecks = concatStringsSep "\n" (
-    mapAttrsToList (
-      name: image:
-      let
-        closure = materializedImageClosure image;
-      in
-      ''
-        check_surface "${name}" "${closure}/store-paths" "wrix.prekHooks" "${prekHooksBundle}"
-        check_surface "${name}" "${closure}/store-paths" "wrix.prePushChecks" "${prekWrappers.prePushChecks}"
-        check_surface "${name}" "${closure}/store-paths" "wrix.skipIfMissing" "${prekWrappers.skipIfMissing}"
-      ''
-    ) prekSurfaceImageMatrix
+    mapAttrsToList (name: image: ''
+      check_surfaces "${name}" "${image.source_kind}" "${toString image.source}" "${prekHooksBundle}" "${prekWrappers.prePushChecks}" "${prekWrappers.skipIfMissing}"
+    '') prekSurfaceImageMatrix
   );
   prekHooksClosureTest = pkgs.writeShellApplication {
     name = "test-prek-hooks-closure";
     runtimeInputs = [
       pkgs.coreutils
+      pkgs.gawk
       pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.jq
     ];
     text = ''
-      check_surface() {
+      ${archiveShellHelpers}
+
+      check_surfaces() {
           local image_name="$1"
-          local closure_file="$2"
-          local surface_name="$3"
-          local surface_path="$4"
-          if ! grep -qxF "$surface_path" "$closure_file"; then
-              echo "FAIL: $surface_name not in $image_name profile image closure" >&2
-              echo "  expected: $surface_path" >&2
-              echo "  closure : $closure_file" >&2
-              exit 1
-          fi
+          local source_kind="$2"
+          local source="$3"
+          local hooks="$4"
+          local pre_push="$5"
+          local skip_missing="$6"
+          local image_dir="$tmp/$image_name"
+          local paths="$tmp/$image_name.paths"
+          local surface_path
+          prepare_image_artifact "$image_name" "$source_kind" "$source" "$image_dir" "$image_dir.layers"
+          list_layer_store_paths "$image_dir" "$image_dir.layers" >"$paths"
+          for surface_path in "$hooks" "$pre_push" "$skip_missing"; do
+              if ! grep -qxF "$surface_path" "$paths"; then
+                  echo "FAIL: $surface_path is absent from emitted $image_name image layers" >&2
+                  exit 1
+              fi
+          done
       }
 
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
       ${prekSurfaceChecks}
 
       echo "test-prek-hooks-closure: PASS"
@@ -1986,6 +2023,32 @@ let
     entrypointSh = ../../lib/sandbox/linux/entrypoint.sh;
     claudeConfig = { };
     claudeSettings = { };
+  };
+  profilePackagesBundledTest = pkgs.writeShellApplication {
+    name = "test-profile-packages-bundled";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gawk
+      pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.jq
+    ];
+    text = ''
+      ${archiveShellHelpers}
+
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      prepare_image_artifact "package fixture" "${membershipImage.source_kind}" "${toString membershipImage.source}" "$tmp/image" "$tmp/image.layers"
+      list_layer_store_paths "$tmp/image" "$tmp/image.layers" >"$tmp/image.paths"
+      for package in "${membershipStablePkg}" "${membershipAppendedPkg}"; do
+          if ! grep -qxF "$package" "$tmp/image.paths"; then
+              echo "FAIL: profile package is absent from emitted image layers: $package" >&2
+              exit 1
+          fi
+      done
+
+      echo "test-profile-packages-bundled: PASS"
+    '';
   };
   imageTierMembershipTest = pkgs.writeShellApplication {
     name = "test-image-tier-membership";
@@ -2554,8 +2617,8 @@ let
   # an `agent = "direct"` image carries its runner and NO claude-code, even when
   # the build is handed a real claude-code as agentPkg (the claude branch is
   # simply never selected); an `agent = "claude"` image carries claude-code and
-  # not the direct runner. Built via image.nix directly so the closures are
-  # scannable.
+  # not the direct runner. Built via image.nix directly so the emitted image
+  # artifacts can be inspected without unrelated profile packages.
   agentExclusiveProfile = {
     name = "agentexcl";
     corePackages = [ linuxPkgs.coreutils ];
@@ -2586,63 +2649,67 @@ let
     agentPkg = agentExclusiveRunner;
   };
   agentExclusiveClaude = mkAgentExclusiveImage { agent = "claude"; };
-  agentExclusiveDirectClosure = linuxPkgs.closureInfo { rootPaths = [ agentExclusiveDirect ]; };
-  agentExclusiveClaudeClosure = linuxPkgs.closureInfo { rootPaths = [ agentExclusiveClaude ]; };
   agentExclusiveTest = pkgs.writeShellApplication {
     name = "test-agent-exclusive";
-    runtimeInputs = optionals isLinux [
+    runtimeInputs = [
       pkgs.coreutils
+      pkgs.gawk
       pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.jq
     ];
-    text =
-      if isLinux then
-        ''
-          default_direct_closure=${defaultImageClosure}/store-paths
-          direct_closure=${agentExclusiveDirectClosure}/store-paths
-          claude_closure=${agentExclusiveClaudeClosure}/store-paths
-          claude_code=${claudeCodePkg}
-          pi_agent=${piAgentPkg}
-          runner=${agentExclusiveRunner}
+    text = ''
+      ${archiveShellHelpers}
 
-          if ! grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$default_direct_closure"; then
-              echo "FAIL: default agent=direct image closure does not contain loom-direct-runner" >&2
-              echo "  closure: $default_direct_closure" >&2
-              exit 1
-          fi
-          if grep -qxF "$claude_code" "$default_direct_closure" || grep -qxF "$pi_agent" "$default_direct_closure"; then
-              echo "FAIL: default agent=direct image closure contains a non-selected agent runtime" >&2
-              exit 1
-          fi
+      prepare_paths() {
+          local name="$1"
+          local source_kind="$2"
+          local source="$3"
+          prepare_image_artifact "$name" "$source_kind" "$source" "$tmp/$name" "$tmp/$name.layers"
+          list_layer_store_paths "$tmp/$name" "$tmp/$name.layers" >"$tmp/$name.paths"
+      }
 
-          if ! grep -qxF "$runner" "$direct_closure"; then
-              echo "FAIL: direct runner missing from the agent=direct image closure" >&2
-              echo "  expected: $runner" >&2
-              exit 1
-          fi
-          if grep -qxF "$claude_code" "$direct_closure" || grep -qxF "$pi_agent" "$direct_closure"; then
-              echo "FAIL: custom agent=direct image closure contains a non-selected agent runtime" >&2
-              exit 1
-          fi
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      prepare_paths "default-direct" "${defaultImage.source_kind}" "${toString defaultImage.source}"
+      prepare_paths "custom-direct" "${agentExclusiveDirect.source_kind}" "${toString agentExclusiveDirect.source}"
+      prepare_paths "claude" "${agentExclusiveClaude.source_kind}" "${toString agentExclusiveClaude.source}"
 
-          if ! grep -qxF "$claude_code" "$claude_closure"; then
-              echo "FAIL: claude-code missing from the agent=claude image closure" >&2
-              echo "  expected: $claude_code" >&2
-              exit 1
-          fi
-          if grep -qxF "$runner" "$claude_closure" \
-              || grep -qxF "$pi_agent" "$claude_closure" \
-              || grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$claude_closure"; then
-              echo "FAIL: agent=claude image closure contains a non-selected agent runtime" >&2
-              exit 1
-          fi
+      claude_code=${claudeCodePkg}
+      pi_agent=${piAgentPkg}
+      runner=${agentExclusiveRunner}
 
-          echo "test-agent-exclusive: PASS"
-        ''
-      else
-        ''
-          echo "test-agent-exclusive: skipped on this platform (streamLayeredImage is Linux-only)" >&2
-          exit 0
-        '';
+      if ! grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$tmp/default-direct.paths"; then
+          echo "FAIL: emitted default direct image does not contain loom-direct-runner" >&2
+          exit 1
+      fi
+      if grep -qxF "$claude_code" "$tmp/default-direct.paths" || grep -qxF "$pi_agent" "$tmp/default-direct.paths"; then
+          echo "FAIL: emitted default direct image contains a non-selected agent runtime" >&2
+          exit 1
+      fi
+
+      if ! grep -qxF "$runner" "$tmp/custom-direct.paths"; then
+          echo "FAIL: emitted custom direct image does not contain its runner" >&2
+          exit 1
+      fi
+      if grep -qxF "$claude_code" "$tmp/custom-direct.paths" || grep -qxF "$pi_agent" "$tmp/custom-direct.paths"; then
+          echo "FAIL: emitted custom direct image contains a non-selected agent runtime" >&2
+          exit 1
+      fi
+
+      if ! grep -qxF "$claude_code" "$tmp/claude.paths"; then
+          echo "FAIL: emitted claude image does not contain claude-code" >&2
+          exit 1
+      fi
+      if grep -qxF "$runner" "$tmp/claude.paths" \
+          || grep -qxF "$pi_agent" "$tmp/claude.paths" \
+          || grep -Eq '/nix/store/[a-z0-9]{32}-loom-direct-runner$' "$tmp/claude.paths"; then
+          echo "FAIL: emitted claude image contains a non-selected agent runtime" >&2
+          exit 1
+      fi
+
+      echo "test-agent-exclusive: PASS"
+    '';
   };
 
   agentPkgThreadedRunner = linuxPkgs.writeShellScriptBin "wrix-agentpkg-threaded-runner" ''
@@ -3168,6 +3235,7 @@ in
     imageCaCertificatesTest
     imageEntrypointCommandTest
     imageAgentMarkerTest
+    profilePackagesBundledTest
     imageTierMembershipTest
     wrixImagesSourceKindTest
     wrixImageLabelsTest
