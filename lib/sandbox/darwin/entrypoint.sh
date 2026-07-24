@@ -396,8 +396,7 @@ if [[ -f /workspace/.beads/config.yaml ]]; then
     wrix_install_bd_remote_wrapper
   fi
 
-  # best-effort: files may not exist or not be tracked; restoring them is idempotent cleanup
-  git checkout -- .beads/.gitignore AGENTS.md 2>/dev/null || true
+  git checkout -- .beads/.gitignore 2>/dev/null || true # best-effort: file may be absent or untracked
 fi
 
 # Network setup and the NET_ADMIN drop are complete before this stage begins.

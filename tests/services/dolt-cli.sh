@@ -165,6 +165,9 @@ dest = Path(sys.argv[3])
 setup = workspace / 'git-ssh-setup.sh'
 setup.write_text('#!/usr/bin/env bash\nset -euo pipefail\n', encoding='utf-8')
 setup.chmod(0o755)
+mcp_setup = workspace / 'mcp-manifest.sh'
+mcp_source = source.parent.parent / 'mcp-manifest.sh'
+mcp_setup.write_text(mcp_source.read_text(encoding='utf-8'), encoding='utf-8')
 cap_status = workspace / 'proc-self-status'
 cap_status.write_text(
     'CapInh:\t0000000000000000\n'
@@ -180,6 +183,7 @@ text = source.read_text(encoding='utf-8').replace('/workspace', str(workspace))
 text = text.replace('/proc/self/status', str(cap_status))
 text = text.replace('/run/wrix-network-ready', str(network_ready))
 text = text.replace('. /git-ssh-setup.sh', f'. {shlex.quote(str(setup))}')
+text = text.replace('. /mcp-manifest.sh', f'. {shlex.quote(str(mcp_setup))}')
 dest.write_text(text, encoding='utf-8')
 PY
   chmod +x "$dest_path"
@@ -302,6 +306,41 @@ assert_darwin_does_not_import_jsonl() {
   assert_path_absent "$bd_log"
 }
 
+test_entrypoints_preserve_dirty_agents_documentation() {
+  require_command git
+  require_command jq
+  require_command python3
+
+  local platform workspace entrypoint bd_log stdout_path stderr_path agents_contents
+  for platform in linux darwin; do
+    workspace="$TEST_TMP/$platform-agents-workspace"
+    entrypoint="$TEST_TMP/$platform-agents-entrypoint.sh"
+    bd_log="$TEST_TMP/$platform-agents-bd.log"
+    stdout_path="$TEST_TMP/$platform-agents.out"
+    stderr_path="$TEST_TMP/$platform-agents.err"
+
+    write_beads_files "$workspace" sqlite
+    printf 'dolt/\n' >"$workspace/.beads/.gitignore"
+    printf 'committed documentation\n' >"$workspace/AGENTS.md"
+    git -C "$workspace" init -q -b main
+    git -C "$workspace" add -- .beads/.gitignore AGENTS.md
+    printf 'operator-owned edit\n' >"$workspace/AGENTS.md"
+
+    write_fake_container_tools "$workspace/bin" "$bd_log"
+    rewrite_entrypoint_workspace "$REPO_ROOT/lib/sandbox/$platform/entrypoint.sh" "$workspace" "$entrypoint"
+    if ! run_entrypoint "$entrypoint" "$workspace" "$stdout_path" "$stderr_path"; then
+      fail "$platform entrypoint failed: $(<"$stderr_path")"
+      return 1
+    fi
+
+    agents_contents="$(<"$workspace/AGENTS.md")"
+    if [[ "$agents_contents" != "operator-owned edit" ]]; then
+      fail "$platform entrypoint replaced dirty AGENTS.md content: $agents_contents"
+      return 1
+    fi
+  done
+}
+
 test_no_jsonl_staged() {
   require_command nix
   require_command python3
@@ -323,6 +362,7 @@ test_no_jsonl_staged() {
 }
 
 ALL_TESTS=(
+  test_entrypoints_preserve_dirty_agents_documentation
   test_no_jsonl_staged
 )
 
