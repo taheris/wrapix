@@ -196,10 +196,6 @@ impl Fixture {
         self.beads_worktree().join(".beads/dolt-remote")
     }
 
-    fn remote_dir(&self) -> PathBuf {
-        self.repo.join(".beads/dolt/dolt-remote")
-    }
-
     fn write_bd_fake(&self) -> TestResult {
         write_executable(&self.fake_bin.join("bd"), BD_FAKE)
     }
@@ -499,9 +495,12 @@ fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
     let fixture = Fixture::new("orphaned-worktree")?;
     setup_repo_with_beads_branch(&fixture)?;
     let before = git_stdout(fixture.repo(), &["rev-parse", "origin/beads"])?;
+    fs::create_dir_all(fixture.worktree_remote_dir())?;
+    fs::write(
+        fixture.worktree_remote_dir().join("db.txt"),
+        "canonical remote data\n",
+    )?;
     fs::remove_dir_all(fixture.repo().join(".git/worktrees/beads"))?;
-    fs::create_dir_all(fixture.remote_dir())?;
-    fs::write(fixture.remote_dir().join("db.txt"), "remote data\n")?;
 
     let output = invoke_push(fixture.repo(), &[fixture.fake_bin()], |command| {
         configure_bd(command, &fixture, "success");
@@ -529,6 +528,10 @@ fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
                 .display()
                 .to_string()
         )
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.worktree_remote_dir().join("db.txt"))?,
+        "canonical remote data\n"
     );
     assert_ne!(
         before,

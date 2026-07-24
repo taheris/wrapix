@@ -57,6 +57,7 @@ fn push(stdout: &mut impl Write, stderr: &mut impl Write) -> io::Result<ExitCode
 
     env::set_current_dir(&context.root)?;
     disable_auto_export()?;
+    restore_staged_dolt_remote(&context)?;
     let remote_override = prepare_dolt_origin_remote(&context, stderr)?;
     let sync_result = sync_dolt_remote(stderr);
     let restore_result = remote_override.restore();
@@ -73,7 +74,7 @@ struct Context {
     branch: String,
     worktree: PathBuf,
     worktree_remote_dir: PathBuf,
-    remote_dir: PathBuf,
+    recovery_remote_dir: PathBuf,
 }
 
 impl Context {
@@ -93,13 +94,13 @@ impl Context {
         let branch = read_sync_branch(&root)?;
         let worktree = root.join(".git/beads-worktrees").join(&branch);
         let worktree_remote_dir = worktree.join(".beads/dolt-remote");
-        let remote_dir = root.join(".beads/dolt/dolt-remote");
+        let recovery_remote_dir = root.join(".git/wrix-beads-dolt-remote-recovery");
         Ok(Some(Self {
             root,
             branch,
             worktree,
             worktree_remote_dir,
-            remote_dir,
+            recovery_remote_dir,
         }))
     }
 }
@@ -329,12 +330,6 @@ fn sync_beads_git_branch(
     commit_dirty_worktree(&context.worktree)?;
     run_git_required_in(&context.worktree, &["pull", "--rebase", "--quiet"])?;
 
-    if context.remote_dir.is_dir() {
-        let source = format!("{}/", context.remote_dir.display());
-        let destination = format!("{}/", context.worktree.join(".beads/dolt-remote").display());
-        run_required("rsync", &["-a", "--delete", &source, &destination])?;
-    }
-
     commit_dirty_worktree(&context.worktree)?;
     run_git_required_in(
         &context.worktree,
@@ -354,6 +349,53 @@ fn ensure_beads_worktree(context: &Context, stderr: &mut impl Write) -> io::Resu
     }
     if context.worktree.is_dir() {
         run_git_required(&["worktree", "prune"])?;
+    }
+    let staged_remote = stage_worktree_dolt_remote(context)?;
+    let recreate_result = recreate_beads_worktree(context, stderr);
+    if !staged_remote {
+        return recreate_result;
+    }
+    let restore_result = restore_staged_dolt_remote(context);
+    match (recreate_result, restore_result) {
+        (Ok(recreated), Ok(())) => Ok(recreated),
+        (Err(recreate_error), Ok(())) => Err(recreate_error),
+        (Ok(_), Err(restore_error)) => Err(restore_error),
+        (Err(recreate_error), Err(restore_error)) => Err(io::Error::other(format!(
+            "worktree recovery failed: {recreate_error}; restoring the staged Dolt remote also failed: {restore_error}"
+        ))),
+    }
+}
+
+fn stage_worktree_dolt_remote(context: &Context) -> io::Result<bool> {
+    if !context.worktree_remote_dir.is_dir() {
+        return Ok(false);
+    }
+    if context.recovery_remote_dir.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "staged Dolt remote already exists at {}",
+                context.recovery_remote_dir.display()
+            ),
+        ));
+    }
+    fs::rename(&context.worktree_remote_dir, &context.recovery_remote_dir)?;
+    Ok(true)
+}
+
+fn restore_staged_dolt_remote(context: &Context) -> io::Result<()> {
+    if !context.recovery_remote_dir.is_dir() {
+        return Ok(());
+    }
+    if context.worktree_remote_dir.exists() {
+        fs::remove_dir_all(&context.worktree_remote_dir)?;
+    }
+    fs::create_dir_all(context.worktree.join(".beads"))?;
+    fs::rename(&context.recovery_remote_dir, &context.worktree_remote_dir)
+}
+
+fn recreate_beads_worktree(context: &Context, stderr: &mut impl Write) -> io::Result<bool> {
+    if context.worktree.is_dir() {
         fs::remove_dir_all(&context.worktree)?;
     }
     if run_git_output(&["rev-parse", "--verify", &context.branch])?
