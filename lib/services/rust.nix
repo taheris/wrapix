@@ -76,6 +76,7 @@ in
     {
       nativeBuildInputs = nativeBuildInputs ++ [
         pkgs.hostname
+        pkgs.jq
         pkgs.openssh
       ];
       WRIX_TEST_PUBLISHER_HELPER = "${cacheHookTestPublisher}/bin/wrix-cache-test-publisher";
