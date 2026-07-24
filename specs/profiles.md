@@ -745,10 +745,10 @@ dests live under `/home/wrix/` inside the container, not under
   [check](verify:profiles.rust-build-package-extra-srcs-scoped-to-checks)
 - `bin`, `clippy`, and `nextest` all close over `profile.toolchain`, so `${toolchain}/bin/rustc` resolves to the same `/nix/store/...` path across all three derivations, on both `wrix.profiles.rust` and `wrix.rustProfile { toolchain; sha256; }`
   [check](verify:profiles.rust-build-package-toolchain-alignment)
-- `lib/mcp/tmux/mcp-server.nix` is a thin `wrix.profiles.rust.buildPackage` consumer (no direct `pkgs.rustPlatform.buildRustPackage` or `makeRustPlatform` call); `packages.tmux-mcp` consumes `.bin`; `tests/default.nix` exposes `tmux-mcp-clippy`, `tmux-mcp-nextest` checks
-  [check](verify:profiles.rust-build-package-consumers-migrated)
-- `modules/flake/devshell.nix` is a thin `sandbox.devShell { ... }` consumer (no hand-rolled `RUSTC`/`RUSTC_WRAPPER`/`SCCACHE_DIR`/`PATH` exports, no separate `profile.toolchain` entry in `packages`)
-  [check](verify:devshell.flake-module-thin-consumer)
+- The tmux MCP package depends on the Rust profile's `buildPackage` boundary: its runtime package consumes `bin`, while `clippy` and `nextest` remain independent checks
+  [check](verify:profiles.rust-build-package-consumer-boundary)
+- The repository devshell depends on the sandbox-owned `devShell` constructor rather than reconstructing profile toolchain or environment state
+  [check](verify:devshell.sandbox-boundary)
 - Container entrypoints (`lib/sandbox/linux/entrypoint.sh`, `lib/sandbox/darwin/entrypoint.sh`) contain no rustup bootstrap logic — toolchain is baked into the image at build time
   [check](verify:profiles.sandbox-entrypoints-no-rustup)
 

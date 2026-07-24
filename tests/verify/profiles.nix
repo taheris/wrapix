@@ -46,7 +46,7 @@ in
   "devshell.env-right-merge" = mkDevShell "test_env_right_merge";
   "devshell.flake-module-does-not-own-hooks-path" =
     nixEval "devshell.flake-module-does-not-own-hooks-path";
-  "devshell.flake-module-thin-consumer" = nixEval "devshell.flake-module-thin-consumer";
+  "devshell.sandbox-boundary" = nixEval "devshell.sandbox-boundary";
   "devshell.host-packages-source" = mkDevShell "test_host_packages_source";
   "devshell.no-prek-install" = nixEval "devshell.no-prek-install";
   "devshell.prek-auto-set" = mkDevShellPrek "test_auto_set_when_config_present";
@@ -69,7 +69,7 @@ in
   "profiles.nested-derive" = profileComposition "test_nested_derive_profile";
   "profiles.no-dev-toolchain-lib" = nixEval "profiles.no-dev-toolchain-lib";
   "profiles.no-rust-with-toolchain" = nixEval "profiles.no-rust-with-toolchain";
-  "profiles.rust-build-package-consumers-migrated" = buildPackage "test_consumers_migrated";
+  "profiles.rust-build-package-consumer-boundary" = buildPackage "test_consumer_boundary";
   "profiles.rust-build-package-exposed" = buildPackage "test_build_package_exposed";
   "profiles.rust-build-package-extra-srcs-scoped-to-checks" =
     buildPackage "test_extra_srcs_scoped_to_lint_test";

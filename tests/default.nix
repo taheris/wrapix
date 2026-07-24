@@ -196,7 +196,9 @@ let
 
   # README example verification
   readmeTest = {
-    readme = import ./readme.nix { inherit pkgs src; };
+    readme = import ./readme.nix {
+      inherit pkgs src system;
+    };
   };
 
   # All checks combined

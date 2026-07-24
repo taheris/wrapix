@@ -33,14 +33,15 @@
 
     in
     {
-      _module.args.pkgs = import nixpkgs {
-        inherit system;
-        overlays = [
-          hostOverlay
-        ];
-        config.allowUnfree = true;
+      _module.args = {
+        inherit linuxPkgs;
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            hostOverlay
+          ];
+          config.allowUnfree = true;
+        };
       };
-
-      _module.args.linuxPkgs = linuxPkgs;
     };
 }

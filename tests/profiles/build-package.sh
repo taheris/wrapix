@@ -14,7 +14,7 @@
 #   6. test_build_package_toolchain_alignment
 #      bin/clippy/nextest all close over profile.toolchain on both
 #      profiles.rust and rustProfile { toolchain; sha256; }.
-#   7. test_consumers_migrated
+#   7. test_consumer_boundary
 #      The tmux-mcp consumer calls profile.buildPackage, the flake package
 #      output is a runnable derivation, and ciChecks expose clippy/nextest.
 #
@@ -300,9 +300,9 @@ test_build_package_toolchain_alignment() {
 }
 
 # ============================================================================
-# 7. Consumers migrated to profile.buildPackage and wired through to checks
+# 7. Rust package consumer boundary
 # ============================================================================
-test_consumers_migrated() {
+test_consumer_boundary() {
   local result
   if ! result=$(nix eval --json --impure --no-warn-dirty --expr "
     let
@@ -391,7 +391,7 @@ ALL_TESTS=(
   test_workspace_edit_skips_cargo_artifacts
   test_extra_srcs_scoped_to_lint_test
   test_build_package_toolchain_alignment
-  test_consumers_migrated
+  test_consumer_boundary
 )
 
 run_all() {

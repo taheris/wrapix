@@ -25,7 +25,9 @@
 
     in
     {
-      _module.args.test = test;
+      _module.args = {
+        inherit test;
+      };
 
       inherit (test) checks;
       legacyPackages.ciChecks = test.ciChecks;

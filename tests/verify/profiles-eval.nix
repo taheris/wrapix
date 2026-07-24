@@ -34,7 +34,7 @@ let
     (readRepo "lib/sandbox/darwin/entrypoint.sh")
   ];
 
-  flakeModuleThinConsumer =
+  repositoryDevshellUsesSandbox =
     let
       fakeConfig = {
         packages = {
@@ -60,7 +60,7 @@ let
           if args.profile == fakeRustProfile && args.agent == "pi" then
             fakeSandbox
           else
-            throw "modules/flake/devshell.nix did not construct the expected rust/pi sandbox";
+            throw "repository devshell did not construct the expected rust/pi sandbox";
       };
       result = (import "${rootString}/modules/flake/devshell.nix" { }).perSystem {
         config = fakeConfig;
@@ -93,8 +93,8 @@ let
     "devshell.flake-module-does-not-own-hooks-path" =
       ensure (lacks "core.hooksPath" flakeDevshellSource) "modules/flake/devshell.nix sets core.hooksPath";
 
-    "devshell.flake-module-thin-consumer" =
-      ensure flakeModuleThinConsumer "modules/flake/devshell.nix bypasses the bound sandbox.devShell surface";
+    "devshell.sandbox-boundary" =
+      ensure repositoryDevshellUsesSandbox "repository devshell bypasses the bound sandbox.devShell surface";
 
     "devshell.no-prek-install" =
       ensure (lacks "prek install" devshellSource) "mkDevShell invokes prek install"
