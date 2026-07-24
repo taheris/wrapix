@@ -62,7 +62,11 @@ in
       text = ''
         # Verbose mode for debugging startup
         WRIX_VERBOSE="''${WRIX_VERBOSE:-}"
-        verbose() { [ -n "$WRIX_VERBOSE" ] && echo "[wrix] $*" >&2 || true; }
+        verbose() {
+          if [[ -n "$WRIX_VERBOSE" ]]; then
+            echo "[wrix] $*" >&2
+          fi
+        }
 
         # Ensure USER is set (may be unset in some environments)
         USER="''${USER:-$(id -un)}"
@@ -72,10 +76,10 @@ in
         WRIX_CACHE="$XDG_CACHE_HOME/wrix"
 
         PROFILE_CONFIG=""
-        while [[ $# -gt 0 ]]; do
+        while [[ "$#" -gt 0 ]]; do
           case "$1" in
             --profile-config)
-              [[ $# -lt 2 ]] && { echo "Error: --profile-config requires <file>" >&2; exit 2; }
+              [[ "$#" -lt 2 ]] && { echo "Error: --profile-config requires <file>" >&2; exit 2; }
               PROFILE_CONFIG="$2"; shift 2 ;;
             --profile-config=*) PROFILE_CONFIG="''${1#--profile-config=}"; shift ;;
             --) shift; break ;;
@@ -218,7 +222,7 @@ in
         # `wrix spawn` (stdio, JSON spawn-config). Default with no
         # subcommand keeps legacy positional invocation `wrix [DIR] [CMD...]`.
         SUBCOMMAND="run"
-        if [ $# -gt 0 ]; then
+        if [[ "$#" -gt 0 ]]; then
           case "$1" in
             run|spawn) SUBCOMMAND="$1"; shift ;;
           esac
@@ -235,22 +239,22 @@ in
         # SpawnConfig per-launch mounts, pre-rendered as `host:container[:ro]`
         SPAWN_MOUNTS=()
 
-        if [ "$SUBCOMMAND" = "spawn" ]; then
-          while [ $# -gt 0 ]; do
+        if [[ "$SUBCOMMAND" = "spawn" ]]; then
+          while [[ "$#" -gt 0 ]]; do
             case "$1" in
               --spawn-config)
-                [ $# -lt 2 ] && { echo "Error: --spawn-config requires <file>" >&2; exit 2; }
+                [[ "$#" -lt 2 ]] && { echo "Error: --spawn-config requires <file>" >&2; exit 2; }
                 SPAWN_CONFIG="$2"; shift 2 ;;
               --stdio) USE_STDIO=1; shift ;;
               --) shift; break ;;
               *) echo "Error: unknown wrix spawn flag: $1" >&2; exit 2 ;;
             esac
           done
-          if [ -z "$SPAWN_CONFIG" ]; then
+          if [[ -z "$SPAWN_CONFIG" ]]; then
             echo "Error: wrix spawn requires --spawn-config <file>" >&2
             exit 2
           fi
-          if [ ! -f "$SPAWN_CONFIG" ]; then
+          if [[ ! -f "$SPAWN_CONFIG" ]]; then
             echo "Error: spawn-config file not found: $SPAWN_CONFIG" >&2
             exit 1
           fi
@@ -306,10 +310,14 @@ in
             SPAWN_MOUNTS+=("$entry")
           done < <(jq -r '(.mounts? // [])[] | "\(.host_path):\(.container_path)" + (if .read_only == true then ":ro" else "" end)' "$SPAWN_CONFIG")
         else
-          PROJECT_DIR="''${1:-$(pwd)}"
-          shift || true
+          if [[ "$#" -gt 0 ]]; then
+            PROJECT_DIR="''${1:-$(pwd)}"
+            shift
+          else
+            PROJECT_DIR=$(pwd)
+          fi
           # Remaining args override the container command (passed to entrypoint as $@)
-          if [ $# -gt 0 ]; then
+          if [[ "$#" -gt 0 ]]; then
             CONTAINER_CMD=("$@")
           fi
         fi
@@ -322,7 +330,7 @@ in
         # touching the filesystem or invoking podman. Used by tests to
         # verify SpawnConfig parsing and per-bead profile selection
         # without a container runtime.
-        if [ "''${WRIX_DRY_RUN:-}" = "1" ]; then
+        if [[ "''${WRIX_DRY_RUN:-}" = "1" ]]; then
           printf 'SUBCOMMAND=%s\n' "$SUBCOMMAND"
           printf 'STDIO=%s\n' "$USE_STDIO"
           printf 'PROFILE_CONFIG=%s\n' "$PROFILE_CONFIG"
@@ -377,9 +385,7 @@ in
         # visible to the caller's filesystem. Skip on permission errors — the
         # container's entrypoint creates the dir again when WRIX_AGENT=claude.
         #
-        # mktemp the error-capture file so concurrent `wrix spawn`
-        # invocations don't race on a shared `/tmp/wrix-mkdir-err`
-        # path (wx-w4h5e).
+        # Use a unique error-capture file so concurrent spawns do not race.
         mkdir_err_file=$(mktemp)
         trap 'rm -f "$mkdir_err_file"' EXIT INT TERM
         if ! mkdir -p "$PROJECT_DIR/.claude" 2>"$mkdir_err_file"; then
@@ -402,18 +408,18 @@ in
         verbose "Staging profile mounts..."
         # Process profile mounts - stage directories to dereference symlinks
         while IFS=: read -r src dest mode optional; do
-          [ -z "$src" ] && continue
+          [[ -z "$src" ]] && continue
           src=$(expand_path "$src")
           dest=$(expand_path "$dest")
 
-          if [ ! -e "$src" ]; then
-            [ "$optional" = "optional" ] && continue
+          if [[ ! -e "$src" ]]; then
+            [[ "$optional" = "optional" ]] && continue
             echo "Error: Mount source not found: $src"
             exit 1
           fi
 
-          if [ -d "$src" ]; then
-            if [ "$mode" = "rw" ]; then
+          if [[ -d "$src" ]]; then
+            if [[ "$mode" = "rw" ]]; then
               # rw caches (sccache, cargo registry/git, uv) must persist
               # across container exits — bind-mount directly so writes land
               # on the host. STAGING_ROOT is rm -rf'd on exit (lib/util/shell.nix),
@@ -456,7 +462,7 @@ in
         # We mount the directory (not the socket file) so daemon restarts work
         # without needing to restart the container
         NOTIFY_SOCKET_DIR="''${XDG_RUNTIME_DIR:-$HOME/.local/share}/wrix"
-        if [ -S "$NOTIFY_SOCKET_DIR/notify.sock" ]; then
+        if [[ -S "$NOTIFY_SOCKET_DIR/notify.sock" ]]; then
           VOLUME_ARGS="$VOLUME_ARGS -v $NOTIFY_SOCKET_DIR:/run/wrix"
         else
           echo "Note: Notification socket not found at $NOTIFY_SOCKET_DIR/notify.sock" >&2
@@ -465,9 +471,9 @@ in
 
         # Mount host podman socket for sibling container access (explicit unsafe opt-in)
         PODMAN_SOCKET_ARGS=""
-        if [ -n "''${WRIX_UNSAFE_PODMAN_SOCKET:-}" ]; then
+        if [[ -n "''${WRIX_UNSAFE_PODMAN_SOCKET:-}" ]]; then
           PODMAN_SOCK="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
-          if [ -S "$PODMAN_SOCK" ]; then
+          if [[ -S "$PODMAN_SOCK" ]]; then
             PODMAN_SOCKET_ARGS="-v $PODMAN_SOCK:/run/podman/podman.sock -e CONTAINER_HOST=unix:///run/podman/podman.sock"
             # Tell nested podman commands where the host sees /workspace.
             # $PROJECT_DIR is the host path (the launcher runs on the host).
@@ -529,19 +535,19 @@ in
         # Pi subscription credentials are file-backed. Mount only auth.json
         # when the selected image is Pi; settings are non-secret image defaults.
         PI_AUTH_JSON_MOUNT=""
-        if [ "$WRIX_AGENT" = "pi" ]; then
+        if [[ "$WRIX_AGENT" = "pi" ]]; then
           PI_AUTH_FILE="''${WRIX_PI_AUTH_FILE:-$HOME/.pi/agent/auth.json}"
-          if [ -n "''${WRIX_PI_AUTH_FILE:-}" ]; then
-            if [ ! -f "$PI_AUTH_FILE" ]; then
+          if [[ -n "''${WRIX_PI_AUTH_FILE:-}" ]]; then
+            if [[ ! -f "$PI_AUTH_FILE" ]]; then
               echo "wrix: WRIX_PI_AUTH_FILE=$PI_AUTH_FILE: file does not exist" >&2
               exit 1
             fi
-          elif [ "$SUBCOMMAND" = "spawn" ] && [ ! -f "$PI_AUTH_FILE" ]; then
+          elif [[ "$SUBCOMMAND" = "spawn" && ! -f "$PI_AUTH_FILE" ]]; then
             echo "wrix spawn: Pi auth file not found at $PI_AUTH_FILE — run 'pi' and /login on the host, or set WRIX_PI_AUTH_FILE to an existing auth.json" >&2
             exit 1
-          elif [ "$SUBCOMMAND" = "run" ]; then
+          elif [[ "$SUBCOMMAND" = "run" ]]; then
             mkdir -p "$(dirname "$PI_AUTH_FILE")"
-            if [ ! -e "$PI_AUTH_FILE" ]; then
+            if [[ ! -e "$PI_AUTH_FILE" ]]; then
               printf '{}\n' > "$PI_AUTH_FILE"
             fi
             chmod 600 "$PI_AUTH_FILE"
@@ -552,9 +558,9 @@ in
 
         ${stageBeads}
         BEADS_ARGS=""
-        if [ -n "$BEADS_STAGING" ]; then
+        if [[ -n "$BEADS_STAGING" ]]; then
           BEADS_ARGS="-v $BEADS_STAGING:/workspace/.beads"
-          if [ -n "''${WRIX_UNSAFE_PODMAN_SOCKET:-}" ]; then
+          if [[ -n "''${WRIX_UNSAFE_PODMAN_SOCKET:-}" ]]; then
             PODMAN_SOCKET_ARGS="$PODMAN_SOCKET_ARGS -e GC_HOST_BEADS=$BEADS_STAGING"
           fi
         fi
@@ -602,11 +608,11 @@ in
         NETWORK_CAP_ARGS="--cap-add=NET_ADMIN"
 
         # Calculate CPUs (use ProfileConfig override or half of available, minimum 2)
-        if [ -n "$PROFILE_CPUS" ]; then
+        if [[ -n "$PROFILE_CPUS" ]]; then
           CPUS="$PROFILE_CPUS"
         else
           CPUS=$(($(nproc) / 2))
-          [ "$CPUS" -lt 2 ] && CPUS=2
+          [[ "$CPUS" -lt 2 ]] && CPUS=2
         fi
 
         # Image defaults come from immutable ProfileConfig. SpawnConfig may
@@ -648,8 +654,8 @@ in
         # Default: container boundary (krun microVM currently disabled)
         # WRIX_MICROVM=1: explicit opt-in to microVM boundary
         RUNTIME_ARGS=""
-        if [ "''${WRIX_MICROVM:-}" = "1" ]; then
-          if ! [ -e /dev/kvm ]; then
+        if [[ "''${WRIX_MICROVM:-}" = "1" ]]; then
+          if [[ ! -e /dev/kvm ]]; then
             echo "Error: /dev/kvm not found. A microVM boundary requires KVM support." >&2
             exit 1
           elif ! command -v krun >/dev/null 2>&1 && ! podman info --format '{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}' 2>/dev/null | grep -q krun; then
@@ -673,7 +679,7 @@ in
         KRUN_ENTRYPOINT_ARGS=""
         KRUN_ENV_ARGS=""
         KRUN_CMD_ENV=""
-        if [ -n "$RUNTIME_ARGS" ]; then
+        if [[ -n "$RUNTIME_ARGS" ]]; then
           # Capture host terminal dimensions for PTY sizing
           TERM_ROWS=$(stty size 2>/dev/null | awk '{print $1}') || true
           TERM_COLS=$(stty size 2>/dev/null | awk '{print $2}') || true
@@ -685,7 +691,7 @@ in
 
           # Serialize container command for krun-init.sh (preserves quoting)
           # Kept separate from KRUN_ENV_ARGS to avoid word-splitting the value
-          if [ ''${#CONTAINER_CMD[@]} -gt 0 ]; then
+          if [[ "''${#CONTAINER_CMD[@]}" -gt 0 ]]; then
             KRUN_CMD_ENV="WRIX_KRUN_CMD=$(printf '%q ' "''${CONTAINER_CMD[@]}")"
           fi
 
@@ -706,9 +712,9 @@ in
         #                       --dangerously-skip-permissions as root, so set
         #                       IS_SANDBOX=1 (claude's escape hatch) instead of
         #                       libfakeuid: that getuid->1000 spoof blanks claude's
-        #                       TUI when really root here (wx-nsage). Works on ANY
-        #                       host uid (it maps to container-0).
-        if [ -n "$RUNTIME_ARGS" ]; then
+        #                       TUI when really root here. Works on ANY host uid
+        #                       (it maps to container-0).
+        if [[ -n "$RUNTIME_ARGS" ]]; then
           USERNS_ARGS="--userns=keep-id"
         else
           USERNS_ARGS=""
@@ -719,8 +725,8 @@ in
         #   spawn — non-TTY: stdio piped, env strictly from SpawnConfig.
         TTY_ARGS=()
         ENV_ARGS=()
-        if [ "$SUBCOMMAND" = "spawn" ]; then
-          [ "$USE_STDIO" = "1" ] && TTY_ARGS=(-i)
+        if [[ "$SUBCOMMAND" = "spawn" ]]; then
+          [[ "$USE_STDIO" = "1" ]] && TTY_ARGS=(-i)
           for pair in "''${SPAWN_ENV[@]}"; do
             ENV_ARGS+=(-e "$pair")
           done
@@ -728,7 +734,7 @@ in
           # claude --print --input-format stream-json branch instead of the
           # interactive TTY fallback. Symmetric to the pi RPC branch which
           # is gated on WRIX_AGENT=pi.
-          [ "$USE_STDIO" = "1" ] && ENV_ARGS+=(-e "WRIX_STDIO=1")
+          [[ "$USE_STDIO" = "1" ]] && ENV_ARGS+=(-e "WRIX_STDIO=1")
         else
           TTY_ARGS=(-i -t)
           ENV_ARGS+=(
@@ -736,7 +742,7 @@ in
             -e "WRIX_SESSION_ID=$WRIX_SESSION_ID"
             -e "WRIX_VERBOSE=''${WRIX_VERBOSE:-}"
           )
-          [ -n "''${WRIX_GIT_SIGN:-}" ] && ENV_ARGS+=(-e "WRIX_GIT_SIGN=$WRIX_GIT_SIGN")
+          [[ -n "''${WRIX_GIT_SIGN:-}" ]] && ENV_ARGS+=(-e "WRIX_GIT_SIGN=$WRIX_GIT_SIGN")
         fi
         # Always-on container env: built from launcher state, not host passthrough.
         ENV_ARGS+=(
@@ -755,15 +761,15 @@ in
           ENV_ARGS+=(-e "WRIX_PROJECT_CACHE_PORT=$WRIX_PROJECT_CACHE_PORT")
           ENV_ARGS+=(-e "NIX_CONFIG=$WRIX_PROJECT_CACHE_NIX_CONFIG")
         fi
-        [ -n "$PI_AUTH_JSON_MOUNT" ] && ENV_ARGS+=(-e "WRIX_PI_AUTH_JSON=$PI_AUTH_JSON_MOUNT")
-        [ -n "$BEADS_DOLT_CONTAINER_SOCKET" ] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_SOCKET=$BEADS_DOLT_CONTAINER_SOCKET")
-        [ -n "$KRUN_CMD_ENV" ] && ENV_ARGS+=(-e "$KRUN_CMD_ENV")
+        [[ -n "$PI_AUTH_JSON_MOUNT" ]] && ENV_ARGS+=(-e "WRIX_PI_AUTH_JSON=$PI_AUTH_JSON_MOUNT")
+        [[ -n "$BEADS_DOLT_CONTAINER_SOCKET" ]] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_SOCKET=$BEADS_DOLT_CONTAINER_SOCKET")
+        [[ -n "$KRUN_CMD_ENV" ]] && ENV_ARGS+=(-e "$KRUN_CMD_ENV")
         # default boundary: the process is the store-owning rootless container-0
         # (see USERNS_ARGS above). Tell claude it is sandboxed so it permits
         # --dangerously-skip-permissions as root, rather than spoofing the uid
-        # with libfakeuid — that spoof blanks claude's TUI here (wx-nsage). krun
-        # sets IS_SANDBOX=1 from inside krun-init.sh instead.
-        [ -z "$RUNTIME_ARGS" ] && ENV_ARGS+=(-e "IS_SANDBOX=1")
+        # with libfakeuid — that spoof blanks claude's TUI here. krun sets
+        # IS_SANDBOX=1 from inside krun-init.sh instead.
+        [[ -z "$RUNTIME_ARGS" ]] && ENV_ARGS+=(-e "IS_SANDBOX=1")
 
         RUN_IMAGE="$IMAGE_REF"
 

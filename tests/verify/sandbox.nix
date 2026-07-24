@@ -19,6 +19,14 @@ let
   entrypoint = sandboxScript "entrypoint-contract";
   network = sandboxScript "network-baseline";
   platform = sandboxScript "platform-dispatch";
+  darwinOnly =
+    body:
+    if pkgs.stdenv.isDarwin then
+      body
+    else
+      ''
+        printf '%s\n' 'PASS: Darwin-only verifier is not applicable on this host'
+      '';
   linuxOnly =
     body:
     if pkgs.stdenv.isLinux then
@@ -37,11 +45,11 @@ in
 
   "sandbox.custom-mounts-env" = sandboxScriptAllWithWrix "custom-mounts-env";
 
-  "sandbox.darwin-container-starts" = containerStarts "test_darwin_container_starts";
+  "sandbox.darwin-container-starts" = darwinOnly (containerStarts "test_darwin_container_starts");
 
-  "sandbox.darwin-image-load" = sandboxScriptAll "image-install-darwin-load";
+  "sandbox.darwin-image-load" = darwinOnly (sandboxScriptAll "image-install-darwin-load");
 
-  "sandbox.darwin-network-bootstrap" = sandboxScriptAll "darwin-network-bootstrap";
+  "sandbox.darwin-network-bootstrap" = darwinOnly (sandboxScriptAll "darwin-network-bootstrap");
 
   "sandbox.entrypoint-agent-dispatch" = entrypoint "test_agent_dispatch_both_entrypoints";
 

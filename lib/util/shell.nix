@@ -147,7 +147,7 @@ in
   cleanStaleStagingDirs = ''
     mkdir -p "$WRIX_CACHE/mounts"
     for stale_dir in "$WRIX_CACHE/mounts"/*; do
-      [ -d "$stale_dir" ] || continue
+      [[ -d "$stale_dir" ]] || continue
       stale_pid=$(basename "$stale_dir")
       if ! kill -0 "$stale_pid" 2>/dev/null; then
         rm -rf "$stale_dir"

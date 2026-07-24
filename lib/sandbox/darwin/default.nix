@@ -44,7 +44,11 @@ in
 
             # Verbose mode for debugging startup
             WRIX_VERBOSE="''${WRIX_VERBOSE:-}"
-            verbose() { [ -n "$WRIX_VERBOSE" ] && echo "[wrix] $*" >&2 || true; }
+            verbose() {
+              if [[ -n "$WRIX_VERBOSE" ]]; then
+                echo "[wrix] $*" >&2
+              fi
+            }
 
             # Ensure USER is set (may be unset in some environments)
             USER="''${USER:-$(id -un)}"
@@ -54,10 +58,10 @@ in
             WRIX_CACHE="$XDG_CACHE_HOME/wrix"
 
             PROFILE_CONFIG=""
-            while [[ $# -gt 0 ]]; do
+            while [[ "$#" -gt 0 ]]; do
               case "$1" in
                 --profile-config)
-                  [[ $# -lt 2 ]] && { echo "Error: --profile-config requires <file>" >&2; exit 2; }
+                  [[ "$#" -lt 2 ]] && { echo "Error: --profile-config requires <file>" >&2; exit 2; }
                   PROFILE_CONFIG="$2"; shift 2 ;;
                 --profile-config=*) PROFILE_CONFIG="''${1#--profile-config=}"; shift ;;
                 --) shift; break ;;
@@ -178,7 +182,7 @@ in
             # Subcommand dispatch: `wrix run` (interactive, TTY) vs
             # `wrix spawn` (stdio, JSON spawn-config).
             SUBCOMMAND="run"
-            if [ $# -gt 0 ]; then
+            if [[ "$#" -gt 0 ]]; then
               case "$1" in
                 run|spawn) SUBCOMMAND="$1"; shift ;;
               esac
@@ -193,22 +197,22 @@ in
             SPAWN_ENV=()
             SPAWN_MOUNTS=()
 
-            if [ "$SUBCOMMAND" = "spawn" ]; then
-              while [ $# -gt 0 ]; do
+            if [[ "$SUBCOMMAND" = "spawn" ]]; then
+              while [[ "$#" -gt 0 ]]; do
                 case "$1" in
                   --spawn-config)
-                    [ $# -lt 2 ] && { echo "Error: --spawn-config requires <file>" >&2; exit 2; }
+                    [[ "$#" -lt 2 ]] && { echo "Error: --spawn-config requires <file>" >&2; exit 2; }
                     SPAWN_CONFIG="$2"; shift 2 ;;
                   --stdio) USE_STDIO=1; shift ;;
                   --) shift; break ;;
                   *) echo "Error: unknown wrix spawn flag: $1" >&2; exit 2 ;;
                 esac
               done
-              if [ -z "$SPAWN_CONFIG" ]; then
+              if [[ -z "$SPAWN_CONFIG" ]]; then
                 echo "Error: wrix spawn requires --spawn-config <file>" >&2
                 exit 2
               fi
-              if [ ! -f "$SPAWN_CONFIG" ]; then
+              if [[ ! -f "$SPAWN_CONFIG" ]]; then
                 echo "Error: spawn-config file not found: $SPAWN_CONFIG" >&2
                 exit 1
               fi
@@ -264,10 +268,14 @@ in
                 SPAWN_MOUNTS+=("$entry")
               done < <(${pkgs.jq}/bin/jq -r '(.mounts? // [])[] | [.host_path, .container_path, (.read_only|tostring)] | @tsv' "$SPAWN_CONFIG")
             else
-              PROJECT_DIR="''${1:-$(pwd)}"
-              shift || true
+              if [[ "$#" -gt 0 ]]; then
+                PROJECT_DIR="''${1:-$(pwd)}"
+                shift
+              else
+                PROJECT_DIR=$(pwd)
+              fi
               # Remaining args override the container command (passed to entrypoint as $@)
-              if [ $# -gt 0 ]; then
+              if [[ "$#" -gt 0 ]]; then
                 CONTAINER_CMD=("$@")
               fi
             fi
@@ -281,7 +289,7 @@ in
             # intents, and exit before any container CLI invocation. Used by
             # tests to verify SpawnConfig parsing and mount classification
             # without a runtime.
-            if [ "''${WRIX_DRY_RUN:-}" = "1" ]; then
+            if [[ "''${WRIX_DRY_RUN:-}" = "1" ]]; then
               printf 'SUBCOMMAND=%s\n' "$SUBCOMMAND"
               printf 'STDIO=%s\n' "$USE_STDIO"
               printf 'PROFILE_CONFIG=%s\n' "$PROFILE_CONFIG"
@@ -307,9 +315,9 @@ in
               for entry in "''${SPAWN_MOUNTS[@]}"; do printf 'MOUNT=%s\n' "$entry"; done
             fi
 
-            if [ "''${WRIX_DRY_RUN:-}" != "1" ]; then
+            if [[ "''${WRIX_DRY_RUN:-}" != "1" ]]; then
               # Check macOS version
-              if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 26 ]; then
+              if [[ "$(sw_vers -productVersion | cut -d. -f1)" -lt 26 ]]; then
                 echo "Error: macOS 26+ required (current: $(sw_vers -productVersion))"
                 exit 1
               fi
@@ -351,8 +359,8 @@ in
 
             PROFILE_IMAGE="$IMAGE_REF"
             IMAGE_REPO="''${IMAGE_REF%:*}"
-            if [ "''${WRIX_DRY_RUN:-}" != "1" ]; then
-              if [ -z "$IMAGE_SOURCE" ]; then
+            if [[ "''${WRIX_DRY_RUN:-}" != "1" ]]; then
+              if [[ -z "$IMAGE_SOURCE" ]]; then
                 verbose "Using cached image $PROFILE_IMAGE"
               else
                 # Content-digest preflight (specs/sandbox.md § Image install path):
@@ -394,16 +402,16 @@ in
                   _wrix_desired_short="''${_wrix_desired_digest#sha256:}"
                   _wrix_match_ref=""
                   while IFS= read -r _ref; do
-                    [ -z "$_ref" ] && continue
+                    [[ -z "$_ref" ]] && continue
                     _wrix_actual=$(container image inspect "$_ref" 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[0].digest // .[0].id // empty')
                     _wrix_actual_short="''${_wrix_actual#sha256:}"
-                    if [ -n "$_wrix_actual_short" ] && [ "$_wrix_actual_short" = "$_wrix_desired_short" ]; then
+                    if [[ -n "$_wrix_actual_short" && "$_wrix_actual_short" = "$_wrix_desired_short" ]]; then
                       _wrix_match_ref="$_ref"
                       break
                     fi
                   done < <(container image list 2>/dev/null | tail -n +2 | awk '/^wrix-/ {print $1 ":" $2}')
 
-                  if [ -n "$_wrix_match_ref" ]; then
+                  if [[ -n "$_wrix_match_ref" ]]; then
                     # best-effort: requested ref may already alias matching content,
                     # in which case tag exits non-zero benignly; tar bytes still
                     # aren't streamed.
@@ -414,7 +422,7 @@ in
                   _wrix_skip_load=1
                 fi
 
-                if [ "$_wrix_skip_load" = "1" ]; then
+                if [[ "$_wrix_skip_load" = "1" ]]; then
                   verbose "Using cached image $PROFILE_IMAGE"
                 else
                   verbose "Image hash changed or missing, reloading..."
@@ -432,7 +440,7 @@ in
                       ${pkgs.skopeo}/bin/skopeo --insecure-policy copy --quiet "docker-archive:$IMAGE_SOURCE" "oci-archive:$OCI_TAR"
                       LOAD_OUTPUT=$(container image load --input "$OCI_TAR" 2>&1)
                       LOADED_REF=$(echo "$LOAD_OUTPUT" | grep -oE 'untagged@sha256:[a-f0-9]+' | head -1)
-                      if [ -n "$LOADED_REF" ]; then
+                      if [[ -n "$LOADED_REF" ]]; then
                         container image tag "$LOADED_REF" "$PROFILE_IMAGE"
                         # Maintain :latest as the keep-anchor for pruneStaleImages.
                         container image tag "$LOADED_REF" "$IMAGE_REPO:latest"
@@ -487,19 +495,19 @@ in
             # the same branch logic. Socket sources are rejected loudly — see
             # specs/sandbox.md § Platform Implementations / macOS.
             while IFS=: read -r src dest optional; do
-              [ -z "$src" ] && continue
+              [[ -z "$src" ]] && continue
               src=$(expand_path "$src")
               dest=$(expand_path "$dest")
 
-              if [ ! -e "$src" ]; then
-                [ "$optional" = "optional" ] && continue
+              if [[ ! -e "$src" ]]; then
+                [[ "$optional" = "optional" ]] && continue
                 echo "Error: Mount source not found: $src"
                 exit 1
               fi
 
-              if [ -d "$src" ]; then
+              if [[ -d "$src" ]]; then
                 host_staging="$STAGING_ROOT/dir$dir_idx"
-                if [ "''${WRIX_DRY_RUN:-}" != "1" ]; then
+                if [[ "''${WRIX_DRY_RUN:-}" != "1" ]]; then
                   mkdir -p "$host_staging"
                   cp -rL "$src/." "$host_staging/"
                 fi
@@ -507,9 +515,9 @@ in
                 staging="/mnt/wrix/dir$dir_idx"
                 dir_idx=$((dir_idx + 1))
                 MOUNT_ARGS="$MOUNT_ARGS -v $host_staging:$staging"
-                [ -n "$DIR_MOUNTS" ] && DIR_MOUNTS="$DIR_MOUNTS,"
+                [[ -n "$DIR_MOUNTS" ]] && DIR_MOUNTS="$DIR_MOUNTS,"
                 DIR_MOUNTS="$DIR_MOUNTS$staging:$dest"
-              elif [ -S "$src" ]; then
+              elif [[ -S "$src" ]]; then
                 echo "wrix: Unix-socket mount source rejected: $src -> $dest" >&2
                 echo "  (VirtioFS does not pass socket operations; mounting would dead-end at connect())" >&2
                 exit 1
@@ -520,18 +528,18 @@ in
                 for entry in $MOUNTED_FILE_DIRS; do
                   dir="''${entry%%=*}"
                   path="''${entry#*=}"
-                  if [ "$dir" = "$parent_dir" ]; then
+                  if [[ "$dir" = "$parent_dir" ]]; then
                     staging="$path"
                     break
                   fi
                 done
-                if [ -z "$staging" ]; then
+                if [[ -z "$staging" ]]; then
                   staging="/mnt/wrix/file$file_idx"
                   file_idx=$((file_idx + 1))
                   MOUNT_ARGS="$MOUNT_ARGS -v $parent_dir:$staging"
                   MOUNTED_FILE_DIRS="$MOUNTED_FILE_DIRS $parent_dir=$staging"
                 fi
-                [ -n "$FILE_MOUNTS" ] && FILE_MOUNTS="$FILE_MOUNTS,"
+                [[ -n "$FILE_MOUNTS" ]] && FILE_MOUNTS="$FILE_MOUNTS,"
                 FILE_MOUNTS="$FILE_MOUNTS$staging/$file_name:$dest"
               fi
             done < <(
@@ -547,9 +555,9 @@ in
               done
             )
 
-            if [ "''${WRIX_DRY_RUN:-}" = "1" ]; then
-              [ -n "$DIR_MOUNTS" ] && printf 'DIR_MOUNTS=%s\n' "$DIR_MOUNTS"
-              [ -n "$FILE_MOUNTS" ] && printf 'FILE_MOUNTS=%s\n' "$FILE_MOUNTS"
+            if [[ "''${WRIX_DRY_RUN:-}" = "1" ]]; then
+              [[ -n "$DIR_MOUNTS" ]] && printf 'DIR_MOUNTS=%s\n' "$DIR_MOUNTS"
+              [[ -n "$FILE_MOUNTS" ]] && printf 'FILE_MOUNTS=%s\n' "$FILE_MOUNTS"
               printf 'MOUNT_ARGS=%s\n' "$MOUNT_ARGS"
               exit 0
             fi
@@ -624,19 +632,19 @@ in
             # Pi credentials use a private one-file staging mount on Darwin.
             PI_AUTH_JSON_MOUNT=""
             PI_AUTH_STAGING_FILE=""
-            if [ "$WRIX_AGENT" = "pi" ]; then
+            if [[ "$WRIX_AGENT" = "pi" ]]; then
               PI_AUTH_FILE="''${WRIX_PI_AUTH_FILE:-$HOME/.pi/agent/auth.json}"
-              if [ -n "''${WRIX_PI_AUTH_FILE:-}" ]; then
-                if [ ! -f "$PI_AUTH_FILE" ]; then
+              if [[ -n "''${WRIX_PI_AUTH_FILE:-}" ]]; then
+                if [[ ! -f "$PI_AUTH_FILE" ]]; then
                   echo "wrix: WRIX_PI_AUTH_FILE=$PI_AUTH_FILE: file does not exist" >&2
                   exit 1
                 fi
-              elif [ "$SUBCOMMAND" = "spawn" ] && [ ! -f "$PI_AUTH_FILE" ]; then
+              elif [[ "$SUBCOMMAND" = "spawn" && ! -f "$PI_AUTH_FILE" ]]; then
                 echo "wrix spawn: Pi auth file not found at $PI_AUTH_FILE — run 'pi' and /login on the host, or set WRIX_PI_AUTH_FILE to an existing auth.json" >&2
                 exit 1
-              elif [ "$SUBCOMMAND" = "run" ]; then
+              elif [[ "$SUBCOMMAND" = "run" ]]; then
                 mkdir -p "$(dirname "$PI_AUTH_FILE")"
-                if [ ! -e "$PI_AUTH_FILE" ]; then
+                if [[ ! -e "$PI_AUTH_FILE" ]]; then
                   printf '{}\n' > "$PI_AUTH_FILE"
                 fi
                 chmod 600 "$PI_AUTH_FILE"
@@ -652,7 +660,7 @@ in
             fi
 
             ${stageBeads}
-            if [ -n "$BEADS_STAGING" ]; then
+            if [[ -n "$BEADS_STAGING" ]]; then
               MOUNT_ARGS="$MOUNT_ARGS -v $BEADS_STAGING:/workspace/.beads"
             fi
 
@@ -695,15 +703,15 @@ in
             # SpawnConfig allowlist; interactive run keeps the historical
             # host-env passthrough.
             ENV_ARGS=()
-            if [ "$SUBCOMMAND" = "spawn" ]; then
+            if [[ "$SUBCOMMAND" = "spawn" ]]; then
               for pair in "''${SPAWN_ENV[@]}"; do
                 ENV_ARGS+=(-e "$pair")
               done
-              [ "$USE_STDIO" = "1" ] && ENV_ARGS+=(-e "WRIX_STDIO=1")
+              [[ "$USE_STDIO" = "1" ]] && ENV_ARGS+=(-e "WRIX_STDIO=1")
             else
               ENV_ARGS+=(-e "WRIX_VERBOSE=''${WRIX_VERBOSE:-}")
               ENV_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=''${CLAUDE_CODE_OAUTH_TOKEN:-}")
-              [ -n "''${WRIX_GIT_SIGN:-}" ] && ENV_ARGS+=(-e "WRIX_GIT_SIGN=$WRIX_GIT_SIGN")
+              [[ -n "''${WRIX_GIT_SIGN:-}" ]] && ENV_ARGS+=(-e "WRIX_GIT_SIGN=$WRIX_GIT_SIGN")
               ENV_ARGS+=(-e "WRIX_SESSION_ID=$WRIX_SESSION_ID")
             fi
             # Always-on container env: built from launcher state, not host passthrough.
@@ -714,31 +722,31 @@ in
             ENV_ARGS+=(-e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME")
             ENV_ARGS+=(-e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL")
             ENV_ARGS+=(-e "WRIX_AGENT=$WRIX_AGENT")
-            [ -n "$DIR_MOUNTS" ] && ENV_ARGS+=(-e "WRIX_DIR_MOUNTS=$DIR_MOUNTS")
-            [ -n "$FILE_MOUNTS" ] && ENV_ARGS+=(-e "WRIX_FILE_MOUNTS=$FILE_MOUNTS")
+            [[ -n "$DIR_MOUNTS" ]] && ENV_ARGS+=(-e "WRIX_DIR_MOUNTS=$DIR_MOUNTS")
+            [[ -n "$FILE_MOUNTS" ]] && ENV_ARGS+=(-e "WRIX_FILE_MOUNTS=$FILE_MOUNTS")
             ENV_ARGS+=(-e "WRIX_NOTIFY_TCP=192.168.64.1:5959")
-            [ -n "$BEADS_DOLT_PORT" ] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_PORT=$BEADS_DOLT_PORT")
-            [ -n "$BEADS_DOLT_HOST" ] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_HOST=$BEADS_DOLT_HOST")
+            [[ -n "$BEADS_DOLT_PORT" ]] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_PORT=$BEADS_DOLT_PORT")
+            [[ -n "$BEADS_DOLT_HOST" ]] && ENV_ARGS+=(-e "BEADS_DOLT_SERVER_HOST=$BEADS_DOLT_HOST")
             # Pass network mode and allowlist for WRIX_NETWORK=limit filtering
             ENV_ARGS+=(-e "WRIX_NETWORK=$WRIX_NETWORK")
-            [ "$_vpn_conflict" = true ] && ENV_ARGS+=(-e "WRIX_WAIT_FOR_ROUTE=1")
+            [[ "$_vpn_conflict" = true ]] && ENV_ARGS+=(-e "WRIX_WAIT_FOR_ROUTE=1")
             ENV_ARGS+=(-e "WRIX_NETWORK_ALLOWLIST=$PROFILE_NETWORK_ALLOWLIST")
             if [[ -n "$WRIX_PROJECT_CACHE_URL" ]]; then
               ENV_ARGS+=(-e "WRIX_PROJECT_CACHE_HOST=$WRIX_PROJECT_CACHE_HOST")
               ENV_ARGS+=(-e "WRIX_PROJECT_CACHE_PORT=$WRIX_PROJECT_CACHE_PORT")
               ENV_ARGS+=(-e "NIX_CONFIG=$WRIX_PROJECT_CACHE_NIX_CONFIG")
             fi
-            [ -n "$PI_AUTH_JSON_MOUNT" ] && ENV_ARGS+=(-e "WRIX_PI_AUTH_JSON=$PI_AUTH_JSON_MOUNT")
+            [[ -n "$PI_AUTH_JSON_MOUNT" ]] && ENV_ARGS+=(-e "WRIX_PI_AUTH_JSON=$PI_AUTH_JSON_MOUNT")
 
             # Generate unique container name
             CONTAINER_NAME="wrix-$$"
 
             # Calculate CPUs (use ProfileConfig override or half of available, minimum 2)
-            if [ -n "$PROFILE_CPUS" ]; then
+            if [[ -n "$PROFILE_CPUS" ]]; then
               CPUS="$PROFILE_CPUS"
             else
               CPUS=$(($(sysctl -n hw.ncpu) / 2))
-              [ "$CPUS" -lt 2 ] && CPUS=2
+              [[ "$CPUS" -lt 2 ]] && CPUS=2
             fi
 
             # Ensure .claude directory exists on host for session persistence
@@ -754,10 +762,10 @@ in
             # avoiding Claude Code writing user-only properties (like
             # skipDangerousModePermissionPrompt) to the project settings path.
             TTY_ARGS=()
-            if [ "$SUBCOMMAND" = "spawn" ]; then
-              [ "$USE_STDIO" = "1" ] && TTY_ARGS=(-i)
+            if [[ "$SUBCOMMAND" = "spawn" ]]; then
+              [[ "$USE_STDIO" = "1" ]] && TTY_ARGS=(-i)
             else
-              [ -t 0 ] && TTY_ARGS=(-t -i)
+              [[ -t 0 ]] && TTY_ARGS=(-t -i)
             fi
 
             RUN_IMAGE="''${WRIX_IMAGE:-$PROFILE_IMAGE}"

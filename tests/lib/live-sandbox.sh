@@ -222,7 +222,7 @@ wrix_run_with_pty() {
   uname_s=$(uname -s)
   case "$uname_s" in
     Linux) script -qefc "$command_line" /dev/null ;;
-    Darwin) script -q /dev/null /bin/bash -lc "$command_line" ;;
+    Darwin) script -q /dev/null bash -lc "$command_line" ;;
     *)
       printf 'unsupported live sandbox host: %s\n' "$uname_s" >&2
       return 64

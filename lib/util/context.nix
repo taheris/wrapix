@@ -11,7 +11,7 @@ in
   # Script that outputs pinned project context
   pin-context = writeShellScriptBin "pin-context" ''
     pin_file="''${1:-docs/README.md}"
-    if [ -f "$pin_file" ]; then
+    if [[ -f "$pin_file" ]]; then
       echo "Context pinned: $pin_file" >&2
       cat "$pin_file"
     else
