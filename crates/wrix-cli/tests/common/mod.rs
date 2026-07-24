@@ -202,6 +202,35 @@ pub fn write_online_success_git(path: &Path) -> TestResult<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+pub fn write_tracing_git(path: &Path, capture_dir: &Path) -> TestResult<PathBuf> {
+    fs::create_dir_all(path)?;
+    let real_git = command_path("git")?;
+    let script = r#"#!/usr/bin/env bash
+set -euo pipefail
+
+capture_dir=@CAPTURE_DIR@
+if [[ "$#" -gt 0 && "$1" == "ls-remote" ]]; then
+  mkdir -p "$capture_dir"
+  pwd -P >"$capture_dir/cwd"
+  printf '%s\n' "$@" >"$capture_dir/args"
+  env | sort >"$capture_dir/env"
+fi
+exec @REAL_GIT@ "$@"
+"#
+    .replace(
+        "@CAPTURE_DIR@",
+        &shell_single_quote(&capture_dir.display().to_string()),
+    )
+    .replace(
+        "@REAL_GIT@",
+        &shell_single_quote(&real_git.display().to_string()),
+    );
+    let git = path.join("git");
+    fs::write(&git, script)?;
+    set_mode(&git, 0o700)?;
+    Ok(path.to_path_buf())
+}
+
 pub fn write_capturing_git(
     path: &Path,
     mode_file: &Path,
@@ -262,6 +291,69 @@ exec @REAL_GIT@ "$@"
     let git = path.join("git");
     fs::write(&git, script)?;
     set_mode(&git, 0o700)?;
+    Ok(path.to_path_buf())
+}
+
+pub fn write_capturing_ssh(
+    path: &Path,
+    mode_file: &Path,
+    capture_dir: &Path,
+) -> TestResult<PathBuf> {
+    fs::create_dir_all(path)?;
+    let real_ssh = command_path("ssh")?;
+    let script = r#"#!/usr/bin/env bash
+set -euo pipefail
+
+capture_dir=@CAPTURE_DIR@
+mode_file=@MODE_FILE@
+for arg in "$@"; do
+  if [[ "$arg" == "-G" ]]; then
+    exec @REAL_SSH@ "$@"
+  fi
+done
+mkdir -p "$capture_dir"
+pwd -P >"$capture_dir/cwd"
+printf '%s\n' "$@" >"$capture_dir/args"
+env | sort >"$capture_dir/env"
+mode="$(<"$mode_file")"
+case "$mode" in
+  success)
+    repo="$(git rev-parse --show-toplevel)"
+    exec git upload-pack "$repo"
+    ;;
+  host-key)
+    printf 'Host key verification failed.\n' >&2
+    exit 255
+    ;;
+  auth)
+    printf 'Permission denied (publickey).\nfatal: Could not read from remote repository.\n' >&2
+    exit 255
+    ;;
+  fail-if-online)
+    printf 'unexpected online verification\n' >&2
+    exit 99
+    ;;
+  *)
+    printf 'unknown fake ssh mode: %s\n' "$mode" >&2
+    exit 98
+    ;;
+esac
+"#
+    .replace(
+        "@CAPTURE_DIR@",
+        &shell_single_quote(&capture_dir.display().to_string()),
+    )
+    .replace(
+        "@MODE_FILE@",
+        &shell_single_quote(&mode_file.display().to_string()),
+    )
+    .replace(
+        "@REAL_SSH@",
+        &shell_single_quote(&real_ssh.display().to_string()),
+    );
+    let ssh = path.join("ssh");
+    fs::write(&ssh, script)?;
+    set_mode(&ssh, 0o700)?;
     Ok(path.to_path_buf())
 }
 

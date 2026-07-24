@@ -1,6 +1,7 @@
 use std::{
     env, fmt, fs, io,
     io::Write,
+    num::NonZeroU64,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Stdio},
@@ -248,6 +249,17 @@ struct ProfilePolicy {
     deploy_key: Option<KeyName>,
 }
 
+#[derive(Default, Deserialize)]
+struct RawProfilePolicy {
+    #[serde(default)]
+    security: RawProfileSecurity,
+}
+
+#[derive(Default, Deserialize)]
+struct RawProfileSecurity {
+    deploy_key: Option<String>,
+}
+
 struct Plan {
     root: PathBuf,
     key_name: KeyName,
@@ -269,10 +281,46 @@ struct SigningIdentity {
 
 #[derive(Clone, Debug)]
 struct RemoteKey {
-    id: String,
+    id: RemoteKeyId,
     title: String,
     key: String,
     read_only: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RemoteKeyId(NonZeroU64);
+
+impl RemoteKeyId {
+    fn parse(value: &Value) -> Result<Self, RemoteKeyIdParseError> {
+        let parsed = match value {
+            Value::Number(number) => number.as_u64().ok_or_else(|| Self::invalid(value))?,
+            Value::String(text) => text
+                .parse::<u64>()
+                .map_err(|_source| Self::invalid(value))?,
+            _ => return Err(Self::invalid(value)),
+        };
+        NonZeroU64::new(parsed)
+            .map(Self)
+            .ok_or_else(|| Self::invalid(value))
+    }
+
+    fn invalid(value: &Value) -> RemoteKeyIdParseError {
+        RemoteKeyIdParseError::Invalid {
+            value: value.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for RemoteKeyId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+#[derive(Clone, Debug, displaydoc::Display, thiserror::Error)]
+enum RemoteKeyIdParseError {
+    /// GitHub remote key id must be a positive integer: {value}
+    Invalid { value: String },
 }
 
 enum LocalKeyState {
@@ -284,7 +332,7 @@ enum LocalKeyState {
 enum RemoteKeyPlan {
     Reuse,
     Create,
-    Replace { ids: Vec<String>, create: bool },
+    Replace { ids: Vec<RemoteKeyId>, create: bool },
 }
 
 impl Plan {
@@ -663,10 +711,37 @@ fn create_secure_dir(path: &Path) -> Result<(), Error> {
 }
 
 fn write_secure_file(path: &Path, content: &str, mode: u32) -> Result<(), Error> {
-    fs::write(path, content).map_err(|source| Error::StateIo {
-        path: path_string(path),
-        source,
-    })?;
+    let matches = match fs::read(path) {
+        Ok(existing) => existing == content.as_bytes(),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => false,
+        Err(source) => {
+            return Err(Error::StateIo {
+                path: path_string(path),
+                source,
+            });
+        }
+    };
+    if !matches {
+        fs::write(path, content).map_err(|source| Error::StateIo {
+            path: path_string(path),
+            source,
+        })?;
+    }
+    set_mode_if_needed(path, mode)
+}
+
+fn set_mode_if_needed(path: &Path, mode: u32) -> Result<(), Error> {
+    let actual = fs::metadata(path)
+        .map_err(|source| Error::StateIo {
+            path: path_string(path),
+            source,
+        })?
+        .permissions()
+        .mode()
+        & 0o777;
+    if actual == mode {
+        return Ok(());
+    }
     set_mode(path, mode)
 }
 
@@ -682,6 +757,30 @@ fn set_mode(path: &Path, mode: u32) -> Result<(), Error> {
 
 fn write_common_git_config(common_dir: &Path, key: &str, value: &str) -> Result<(), Error> {
     let config_path = common_dir.join("config");
+    let current = ProcessCommand::new("git")
+        .arg("config")
+        .arg("--file")
+        .arg(&config_path)
+        .arg("--get-all")
+        .arg(key)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(Error::GitIo)?;
+    let values = String::from_utf8_lossy(&current.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if current.status.success() && values.len() == 1 && values[0] == value {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&current.stderr).trim().to_owned();
+    if !current.status.success() && (current.status.code() != Some(1) || !detail.is_empty()) {
+        return Err(Error::GitConfigQuery {
+            key: key.to_owned(),
+            detail,
+        });
+    }
+
     let output = ProcessCommand::new("git")
         .arg("config")
         .arg("--file")
@@ -945,7 +1044,7 @@ fn apply_github_deploy_key_plan(
         RemoteKeyPlan::Create => create_github_deploy_key(repo, title, public_key),
         RemoteKeyPlan::Replace { ids, create } => {
             for id in ids {
-                delete_github_deploy_key(repo, &id)?;
+                delete_github_deploy_key(repo, id)?;
             }
             if create {
                 create_github_deploy_key(repo, title, public_key)?;
@@ -965,7 +1064,7 @@ fn apply_github_signing_key_plan(
         RemoteKeyPlan::Create => create_github_signing_key(title, public_key),
         RemoteKeyPlan::Replace { ids, create } => {
             for id in ids {
-                delete_github_signing_key(&id)?;
+                delete_github_signing_key(id)?;
             }
             if create {
                 create_github_signing_key(title, public_key)?;
@@ -1019,7 +1118,7 @@ fn create_github_signing_key(title: &str, public_key: &str) -> Result<(), Error>
     Ok(())
 }
 
-fn delete_github_deploy_key(repo: &GithubRepo, id: &str) -> Result<(), Error> {
+fn delete_github_deploy_key(repo: &GithubRepo, id: RemoteKeyId) -> Result<(), Error> {
     let args = vec![
         String::from("--method"),
         String::from("DELETE"),
@@ -1029,7 +1128,7 @@ fn delete_github_deploy_key(repo: &GithubRepo, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn delete_github_signing_key(id: &str) -> Result<(), Error> {
+fn delete_github_signing_key(id: RemoteKeyId) -> Result<(), Error> {
     let args = vec![
         String::from("--method"),
         String::from("DELETE"),
@@ -1078,18 +1177,12 @@ fn parse_remote_keys(operation: &'static str, value: &Value) -> Result<Vec<Remot
 }
 
 fn parse_remote_key(operation: &'static str, value: &Value) -> Result<RemoteKey, Error> {
-    let id = value
-        .get("id")
-        .and_then(|id| {
-            id.as_i64()
-                .map(|value| value.to_string())
-                .or_else(|| id.as_u64().map(|value| value.to_string()))
-                .or_else(|| id.as_str().map(ToOwned::to_owned))
-        })
-        .ok_or_else(|| Error::GhSchema {
-            operation,
-            message: String::from("key entry is missing id"),
-        })?;
+    let raw_id = value.get("id").ok_or_else(|| Error::GhSchema {
+        operation,
+        message: String::from("key entry is missing id"),
+    })?;
+    let id = RemoteKeyId::parse(raw_id)
+        .map_err(|source| Error::InvalidRemoteKeyId { operation, source })?;
     let title = value
         .get("title")
         .and_then(Value::as_str)
@@ -1530,7 +1623,7 @@ fn verify_transport_helper(
     known_hosts_path: &Path,
     key_name: &KeyName,
 ) -> Result<(), Error> {
-    let configured = read_common_git_config(common_dir, "core.sshCommand")?;
+    let configured = read_runtime_git_config(root, "core.sshCommand")?;
     ensure_context_stable_ssh_command(root, &configured)?;
     if configured != TRANSPORT_TRAMPOLINE {
         return Err(Error::TransportConfigMismatch { value: configured });
@@ -1600,21 +1693,7 @@ fn online_verification_cwd(root: &Path, common_dir: &Path) -> Result<PathBuf, Er
 }
 
 fn require_runtime_git_config(cwd: &Path, key: &str, expected: &str) -> Result<(), Error> {
-    let output = ProcessCommand::new("git")
-        .arg("config")
-        .arg("--get")
-        .arg(key)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(Error::GitIo)?;
-    if !output.status.success() {
-        return Err(Error::GitConfigQuery {
-            key: key.to_owned(),
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let value = read_runtime_git_config(cwd, key)?;
     if value == expected {
         return Ok(());
     }
@@ -1623,6 +1702,24 @@ fn require_runtime_git_config(cwd: &Path, key: &str, expected: &str) -> Result<(
         value,
         expected: expected.to_owned(),
         cwd: path_string(cwd),
+    })
+}
+
+fn read_runtime_git_config(cwd: &Path, key: &str) -> Result<String, Error> {
+    let output = ProcessCommand::new("git")
+        .arg("config")
+        .arg("--get")
+        .arg(key)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(Error::GitIo)?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    }
+    Err(Error::GitConfigQuery {
+        key: key.to_owned(),
+        detail: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
 }
 
@@ -1946,16 +2043,16 @@ fn load_profile_policy(path: Option<&Path>) -> Result<ProfilePolicy, Error> {
         path: path_string(path),
         source,
     })?;
-    let value =
-        serde_json::from_str::<Value>(&content).map_err(|source| Error::ProfileConfigJson {
+    let raw = serde_json::from_str::<RawProfilePolicy>(&content).map_err(|source| {
+        Error::ProfileConfigJson {
             path: path_string(path),
             source,
-        })?;
-    let deploy_key = value
-        .get("security")
-        .and_then(Value::as_object)
-        .and_then(|security| security.get("deploy_key"))
-        .and_then(Value::as_str)
+        }
+    })?;
+    let deploy_key = raw
+        .security
+        .deploy_key
+        .as_deref()
         .map(|value| parse_key_name(value, "ProfileConfig security.deploy_key"))
         .transpose()?;
     Ok(ProfilePolicy { deploy_key })
@@ -2068,6 +2165,11 @@ enum Error {
     GhSchema {
         operation: &'static str,
         message: String,
+    },
+    /// GitHub CLI gh api response during {operation} contained an invalid key id: {source}
+    InvalidRemoteKeyId {
+        operation: &'static str,
+        source: RemoteKeyIdParseError,
     },
     /// remote {kind} registration titled {title} conflicts with requested key: {detail}
     RemoteKeyConflict {
@@ -2207,8 +2309,8 @@ mod test {
 
     use super::{
         DeployPolicy, FilePolicy, ForcePolicy, GithubRepo, HookPolicy, KeyName, OnlineFailure,
-        RemoteName, SigningPolicy, VerificationPolicy, classify_online_failure, parse_file_policy,
-        parse_flags, parse_github_remote,
+        RemoteKeyId, RemoteName, SigningPolicy, VerificationPolicy, classify_online_failure,
+        parse_file_policy, parse_flags, parse_github_remote,
     };
 
     #[test]
@@ -2282,6 +2384,23 @@ deploy_key = 'second-key'
         assert_eq!(
             classify_online_failure("ssh: Could not resolve hostname github.com"),
             OnlineFailure::Other,
+        );
+    }
+
+    #[test]
+    fn remote_key_id_rejects_non_positive_or_non_numeric_values() {
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!("not-an-id"),
+        ] {
+            assert!(RemoteKeyId::parse(&value).is_err());
+        }
+        assert_eq!(
+            RemoteKeyId::parse(&serde_json::json!("42"))
+                .unwrap()
+                .to_string(),
+            "42",
         );
     }
 

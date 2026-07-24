@@ -52,7 +52,7 @@ pub fn run_program(args: Vec<OsString>) -> Result<ExitCode, Error> {
         .args(args)
         .status()
         .map_err(|source| Error::SshKeygenIo { source })?;
-    Ok(exit_code(status))
+    exit_code(status)
 }
 
 fn rewrite_args(args: Vec<OsString>) -> Result<Vec<OsString>, Error> {
@@ -163,11 +163,10 @@ fn git_stdout(args: &[&str]) -> Result<String, Error> {
     })
 }
 
-fn exit_code(status: ExitStatus) -> ExitCode {
-    status
-        .code()
-        .and_then(|code| u8::try_from(code).ok())
-        .map_or(ExitCode::FAILURE, ExitCode::from)
+fn exit_code(status: ExitStatus) -> Result<ExitCode, Error> {
+    let code = status.code().ok_or(Error::SshKeygenTerminated)?;
+    let code = u8::try_from(code).map_err(|source| Error::InvalidExitCode { code, source })?;
+    Ok(ExitCode::from(code))
 }
 
 fn path_string(path: &Path) -> String {
@@ -194,6 +193,13 @@ pub enum Error {
     StateIo { path: String, source: io::Error },
     /// cannot execute ssh-keygen: {source}
     SshKeygenIo { source: io::Error },
+    /// ssh-keygen terminated without an exit code
+    SshKeygenTerminated,
+    /// ssh-keygen returned exit code {code}, which cannot be represented: {source}
+    InvalidExitCode {
+        code: i32,
+        source: std::num::TryFromIntError,
+    },
     /// cannot derive SSH public key from signing key {path}: {detail}
     SshPublicKey { path: String, detail: String },
     /// failed to run git: {source}

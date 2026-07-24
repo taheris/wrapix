@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 use common::{
     TestResult, assert_contains, assert_failure_with_clean_stdout, assert_not_contains,
     assert_success_with_clean_stderr, common_git_dir, git_stdout, mode, run_command, run_git,
-    setup_committed_repo, write_empty_key, write_fake_ssh, wrix_command,
+    setup_committed_repo, write_ed25519_key, write_empty_key, write_fake_ssh, wrix_command,
 };
 
 #[test]
@@ -16,12 +16,14 @@ fn common_config_inherited_by_loom_integration() -> TestResult {
         .tempdir()?;
     let home = fixture.path().join("home");
     let deploy_key = home.join(".ssh/deploy_keys/common-key");
+    let signing_key = home.join(".ssh/deploy_keys/common-key-signing");
     write_empty_key(&deploy_key)?;
+    write_ed25519_key(&signing_key)?;
 
     let mut command = wrix_command(repo.path())?;
     command
         .arg("init")
-        .args(["--offline", "--no-sign", "--key", "common-key"])
+        .args(["--offline", "--key", "common-key"])
         .env("HOME", &home);
     let result = run_command(&mut command)?;
     assert_success_with_clean_stderr(&result);
@@ -47,30 +49,34 @@ fn common_config_inherited_by_loom_integration() -> TestResult {
         ],
     )?;
 
-    let command = git_stdout(repo.path(), &["config", "--get", "core.sshCommand"])?;
-    let linked_command = git_stdout(&integration, &["config", "--get", "core.sshCommand"])?;
-    assert_eq!(
-        command, linked_command,
-        "linked worktree did not inherit core.sshCommand",
-    );
-    assert_contains("ssh command", &command, "git rev-parse --git-common-dir");
-    assert_not_contains("ssh command", &command, &repo.path().display().to_string());
-    assert_not_contains("ssh command", &command, &deploy_key.display().to_string());
-    assert_not_contains("ssh command", &command, "/nix/store");
-    assert_not_contains("ssh command", &command, "/etc/wrix/keys");
-    assert_not_contains("ssh command", &command, "/workspace");
-    assert_not_contains("ssh command", &command, ".ssh/deploy_keys");
-
     let common_dir = common_git_dir(repo.path())?;
-    let origin = git_stdout(
-        &integration,
-        &["config", "--show-origin", "--get", "core.sshCommand"],
-    )?;
-    assert_contains(
-        "linked config origin",
-        &origin,
-        &format!("file:{}", common_dir.join("config").display()),
-    );
+    for (key, expected) in [
+        ("core.sshCommand", None),
+        ("gpg.format", Some("ssh")),
+        ("gpg.ssh.program", Some("wrix-git-sign")),
+        ("gpg.ssh.allowedSignersFile", Some("wrix/allowed_signers")),
+        (
+            "user.signingkey",
+            Some("wrix/signing-key/common-key-signing"),
+        ),
+        ("commit.gpgsign", Some("true")),
+    ] {
+        let value = git_stdout(repo.path(), &["config", "--get", key])?;
+        let linked_value = git_stdout(&integration, &["config", "--get", key])?;
+        assert_eq!(value, linked_value, "linked worktree did not inherit {key}");
+        if let Some(expected) = expected {
+            assert_eq!(value, expected, "unexpected {key}");
+        }
+        assert_stable_config_value(key, &value, repo.path(), &home);
+        let origin = git_stdout(&integration, &["config", "--show-origin", "--get", key])?;
+        assert_contains(
+            &format!("linked {key} origin"),
+            &origin,
+            &format!("file:{}", common_dir.join("config").display()),
+        );
+    }
+    let command = git_stdout(repo.path(), &["config", "--get", "core.sshCommand"])?;
+    assert_contains("ssh command", &command, "git rev-parse --git-common-dir");
 
     let state_dir = common_dir.join("wrix");
     assert!(
@@ -85,6 +91,12 @@ fn common_config_inherited_by_loom_integration() -> TestResult {
         state_dir.join("github_known_hosts").display(),
     );
     assert_eq!(mode(&state_dir.join("github_known_hosts"))?, 0o600);
+    assert!(
+        state_dir.join("allowed_signers").is_file(),
+        "missing allowed signers at {}",
+        state_dir.join("allowed_signers").display(),
+    );
+    assert_eq!(mode(&state_dir.join("allowed_signers"))?, 0o600);
 
     Ok(())
 }
@@ -177,6 +189,15 @@ fn strict_context_aware_ssh_helper() -> TestResult {
     );
 
     Ok(())
+}
+
+fn assert_stable_config_value(label: &str, value: &str, repo: &Path, home: &Path) {
+    assert_not_contains(label, value, &repo.display().to_string());
+    assert_not_contains(label, value, &home.display().to_string());
+    assert_not_contains(label, value, "/nix/store");
+    assert_not_contains(label, value, "/etc/wrix/keys");
+    assert_not_contains(label, value, "/workspace");
+    assert_not_contains(label, value, ".ssh/deploy_keys");
 }
 
 fn helper_command(

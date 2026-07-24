@@ -85,70 +85,82 @@ fn root_and_subcommand_help() -> TestResult {
 }
 
 #[test]
-fn help_errors_are_non_mutating() -> TestResult {
-    let repo = setup_repo("cli-help-errors")?;
-
+fn init_help_is_non_mutating() -> TestResult {
+    let repo = setup_repo("cli-init-help")?;
     let before = git_config(repo.path())?;
-    let init_help = run_wrix_in(repo.path(), &["init", "--help"])?;
-    let after = git_config(repo.path())?;
-    assert_success_with_clean_stderr(&init_help);
-    assert_contains("init help", &init_help.stdout, "Usage: wrix init");
-    assert_eq!(before, after, "wrix init --help mutated git config");
+
+    let result = run_wrix_in(repo.path(), &["init", "--help"])?;
+
+    assert_success_with_clean_stderr(&result);
+    assert_contains("init help", &result.stdout, "Usage: wrix init");
+    assert_eq!(before, git_config(repo.path())?);
     assert!(
         !repo.path().join("wrix.toml").exists(),
         "wrix init --help created wrix.toml"
     );
+    Ok(())
+}
 
-    let unknown = run_wrix(&["not-a-command"])?;
-    assert_failure_with_clean_stdout(&unknown);
-    assert_contains("unknown command", &unknown.stderr, "not-a-command");
-    assert_contains("unknown command", &unknown.stderr, "Usage: wrix <command>");
+#[test]
+fn unknown_root_command_reports_usage() -> TestResult {
+    let result = run_wrix(&["not-a-command"])?;
 
+    assert_failure_with_clean_stdout(&result);
+    assert_contains("unknown command", &result.stderr, "not-a-command");
+    assert_contains("unknown command", &result.stderr, "Usage: wrix <command>");
+    Ok(())
+}
+
+#[test]
+fn missing_init_flag_value_is_non_mutating() -> TestResult {
+    let repo = setup_repo("cli-missing-init-value")?;
     let before = git_config(repo.path())?;
-    let deploy_offline = run_wrix_in(repo.path(), &["init", "--deploy", "--offline"])?;
-    let after = git_config(repo.path())?;
-    assert_failure_with_clean_stdout(&deploy_offline);
+
+    let result = run_wrix_in(repo.path(), &["init", "--key"])?;
+
+    assert_failure_with_clean_stdout(&result);
+    assert_contains("missing key", &result.stderr, "--key requires <name>");
+    assert_contains("missing key", &result.stderr, "Usage: wrix init");
+    assert_eq!(before, git_config(repo.path())?);
+    Ok(())
+}
+
+#[test]
+fn deploy_offline_flags_are_non_mutating() -> TestResult {
+    let repo = setup_repo("cli-deploy-offline-flags")?;
+    let before = git_config(repo.path())?;
+
+    let result = run_wrix_in(repo.path(), &["init", "--deploy", "--offline"])?;
+
+    assert_failure_with_clean_stdout(&result);
     assert_contains(
         "deploy offline",
-        &deploy_offline.stderr,
+        &result.stderr,
         "--deploy cannot be used with --offline",
     );
-    assert_contains("deploy offline", &deploy_offline.stderr, "Usage: wrix init");
-    assert_eq!(
-        before, after,
-        "wrix init --deploy --offline mutated git config"
-    );
+    assert_contains("deploy offline", &result.stderr, "Usage: wrix init");
+    assert_eq!(before, git_config(repo.path())?);
+    Ok(())
+}
 
-    let before = git_config(repo.path())?;
-    let missing_key = run_wrix_in(repo.path(), &["init", "--key"])?;
-    let after = git_config(repo.path())?;
-    assert_failure_with_clean_stdout(&missing_key);
-    assert_contains("missing key", &missing_key.stderr, "--key requires <name>");
-    assert_contains("missing key", &missing_key.stderr, "Usage: wrix init");
-    assert_eq!(before, after, "wrix init --key mutated git config");
-
+#[test]
+fn deploy_under_offline_policy_is_non_mutating() -> TestResult {
+    let repo = setup_repo("cli-deploy-offline-policy")?;
     let policy = "[wrix.init]\nonline_verify = false\n";
     fs::write(repo.path().join("wrix.toml"), policy)?;
     let before = git_config(repo.path())?;
-    let deploy_offline_policy = run_wrix_in(repo.path(), &["init", "--deploy"])?;
-    let after = git_config(repo.path())?;
-    assert_failure_with_clean_stdout(&deploy_offline_policy);
+
+    let result = run_wrix_in(repo.path(), &["init", "--deploy"])?;
+
+    assert_failure_with_clean_stdout(&result);
     assert_contains(
         "deploy offline policy",
-        &deploy_offline_policy.stderr,
+        &result.stderr,
         "--deploy requires online verification",
     );
-    assert_contains(
-        "deploy offline policy",
-        &deploy_offline_policy.stderr,
-        "Usage: wrix init",
-    );
-    assert_eq!(
-        before, after,
-        "wrix init --deploy under offline policy mutated git config"
-    );
+    assert_contains("deploy offline policy", &result.stderr, "Usage: wrix init");
+    assert_eq!(before, git_config(repo.path())?);
     assert_eq!(fs::read_to_string(repo.path().join("wrix.toml"))?, policy);
-
     Ok(())
 }
 

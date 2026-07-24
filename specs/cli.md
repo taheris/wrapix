@@ -17,7 +17,7 @@ Wrix needs one predictable command line that works from host shells, devshells, 
 | `wrix run ...` | `sandbox.md` | Interactive sandbox launch |
 | `wrix spawn ...` | `sandbox.md` | Programmatic sandbox launch from `SpawnConfig` |
 | `wrix service ...` | `services.md` | Workspace service lifecycle |
-| `wrix service dolt ...` | `services.md` / `beads.md` | Dolt endpoint diagnostics for beads |
+| `wrix service dolt ...` | `services.md` | Dolt endpoint diagnostics for beads |
 | `wrix service cache ...` | `services.md` | Project Nix cache operations |
 | `wrix beads push` | `beads.md` | Beads session-close synchronization |
 | `wrix init ...` | this spec | Repository-local Git, signing, hook, and verification bootstrap |
@@ -110,23 +110,59 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [check](verify:cli.shared-verifier-app)
 - Runner configuration maps `verify:` annotations to the batched `.#verify` app invocation rather than spawning one Nix process per criterion, and treats the `.#verify --list` inventory as the verifier registry.
   [check](verify:cli.verify-runner-batching)
-- Unknown root commands and malformed `wrix init` invocations, including `--deploy --offline` and `--deploy` when `wrix.init.online_verify = false`, exit non-zero with an actionable error and usage text, while `--help` exits zero without mutating repository state.
-  [test](../crates/wrix-cli/tests/cli_surface.rs::help_errors_are_non_mutating)
+- `wrix init --help` exits zero without mutating Git config or creating `wrix.toml`.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::init_help_is_non_mutating)
+- Unknown root commands exit non-zero, name the unknown token, and print root usage.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::unknown_root_command_reports_usage)
+- A `wrix init` flag missing its required value exits non-zero with usage and does not mutate Git config.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::missing_init_flag_value_is_non_mutating)
+- `wrix init --deploy --offline` exits non-zero with usage before mutating Git config.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::deploy_offline_flags_are_non_mutating)
+- `wrix init --deploy` under `wrix.init.online_verify = false` exits non-zero with usage before mutating Git config or policy.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::deploy_under_offline_policy_is_non_mutating)
 - `wrix init` succeeds without `wrix.toml`, does not create `wrix.toml` for default behavior, and applies flag > `wrix.toml` > ProfileConfig > derived-default precedence for key name, signing, remote, hook, and online verification policy.
   [test](../crates/wrix-cli/tests/init_config.rs::defaults_and_overrides)
-- `wrix init` writes shared/common Git config that is inherited by a `.loom/integration`-style linked worktree, and that config contains no absolute host deploy-key path, container `/etc/wrix/keys` private-key path, host-only/container-only helper path, or host-only/container-only allowed-signers path.
+- ProfileConfig security policy rejects wrong-typed `security` and `security.deploy_key` values before repository mutation.
+  [test](../crates/wrix-cli/tests/init_config.rs::profile_config_rejects_wrong_typed_security_policy)
+- `wrix init` writes shared/common transport and signing config that is inherited by a `.loom/integration`-style linked worktree, and that config contains no context-specific private-key, helper, or allowed-signers paths.
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::common_config_inherited_by_loom_integration)
 - With `$HOME` and the effective-user home differing, the Git transport helper
   conforms to the credential-resolution, host-verification, and ambient-identity
   policy owned by `security.md`, and leaves Wrix-created SSH directories at
   `0700` plus compatibility `config` / `known_hosts` files at `0600`.
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::strict_context_aware_ssh_helper)
-- SSH commit signing is enabled by default; a missing `<key-name>-signing` key fails hard, `--no-sign` disables signing explicitly, and a signed test commit verifies against the generated allowed-signers file.
+- An effective worktree-local `core.sshCommand` override that weakens the common transport policy makes local init verification fail.
+  [test](../crates/wrix-cli/tests/init_verify.rs::worktree_transport_override_fails_verification)
+- SSH commit signing is enabled by default, a signed test commit verifies against the generated allowed-signers file, and a linked worktree verifies the same commit.
   [test](../crates/wrix-cli/tests/init_signing.rs::signing_required_by_default)
-- `wrix init --deploy` generates separate passphraseless deploy and signing ed25519 keys with secure permissions when signing is enabled, registers the deploy key with write access and the signing key with GitHub, reuses matching existing keys, and replaces conflicts only with `--force`.
+- Missing fallback signing material is a hard failure when signing is enabled.
+  [test](../crates/wrix-cli/tests/init_signing.rs::fallback_signing_key_is_required)
+- `--no-sign` explicitly disables commit signing.
+  [test](../crates/wrix-cli/tests/init_signing.rs::no_sign_flag_disables_signing)
+- `wrix.git.sign_commits = false` disables commit signing by repository policy.
+  [test](../crates/wrix-cli/tests/init_signing.rs::signing_config_opt_out_disables_signing)
+- `wrix init --deploy` generates separate passphraseless deploy and signing ed25519 keys with secure permissions, registers the deploy key with write access, and registers the signing key with GitHub.
   [test](../crates/wrix-cli/tests/init_deploy.rs::github_deploy_and_signing_keys)
-- Online verification runs a fresh host-side Git operation from a minimal Loom-driver-like environment through the Wrix helper and distinguishes host-key verification failure from GitHub auth/repository authorization failure; `--offline` or `wrix.init.online_verify = false` skips network and GitHub API calls while preserving local verification.
-  [test](../crates/wrix-cli/tests/init_verify.rs::online_and_offline_verification)
+- Deploy provisioning reuses matching local and remote keys without remote mutation.
+  [test](../crates/wrix-cli/tests/init_deploy.rs::matching_deploy_keys_are_reused)
+- Conflicting local key material fails unless `--force` replaces it and its remote registration.
+  [test](../crates/wrix-cli/tests/init_deploy.rs::local_key_conflict_requires_force)
+- Conflicting remote key registration fails unless `--force` replaces it.
+  [test](../crates/wrix-cli/tests/init_deploy.rs::remote_key_conflict_requires_force)
+- Deploy provisioning rejects non-GitHub remotes before remote API mutation.
+  [test](../crates/wrix-cli/tests/init_deploy.rs::unsupported_deploy_remote_fails_before_api_mutation)
+- Online verification runs real Git from a minimal Loom-driver-like environment through the configured common-dir trampoline and generated strict SSH helper.
+  [test](../crates/wrix-cli/tests/init_verify.rs::online_verification_uses_generated_helper)
+- Online verification reports host-key verification failure separately from authentication or repository authorization failure.
+  [test](../crates/wrix-cli/tests/init_verify.rs::online_failures_distinguish_host_key_from_authorization)
+- `--offline` skips network verification while preserving local helper and key verification.
+  [test](../crates/wrix-cli/tests/init_verify.rs::offline_flag_skips_network_verification)
+- `wrix.init.online_verify = false` skips network verification while preserving local helper and key verification.
+  [test](../crates/wrix-cli/tests/init_verify.rs::offline_config_skips_network_verification)
+- Offline verification rejects insecure local deploy-key permissions without a network operation.
+  [test](../crates/wrix-cli/tests/init_verify.rs::offline_verification_rejects_insecure_key_permissions)
+- Repeated identical `wrix init --deploy` runs preserve key, config, hook, and generated-helper content and file metadata while avoiding remote mutation.
+  [test](../crates/wrix-cli/tests/init_idempotency.rs::repeated_init_does_not_churn_managed_state)
 - When `.pre-commit-config.yaml` exists and hook setup is enabled, `wrix init` points repo-local `core.hooksPath` at Wrix's prek hook bundle in the same shared config inherited by `.loom/integration`; when hooks are disabled by flag or config it leaves hook config unchanged.
   [test](../crates/wrix-cli/tests/init_prek.rs::prek_hooks)
 

@@ -12,9 +12,9 @@ use common::{
 fn signing_required_by_default() -> TestResult {
     let repo = setup_committed_repo("signing-default", false)?;
     let fixture = tempfile::Builder::new()
-        .prefix("wrix-init-signing-fixtures")
+        .prefix("wrix-init-signing-default")
         .tempdir()?;
-    let home = fixture.path().join("home-signing");
+    let home = fixture.path().join("home");
     let deploy_key = home.join(".ssh/deploy_keys/signing-key");
     let signing_key = home.join(".ssh/deploy_keys/signing-key-signing");
     write_ed25519_key(&deploy_key)?;
@@ -26,71 +26,33 @@ fn signing_required_by_default() -> TestResult {
         .args(["--offline", "--key", "signing-key"])
         .env("HOME", &home);
     let result = run_command(&mut command)?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains(
         "default signing output",
         &result.stdout,
         "sign_commits: true",
     );
-
-    assert_eq!(
-        git_stdout(repo.path(), &["config", "--get", "gpg.format"])?,
-        "ssh"
-    );
-    assert_eq!(
-        git_stdout(repo.path(), &["config", "--get", "commit.gpgsign"])?,
-        "true",
-    );
-    assert_eq!(
-        git_stdout(repo.path(), &["config", "--get", "gpg.ssh.program"])?,
-        "wrix-git-sign",
-    );
-    assert_eq!(
-        git_stdout(
-            repo.path(),
-            &["config", "--get", "gpg.ssh.allowedSignersFile"],
-        )?,
-        "wrix/allowed_signers",
-    );
-    assert_eq!(
-        git_stdout(repo.path(), &["config", "--get", "user.signingkey"])?,
-        "wrix/signing-key/signing-key-signing",
-    );
-    assert_stable_config_value(
-        "gpg.ssh.program",
-        &git_stdout(repo.path(), &["config", "--get", "gpg.ssh.program"])?,
-        repo.path(),
-        &home,
-    );
-    assert_stable_config_value(
-        "gpg.ssh.allowedSignersFile",
-        &git_stdout(
-            repo.path(),
-            &["config", "--get", "gpg.ssh.allowedSignersFile"],
-        )?,
-        repo.path(),
-        &home,
-    );
-    assert_stable_config_value(
-        "user.signingkey",
-        &git_stdout(repo.path(), &["config", "--get", "user.signingkey"])?,
-        repo.path(),
-        &home,
-    );
+    for (key, expected) in [
+        ("gpg.format", "ssh"),
+        ("commit.gpgsign", "true"),
+        ("gpg.ssh.program", "wrix-git-sign"),
+        ("gpg.ssh.allowedSignersFile", "wrix/allowed_signers"),
+        ("user.signingkey", "wrix/signing-key/signing-key-signing"),
+    ] {
+        let value = git_stdout(repo.path(), &["config", "--get", key])?;
+        assert_eq!(value, expected);
+        assert_stable_config_value(key, &value, repo.path(), &home);
+    }
 
     let common_dir = common_git_dir(repo.path())?;
     let allowed_signers = common_dir.join("wrix/allowed_signers");
-    assert!(
-        allowed_signers.is_file(),
-        "allowed signers file was not generated at {}",
-        allowed_signers.display(),
-    );
+    assert!(allowed_signers.is_file());
     assert_eq!(mode(&allowed_signers)?, 0o600);
-    let public_key = public_key(&signing_key)?;
     assert_contains(
         "allowed signers",
         &fs::read_to_string(&allowed_signers)?,
-        &format!("wrix-test@example.invalid {public_key}"),
+        &format!("wrix-test@example.invalid {}", public_key(&signing_key)?),
     );
 
     fs::write(repo.path().join("signed.txt"), "signed\n")?;
@@ -115,72 +77,105 @@ fn signing_required_by_default() -> TestResult {
         &home,
     )?;
     run_git_with_signing_env(&integration, &["verify-commit", "HEAD"], &home)?;
+    Ok(())
+}
 
-    let missing_repo = setup_committed_repo("signing-missing-env", false)?;
-    let missing_home = fixture.path().join("home-missing-env");
-    fs::create_dir_all(&missing_home)?;
-    let mut command = wrix_command(missing_repo.path())?;
+#[test]
+fn signing_key_env_must_point_to_file() -> TestResult {
+    let repo = setup_committed_repo("signing-missing-env", false)?;
+    let fixture = tempfile::Builder::new()
+        .prefix("wrix-init-signing-missing-env")
+        .tempdir()?;
+    let home = fixture.path().join("home");
+    fs::create_dir_all(&home)?;
+    let mut command = wrix_command(repo.path())?;
     command
         .arg("init")
         .args(["--offline", "--key", "missing-key"])
-        .env("HOME", &missing_home)
-        .env(
-            "WRIX_SIGNING_KEY",
-            fixture.path().join("absent-signing-key"),
-        );
+        .env("HOME", &home)
+        .env("WRIX_SIGNING_KEY", fixture.path().join("absent-key"));
+
     let result = run_command(&mut command)?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains(
         "missing WRIX_SIGNING_KEY",
         &result.stderr,
         "WRIX_SIGNING_KEY does not point at a file",
     );
+    Ok(())
+}
 
-    let missing_repo = setup_committed_repo("signing-missing-home", false)?;
-    let missing_home = fixture.path().join("home-missing-home");
-    fs::create_dir_all(&missing_home)?;
-    let mut command = wrix_command(missing_repo.path())?;
+#[test]
+fn fallback_signing_key_is_required() -> TestResult {
+    let repo = setup_committed_repo("signing-missing-home", false)?;
+    let fixture = tempfile::Builder::new()
+        .prefix("wrix-init-signing-missing-home")
+        .tempdir()?;
+    let home = fixture.path().join("home");
+    fs::create_dir_all(&home)?;
+    let mut command = wrix_command(repo.path())?;
     command
         .arg("init")
         .args(["--offline", "--key", "missing-key"])
-        .env("HOME", &missing_home);
+        .env("HOME", &home);
+
     let result = run_command(&mut command)?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains(
         "missing home signing key",
         &result.stderr,
         "fallback signing key does not exist",
     );
+    Ok(())
+}
 
-    let no_sign_repo = setup_committed_repo("signing-disabled-flag", false)?;
-    let no_sign_home = fixture.path().join("home-no-sign");
-    write_ed25519_key(&no_sign_home.join(".ssh/deploy_keys/no-sign-key"))?;
-    let mut command = wrix_command(no_sign_repo.path())?;
+#[test]
+fn no_sign_flag_disables_signing() -> TestResult {
+    let repo = setup_committed_repo("signing-disabled-flag", false)?;
+    let fixture = tempfile::Builder::new()
+        .prefix("wrix-init-signing-no-sign")
+        .tempdir()?;
+    let home = fixture.path().join("home");
+    write_ed25519_key(&home.join(".ssh/deploy_keys/no-sign-key"))?;
+    let mut command = wrix_command(repo.path())?;
     command
         .arg("init")
         .args(["--offline", "--key", "no-sign-key", "--no-sign"])
-        .env("HOME", &no_sign_home);
+        .env("HOME", &home);
+
     let result = run_command(&mut command)?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains("--no-sign output", &result.stdout, "sign_commits: false");
     assert_eq!(
-        git_stdout(no_sign_repo.path(), &["config", "--get", "commit.gpgsign"])?,
+        git_stdout(repo.path(), &["config", "--get", "commit.gpgsign"])?,
         "false",
     );
+    Ok(())
+}
 
-    let config_repo = setup_committed_repo("signing-disabled-config", false)?;
-    let config_home = fixture.path().join("home-config-no-sign");
-    write_ed25519_key(&config_home.join(".ssh/deploy_keys/config-key"))?;
+#[test]
+fn signing_config_opt_out_disables_signing() -> TestResult {
+    let repo = setup_committed_repo("signing-disabled-config", false)?;
+    let fixture = tempfile::Builder::new()
+        .prefix("wrix-init-signing-config-opt-out")
+        .tempdir()?;
+    let home = fixture.path().join("home");
+    write_ed25519_key(&home.join(".ssh/deploy_keys/config-key"))?;
     fs::write(
-        config_repo.path().join("wrix.toml"),
+        repo.path().join("wrix.toml"),
         "[wrix.git]\nsign_commits = false\n",
     )?;
-    let mut command = wrix_command(config_repo.path())?;
+    let mut command = wrix_command(repo.path())?;
     command
         .arg("init")
         .args(["--offline", "--key", "config-key"])
-        .env("HOME", &config_home);
+        .env("HOME", &home);
+
     let result = run_command(&mut command)?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains(
         "config disabled output",
@@ -188,10 +183,9 @@ fn signing_required_by_default() -> TestResult {
         "sign_commits: false",
     );
     assert_eq!(
-        git_stdout(config_repo.path(), &["config", "--get", "commit.gpgsign"])?,
+        git_stdout(repo.path(), &["config", "--get", "commit.gpgsign"])?,
         "false",
     );
-
     Ok(())
 }
 

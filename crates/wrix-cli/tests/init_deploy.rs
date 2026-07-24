@@ -1,6 +1,6 @@
 mod common;
 
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path, path::PathBuf, process::Command};
 
 use common::{
     RunResult, TestResult, assert_contains, assert_failure_with_clean_stdout, assert_not_contains,
@@ -11,57 +11,44 @@ use common::{
 
 #[test]
 fn github_deploy_and_signing_keys() -> TestResult {
-    let fixture = tempfile::Builder::new()
-        .prefix("wrix-init-deploy-fixtures")
-        .tempdir()?;
-    let fake_git = write_online_success_git(&fixture.path().join("fake-git"))?;
-    let gh_state = fixture.path().join("gh-state");
-    let gh_log = fixture.path().join("gh.log");
-    let fake_gh = write_fake_gh(&fixture.path().join("fake-gh"), &gh_state, &gh_log)?;
-    let ssh_keygen_log = fixture.path().join("ssh-keygen.log");
-    let fake_ssh_keygen =
-        write_logging_ssh_keygen(&fixture.path().join("fake-ssh-keygen"), &ssh_keygen_log)?;
-
+    let fixture = DeployFixture::new()?;
     let repo = setup_committed_repo("deploy-target", false)?;
-    let home = fixture.path().join("home-deploy");
-    let result = run_init(
+    let home = fixture.home("initial");
+
+    let result = fixture.run_init(
         repo.path(),
         &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
         &["--deploy", "--key", "deploy-key", "--no-hooks"],
     )?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains("deploy output", &result.stdout, "deploy: true");
     assert_contains("deploy output", &result.stdout, "sign_commits: true");
-
-    let key_dir = home.join(".ssh/deploy_keys");
-    let deploy_key = key_dir.join("deploy-key");
-    let signing_key = key_dir.join("deploy-key-signing");
-    assert!(deploy_key.is_file(), "deploy private key was not generated");
-    assert!(
-        deploy_key.with_extension("pub").is_file(),
-        "deploy public key was not generated",
-    );
-    assert!(
-        signing_key.is_file(),
-        "signing private key was not generated",
-    );
-    assert!(
-        signing_key.with_extension("pub").is_file(),
-        "signing public key was not generated",
-    );
+    let deploy_key = home.join(".ssh/deploy_keys/deploy-key");
+    let signing_key = home.join(".ssh/deploy_keys/deploy-key-signing");
+    for path in [
+        deploy_key.as_path(),
+        deploy_key.with_extension("pub").as_path(),
+        signing_key.as_path(),
+        signing_key.with_extension("pub").as_path(),
+    ] {
+        assert!(
+            path.is_file(),
+            "generated key is missing: {}",
+            path.display()
+        );
+    }
     assert_eq!(mode(&home.join(".ssh"))?, 0o700);
-    assert_eq!(mode(&key_dir)?, 0o700);
+    assert_eq!(mode(&home.join(".ssh/deploy_keys"))?, 0o700);
     assert_eq!(mode(&deploy_key)?, 0o600);
     assert_eq!(mode(&signing_key)?, 0o600);
 
-    let deploy_public = public_key(&deploy_key)?;
-    let signing_public = public_key(&signing_key)?;
-    assert_eq!(state_value(&gh_state, "deploy_key")?, deploy_public);
-    assert_eq!(state_value(&gh_state, "signing_key")?, signing_public);
-    let log = fs::read_to_string(&gh_log)?;
+    assert_eq!(fixture.state_value("deploy_key")?, public_key(&deploy_key)?);
+    assert_eq!(
+        fixture.state_value("signing_key")?,
+        public_key(&signing_key)?,
+    );
+    let log = fs::read_to_string(&fixture.gh_log)?;
     assert_contains(
         "deploy create",
         &log,
@@ -69,130 +56,143 @@ fn github_deploy_and_signing_keys() -> TestResult {
     );
     assert_contains("deploy create", &log, "read_only=false");
     assert_contains("signing create", &log, "POST user/ssh_signing_keys");
-    let ssh_keygen_log_content = fs::read_to_string(&ssh_keygen_log)?;
+    let keygen_log = fs::read_to_string(&fixture.ssh_keygen_log)?;
     assert_contains(
         "ssh-keygen deploy invocation",
-        &ssh_keygen_log_content,
+        &keygen_log,
         "wrix deploy key example/deploy-target",
     );
     assert_contains(
         "ssh-keygen signing invocation",
-        &ssh_keygen_log_content,
+        &keygen_log,
         "wrix signing key example/deploy-target",
     );
+    Ok(())
+}
 
-    clear_log(&gh_log)?;
-    let before_public = format!("{deploy_public}/{signing_public}");
-    let result = run_init(
-        repo.path(),
-        &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
-        &["--deploy", "--key", "deploy-key", "--no-hooks"],
-    )?;
+#[test]
+fn matching_deploy_keys_are_reused() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("deploy-reuse", false)?;
+    let home = fixture.home("reuse");
+    let args = ["--deploy", "--key", "deploy-key", "--no-hooks"];
+    assert_success_with_clean_stderr(&fixture.run_init(repo.path(), &home, &args)?);
+    let deploy_key = home.join(".ssh/deploy_keys/deploy-key");
+    let signing_key = home.join(".ssh/deploy_keys/deploy-key-signing");
+    let before = format!("{}/{}", public_key(&deploy_key)?, public_key(&signing_key)?);
+    fixture.clear_gh_log()?;
+
+    let result = fixture.run_init(repo.path(), &home, &args)?;
+
     assert_success_with_clean_stderr(&result);
-    assert_contains("reuse output", &result.stdout, "deploy: true");
-    let after_public = format!("{}/{}", public_key(&deploy_key)?, public_key(&signing_key)?);
     assert_eq!(
-        after_public, before_public,
-        "deploy run churned key material"
+        before,
+        format!("{}/{}", public_key(&deploy_key)?, public_key(&signing_key)?),
+        "repeated deploy provisioning churned key material",
     );
-    assert_no_remote_mutation("reuse remote log", &gh_log)?;
+    fixture.assert_no_remote_mutation("reuse remote log")?;
+    Ok(())
+}
 
+#[test]
+fn local_key_conflict_requires_force() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("deploy-local-conflict", false)?;
+    let home = fixture.home("local-conflict");
+    let args = ["--deploy", "--key", "deploy-key", "--no-hooks"];
+    assert_success_with_clean_stderr(&fixture.run_init(repo.path(), &home, &args)?);
+    let deploy_key = home.join(".ssh/deploy_keys/deploy-key");
     set_mode(&deploy_key, 0o644)?;
-    clear_log(&gh_log)?;
-    let result = run_init(
-        repo.path(),
-        &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
-        &["--deploy", "--key", "deploy-key", "--no-hooks"],
-    )?;
-    assert_failure_with_clean_stdout(&result);
-    assert_contains("local conflict", &result.stderr, "deploy key");
+    fixture.clear_gh_log()?;
+
+    let rejected = fixture.run_init(repo.path(), &home, &args)?;
+
+    assert_failure_with_clean_stdout(&rejected);
+    assert_contains("local conflict", &rejected.stderr, "deploy key");
     assert_contains(
         "local conflict",
-        &result.stderr,
+        &rejected.stderr,
         "conflicts with requested deploy provisioning",
     );
-    assert_log_empty("local conflict", &gh_log)?;
+    fixture.assert_gh_log_empty("local conflict")?;
 
-    let result = run_init(
+    let replaced = fixture.run_init(
         repo.path(),
         &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
         &["--deploy", "--key", "deploy-key", "--no-hooks", "--force"],
     )?;
-    assert_success_with_clean_stderr(&result);
-    assert_contains("force output", &result.stdout, "force: true");
-    let deploy_public = public_key(&deploy_key)?;
-    assert_eq!(state_value(&gh_state, "deploy_key")?, deploy_public);
-    let log = fs::read_to_string(&gh_log)?;
+    assert_success_with_clean_stderr(&replaced);
+    assert_contains("force output", &replaced.stdout, "force: true");
+    assert_eq!(fixture.state_value("deploy_key")?, public_key(&deploy_key)?);
+    let log = fs::read_to_string(&fixture.gh_log)?;
     assert_contains(
         "force deploy delete",
         &log,
-        "DELETE repos/example/deploy-target/keys/1",
+        "DELETE repos/example/deploy-local-conflict/keys/1",
     );
     assert_contains(
         "force deploy create",
         &log,
-        "POST repos/example/deploy-target/keys",
+        "POST repos/example/deploy-local-conflict/keys",
     );
+    Ok(())
+}
 
-    let conflict_key = fixture.path().join("conflict-key");
+#[test]
+fn remote_key_conflict_requires_force() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("deploy-remote-conflict", false)?;
+    let home = fixture.home("remote-conflict");
+    let args = ["--deploy", "--key", "deploy-key", "--no-hooks"];
+    assert_success_with_clean_stderr(&fixture.run_init(repo.path(), &home, &args)?);
+    let conflict_key = fixture.directory.path().join("conflict-key");
     write_ed25519_key(&conflict_key)?;
-    let conflict_public = public_key(&conflict_key)?;
-    seed_remote_signing(&gh_state, "deploy-key-signing", &conflict_public)?;
-    clear_log(&gh_log)?;
-    let result = run_init(
-        repo.path(),
-        &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
-        &["--deploy", "--key", "deploy-key", "--no-hooks"],
-    )?;
-    assert_failure_with_clean_stdout(&result);
+    fixture.seed_remote_signing("deploy-key-signing", &public_key(&conflict_key)?)?;
+    fixture.clear_gh_log()?;
+
+    let rejected = fixture.run_init(repo.path(), &home, &args)?;
+
+    assert_failure_with_clean_stdout(&rejected);
     assert_contains(
         "remote conflict",
-        &result.stderr,
+        &rejected.stderr,
         "remote signing key registration",
     );
     assert_contains(
         "remote conflict",
-        &result.stderr,
+        &rejected.stderr,
         "conflicts with requested key",
     );
-    assert_no_remote_mutation("remote conflict log", &gh_log)?;
+    fixture.assert_no_remote_mutation("remote conflict log")?;
 
-    clear_log(&gh_log)?;
-    let result = run_init(
+    fixture.clear_gh_log()?;
+    let replaced = fixture.run_init(
         repo.path(),
         &home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
         &["--deploy", "--key", "deploy-key", "--no-hooks", "--force"],
     )?;
-    assert_success_with_clean_stderr(&result);
-    assert_contains("remote force output", &result.stdout, "force: true");
-    let signing_public = public_key(&signing_key)?;
-    assert_eq!(state_value(&gh_state, "signing_key")?, signing_public);
-    let log = fs::read_to_string(&gh_log)?;
+    assert_success_with_clean_stderr(&replaced);
+    assert_contains("remote force output", &replaced.stdout, "force: true");
+    assert_eq!(
+        fixture.state_value("signing_key")?,
+        public_key(&home.join(".ssh/deploy_keys/deploy-key-signing"))?,
+    );
+    let log = fs::read_to_string(&fixture.gh_log)?;
     assert_contains(
         "force signing delete",
         &log,
         "DELETE user/ssh_signing_keys/2",
     );
     assert_contains("force signing create", &log, "POST user/ssh_signing_keys");
+    Ok(())
+}
 
-    let unsupported_repo = setup_committed_repo("unsupported-remote", false)?;
+#[test]
+fn unsupported_deploy_remote_fails_before_api_mutation() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("unsupported-remote", false)?;
     run_git(
-        unsupported_repo.path(),
+        repo.path(),
         &[
             "remote",
             "set-url",
@@ -200,13 +200,12 @@ fn github_deploy_and_signing_keys() -> TestResult {
             "git@example.com:example/unsupported-remote.git",
         ],
     )?;
-    clear_log(&gh_log)?;
-    let result = run_init(
-        unsupported_repo.path(),
-        &fixture.path().join("home-unsupported"),
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
+    let home = fixture.home("unsupported");
+    fixture.clear_gh_log()?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
         &[
             "--deploy",
             "--key",
@@ -215,23 +214,27 @@ fn github_deploy_and_signing_keys() -> TestResult {
             "--no-hooks",
         ],
     )?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains(
         "unsupported remote",
         &result.stderr,
         "supports only github.com remotes",
     );
-    assert_log_empty("unsupported remote", &gh_log)?;
+    fixture.assert_gh_log_empty("unsupported remote")?;
+    Ok(())
+}
 
-    let offline_repo = setup_committed_repo("offline-flag", false)?;
-    let offline_home = fixture.path().join("home-offline");
-    clear_log(&gh_log)?;
-    let result = run_init(
-        offline_repo.path(),
-        &offline_home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
+#[test]
+fn deploy_offline_flag_fails_before_key_or_api_mutation() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("deploy-offline-flag", false)?;
+    let home = fixture.home("offline-flag");
+    fixture.clear_gh_log()?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
         &[
             "--deploy",
             "--offline",
@@ -240,97 +243,131 @@ fn github_deploy_and_signing_keys() -> TestResult {
             "--no-hooks",
         ],
     )?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains(
         "offline flag",
         &result.stderr,
         "--deploy cannot be used with --offline",
     );
-    assert_absent(&offline_home.join(".ssh/deploy_keys/offline-key"));
-    assert_log_empty("offline flag", &gh_log)?;
+    assert_absent(&home.join(".ssh/deploy_keys/offline-key"));
+    fixture.assert_gh_log_empty("offline flag")?;
+    Ok(())
+}
 
-    let config_repo = setup_committed_repo("offline-config", false)?;
-    let config_home = fixture.path().join("home-config-offline");
+#[test]
+fn deploy_offline_config_fails_before_key_or_api_mutation() -> TestResult {
+    let fixture = DeployFixture::new()?;
+    let repo = setup_committed_repo("deploy-offline-config", false)?;
+    let home = fixture.home("offline-config");
     fs::write(
-        config_repo.path().join("wrix.toml"),
+        repo.path().join("wrix.toml"),
         "[wrix.init]\nonline_verify = false\n",
     )?;
-    clear_log(&gh_log)?;
-    let result = run_init(
-        config_repo.path(),
-        &config_home,
-        &fake_git,
-        &fake_gh,
-        &fake_ssh_keygen,
+    fixture.clear_gh_log()?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
         &["--deploy", "--key", "offline-key", "--no-hooks"],
     )?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains(
         "offline config",
         &result.stderr,
         "--deploy requires online verification",
     );
-    assert_absent(&config_home.join(".ssh/deploy_keys/offline-key"));
-    assert_log_empty("offline config", &gh_log)?;
-
+    assert_absent(&home.join(".ssh/deploy_keys/offline-key"));
+    fixture.assert_gh_log_empty("offline config")?;
     Ok(())
 }
 
-fn run_init(
-    repo: &Path,
-    home: &Path,
-    fake_git: &Path,
-    fake_gh: &Path,
-    fake_ssh_keygen: &Path,
-    args: &[&str],
-) -> TestResult<RunResult> {
-    let mut command = init_command(repo, home, fake_git, fake_gh, fake_ssh_keygen)?;
-    command.arg("init").args(args);
-    run_command(&mut command)
+struct DeployFixture {
+    directory: tempfile::TempDir,
+    fake_git: PathBuf,
+    fake_gh: PathBuf,
+    fake_ssh_keygen: PathBuf,
+    gh_state: PathBuf,
+    gh_log: PathBuf,
+    ssh_keygen_log: PathBuf,
 }
 
-fn init_command(
-    repo: &Path,
-    home: &Path,
-    fake_git: &Path,
-    fake_gh: &Path,
-    fake_ssh_keygen: &Path,
-) -> TestResult<Command> {
-    let mut command = wrix_command_with_path(repo, &[fake_gh, fake_git, fake_ssh_keygen])?;
-    command
-        .env("HOME", home)
-        .env_remove("WRIX_DEPLOY_KEY")
-        .env_remove("WRIX_SIGNING_KEY");
-    Ok(command)
-}
+impl DeployFixture {
+    fn new() -> TestResult<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix("wrix-init-deploy-fixtures")
+            .tempdir()?;
+        let fake_git = write_online_success_git(&directory.path().join("fake-git"))?;
+        let gh_state = directory.path().join("gh-state");
+        let gh_log = directory.path().join("gh.log");
+        let fake_gh = write_fake_gh(&directory.path().join("fake-gh"), &gh_state, &gh_log)?;
+        let ssh_keygen_log = directory.path().join("ssh-keygen.log");
+        let fake_ssh_keygen =
+            write_logging_ssh_keygen(&directory.path().join("fake-ssh-keygen"), &ssh_keygen_log)?;
+        Ok(Self {
+            directory,
+            fake_git,
+            fake_gh,
+            fake_ssh_keygen,
+            gh_state,
+            gh_log,
+            ssh_keygen_log,
+        })
+    }
 
-fn state_value(state_dir: &Path, name: &str) -> TestResult<String> {
-    Ok(fs::read_to_string(state_dir.join(name))?.trim().to_owned())
-}
+    fn home(&self, name: &str) -> PathBuf {
+        self.directory.path().join(format!("home-{name}"))
+    }
 
-fn seed_remote_signing(state_dir: &Path, title: &str, key: &str) -> TestResult {
-    fs::write(state_dir.join("signing_id"), "2\n")?;
-    fs::write(state_dir.join("signing_title"), format!("{title}\n"))?;
-    fs::write(state_dir.join("signing_key"), format!("{key}\n"))?;
-    Ok(())
-}
+    fn run_init(&self, repo: &Path, home: &Path, args: &[&str]) -> TestResult<RunResult> {
+        let mut command = self.init_command(repo, home)?;
+        command.arg("init").args(args);
+        run_command(&mut command)
+    }
 
-fn clear_log(path: &Path) -> TestResult {
-    fs::write(path, "")?;
-    Ok(())
-}
+    fn init_command(&self, repo: &Path, home: &Path) -> TestResult<Command> {
+        let mut command = wrix_command_with_path(
+            repo,
+            &[&self.fake_gh, &self.fake_git, &self.fake_ssh_keygen],
+        )?;
+        command
+            .env("HOME", home)
+            .env_remove("WRIX_DEPLOY_KEY")
+            .env_remove("WRIX_SIGNING_KEY");
+        Ok(command)
+    }
 
-fn assert_no_remote_mutation(label: &str, log_file: &Path) -> TestResult {
-    let log = fs::read_to_string(log_file)?;
-    assert_not_contains(label, &log, "POST");
-    assert_not_contains(label, &log, "DELETE");
-    Ok(())
-}
+    fn state_value(&self, name: &str) -> TestResult<String> {
+        Ok(fs::read_to_string(self.gh_state.join(name))?
+            .trim()
+            .to_owned())
+    }
 
-fn assert_log_empty(label: &str, log_file: &Path) -> TestResult {
-    let log = fs::read_to_string(log_file)?;
-    assert!(log.is_empty(), "{label}: unexpected gh API call log: {log}");
-    Ok(())
+    fn seed_remote_signing(&self, title: &str, key: &str) -> TestResult {
+        fs::write(self.gh_state.join("signing_id"), "2\n")?;
+        fs::write(self.gh_state.join("signing_title"), format!("{title}\n"))?;
+        fs::write(self.gh_state.join("signing_key"), format!("{key}\n"))?;
+        Ok(())
+    }
+
+    fn clear_gh_log(&self) -> TestResult {
+        fs::write(&self.gh_log, "")?;
+        Ok(())
+    }
+
+    fn assert_no_remote_mutation(&self, label: &str) -> TestResult {
+        let log = fs::read_to_string(&self.gh_log)?;
+        assert_not_contains(label, &log, "POST");
+        assert_not_contains(label, &log, "DELETE");
+        Ok(())
+    }
+
+    fn assert_gh_log_empty(&self, label: &str) -> TestResult {
+        let log = fs::read_to_string(&self.gh_log)?;
+        assert!(log.is_empty(), "{label}: unexpected gh API call log: {log}");
+        Ok(())
+    }
 }
 
 fn assert_absent(path: &Path) {

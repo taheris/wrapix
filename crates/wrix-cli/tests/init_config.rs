@@ -3,9 +3,9 @@ mod common;
 use std::{fs, path::Path, process::Command};
 
 use common::{
-    TestResult, assert_contains, assert_success_with_clean_stderr, run_command, run_git,
-    setup_repo, write_ed25519_key, write_empty_key, write_online_success_git, write_prek_hooks,
-    wrix_command_with_path,
+    TestResult, assert_contains, assert_failure_with_clean_stdout,
+    assert_success_with_clean_stderr, run_command, run_git, setup_repo, write_ed25519_key,
+    write_empty_key, write_online_success_git, write_prek_hooks, wrix_command_with_path,
 };
 
 #[test]
@@ -148,6 +148,39 @@ online_verify = true
     assert_policy_line("flag overrides", &result.stdout, "online_verify", "false");
     assert_policy_line("flag overrides", &result.stdout, "force", "true");
 
+    Ok(())
+}
+
+#[test]
+fn profile_config_rejects_wrong_typed_security_policy() -> TestResult {
+    let repo = setup_repo("config-invalid-profile-policy")?;
+    let fixture = tempfile::Builder::new()
+        .prefix("wrix-init-invalid-profile-policy")
+        .tempdir()?;
+    let profile_config = fixture.path().join("profile-config.json");
+    let before = fs::read(repo.path().join(".git/config"))?;
+
+    for content in [
+        r#"{"security":"not-an-object"}"#,
+        r#"{"security":{"deploy_key":42}}"#,
+    ] {
+        fs::write(&profile_config, content)?;
+        let mut command = wrix_command_with_path(repo.path(), &[])?;
+        command
+            .arg("--profile-config")
+            .arg(&profile_config)
+            .arg("init")
+            .args(["--offline", "--no-sign"])
+            .env("HOME", fixture.path().join("home"));
+        let result = run_command(&mut command)?;
+        assert_failure_with_clean_stdout(&result);
+        assert_contains(
+            "invalid profile policy",
+            &result.stderr,
+            "invalid profile config JSON",
+        );
+        assert_eq!(before, fs::read(repo.path().join(".git/config"))?);
+    }
     Ok(())
 }
 

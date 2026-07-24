@@ -7,86 +7,107 @@ use std::{
 
 use common::{
     RunResult, TestResult, assert_contains, assert_failure_with_clean_stdout, assert_not_contains,
-    assert_success_with_clean_stderr, git_stdout, run_command, run_git, set_mode,
-    setup_committed_repo, write_capturing_git, write_empty_key, wrix_command_with_path,
+    assert_success_with_clean_stderr, common_git_dir, git_stdout, run_command, run_git, set_mode,
+    setup_committed_repo, write_capturing_ssh, write_empty_key, write_tracing_git,
+    wrix_command_with_path,
 };
 
 #[test]
-fn online_and_offline_verification() -> TestResult {
-    let fixture = tempfile::Builder::new()
-        .prefix("wrix-init-verify-fixtures")
-        .tempdir()?;
-    let mode_file = fixture.path().join("git-mode");
-    let capture_dir = fixture.path().join("online-capture");
-    let fake_git = write_capturing_git(&fixture.path().join("fake-git"), &mode_file, &capture_dir)?;
-
-    let repo = setup_committed_repo("online-success", false)?;
+fn online_verification_uses_generated_helper() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("online-helper", false)?;
     let integration = add_integration_worktree(repo.path())?;
-    let home = fixture.path().join("home-online");
+    let home = fixture.home("online-helper");
     let deploy_key = write_deploy_key(&home, 0o600)?;
-    fs::write(&mode_file, "success\n")?;
-    reset_capture(&capture_dir)?;
-    let result = run_init(
+    fixture.set_mode("success")?;
+
+    let result = fixture.run_init(
         repo.path(),
         &home,
         &deploy_key,
-        &fake_git,
         &["--no-sign", "--key", "verify-key"],
     )?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains("online output", &result.stdout, "online_verify: true");
-    assert_online_capture(&capture_dir, &integration, &deploy_key, &home)?;
+    assert_online_capture(
+        &fixture.git_capture_dir,
+        &fixture.ssh_capture_dir,
+        &integration,
+        &common_git_dir(repo.path())?,
+        &deploy_key,
+        &home,
+    )?;
     let command = git_stdout(&integration, &["config", "--get", "core.sshCommand"])?;
     assert_contains("linked helper config", &command, "wrix/git-ssh");
+    Ok(())
+}
 
+#[test]
+fn offline_flag_skips_network_verification() -> TestResult {
+    let fixture = VerifyFixture::new()?;
     let repo = setup_committed_repo("offline-flag", false)?;
-    let home = fixture.path().join("home-offline");
+    let home = fixture.home("offline-flag");
     let deploy_key = write_deploy_key(&home, 0o600)?;
-    fs::write(&mode_file, "fail-if-online\n")?;
-    reset_capture(&capture_dir)?;
-    let result = run_init(
+    fixture.set_mode("fail-if-online")?;
+
+    let result = fixture.run_init(
         repo.path(),
         &home,
         &deploy_key,
-        &fake_git,
         &["--offline", "--no-sign", "--key", "verify-key"],
     )?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains("offline output", &result.stdout, "online_verify: false");
-    assert_absent(&capture_dir.join("cwd"));
+    fixture.assert_no_online_capture();
+    Ok(())
+}
 
-    let config_repo = setup_committed_repo("offline-config", false)?;
+#[test]
+fn offline_config_skips_network_verification() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("offline-config", false)?;
+    let home = fixture.home("offline-config");
+    let deploy_key = write_deploy_key(&home, 0o600)?;
     fs::write(
-        config_repo.path().join("wrix.toml"),
+        repo.path().join("wrix.toml"),
         "[wrix.init]\nonline_verify = false\n",
     )?;
-    reset_capture(&capture_dir)?;
-    let result = run_init(
-        config_repo.path(),
+    fixture.set_mode("fail-if-online")?;
+
+    let result = fixture.run_init(
+        repo.path(),
         &home,
         &deploy_key,
-        &fake_git,
         &["--no-sign", "--key", "verify-key"],
     )?;
+
     assert_success_with_clean_stderr(&result);
     assert_contains(
         "config offline output",
         &result.stdout,
         "online_verify: false",
     );
-    assert_absent(&capture_dir.join("cwd"));
+    fixture.assert_no_online_capture();
+    Ok(())
+}
 
-    let bad_repo = setup_committed_repo("offline-local-check", false)?;
-    let bad_home = fixture.path().join("home-bad-perms");
-    let bad_key = write_deploy_key(&bad_home, 0o644)?;
-    reset_capture(&capture_dir)?;
-    let result = run_init(
-        bad_repo.path(),
-        &bad_home,
-        &bad_key,
-        &fake_git,
+#[test]
+fn offline_verification_rejects_insecure_key_permissions() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("offline-local-check", false)?;
+    let home = fixture.home("offline-local-check");
+    let deploy_key = write_deploy_key(&home, 0o644)?;
+    fixture.set_mode("fail-if-online")?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
+        &deploy_key,
         &["--offline", "--no-sign", "--key", "verify-key"],
     )?;
+
     assert_failure_with_clean_stdout(&result);
     assert_contains("offline local permissions", &result.stderr, "deploy key");
     assert_contains(
@@ -94,17 +115,22 @@ fn online_and_offline_verification() -> TestResult {
         &result.stderr,
         "no group or other permissions",
     );
-    assert_absent(&capture_dir.join("cwd"));
+    fixture.assert_no_online_capture();
+    Ok(())
+}
 
-    let repo = setup_committed_repo("host-key-failure", false)?;
-    let home = fixture.path().join("home-host-key");
-    let deploy_key = write_deploy_key(&home, 0o600)?;
-    fs::write(&mode_file, "host-key\n")?;
-    let result = run_init(
-        repo.path(),
-        &home,
-        &deploy_key,
-        &fake_git,
+#[test]
+fn online_failures_distinguish_host_key_from_authorization() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+
+    let host_key_repo = setup_committed_repo("host-key-failure", false)?;
+    let host_key_home = fixture.home("host-key-failure");
+    let host_key = write_deploy_key(&host_key_home, 0o600)?;
+    fixture.set_mode("host-key")?;
+    let result = fixture.run_init(
+        host_key_repo.path(),
+        &host_key_home,
+        &host_key,
         &["--no-sign", "--key", "verify-key"],
     )?;
     assert_failure_with_clean_stdout(&result);
@@ -119,15 +145,14 @@ fn online_and_offline_verification() -> TestResult {
         "authentication or repository authorization failed",
     );
 
-    let repo = setup_committed_repo("auth-failure", false)?;
-    let home = fixture.path().join("home-auth");
-    let deploy_key = write_deploy_key(&home, 0o600)?;
-    fs::write(&mode_file, "auth\n")?;
-    let result = run_init(
-        repo.path(),
-        &home,
-        &deploy_key,
-        &fake_git,
+    let auth_repo = setup_committed_repo("auth-failure", false)?;
+    let auth_home = fixture.home("auth-failure");
+    let auth_key = write_deploy_key(&auth_home, 0o600)?;
+    fixture.set_mode("auth")?;
+    let result = fixture.run_init(
+        auth_repo.path(),
+        &auth_home,
+        &auth_key,
         &["--no-sign", "--key", "verify-key"],
     )?;
     assert_failure_with_clean_stdout(&result);
@@ -141,8 +166,124 @@ fn online_and_offline_verification() -> TestResult {
         &result.stderr,
         "failed host-key verification",
     );
-
     Ok(())
+}
+
+#[test]
+fn worktree_transport_override_fails_verification() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("worktree-transport-override", false)?;
+    let home = fixture.home("worktree-transport-override");
+    let deploy_key = write_deploy_key(&home, 0o600)?;
+    run_git(
+        repo.path(),
+        &["config", "extensions.worktreeConfig", "true"],
+    )?;
+    run_git(
+        repo.path(),
+        &[
+            "config",
+            "--worktree",
+            "core.sshCommand",
+            "ssh -o StrictHostKeyChecking=no",
+        ],
+    )?;
+    fixture.set_mode("fail-if-online")?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
+        &deploy_key,
+        &["--offline", "--no-sign", "--key", "verify-key"],
+    )?;
+
+    assert_failure_with_clean_stdout(&result);
+    assert_contains(
+        "worktree override",
+        &result.stderr,
+        "core.sshCommand does not match the Wrix common-dir trampoline",
+    );
+    assert_contains(
+        "worktree override",
+        &result.stderr,
+        "StrictHostKeyChecking=no",
+    );
+    fixture.assert_no_online_capture();
+    Ok(())
+}
+
+struct VerifyFixture {
+    directory: tempfile::TempDir,
+    mode_file: PathBuf,
+    git_capture_dir: PathBuf,
+    ssh_capture_dir: PathBuf,
+    tracing_git: PathBuf,
+    fake_ssh: PathBuf,
+}
+
+impl VerifyFixture {
+    fn new() -> TestResult<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix("wrix-init-verify-fixtures")
+            .tempdir()?;
+        let mode_file = directory.path().join("ssh-mode");
+        let git_capture_dir = directory.path().join("git-capture");
+        let ssh_capture_dir = directory.path().join("ssh-capture");
+        let tracing_git =
+            write_tracing_git(&directory.path().join("tracing-git"), &git_capture_dir)?;
+        let fake_ssh = write_capturing_ssh(
+            &directory.path().join("fake-ssh"),
+            &mode_file,
+            &ssh_capture_dir,
+        )?;
+        Ok(Self {
+            directory,
+            mode_file,
+            git_capture_dir,
+            ssh_capture_dir,
+            tracing_git,
+            fake_ssh,
+        })
+    }
+
+    fn home(&self, name: &str) -> PathBuf {
+        self.directory.path().join(format!("home-{name}"))
+    }
+
+    fn set_mode(&self, mode: &str) -> TestResult {
+        fs::write(&self.mode_file, format!("{mode}\n"))?;
+        for capture_dir in [&self.git_capture_dir, &self.ssh_capture_dir] {
+            if capture_dir.exists() {
+                fs::remove_dir_all(capture_dir)?;
+            }
+            fs::create_dir_all(capture_dir)?;
+        }
+        Ok(())
+    }
+
+    fn assert_no_online_capture(&self) {
+        assert_absent(&self.git_capture_dir.join("cwd"));
+        assert_absent(&self.ssh_capture_dir.join("cwd"));
+    }
+
+    fn run_init(
+        &self,
+        repo: &Path,
+        home: &Path,
+        deploy_key: &Path,
+        args: &[&str],
+    ) -> TestResult<RunResult> {
+        let mut command = wrix_command_with_path(repo, &[&self.tracing_git, &self.fake_ssh])?;
+        command
+            .arg("init")
+            .args(args)
+            .env("GIT_SSH_COMMAND", "ambient ssh")
+            .env("SSH_AUTH_SOCK", home.join("agent.sock"))
+            .env("WRIX_SHOULD_NOT_LEAK", "1")
+            .env("HOME", home)
+            .env("WRIX_DEPLOY_KEY", deploy_key);
+        run_command(&mut command)
+    }
 }
 
 fn add_integration_worktree(repo: &Path) -> TestResult<PathBuf> {
@@ -172,64 +313,67 @@ fn write_deploy_key(home: &Path, mode: u32) -> TestResult<PathBuf> {
     Ok(key)
 }
 
-fn reset_capture(capture_dir: &Path) -> TestResult {
-    if capture_dir.exists() {
-        fs::remove_dir_all(capture_dir)?;
-    }
-    fs::create_dir_all(capture_dir)?;
-    Ok(())
-}
-
-fn run_init(
-    repo: &Path,
-    home: &Path,
-    deploy_key: &Path,
-    fake_git: &Path,
-    args: &[&str],
-) -> TestResult<RunResult> {
-    let mut command = wrix_command_with_path(repo, &[fake_git])?;
-    command
-        .arg("init")
-        .args(args)
-        .env("GIT_SSH_COMMAND", "ambient ssh")
-        .env("SSH_AUTH_SOCK", home.join("agent.sock"))
-        .env("WRIX_SHOULD_NOT_LEAK", "1")
-        .env("HOME", home)
-        .env("WRIX_DEPLOY_KEY", deploy_key);
-    run_command(&mut command)
-}
-
 fn assert_online_capture(
-    capture_dir: &Path,
+    git_capture_dir: &Path,
+    ssh_capture_dir: &Path,
     expected_cwd: &Path,
+    common_dir: &Path,
     deploy_key: &Path,
     home: &Path,
 ) -> TestResult {
-    let cwd = fs::read_to_string(capture_dir.join("cwd"))?;
-    assert_eq!(cwd.trim(), expected_cwd.display().to_string());
-    let args = fs::read_to_string(capture_dir.join("args"))?;
-    assert_contains("ls-remote args", &args, "ls-remote");
-    assert_contains("ls-remote args", &args, "origin");
-    assert_contains("ls-remote args", &args, "HEAD");
-    let env_output = fs::read_to_string(capture_dir.join("env"))?;
-    assert_contains("online env", &env_output, "GIT_CONFIG_GLOBAL=/dev/null");
-    assert_contains("online env", &env_output, "GIT_CONFIG_NOSYSTEM=1");
-    assert_contains("online env", &env_output, "GIT_TERMINAL_PROMPT=0");
-    assert_contains("online env", &env_output, "GIT_SSH_VARIANT=ssh");
-    assert_contains(
-        "online env",
-        &env_output,
-        &format!("HOME={}", home.display()),
+    let git_cwd = fs::read_to_string(git_capture_dir.join("cwd"))?;
+    assert_eq!(git_cwd.trim(), expected_cwd.display().to_string());
+    assert_eq!(
+        fs::read_to_string(git_capture_dir.join("args"))?,
+        "ls-remote\norigin\nHEAD\n",
     );
+    let git_env = fs::read_to_string(git_capture_dir.join("env"))?;
+    assert_minimal_online_env("online Git env", &git_env, deploy_key, home);
+
+    let ssh_cwd = fs::read_to_string(ssh_capture_dir.join("cwd"))?;
+    assert_eq!(ssh_cwd.trim(), expected_cwd.display().to_string());
+    let args = fs::read_to_string(ssh_capture_dir.join("args"))?;
+    assert_contains("live ssh args", &args, "BatchMode=yes");
+    assert_contains("live ssh args", &args, "IdentitiesOnly=yes");
+    assert_contains("live ssh args", &args, "StrictHostKeyChecking=yes");
+    assert_contains("live ssh args", &args, "IdentityAgent=none");
+    assert_contains("live ssh args", &args, "IdentityFile=none");
     assert_contains(
-        "online env",
-        &env_output,
+        "live ssh args",
+        &args,
+        &format!(
+            "UserKnownHostsFile={}",
+            common_dir.join("wrix/github_known_hosts").display()
+        ),
+    );
+    assert_contains("live ssh args", &args, &deploy_key.display().to_string());
+    assert_contains("live ssh args", &args, "git@github.com");
+    assert_contains(
+        "live ssh args",
+        &args,
+        "git-upload-pack 'example/online-helper.git'",
+    );
+    assert_not_contains("live ssh args", &args, "StrictHostKeyChecking=no");
+
+    let ssh_env = fs::read_to_string(ssh_capture_dir.join("env"))?;
+    assert_minimal_online_env("online SSH env", &ssh_env, deploy_key, home);
+    Ok(())
+}
+
+fn assert_minimal_online_env(label: &str, output: &str, deploy_key: &Path, home: &Path) {
+    assert_contains(label, output, "GIT_CONFIG_GLOBAL=/dev/null");
+    assert_contains(label, output, "GIT_CONFIG_NOSYSTEM=1");
+    assert_contains(label, output, "GIT_TERMINAL_PROMPT=0");
+    assert_contains(label, output, "GIT_SSH_VARIANT=ssh");
+    assert_contains(label, output, &format!("HOME={}", home.display()));
+    assert_contains(
+        label,
+        output,
         &format!("WRIX_DEPLOY_KEY={}", deploy_key.display()),
     );
-    assert_not_contains("online env", &env_output, "GIT_SSH_COMMAND=");
-    assert_not_contains("online env", &env_output, "SSH_AUTH_SOCK=");
-    assert_not_contains("online env", &env_output, "WRIX_SHOULD_NOT_LEAK=");
-    Ok(())
+    assert_not_contains(label, output, "GIT_SSH_COMMAND=");
+    assert_not_contains(label, output, "SSH_AUTH_SOCK=");
+    assert_not_contains(label, output, "WRIX_SHOULD_NOT_LEAK=");
 }
 
 fn assert_absent(path: &Path) {
