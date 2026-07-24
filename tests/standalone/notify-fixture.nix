@@ -26,6 +26,9 @@ let
 
     : "''${WRIX_NOTIFY_TEST_DISPATCH_CAPTURE:?}"
     ${bridgeContract}
+    if [[ -n "''${WRIX_NOTIFY_TEST_DISPATCH_TIME_CAPTURE:-}" ]]; then
+      ${pkgs.coreutils}/bin/date +%s%N > "$WRIX_NOTIFY_TEST_DISPATCH_TIME_CAPTURE"
+    fi
     ${pkgs.jq}/bin/jq -cn --args '$ARGS.positional' -- "$@" \
       >> "$WRIX_NOTIFY_TEST_DISPATCH_CAPTURE"
   '';

@@ -165,7 +165,7 @@ pkgs.writeShellApplication {
     SOCKET_PID=""
 
     cleanup() {
-      local status=$?
+      local status="$?"
       rm -f "$SOCKET"
       if [[ -n "$HANDLER_SCRIPT" ]]; then rm -f "$HANDLER_SCRIPT"; fi
       if [[ -n "$SOCKET_PID" ]]; then
@@ -189,7 +189,7 @@ pkgs.writeShellApplication {
         ''
           echo "wrix-notifyd: listening on TCP port ${tcpPort} and $SOCKET"
           socat UNIX-LISTEN:"$SOCKET",fork EXEC:"bash $HANDLER_SCRIPT" &
-          SOCKET_PID=$!
+          SOCKET_PID="$!"
           socat TCP-LISTEN:${tcpPort},bind=192.168.64.1,fork,reuseaddr EXEC:"bash $HANDLER_SCRIPT"
         ''
       else
