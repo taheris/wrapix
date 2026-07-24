@@ -4,7 +4,7 @@ use std::process::Command;
 
 use common::{
     TestResult, assert_contains, assert_success_with_clean_stderr, run_command,
-    write_capturing_git, write_capturing_ssh, write_fake_gh, write_fake_ssh,
+    setup_committed_repo, write_capturing_git, write_capturing_ssh, write_fake_gh, write_fake_ssh,
     write_logging_ssh_keygen, write_online_success_git, write_tracing_git,
 };
 
@@ -13,6 +13,7 @@ fn command_fixtures_have_expected_observable_contract() -> TestResult {
     let fixture = tempfile::Builder::new()
         .prefix("wrix-init-command-fixtures")
         .tempdir()?;
+    let source_repo = setup_committed_repo("wrix-init-command-fixtures-source", false)?;
     let fake_git = write_online_success_git(&fixture.path().join("fake-git"))?;
     let tracing_git_capture = fixture.path().join("tracing-git-capture");
     let tracing_git = write_tracing_git(&fixture.path().join("tracing-git"), &tracing_git_capture)?;
@@ -57,20 +58,17 @@ fn command_fixtures_have_expected_observable_contract() -> TestResult {
         "0123456789012345678901234567890123456789\tHEAD",
     );
 
-    let root = run_command(Command::new("git").args(["rev-parse", "--show-toplevel"]))?;
-    assert_success_with_clean_stderr(&root);
-    let root = root.stdout.trim();
     let tracing_ls_remote = run_command(
         Command::new(tracing_git.join("git"))
             .arg("ls-remote")
-            .arg(root)
+            .arg(source_repo.path())
             .arg("HEAD"),
     )?;
     assert_success_with_clean_stderr(&tracing_ls_remote);
     assert_contains("tracing git output", &tracing_ls_remote.stdout, "HEAD");
     assert_eq!(
         std::fs::read_to_string(tracing_git_capture.join("args"))?,
-        format!("ls-remote\n{root}\nHEAD\n"),
+        format!("ls-remote\n{}\nHEAD\n", source_repo.path().display()),
     );
 
     std::fs::write(&capturing_mode, "success\n")?;
