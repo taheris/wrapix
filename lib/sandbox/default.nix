@@ -230,6 +230,7 @@ let
       claudeSettings ? baseClaudeSettings,
       piSettings ? basePiSettings,
       mcpServerConfigs ? { },
+      mcpRuntime ? false,
       agent,
       agentPkg,
       asTarball ? false,
@@ -246,6 +247,7 @@ let
         claudeSettings
         piSettings
         mcpServerConfigs
+        mcpRuntime
         agent
         agentPkg
         asTarball
@@ -274,10 +276,8 @@ let
       }
     );
 
-  # Build MCP server configurations from the mcp attrset
-  # Returns { packages, mcpServers } where:
-  #   - packages: flattened list of all server runtime packages
-  #   - mcpServers: attrset of server configs for Claude's user config
+  # Build MCP server configurations from the mcp attrset.
+  # Every adapter consumes the same normalized stdio fields.
   buildMcpConfig =
     mcp:
     let
@@ -296,7 +296,11 @@ let
     in
     {
       packages = concatMap (s: s.packages) (attrValues serverConfigs);
-      mcpServers = mapAttrs (_name: s: s.config) serverConfigs;
+      mcpServers = mapAttrs (_name: s: {
+        inherit (s.config) command;
+        args = s.config.args or [ ];
+        env = s.config.env or { };
+      }) serverConfigs;
     };
 
   mkSandbox =
@@ -328,9 +332,7 @@ let
       # Build MCP configuration from enabled servers
       mcpConfig = buildMcpConfig effectiveMcp;
 
-      # Per-server config files for runtime selection (mcpRuntime only)
-      mcpServerConfigs =
-        if mcpRuntime then mapAttrs (name: _: mcpRegistry.${name}.mkServerConfig { }) mcpRegistry else { };
+      mcpServerConfigs = mcpConfig.mcpServers;
 
       # Extend profile with wrix-owned sandbox tools, user packages, and MCP server packages.
       finalProfile = extendProfile profile {
@@ -356,15 +358,7 @@ let
         if agentPkg == null then defaultAgentPkg else agentPkg
       );
 
-      # Claude reads explicit MCP server registrations from its user config.
-      finalClaudeConfig =
-        baseClaudeConfig
-        // (
-          if agent == "claude" && !mcpRuntime && mcpConfig.mcpServers != { } then
-            { inherit (mcpConfig) mcpServers; }
-          else
-            { }
-        );
+      finalClaudeConfig = baseClaudeConfig;
 
       claudeAgentSettings = if agent == "claude" then agentSettings else { };
 
@@ -427,6 +421,7 @@ let
         agentPkg = finalAgentPkg;
         inherit
           agent
+          mcpRuntime
           mcpServerConfigs
           ;
       };

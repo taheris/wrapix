@@ -160,9 +160,13 @@ mkSandbox {
 ```
 
 `mcpRuntime = true` bundles every registered server into the image and lets
-`WRIX_MCP=<csv>` pick at container start.
+`WRIX_MCP=<csv>` pick at container start. Wrix publishes the selected stdio
+servers through `WRIX_MCP_MANIFEST`; Claude and Pi use Wrix-owned adapters,
+while external direct runners consume the same handoff.
 
-See [tmux-mcp.md](../specs/tmux-mcp.md) and [playwright-mcp.md](../specs/playwright-mcp.md) for details.
+See [sandbox.md](../specs/sandbox.md) for manifest and adapter ownership, and
+[tmux-mcp.md](../specs/tmux-mcp.md) / [playwright-mcp.md](../specs/playwright-mcp.md)
+for server details.
 
 ## State Layout
 

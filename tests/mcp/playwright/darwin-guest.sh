@@ -30,7 +30,6 @@ run_in_guest() {
     command=(
         env WRIX_NETWORK=limit
         "$sandbox/bin/wrix" run "$REPO_ROOT"
-        /usr/bin/env PLAYWRIGHT_SERVER_CONFIG_FILE=/etc/wrix/claude-config.json
         /bin/bash "/workspace/tests/mcp/playwright/$test_script" "$@"
     )
     printf -v command_line '%q ' "${command[@]}"

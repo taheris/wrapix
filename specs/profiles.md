@@ -565,13 +565,11 @@ Profiles surface as three sibling output families:
 | `packages.sandbox-<profile>` | Configured sandbox package with explicit `bin/wrix` plus `meta.mainProgram = "wrix-run"` for default `nix run`; direct agent variant | One-shot users (`nix run .#sandbox-rust`) |
 | `packages.sandbox-<profile>-claude` | Configured Claude variant with explicit `bin/wrix` plus `wrix-run` main program | One-shot users that want Claude |
 | `packages.sandbox-<profile>-pi` | Configured Pi variant with explicit `bin/wrix` plus `wrix-run` main program | One-shot users that want Pi; `packages.default` points at rust `sandbox-rust-pi` |
-| `packages.sandbox-<profile>-mcp` | Direct-agent wrapper built with `mcpRuntime = true`, baking every registered MCP server and deferring selection to `WRIX_MCP` at launch | One-shot users that want runtime MCP server selection without a per-sandbox `mcp` build |
-| `packages.sandbox-<profile>-<agent>-mcp` | Agent overlay wrapper built with both `agent = "<agent>"` and `mcpRuntime = true` | One-shot users that need a selected agent plus runtime MCP server selection |
+| `packages.sandbox-<profile>-mcp` | Direct-agent wrapper built with `mcpRuntime = true`; `WRIX_MCP` selects the agent-neutral manifest handed to the direct runner | External direct runners that consume `WRIX_MCP_MANIFEST`; the built-in direct runner remains a placeholder |
+| `packages.sandbox-<profile>-<agent>-mcp` | Agent overlay wrapper built with both `agent = "<agent>"` and `mcpRuntime = true`; Claude and Pi consume the selected manifest through their adapters | One-shot Claude/Pi users that want runtime MCP server selection |
 | `packages.profile-images` | JSON manifest from `mkProfileImages`, keyed by profile then selected agent variant | External orchestrators (e.g. Loom via `LOOM_PROFILES_MANIFEST`) |
 
-`<profile>` covers the built-in profiles (`base`, `rust`, `python`). The
-`-mcp` axis is all-server runtime MCP selection, independent of agent, and
-does not create per-server profile variants such as `-tmux` or `-playwright`.
+`<profile>` covers the built-in profiles (`base`, `rust`, `python`). The `-mcp` axis is all-server runtime selection, independent of agent because `sandbox.md` owns one `WRIX_MCP_MANIFEST` contract. Registration remains adapter-specific: Wrix supplies Claude and Pi adapters, while an external direct runner consumes the manifest handoff. The axis does not create per-server profile variants such as `-tmux` or `-playwright`.
 
 ## Downstream Integration
 

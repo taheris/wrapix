@@ -241,10 +241,12 @@ let
     assert builtins.elemAt serverConfig.args 0 == "--config";
     mkCheck "test-playwright-registry-triple" [ pkgs.jq ] ''
       jq -e '
-        .mcpServers.playwright.command == "playwright-mcp"
-        and .mcpServers.playwright.args[0] == "--config"
-        and .mcpServers.playwright.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD == "1"
-      ' ${sandbox.image.claudeConfigJson} >/dev/null
+        .servers[]
+        | select(.name == "playwright")
+        | .command == "playwright-mcp"
+          and .args[0] == "--config"
+          and .env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD == "1"
+      ' ${sandbox.image.mcpAvailableJson} >/dev/null
     '';
 in
 {

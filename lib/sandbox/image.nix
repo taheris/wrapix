@@ -28,6 +28,7 @@
   claudeSettings,
   piSettings ? { },
   mcpServerConfigs ? { },
+  mcpRuntime ? false,
   # Agent runtime axis. Callers must choose explicitly. "claude" adds
   # claude-code; "pi" adds pi-coding-agent; "direct" adds the direct-runner
   # binary. The resolved package is supplied as `agentPkg`.
@@ -104,10 +105,18 @@ let
   claudeSettingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON claudeSettings);
   piSettingsJson = pkgs.writeText "pi-settings.json" (builtins.toJSON piSettings);
 
-  # Per-server MCP config files for runtime selection (mcpRuntime mode)
-  mcpConfigFiles = builtins.mapAttrs (
-    name: config: pkgs.writeText "mcp-${name}.json" (builtins.toJSON config)
-  ) mcpServerConfigs;
+  mcpAvailableJson = pkgs.writeText "wrix-mcp-available.json" (
+    builtins.toJSON {
+      schema = 1;
+      runtime_selection = mcpRuntime;
+      servers = mapAttrsToList (name: config: {
+        inherit name;
+        inherit (config) command;
+        args = config.args or [ ];
+        env = config.env or { };
+      }) mcpServerConfigs;
+    }
+  );
 
   # Agent runtime selection. Exactly one agent package rides the agent tier —
   # new runtimes plug in by extending the supported `agent` values. No
@@ -293,6 +302,8 @@ let
 
       cp ${entrypointSh} entrypoint.sh
       chmod +x entrypoint.sh
+      cp ${./mcp-manifest.sh} mcp-manifest.sh
+      chmod +x mcp-manifest.sh
 
       ${optionalString (networkBootstrapSh != null) ''
         cp ${networkBootstrapSh} network-bootstrap.sh
@@ -321,15 +332,13 @@ let
       cp ${claudeSettingsJson} etc/wrix/claude-settings.json
 
       ${optionalString (agent == "pi") ''
-        mkdir -p etc/wrix/pi-agent
+        mkdir -p etc/wrix/pi-agent/extensions
         cp ${piSettingsJson} etc/wrix/pi-agent/settings.json
+        cp ${./pi-mcp-extension.ts} etc/wrix/pi-agent/extensions/wrix-mcp.ts
       ''}
 
       ${optionalString (mcpServerConfigs != { }) ''
-        mkdir -p etc/wrix/mcp
-        ${concatStringsSep "\n" (
-          mapAttrsToList (name: file: "cp ${file} etc/wrix/mcp/${name}.json") mcpConfigFiles
-        )}
+        cp ${mcpAvailableJson} etc/wrix/mcp-available.json
       ''}
 
       # Register the materialized on-disk closure in the nix db. includeNixDB
@@ -474,6 +483,7 @@ rawImage
     claudeConfigJson
     claudeSettingsJson
     materializedRoots
+    mcpAvailableJson
     piSettingsJson
     ;
 }

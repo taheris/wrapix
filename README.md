@@ -116,12 +116,12 @@ The launcher exposes two entry points (both honour the profile's mounts, env pas
 ## MCP Servers
 
 ```bash
-nix run github:taheris/wrix#sandbox-mcp         # base + all MCP servers
-nix run github:taheris/wrix#sandbox-rust-mcp    # rust + all MCP servers
-WRIX_MCP=tmux nix run .#sandbox-mcp             # select specific servers
+nix run github:taheris/wrix#sandbox-pi-mcp         # base + all MCP servers
+nix run github:taheris/wrix#sandbox-rust-pi-mcp    # rust + all MCP servers
+WRIX_MCP=tmux nix run .#sandbox-pi-mcp             # select specific servers
 ```
 
-Available: [tmux](specs/tmux-mcp.md) (pane management for debugging), [playwright](specs/playwright-mcp.md) (browser automation). In flakes: `mcp.tmux = { }` or `mcpRuntime = true`.
+Available: [tmux](specs/tmux-mcp.md) (pane management for debugging), [playwright](specs/playwright-mcp.md) (browser automation). In flakes: `mcp.tmux = { }` or `mcpRuntime = true`. Wrix adapts the selected `WRIX_MCP_MANIFEST` for Claude and Pi; external direct runners consume that same manifest handoff.
 
 ## Notifications
 

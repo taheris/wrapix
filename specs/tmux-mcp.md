@@ -131,7 +131,7 @@ The tmux server does not define a per-server `-debug` or `-tmux` profile variant
 ### Non-Functional
 
 1. **Sandbox-only trust boundary** — no command filtering beyond what the wrix container enforces; pane processes inherit container constraints.
-2. **No privilege escalation** — server runs as the same unprivileged user as Claude Code; tmux session is user-local.
+2. **No privilege escalation** — server runs as the same unprivileged user as the selected agent; tmux session is user-local.
 3. **Plain-text errors** — MCP error responses carry natural-language messages, not structured codes.
 
 ## Out of Scope

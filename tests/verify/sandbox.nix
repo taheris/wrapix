@@ -58,6 +58,8 @@ in
   "sandbox.mksandbox-api" =
     sandboxScript "mksandbox-api" "test_mksandbox_accepts_documented_parameters";
 
+  "sandbox.mcp-agent-adapters" = sandboxScriptAll "mcp-agent-adapters";
+
   "sandbox.network-fail-closed" = network "test_fail_closed";
 
   "sandbox.network-ipv6-blocked" = network "test_ipv6_blocked";

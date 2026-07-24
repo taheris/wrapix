@@ -221,6 +221,10 @@ if [[ $# -eq 0 ]] && ! command -v "$WRIX_AGENT_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+# shellcheck source=/dev/null
+. /mcp-manifest.sh
+wrix_prepare_mcp_manifest
+
 if [[ "$WRIX_AGENT" = "claude" ]]; then
   # Initialize Claude config and settings
   # ~/.claude is a container-local directory (tmpfs, not mounted from host) so that
@@ -232,41 +236,12 @@ if [[ "$WRIX_AGENT" = "claude" ]]; then
   cp /etc/wrix/claude-settings.json "$HOME/.claude/settings.json"
   chmod 644 "$HOME/.claude.json" "$HOME/.claude/settings.json"
 
-  # Runtime MCP server selection
-  # Images built with mcpRuntime=true include per-server configs in /etc/wrix/mcp/.
-  # WRIX_MCP selects which servers to enable (comma-separated, default: all).
-  if [[ -d /etc/wrix/mcp ]]; then
-    mcp_enabled="${WRIX_MCP:-all}"
-    mcp_servers="{}"
-
-    for config_file in /etc/wrix/mcp/*.json; do
-      [[ -f "$config_file" ]] || continue
-      server_name=$(basename "$config_file" .json)
-
-      # Filter by WRIX_MCP unless "all"
-      if [[ "$mcp_enabled" != "all" ]]; then
-        if ! echo ",$mcp_enabled," | grep -qF ",$server_name,"; then
-          continue
-        fi
-      fi
-
-      server_config=$(cat "$config_file")
-
-      # Apply runtime env var overrides
-      case "$server_name" in
-        tmux)
-          if [[ -n "${WRIX_MCP_TMUX_AUDIT:-}" ]]; then
-            server_config=$(echo "$server_config" | jq --arg v "$WRIX_MCP_TMUX_AUDIT" '.env.TMUX_DEBUG_AUDIT = $v')
-          fi
-          if [[ -n "${WRIX_MCP_TMUX_AUDIT_FULL:-}" ]]; then
-            server_config=$(echo "$server_config" | jq --arg v "$WRIX_MCP_TMUX_AUDIT_FULL" '.env.TMUX_DEBUG_AUDIT_FULL = $v')
-          fi
-          ;;
-      esac
-
-      mcp_servers=$(echo "$mcp_servers" | jq --arg name "$server_name" --argjson config "$server_config" '.[$name] = $config')
-    done
-
+  if [[ -n "${WRIX_MCP_MANIFEST:-}" ]]; then
+    mcp_servers=$(jq '
+      .servers
+      | map({ key: .name, value: { command: .command, args: .args, env: .env } })
+      | from_entries
+    ' "$WRIX_MCP_MANIFEST")
     if [[ "$mcp_servers" != "{}" ]]; then
       jq --argjson servers "$mcp_servers" '.mcpServers = $servers' \
         "$HOME/.claude.json" > "$HOME/.claude.json.tmp"

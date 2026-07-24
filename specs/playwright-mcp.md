@@ -10,7 +10,7 @@ AI agents building web frontends cannot see what they've built. They edit HTML/C
 
 Wraps Microsoft's `@playwright/mcp` server to provide browser automation inside wrix sandboxes. The agent can navigate pages, take screenshots (returned as base64 PNG for direct visual interpretation), fill forms, click elements, and inspect accessibility trees — enabling a tight edit-code-check-browser iteration loop.
 
-The server is registered in the main Claude session via `mkSandbox`'s `mcp` parameter (see `sandbox.md`); MCP servers compose orthogonally with workspace profiles. Container construction, isolation, and trust boundary belong to `sandbox.md`; this spec owns the Playwright server's wiring on top.
+The server enters Wrix's agent-neutral stdio registry through `mkSandbox`'s `mcp` parameter (see `sandbox.md`); the selected agent adapter registers its tools, and MCP servers compose orthogonally with workspace profiles. Container construction, manifest selection, adapter ownership, isolation, and the trust boundary belong to `sandbox.md`; this spec owns the Playwright server's wiring on top.
 
 Load-bearing decisions:
 
@@ -33,12 +33,11 @@ Wrix does not define or freeze a Playwright tool whitelist. It starts the bundle
 
 ## Configuration
 
-Enabled for a Claude sandbox via `mkSandbox`'s `mcp` parameter:
+Enabled for a sandbox via `mkSandbox`'s `mcp` parameter:
 
 ```nix
 mkSandbox {
   profile = profiles.rust;
-  agent = "claude";
   mcp.playwright = {
     viewport = { width = 1920; height = 1080; };  # optional
   };
@@ -100,7 +99,7 @@ The container image is Linux (aarch64 or x86_64), so `pkgs.playwright-driver.bro
 
 1. **MCP tool surface** — every tool the bundled `@playwright/mcp` exposes is registered; the spec does not maintain its own tool whitelist. The category table above is illustrative, not exhaustive, and the smoke verifier checks representative tools returned by the live server rather than a fixed upstream count.
 2. **Offline operation** — `pkgs.playwright-mcp` and `pkgs.playwright-driver.browsers` bake the server and Playwright browser bundle into the image. No `npx` or browser download at runtime.
-3. **MCP opt-in via sandbox** — enabled for a Claude sandbox via `agent = "claude"` and `mcp.playwright = { … }`; composes with the workspace profile and other MCP servers without a `-playwright` profile variant.
+3. **MCP opt-in via sandbox** — enabled via `mcp.playwright = { … }`; composes with the workspace profile and other MCP servers without a `-playwright` profile variant. Registry selection and per-agent adapter registration are owned by `sandbox.md`.
 4. **Configuration passthrough** — `headless`, `viewport`, and `config` options reach `@playwright/mcp`'s serialized JSON config.
 5. **Non-overridable flags** — `--no-sandbox`, `--disable-dev-shm-usage`, `--disable-gpu` are always set on `browser.launchOptions.args`. User-supplied `launchOptions.args` are appended, not substituted.
 

@@ -146,7 +146,7 @@ if ! AUDIT_CONFIG=$(nix build --no-link --print-out-paths --no-warn-dirty --impu
         audit = \"/workspace/.debug-audit.log\";
         auditFull = \"/workspace/.debug-audit\";
       };
-    }).image.claudeConfigJson
+    }).image.mcpAvailableJson
 " 2>>"$build_log"); then
   cat "$build_log" >&2
   echo "FAIL: nix build explicit mkSandbox mcp.tmux audit settings" >&2
@@ -154,11 +154,12 @@ if ! AUDIT_CONFIG=$(nix build --no-link --print-out-paths --no-warn-dirty --impu
 fi
 
 if ! jq -e '
-  .mcpServers.tmux.command == "tmux-mcp"
-  and .mcpServers.tmux.env.TMUX_DEBUG_AUDIT == "/workspace/.debug-audit.log"
-  and .mcpServers.tmux.env.TMUX_DEBUG_AUDIT_FULL == "/workspace/.debug-audit"
+  .servers[0].name == "tmux"
+  and .servers[0].command == "tmux-mcp"
+  and .servers[0].env.TMUX_DEBUG_AUDIT == "/workspace/.debug-audit.log"
+  and .servers[0].env.TMUX_DEBUG_AUDIT_FULL == "/workspace/.debug-audit"
 ' "$AUDIT_CONFIG" >/dev/null; then
-  echo "FAIL: mcp.tmux audit/auditFull settings not present in Claude user config" >&2
+  echo "FAIL: mcp.tmux audit/auditFull settings not present in the MCP manifest" >&2
   cat "$AUDIT_CONFIG" >&2
   exit 1
 fi

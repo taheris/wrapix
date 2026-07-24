@@ -5,7 +5,7 @@ PLAYWRIGHT_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAYWRIGHT_REPO_ROOT="${PLAYWRIGHT_REPO_ROOT:-$(cd "${PLAYWRIGHT_HELPER_DIR}/../../.." && pwd)}"
 PLAYWRIGHT_SYSTEM="${PLAYWRIGHT_SYSTEM:-$(nix eval --raw --impure --expr 'builtins.currentSystem')}"
 PLAYWRIGHT_EVAL_NIX="${PLAYWRIGHT_REPO_ROOT}/tests/mcp/playwright/eval.nix"
-PLAYWRIGHT_SERVER_CONFIG_FILE="${PLAYWRIGHT_SERVER_CONFIG_FILE:-}"
+PLAYWRIGHT_SERVER_CONFIG_FILE="${PLAYWRIGHT_SERVER_CONFIG_FILE:-${WRIX_MCP_MANIFEST:-}}"
 
 playwright_require_linux() {
     if [[ "$PLAYWRIGHT_SYSTEM" != *-linux ]]; then
@@ -82,7 +82,8 @@ playwright_server_args() {
     fi
 
     if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
-        jq -er '.mcpServers.playwright.args[]' "$PLAYWRIGHT_SERVER_CONFIG_FILE"
+        jq -er '.servers[] | select(.name == "playwright") | .args[]' \
+            "$PLAYWRIGHT_SERVER_CONFIG_FILE"
         return
     fi
 
@@ -107,7 +108,8 @@ playwright_server_env_json() {
     fi
 
     if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
-        jq -ec '.mcpServers.playwright.env' "$PLAYWRIGHT_SERVER_CONFIG_FILE"
+        jq -ec '.servers[] | select(.name == "playwright") | .env' \
+            "$PLAYWRIGHT_SERVER_CONFIG_FILE"
         return
     fi
 
@@ -139,7 +141,8 @@ playwright_find_mcp() {
     local mcp_bin
 
     if [[ -n "$PLAYWRIGHT_SERVER_CONFIG_FILE" ]]; then
-        mcp_bin=$(jq -er '.mcpServers.playwright.command' "$PLAYWRIGHT_SERVER_CONFIG_FILE") || return 1
+        mcp_bin=$(jq -er '.servers[] | select(.name == "playwright") | .command' \
+            "$PLAYWRIGHT_SERVER_CONFIG_FILE") || return 1
         mcp_bin=$(command -v "$mcp_bin") || return 1
     else
         package_path=$(playwright_build_package playwright-mcp) || return 1
