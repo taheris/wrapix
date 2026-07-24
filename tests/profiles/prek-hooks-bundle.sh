@@ -6,14 +6,21 @@
 #     pre-commit, pre-push, prepare-commit-msg, post-checkout, post-merge —
 #     and no other paths.
 #
+#   test_bundle_path_is_context_stable
+#     Every supported host/image system resolves the bundle to the same
+#     content-addressed Nix-store path.
+#
 #   test_shims_use_hook_impl
 #     The materialized pre-commit and pre-push shims invoke
 #     `prek hook-impl --hook-type=<stage>` rather than `prek run`.
 #
 #   test_shims_no_flock
 #     No materialized shim sources lock.sh, calls _prek_acquire_lock, or
-#     invokes flock; every shim invokes hook-impl and pins the Nix-store
-#     prek package on PATH.
+#     invokes flock; every shim invokes hook-impl.
+#
+#   test_shims_resolve_packaged_prek_at_runtime
+#     Every shim runs its configured stage when only the packaged `wrix-prek`
+#     resolver, not an ambient `prek`, is initially on PATH.
 #
 #   test_pre_push_exact_transaction_stamp_written_and_consumed
 #     The materialized pre-push shim writes .wrix/push-verified after a
@@ -101,6 +108,28 @@ test_bundle_contents() {
 }
 
 # ============================================================================
+test_bundle_path_is_context_stable() {
+  local expected=""
+  local actual system
+  local failed=0
+  for system in aarch64-darwin aarch64-linux x86_64-linux; do
+    if ! actual=$(nix eval --raw --no-warn-dirty \
+      "$REPO_ROOT#legacyPackages.$system.lib.prekHooks.outPath"); then
+      echo "FAIL: could not evaluate lib.prekHooks for $system" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+    if [[ -z "$expected" ]]; then
+      expected="$actual"
+    elif [[ "$actual" != "$expected" ]]; then
+      echo "FAIL: $system bundle path $actual differs from $expected" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  [[ "$failed" -eq 0 ]]
+}
+
+# ============================================================================
 test_shims_use_hook_impl() {
   local bundle
   if ! bundle=$(require_bundle "$@"); then
@@ -161,14 +190,84 @@ test_shims_no_flock() {
       echo "FAIL: $hook does not invoke 'prek hook-impl --hook-type=$hook'" >&2
       failed=$((failed + 1))
     fi
-    if ! grep -qE '/nix/store/[^"]+-prek-[^/]+/bin' "$bundle/$hook"; then
-      echo "FAIL: $hook does not pin prek on PATH" >&2
-      failed=$((failed + 1))
-    fi
   done
 
   [[ "$failed" -eq 0 ]]
 }
+
+# ============================================================================
+test_shims_resolve_packaged_prek_at_runtime() (
+  local bundle
+  if ! bundle=$(require_bundle "$@"); then
+    echo "FAIL: nix build lib.prekHooks failed" >&2
+    return 1
+  fi
+
+  local work tools repo resolver command stage head_sha zero_sha actual
+  local expected=$'pre-commit\nprepare-commit-msg\npost-checkout\npost-merge\npre-push'
+  work=$(mktemp -d)
+  tools="$work/bin"
+  repo="$work/repo"
+  resolver=$(command -v wrix-prek)
+  trap 'rm -rf "$work"' EXIT
+
+  mkdir -p "$tools"
+  for command in bash cat chmod dirname git mkdir rm; do
+    ln -s "$(command -v "$command")" "$tools/$command"
+  done
+  export PATH="${resolver%/*}:$tools"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_NOSYSTEM=1
+  if command -v prek >/dev/null; then
+    echo "FAIL: runtime-resolution test still has ambient prek on PATH" >&2
+    return 1
+  fi
+
+  git -C "$work" init -q -b main repo
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name Test
+  cat >"$repo/.git/hook-probe" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${WRIX_TEST_STAGE:?}" >>.git/hook-probe.log
+SCRIPT
+  chmod +x "$repo/.git/hook-probe"
+  printf 'repos:\n' >"$repo/.pre-commit-config.yaml"
+  printf '  - repo: local\n    hooks:\n' >>"$repo/.pre-commit-config.yaml"
+  for stage in pre-commit pre-push prepare-commit-msg post-checkout post-merge; do
+    cat >>"$repo/.pre-commit-config.yaml" <<YAML
+      - id: $stage-probe
+        name: $stage-probe
+        entry: .git/hook-probe
+        language: system
+        stages: [$stage]
+        always_run: true
+        pass_filenames: false
+YAML
+  done
+  printf 'seed\n' >"$repo/seed.txt"
+  git -C "$repo" add .
+  git -C "$repo" commit -qm initial
+  head_sha=$(git -C "$repo" rev-parse HEAD)
+  zero_sha=0000000000000000000000000000000000000000
+
+  (
+    cd "$repo"
+    WRIX_TEST_STAGE=pre-commit "$bundle/pre-commit"
+    printf 'message\n' >.git/message
+    WRIX_TEST_STAGE=prepare-commit-msg "$bundle/prepare-commit-msg" .git/message message
+    WRIX_TEST_STAGE=post-checkout "$bundle/post-checkout" "$head_sha" "$head_sha" 1
+    WRIX_TEST_STAGE=post-merge "$bundle/post-merge" 0
+    printf 'refs/heads/main %s refs/heads/main %s\n' "$head_sha" "$zero_sha" \
+      | WRIX_TEST_STAGE=pre-push "$bundle/pre-push" origin example
+  )
+
+  actual=$(cat "$repo/.git/hook-probe.log")
+  if [[ "$actual" != "$expected" ]]; then
+    echo "FAIL: packaged prek runtime stage log was: $actual" >&2
+    return 1
+  fi
+)
 
 # ============================================================================
 init_pre_push_probe_repo() {
@@ -621,8 +720,10 @@ YAML
 
 ALL_TESTS=(
   test_bundle_contents
+  test_bundle_path_is_context_stable
   test_shims_use_hook_impl
   test_shims_no_flock
+  test_shims_resolve_packaged_prek_at_runtime
   test_pre_push_exact_transaction_stamp_written_and_consumed
   test_pre_push_stamp_rejects_different_transaction
   test_pre_push_stale_stamp_removed_on_failure

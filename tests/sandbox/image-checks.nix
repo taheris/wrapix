@@ -272,6 +272,7 @@ let
   claudeCodePkg = linuxPkgs.claude-code;
   piAgentPkg = linuxPkgs.pi-coding-agent;
   prekHooksBundle = import ../../lib/prek/bundle.nix { pkgs = linuxPkgs; };
+  prekRunner = import ../../lib/prek/runner.nix { pkgs = linuxPkgs; };
   prekWrappers = import ../../lib/prek/wrappers.nix { pkgs = linuxPkgs; };
 
   # Linux-only shim verifier for the shared `imageLoadStep` snippet (the same
@@ -1702,7 +1703,7 @@ let
   };
   prekSurfaceChecks = concatStringsSep "\n" (
     mapAttrsToList (name: image: ''
-      check_surfaces "${name}" "${image.source_kind}" "${toString image.source}" "${prekHooksBundle}" "${prekWrappers.prePushChecks}" "${prekWrappers.skipIfMissing}"
+      check_surfaces "${name}" "${image.source_kind}" "${toString image.source}" "${prekHooksBundle}" "${prekRunner}" "${prekWrappers.prePushChecks}" "${prekWrappers.skipIfMissing}"
     '') prekSurfaceImageMatrix
   );
   prekHooksClosureTest = pkgs.writeShellApplication {
@@ -1722,14 +1723,15 @@ let
           local source_kind="$2"
           local source="$3"
           local hooks="$4"
-          local pre_push="$5"
-          local skip_missing="$6"
+          local runner="$5"
+          local pre_push="$6"
+          local skip_missing="$7"
           local image_dir="$tmp/$image_name"
           local paths="$tmp/$image_name.paths"
           local surface_path
           prepare_image_artifact "$image_name" "$source_kind" "$source" "$image_dir" "$image_dir.layers"
           list_layer_store_paths "$image_dir" "$image_dir.layers" >"$paths"
-          for surface_path in "$hooks" "$pre_push" "$skip_missing"; do
+          for surface_path in "$hooks" "$runner" "$pre_push" "$skip_missing"; do
               if ! grep -qxF "$surface_path" "$paths"; then
                   echo "FAIL: $surface_path is absent from emitted $image_name image layers" >&2
                   exit 1

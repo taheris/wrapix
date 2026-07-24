@@ -529,6 +529,7 @@ let
             set -euo pipefail
             exec ${launcher}/bin/wrix-git-sign "$@"
             WRIX_GIT_SIGN_WRAPPER
+            ln -s "${launcher}/bin/wrix-prek" "$out/bin/wrix-prek"
             chmod +x "$out/bin/wrix"
             chmod +x "$out/bin/wrix-run"
             chmod +x "$out/bin/wrix-git-sign"

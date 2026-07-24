@@ -24,6 +24,7 @@ let
   '';
 
   prekHooksBundle = import ../prek/bundle.nix { inherit pkgs; };
+  prekRunner = import ../prek/runner.nix { inherit pkgs; };
 
   binaryMeta = name: {
     description = "Rust ${name} binary";
@@ -52,6 +53,7 @@ let
         mkdir -p "$out/bin"
         makeWrapper "${workspace.bin}/bin/${name}" "$out/bin/${name}" ${concatStringsSep " " wrapperArgs}
         ln -s "${workspace.bin}/bin/wrix-git-sign" "$out/bin/wrix-git-sign"
+        ln -s "${prekRunner}/bin/wrix-prek" "$out/bin/wrix-prek"
       '';
 
 in

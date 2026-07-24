@@ -7,6 +7,7 @@ _:
     local repo_beads_bin
     package="$(build_flake_package wrix)"
     assert_executable "$package/bin/wrix"
+    assert_executable "$package/bin/wrix-prek"
     for forbidden in beads-dolt beads-push wrix-svc; do
       if [[ -e "$package/bin/$forbidden" ]]; then
         fail "wrix package exposes forbidden binary $forbidden"

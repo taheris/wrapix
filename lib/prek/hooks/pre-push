@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_wrix_prek_bin=$(wrix-prek --print-bin-dir)
+export PATH="$_wrix_prek_bin:$PATH"
+
 _worktree_root=$(git rev-parse --show-toplevel)
 _wrix_dir="$_worktree_root/.wrix"
 _stamp_file="$_wrix_dir/push-verified"

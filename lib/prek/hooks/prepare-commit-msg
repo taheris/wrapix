@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
+_wrix_prek_bin=$(wrix-prek --print-bin-dir)
+export PATH="$_wrix_prek_bin:$PATH"
 exec prek hook-impl --hook-dir "$(git rev-parse --show-toplevel)" --script-version 4 --hook-type=prepare-commit-msg -- "$@"

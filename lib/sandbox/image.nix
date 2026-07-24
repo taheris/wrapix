@@ -73,9 +73,8 @@ let
   # install it as specified by specs/image-builder.md § Hook Installation.
   prekHooksBundle = import ../prek/bundle.nix { inherit pkgs; };
 
-  # `pre-push-checks` and `skip-if-missing` wrappers — co-located on PATH so
-  # `.pre-commit-config.yaml` entries that name them resolve inside the
-  # container (specs/pre-commit.md § Hook-Entry Wrappers).
+  # Platform-local prek resolution and hook-entry wrappers share the image PATH.
+  prekRunner = import ../prek/runner.nix { inherit pkgs; };
   prekWrappers = import ../prek/wrappers.nix { inherit pkgs; };
 
   # libfakeuid: LD_PRELOAD UID-spoofing lib used on BOTH Linux boundaries — the
@@ -157,6 +156,7 @@ let
   # the agent tier and stripped from this leaf's graph by remove_paths).
   allPackages = [
     notifyClient
+    prekRunner
     prekWrappers.prePushChecks
     prekWrappers.skipIfMissing
   ]
