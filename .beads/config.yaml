@@ -69,7 +69,7 @@ sync:
 dolt:
   auth-push: false
 
-# Disable JSONL export — Dolt is authoritative, issues.jsonl is dead (3171e1f)
+# Disable JSONL export because Dolt is authoritative.
 export:
   auto: false
   git-add: false

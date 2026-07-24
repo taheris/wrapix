@@ -5,6 +5,38 @@ use std::{
     process::{Command as ProcessCommand, ExitCode, Output, Stdio},
 };
 
+use displaydoc::Display;
+use thiserror::Error as ThisError;
+use wrix_core::git::{Branch, ParseError as BranchParseError};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Display, ThisError)]
+pub enum Error {
+    /// beads workflow I/O failed: {source}
+    Io {
+        #[from]
+        source: io::Error,
+    },
+    /// invalid beads sync branch: {source}
+    InvalidSyncBranch {
+        #[from]
+        source: BranchParseError,
+    },
+    /// {program} failed: {stderr}
+    CommandFailed {
+        program: &'static str,
+        stderr: String,
+    },
+    /// staged Dolt remote already exists at {path}
+    StagedRemoteExists { path: String },
+    /// worktree recovery failed: {recovery}; restoring the staged Dolt remote also failed: {restore}
+    RecoveryRestore {
+        recovery: Box<Self>,
+        restore: Box<Self>,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
     Push,
@@ -19,24 +51,20 @@ impl Command {
     }
 }
 
-pub const HELP: &str =
-    "Manage beads workflows.\n\nUsage: wrix beads <command>\n\nCommands:\n  push\n";
+pub const HELP: &str = "Manage beads workflows.\n\nUsage: wrix beads <command>\n\nCommands:\n  push  Synchronize session-close beads state.\n";
 
-pub fn write_help(stdout: &mut impl Write) -> io::Result<()> {
-    stdout.write_all(HELP.as_bytes())
+pub fn write_help(stdout: &mut impl Write) -> Result<()> {
+    stdout.write_all(HELP.as_bytes())?;
+    Ok(())
 }
 
-pub fn run(
-    command: Command,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> io::Result<ExitCode> {
+pub fn run(command: Command, stdout: &mut impl Write, stderr: &mut impl Write) -> Result<ExitCode> {
     match command {
         Command::Push => push(stdout, stderr),
     }
 }
 
-fn push(stdout: &mut impl Write, stderr: &mut impl Write) -> io::Result<ExitCode> {
+fn push(stdout: &mut impl Write, stderr: &mut impl Write) -> Result<ExitCode> {
     if env::var_os("LOOM_INSIDE").is_some() {
         writeln!(
             stderr,
@@ -71,14 +99,14 @@ fn push(stdout: &mut impl Write, stderr: &mut impl Write) -> io::Result<ExitCode
 
 struct Context {
     root: PathBuf,
-    branch: String,
+    branch: Branch,
     worktree: PathBuf,
     worktree_remote_dir: PathBuf,
     recovery_remote_dir: PathBuf,
 }
 
 impl Context {
-    fn load(current_dir: &Path) -> io::Result<Option<Self>> {
+    fn load(current_dir: &Path) -> Result<Option<Self>> {
         let output = ProcessCommand::new("git")
             .arg("rev-parse")
             .arg("--show-toplevel")
@@ -92,7 +120,7 @@ impl Context {
             root = peel;
         }
         let branch = read_sync_branch(&root)?;
-        let worktree = root.join(".git/beads-worktrees").join(&branch);
+        let worktree = root.join(".git/beads-worktrees").join(branch.as_str());
         let worktree_remote_dir = worktree.join(".beads/dolt-remote");
         let recovery_remote_dir = root.join(".git/wrix-beads-dolt-remote-recovery");
         Ok(Some(Self {
@@ -111,28 +139,25 @@ fn peel_beads_worktree(root: &Path) -> Option<PathBuf> {
         .map(|index| PathBuf::from(&text[..index]))
 }
 
-fn read_sync_branch(root: &Path) -> io::Result<String> {
+fn read_sync_branch(root: &Path) -> Result<Branch> {
     let config_path = root.join(".beads/config.yaml");
     if !config_path.exists() {
-        return Ok(String::from("beads"));
+        return Ok(Branch::default());
     }
     let content = fs::read_to_string(config_path)?;
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("sync-branch:") {
-            let branch = rest.trim().trim_matches('"');
-            if !branch.is_empty() {
-                return Ok(branch.to_owned());
-            }
+            return Ok(Branch::parse(rest.trim().trim_matches('"'))?);
         }
     }
-    Ok(String::from("beads"))
+    Ok(Branch::default())
 }
 
 fn prepare_dolt_origin_remote(
     context: &Context,
     stderr: &mut impl Write,
-) -> io::Result<DoltRemoteOverride> {
+) -> Result<DoltRemoteOverride> {
     if !context.worktree_remote_dir.is_dir() {
         return Ok(DoltRemoteOverride::inactive());
     }
@@ -178,7 +203,7 @@ impl DoltRemoteOverride {
         original: Option<String>,
         remote: &str,
         stderr: &mut impl Write,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         writeln!(
             stderr,
             "wrix beads push: temporarily using sandbox Dolt origin remote -> {remote}"
@@ -190,7 +215,7 @@ impl DoltRemoteOverride {
         })
     }
 
-    fn restore(self) -> io::Result<()> {
+    fn restore(self) -> Result<()> {
         if !self.active {
             return Ok(());
         }
@@ -203,7 +228,7 @@ impl DoltRemoteOverride {
     }
 }
 
-fn replace_dolt_origin(existing: Option<&str>, remote: &str) -> io::Result<()> {
+fn replace_dolt_origin(existing: Option<&str>, remote: &str) -> Result<()> {
     if existing.is_some() {
         run_required("bd", &["sql", "CALL DOLT_REMOTE('remove', 'origin')"])?;
     }
@@ -226,11 +251,11 @@ fn sql_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-fn disable_auto_export() -> io::Result<()> {
+fn disable_auto_export() -> Result<()> {
     run_required("bd", &["config", "set", "export.auto", "false"])
 }
 
-fn sync_dolt_remote(stderr: &mut impl Write) -> io::Result<ExitCode> {
+fn sync_dolt_remote(stderr: &mut impl Write) -> Result<ExitCode> {
     let commit = run_output("bd", &["dolt", "commit"])?;
     if !commit.status.success() && !commit.stderr.is_empty() {
         stderr.write_all(&commit.stderr)?;
@@ -243,7 +268,7 @@ fn sync_dolt_remote(stderr: &mut impl Write) -> io::Result<ExitCode> {
     if push.status.success() {
         return Ok(ExitCode::SUCCESS);
     }
-    if !is_fast_forward_rejection(&push.stderr) {
+    if !is_fast_forward_rejection(&push.stderr) && !is_fast_forward_rejection(&push.stdout) {
         return Ok(ExitCode::FAILURE);
     }
     pull_with_intent_protection(stderr)
@@ -265,7 +290,7 @@ fn is_fast_forward_rejection(stderr: &[u8]) -> bool {
     .any(|needle| text.contains(needle))
 }
 
-fn pull_with_intent_protection(stderr: &mut impl Write) -> io::Result<ExitCode> {
+fn pull_with_intent_protection(stderr: &mut impl Write) -> Result<ExitCode> {
     let affected_ids = query_affected_ids()?;
     if affected_ids.is_empty() {
         run_required("bd", &["dolt", "pull"])?;
@@ -293,7 +318,7 @@ fn pull_with_intent_protection(stderr: &mut impl Write) -> io::Result<ExitCode> 
     Ok(status_to_exit(&push))
 }
 
-fn query_affected_ids() -> io::Result<Vec<String>> {
+fn query_affected_ids() -> Result<Vec<String>> {
     let output = run_required_output("bd", &["sql", "--csv", AFFECTED_IDS_SQL])?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text
@@ -322,7 +347,7 @@ fn sync_beads_git_branch(
     context: &Context,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
-) -> io::Result<ExitCode> {
+) -> Result<ExitCode> {
     if !ensure_beads_worktree(context, stderr)? {
         return Ok(ExitCode::SUCCESS);
     }
@@ -333,13 +358,13 @@ fn sync_beads_git_branch(
     commit_dirty_worktree(&context.worktree)?;
     run_git_required_in(
         &context.worktree,
-        &["push", "-u", "origin", &context.branch, "--quiet"],
+        &["push", "-u", "origin", context.branch.as_str(), "--quiet"],
     )?;
     writeln!(stdout, "wrix beads push: synced to GitHub")?;
     Ok(ExitCode::SUCCESS)
 }
 
-fn ensure_beads_worktree(context: &Context, stderr: &mut impl Write) -> io::Result<bool> {
+fn ensure_beads_worktree(context: &Context, stderr: &mut impl Write) -> Result<bool> {
     if context.worktree.is_dir()
         && run_git_output_in(&context.worktree, &["rev-parse", "--is-inside-work-tree"])?
             .status
@@ -360,30 +385,27 @@ fn ensure_beads_worktree(context: &Context, stderr: &mut impl Write) -> io::Resu
         (Ok(recreated), Ok(())) => Ok(recreated),
         (Err(recreate_error), Ok(())) => Err(recreate_error),
         (Ok(_), Err(restore_error)) => Err(restore_error),
-        (Err(recreate_error), Err(restore_error)) => Err(io::Error::other(format!(
-            "worktree recovery failed: {recreate_error}; restoring the staged Dolt remote also failed: {restore_error}"
-        ))),
+        (Err(recovery), Err(restore)) => Err(Error::RecoveryRestore {
+            recovery: Box::new(recovery),
+            restore: Box::new(restore),
+        }),
     }
 }
 
-fn stage_worktree_dolt_remote(context: &Context) -> io::Result<bool> {
+fn stage_worktree_dolt_remote(context: &Context) -> Result<bool> {
     if !context.worktree_remote_dir.is_dir() {
         return Ok(false);
     }
     if context.recovery_remote_dir.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!(
-                "staged Dolt remote already exists at {}",
-                context.recovery_remote_dir.display()
-            ),
-        ));
+        return Err(Error::StagedRemoteExists {
+            path: context.recovery_remote_dir.display().to_string(),
+        });
     }
     fs::rename(&context.worktree_remote_dir, &context.recovery_remote_dir)?;
     Ok(true)
 }
 
-fn restore_staged_dolt_remote(context: &Context) -> io::Result<()> {
+fn restore_staged_dolt_remote(context: &Context) -> Result<()> {
     if !context.recovery_remote_dir.is_dir() {
         return Ok(());
     }
@@ -391,19 +413,26 @@ fn restore_staged_dolt_remote(context: &Context) -> io::Result<()> {
         fs::remove_dir_all(&context.worktree_remote_dir)?;
     }
     fs::create_dir_all(context.worktree.join(".beads"))?;
-    fs::rename(&context.recovery_remote_dir, &context.worktree_remote_dir)
+    fs::rename(&context.recovery_remote_dir, &context.worktree_remote_dir)?;
+    Ok(())
 }
 
-fn recreate_beads_worktree(context: &Context, stderr: &mut impl Write) -> io::Result<bool> {
+fn recreate_beads_worktree(context: &Context, stderr: &mut impl Write) -> Result<bool> {
     if context.worktree.is_dir() {
         fs::remove_dir_all(&context.worktree)?;
     }
-    if run_git_output(&["rev-parse", "--verify", &context.branch])?
+    if run_git_output(&["rev-parse", "--verify", context.branch.as_str()])?
         .status
         .success()
     {
         let worktree = context.worktree_text();
-        run_git_required(&["worktree", "add", &worktree, &context.branch, "--quiet"])?;
+        run_git_required(&[
+            "worktree",
+            "add",
+            &worktree,
+            context.branch.as_str(),
+            "--quiet",
+        ])?;
     } else {
         let origin_branch = format!("origin/{}", context.branch);
         if run_git_output(&["rev-parse", "--verify", &origin_branch])?
@@ -430,9 +459,12 @@ impl Context {
     }
 }
 
-fn repair_worktree_pointers(context: &Context) -> io::Result<()> {
+fn repair_worktree_pointers(context: &Context) -> Result<()> {
     let dotgit = context.worktree.join(".git");
-    let admin = context.root.join(".git/worktrees").join(&context.branch);
+    let admin = context
+        .root
+        .join(".git/worktrees")
+        .join(context.branch.as_str());
     if !dotgit.is_file() || !admin.is_dir() {
         return Ok(());
     }
@@ -451,7 +483,7 @@ fn repair_worktree_pointers(context: &Context) -> io::Result<()> {
     Ok(())
 }
 
-fn commit_dirty_worktree(worktree: &Path) -> io::Result<()> {
+fn commit_dirty_worktree(worktree: &Path) -> Result<()> {
     let refresh = run_git_output_in(worktree, &["update-index", "--refresh"])?;
     if !refresh.stderr.is_empty() {
         io::stderr().write_all(&refresh.stderr)?;
@@ -467,53 +499,53 @@ fn commit_dirty_worktree(worktree: &Path) -> io::Result<()> {
     run_git_required_in(worktree, &["commit", "-m", "bd sync", "--quiet"])
 }
 
-fn run_required(program: &str, args: &[&str]) -> io::Result<()> {
+fn run_required(program: &'static str, args: &[&str]) -> Result<()> {
     run_required_in(Path::new("."), program, args)
 }
 
-fn run_required_in(cwd: &Path, program: &str, args: &[&str]) -> io::Result<()> {
+fn run_required_in(cwd: &Path, program: &'static str, args: &[&str]) -> Result<()> {
     let output = run_output_in(cwd, program, args)?;
-    status_to_result(&output)
+    status_to_result(program, &output)
 }
 
-fn run_required_output(program: &str, args: &[&str]) -> io::Result<Output> {
+fn run_required_output(program: &'static str, args: &[&str]) -> Result<Output> {
     run_required_output_in(Path::new("."), program, args)
 }
 
-fn run_required_output_in(cwd: &Path, program: &str, args: &[&str]) -> io::Result<Output> {
+fn run_required_output_in(cwd: &Path, program: &'static str, args: &[&str]) -> Result<Output> {
     let output = run_output_in(cwd, program, args)?;
     required_output_result(program, output)
 }
 
-fn run_output(program: &str, args: &[&str]) -> io::Result<Output> {
+fn run_output(program: &'static str, args: &[&str]) -> Result<Output> {
     run_output_in(Path::new("."), program, args)
 }
 
-fn run_output_in(cwd: &Path, program: &str, args: &[&str]) -> io::Result<Output> {
-    process_command_in(cwd, program, args).output()
+fn run_output_in(cwd: &Path, program: &'static str, args: &[&str]) -> Result<Output> {
+    Ok(process_command_in(cwd, program, args).output()?)
 }
 
-fn run_git_required(args: &[&str]) -> io::Result<()> {
+fn run_git_required(args: &[&str]) -> Result<()> {
     run_git_required_in(Path::new("."), args)
 }
 
-fn run_git_required_in(cwd: &Path, args: &[&str]) -> io::Result<()> {
+fn run_git_required_in(cwd: &Path, args: &[&str]) -> Result<()> {
     let output = run_git_output_in(cwd, args)?;
-    status_to_result(&output)
+    status_to_result("git", &output)
 }
 
-fn run_git_required_output_in(cwd: &Path, args: &[&str]) -> io::Result<Output> {
+fn run_git_required_output_in(cwd: &Path, args: &[&str]) -> Result<Output> {
     let output = run_git_output_in(cwd, args)?;
     required_output_result("git", output)
 }
 
-fn run_git_output(args: &[&str]) -> io::Result<Output> {
+fn run_git_output(args: &[&str]) -> Result<Output> {
     run_git_output_in(Path::new("."), args)
 }
 
-fn run_git_output_in(cwd: &Path, args: &[&str]) -> io::Result<Output> {
+fn run_git_output_in(cwd: &Path, args: &[&str]) -> Result<Output> {
     let mut command = process_command_in(cwd, "git", args);
-    command.env("PREK_ALLOW_NO_CONFIG", "1").output()
+    Ok(command.env("PREK_ALLOW_NO_CONFIG", "1").output()?)
 }
 
 fn process_command_in(cwd: &Path, program: &str, args: &[&str]) -> ProcessCommand {
@@ -524,27 +556,29 @@ fn process_command_in(cwd: &Path, program: &str, args: &[&str]) -> ProcessComman
     command
 }
 
-fn required_output_result(program: &str, output: Output) -> io::Result<Output> {
+fn required_output_result(program: &'static str, output: Output) -> Result<Output> {
     if output.status.success() {
         Ok(output)
     } else {
-        Err(io::Error::other(format!(
-            "{} failed: {}",
-            program,
-            String::from_utf8_lossy(&output.stderr)
-        )))
+        Err(command_failed(program, &output))
     }
 }
 
-fn status_to_result(output: &Output) -> io::Result<()> {
+fn status_to_result(program: &'static str, output: &Output) -> Result<()> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!(
-            "command failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )))
+        Err(command_failed(program, output))
     }
+}
+
+fn command_failed(program: &'static str, output: &Output) -> Error {
+    let stderr = if output.stderr.is_empty() {
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    } else {
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    Error::CommandFailed { program, stderr }
 }
 
 fn status_to_exit(output: &Output) -> ExitCode {
@@ -557,7 +591,12 @@ fn status_to_exit(output: &Output) -> ExitCode {
 
 #[cfg(test)]
 mod test {
-    use super::{Command, is_fast_forward_rejection, origin_remote_url, snapshot_query_for_ids};
+    use std::fs;
+
+    use super::{
+        Command, is_fast_forward_rejection, origin_remote_url, read_sync_branch,
+        snapshot_query_for_ids,
+    };
 
     #[test]
     fn beads_command_parser_accepts_push() {
@@ -580,6 +619,35 @@ mod test {
         let query = snapshot_query_for_ids(&ids);
         assert!(query.contains("'wx-one'"));
         assert!(query.contains("'wx-''two'"));
+    }
+
+    #[test]
+    fn sync_branch_reader_parses_validated_name() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".beads")).unwrap();
+        fs::write(
+            root.path().join(".beads/config.yaml"),
+            "sync-branch: \"team/beads\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_sync_branch(root.path()).unwrap().as_str(),
+            "team/beads"
+        );
+    }
+
+    #[test]
+    fn sync_branch_reader_rejects_invalid_name() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".beads")).unwrap();
+        fs::write(
+            root.path().join(".beads/config.yaml"),
+            "sync-branch: \"../outside\"\n",
+        )
+        .unwrap();
+
+        assert!(read_sync_branch(root.path()).is_err());
     }
 
     #[test]

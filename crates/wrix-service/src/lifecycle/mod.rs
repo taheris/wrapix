@@ -15,6 +15,7 @@ use serde::{Deserialize, Deserializer, de};
 use thiserror::Error as ThisError;
 use wrix_core::{
     cache_key,
+    git::{Branch, ParseError as BranchParseError},
     path::{ContainerName, Workspace, WorkspaceHash},
 };
 use wrix_sandbox::image::{
@@ -87,6 +88,11 @@ pub enum Error {
     },
     /// invalid persisted workspace hash: {value}
     InvalidPersistedWorkspaceHash { value: String },
+    /// invalid beads sync branch: {source}
+    InvalidBeadsSyncBranch {
+        #[from]
+        source: BranchParseError,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -267,12 +273,15 @@ impl Plan {
         self.write_services()
     }
 
-    fn beads_worktree_remote(&self) -> Option<PathBuf> {
+    fn beads_worktree_remote(&self) -> Result<Option<(Branch, PathBuf)>> {
+        let branch = read_beads_sync_branch(self.workspace.canonical_path())?;
         let path = self
             .workspace
             .canonical_path()
-            .join(".git/beads-worktrees/beads/.beads/dolt-remote");
-        path.is_dir().then_some(path)
+            .join(".git/beads-worktrees")
+            .join(branch.as_str())
+            .join(".beads/dolt-remote");
+        Ok(path.is_dir().then_some((branch, path)))
     }
 
     fn write_services(&self) -> Result<()> {
@@ -935,14 +944,15 @@ impl Runtime {
                     .join(".beads/dolt")
                     .display()
             ));
-            if let Some(remote) = plan.beads_worktree_remote() {
+            if let Some((branch, remote)) = plan.beads_worktree_remote()? {
                 command
                     .arg("-v")
                     .arg(format!("{}:{}:rw", remote.display(), remote.display()))
                     .arg("-v")
                     .arg(format!(
-                        "{}:/workspace/.git/beads-worktrees/beads/.beads/dolt-remote:rw",
-                        remote.display()
+                        "{}:/workspace/.git/beads-worktrees/{}/.beads/dolt-remote:rw",
+                        remote.display(),
+                        branch.as_str()
                     ));
             }
             match dolt.transport() {
@@ -1701,6 +1711,21 @@ fn home_dir() -> Result<PathBuf> {
         .ok_or_else(|| Error::Operation {
             message: String::from("HOME is required to resolve wrix service state roots"),
         })
+}
+
+fn read_beads_sync_branch(workspace: &Path) -> Result<Branch> {
+    let config_path = workspace.join(".beads/config.yaml");
+    if !config_path.is_file() {
+        return Ok(Branch::default());
+    }
+    let content = fs::read_to_string(config_path)?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("sync-branch:") {
+            return Ok(Branch::parse(rest.trim().trim_matches('"'))?);
+        }
+    }
+    Ok(Branch::default())
 }
 
 fn write_if_missing(path: &Path, content: impl AsRef<[u8]>) -> Result<()> {

@@ -1,0 +1,91 @@
+use std::fmt;
+
+use displaydoc::Display;
+use thiserror::Error as ThisError;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Branch(String);
+
+#[derive(Debug, Display, Eq, PartialEq, ThisError)]
+/// invalid Git branch name: {value}
+pub struct ParseError {
+    value: String,
+}
+
+impl Branch {
+    pub fn parse(value: &str) -> Result<Self, ParseError> {
+        if is_valid(value) {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(ParseError {
+                value: value.to_owned(),
+            })
+        }
+    }
+
+    pub const fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Default for Branch {
+    fn default() -> Self {
+        Self(String::from("beads"))
+    }
+}
+
+impl fmt::Display for Branch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+fn is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value != "@"
+        && !value.starts_with('-')
+        && !value.ends_with(['.', '/'])
+        && !value.contains("..")
+        && !value.contains("@{")
+        && !value.contains("//")
+        && !value.bytes().any(is_forbidden_byte)
+        && value.split('/').all(|component| {
+            !component.starts_with('.') && !component.as_bytes().ends_with(b".lock")
+        })
+}
+
+const fn is_forbidden_byte(byte: u8) -> bool {
+    byte <= b' ' || byte == 0x7f || matches!(byte, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\')
+}
+
+#[cfg(test)]
+mod test {
+    use super::Branch;
+
+    #[test]
+    fn branch_parser_accepts_hierarchical_names() {
+        let branch = Branch::parse("team/beads-sync").unwrap();
+
+        assert_eq!(branch.as_str(), "team/beads-sync");
+    }
+
+    #[test]
+    fn branch_parser_rejects_invalid_git_ref_names() {
+        for value in [
+            "",
+            "@",
+            "-beads",
+            ".beads",
+            "team/.beads",
+            "team//beads",
+            "team/../beads",
+            "team/beads.lock",
+            "team/beads.",
+            "team/beads ",
+            "team/beads~1",
+            "team/@{beads",
+        ] {
+            assert!(Branch::parse(value).is_err(), "accepted {value:?}");
+        }
+    }
+}

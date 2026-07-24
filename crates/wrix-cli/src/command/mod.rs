@@ -195,14 +195,14 @@ fn run_beads(
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
     if args.is_empty() || is_help(&args[0]) {
-        wrix_beads::command::write_help(stdout)?;
+        wrix_beads::command::write_help(stdout).map_err(io::Error::other)?;
         return Ok(ExitCode::SUCCESS);
     }
     if let Some(command) = wrix_beads::command::Command::parse(&args[0]) {
-        return wrix_beads::command::run(command, stdout, stderr);
+        return wrix_beads::command::run(command, stdout, stderr).map_err(io::Error::other);
     }
     writeln!(stderr, "unknown beads command: {}", args[0])?;
-    wrix_beads::command::write_help(stderr)?;
+    wrix_beads::command::write_help(stderr).map_err(io::Error::other)?;
     Ok(ExitCode::FAILURE)
 }
 
@@ -219,7 +219,7 @@ fn write_delegated_help(
         "run" => wrix_sandbox::command::write_run_help(stdout)?,
         "spawn" => wrix_sandbox::command::write_spawn_help(stdout)?,
         "service" => write_service_topic_help(&args[1..], stdout)?,
-        "beads" => wrix_beads::command::write_help(stdout)?,
+        "beads" => wrix_beads::command::write_help(stdout).map_err(io::Error::other)?,
         "init" => crate::init::write_help(stdout)?,
         unknown => {
             writeln!(stderr, "unknown help topic: {unknown}")?;

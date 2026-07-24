@@ -396,7 +396,13 @@ if [[ -f /workspace/.beads/config.yaml ]]; then
     wrix_install_bd_remote_wrapper
   fi
 
-  git checkout -- .beads/.gitignore 2>/dev/null || true # best-effort: file may be absent or untracked
+  if [[ -e /workspace/.git ]]; then
+    WRIX_TRACKED_BEADS_GITIGNORE="$(git ls-files -- .beads/.gitignore)"
+    if [[ -n "$WRIX_TRACKED_BEADS_GITIGNORE" ]]; then
+      git checkout -- .beads/.gitignore
+    fi
+    unset WRIX_TRACKED_BEADS_GITIGNORE
+  fi
 fi
 
 # Network setup and the NET_ADMIN drop are complete before this stage begins.

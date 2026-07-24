@@ -5,13 +5,8 @@ use std::{
     fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode},
+    process::Command as ProcessCommand,
 };
-
-use wrix_beads::command::{self, Command};
-
-const CHILD_ENV: &str = "WRIX_BEADS_PUSH_WORKFLOW_CHILD";
-const CHILD_TEST: &str = "child_runs_wrix_beads_push";
 
 const BD_FAKE: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
@@ -62,6 +57,35 @@ set_auto_export_false() {
   mv "$tmp" "$config"
 }
 
+publish_local_remote() {
+  local origin_file="${state_dir}/origin-remote"
+  local source="${root}/.beads/dolt/pending-remote"
+  local origin
+  local destination
+  if [[ ! -f "$origin_file" || ! -d "$source" ]]; then
+    return 0
+  fi
+  origin="$(< "$origin_file")"
+  if [[ "$origin" != file://* ]]; then
+    return 0
+  fi
+  destination="${origin#file://}"
+  mkdir -p "$destination"
+  cp -a "$source/." "$destination/"
+}
+
+set_origin_from_query() {
+  local query="$1"
+  local remote
+  remote="$(printf '%s\n' "$query" | sed -n "s/^CALL DOLT_REMOTE('add', 'origin', '\(.*\)')$/\1/p")"
+  if [[ -z "$remote" ]]; then
+    printf 'fake bd: malformed DOLT_REMOTE add query: %s\n' "$query" >&2
+    exit 64
+  fi
+  remote="${remote//\'\'/\'}"
+  printf '%s\n' "$remote" > "${state_dir}/origin-remote"
+}
+
 log_invocation "$@"
 
 if [[ "$#" -eq 4 && "$arg1" == "config" && "$arg2" == "set" && "$arg3" == "export.auto" && "$arg4" == "false" ]]; then
@@ -79,36 +103,54 @@ if [[ "$#" -eq 2 && "$arg1" == "dolt" && "$arg2" == "push" ]]; then
     printf 'non-fast-forward update rejected\n' >&2
     exit 1
   fi
+  publish_local_remote
   exit 0
 fi
 
 if [[ "$#" -eq 2 && "$arg1" == "dolt" && "$arg2" == "pull" ]]; then
+  touch "${state_dir}/pulled"
   exit 0
 fi
 
 if [[ "$#" -eq 3 && "$arg1" == "dolt" && "$arg2" == "remote" && "$arg3" == "list" ]]; then
-  if [[ -n "${WRIX_BEADS_BD_REMOTE_LIST-}" ]]; then
+  if [[ -f "${state_dir}/origin-remote" ]]; then
+    printf 'origin %s\n' "$(< "${state_dir}/origin-remote")"
+  elif [[ -n "${WRIX_BEADS_BD_REMOTE_LIST-}" ]]; then
     printf '%s\n' "$WRIX_BEADS_BD_REMOTE_LIST"
   fi
   exit 0
 fi
 
 if [[ "$#" -eq 3 && "$arg1" == "sql" && "$arg2" == "--csv" ]]; then
-  count="$(next_count sql_csv)"
-  if [[ "$scenario" == "fallback_diverges" && "$count" == "1" ]]; then
-    printf 'id\nwx-one\n'
-  elif [[ "$scenario" == "fallback_diverges" && "$count" == "2" ]]; then
-    printf 'id,status,labels\nwx-one,closed,ready\n'
-  elif [[ "$scenario" == "fallback_diverges" && "$count" == "3" ]]; then
-    printf 'id,status,labels\nwx-one,blocked,ready\n'
-  else
-    printf 'id\n'
+  query="$arg3"
+  if [[ "$query" == *"dolt_commit_diff_issues"* && "$query" == *"dolt_commit_diff_labels"* ]]; then
+    if [[ "$scenario" == "fallback_diverges" ]]; then
+      printf 'id\nwx-one\n'
+    else
+      printf 'id\n'
+    fi
+    exit 0
   fi
-  exit 0
+  if [[ "$query" == "SELECT i.id, i.status,"* ]]; then
+    if [[ -f "${state_dir}/pulled" ]]; then
+      printf 'id,status,labels\nwx-one,blocked,ready\n'
+    else
+      printf 'id,status,labels\nwx-one,closed,ready\n'
+    fi
+    exit 0
+  fi
 fi
 
 if [[ "$#" -eq 2 && "$arg1" == "sql" ]]; then
-  exit 0
+  query="$arg2"
+  if [[ "$query" == "CALL DOLT_REMOTE('remove', 'origin')" ]]; then
+    rm -f "${state_dir}/origin-remote"
+    exit 0
+  fi
+  if [[ "$query" == "CALL DOLT_REMOTE('add', 'origin', "* ]]; then
+    set_origin_from_query "$query"
+    exit 0
+  fi
 fi
 
 printf 'unexpected bd invocation:' >&2
@@ -154,7 +196,7 @@ struct Fixture {
 }
 
 struct PushOutput {
-    code: u8,
+    code: i32,
     stdout: String,
     stderr: String,
 }
@@ -214,26 +256,6 @@ impl Fixture {
 }
 
 #[test]
-fn child_runs_wrix_beads_push() -> TestResult {
-    if env::var_os(CHILD_ENV).is_none() {
-        return Ok(());
-    }
-
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let status = command::run(Command::Push, &mut stdout, &mut stderr)?;
-    let code = if status == ExitCode::SUCCESS {
-        "0"
-    } else {
-        "1"
-    };
-    fs::write(required_path("WRIX_BEADS_CHILD_STDOUT")?, stdout)?;
-    fs::write(required_path("WRIX_BEADS_CHILD_STDERR")?, stderr)?;
-    fs::write(required_path("WRIX_BEADS_CHILD_STATUS")?, code)?;
-    Ok(())
-}
-
-#[test]
 fn bd_fake_records_invocations_and_updates_auto_export() -> TestResult {
     let fixture = Fixture::new("bd-fake-contract")?;
     setup_minimal_repo(fixture.repo())?;
@@ -257,6 +279,84 @@ fn bd_fake_records_invocations_and_updates_auto_export() -> TestResult {
             String::from("bd\tconfig\tset\texport.auto\tfalse"),
             String::from("bd\tconfig\tset\texport.auto\tfalse"),
         ]
+    );
+    Ok(())
+}
+
+#[test]
+fn bd_fake_pushes_local_payload_to_configured_origin() -> TestResult {
+    let fixture = Fixture::new("bd-fake-remote-contract")?;
+    setup_minimal_repo(fixture.repo())?;
+    let remote = fixture.repo().join("remote");
+    let payload = fixture.repo().join(".beads/dolt/pending-remote");
+    fs::create_dir_all(&payload)?;
+    fs::write(payload.join("db.txt"), "local Dolt state\n")?;
+    let add_query = format!("CALL DOLT_REMOTE('add', 'origin', '{}')", file_url(&remote));
+
+    let add = bd_command(&fixture, "success")
+        .args(["sql", &add_query])
+        .output()?;
+    assert!(
+        add.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let push = bd_command(&fixture, "success")
+        .args(["dolt", "push"])
+        .output()?;
+    assert!(
+        push.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+    let list = bd_command(&fixture, "success")
+        .args(["dolt", "remote", "list"])
+        .output()?;
+
+    assert_eq!(
+        String::from_utf8(list.stdout)?.trim(),
+        format!("origin {}", file_url(&remote))
+    );
+    assert_eq!(
+        fs::read_to_string(remote.join("db.txt"))?,
+        "local Dolt state\n"
+    );
+    Ok(())
+}
+
+#[test]
+fn bd_fake_models_diff_snapshot_state_across_pull() -> TestResult {
+    let fixture = Fixture::new("bd-fake-diff-contract")?;
+    setup_minimal_repo(fixture.repo())?;
+    let affected_query =
+        "SELECT id FROM dolt_commit_diff_issues UNION SELECT issue_id FROM dolt_commit_diff_labels";
+    let snapshot_query = "SELECT i.id, i.status, labels FROM issues i";
+
+    let affected = bd_command(&fixture, "fallback_diverges")
+        .args(["sql", "--csv", affected_query])
+        .output()?;
+    let before = bd_command(&fixture, "fallback_diverges")
+        .args(["sql", "--csv", snapshot_query])
+        .output()?;
+    let pull = bd_command(&fixture, "fallback_diverges")
+        .args(["dolt", "pull"])
+        .output()?;
+    let after = bd_command(&fixture, "fallback_diverges")
+        .args(["sql", "--csv", snapshot_query])
+        .output()?;
+
+    assert!(affected.status.success());
+    assert!(before.status.success());
+    assert!(pull.status.success());
+    assert!(after.status.success());
+    assert_eq!(String::from_utf8(affected.stdout)?, "id\nwx-one\n");
+    assert_eq!(
+        String::from_utf8(before.stdout)?,
+        "id,status,labels\nwx-one,closed,ready\n"
+    );
+    assert_eq!(
+        String::from_utf8(after.stdout)?,
+        "id,status,labels\nwx-one,blocked,ready\n"
     );
     Ok(())
 }
@@ -496,10 +596,9 @@ fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
     setup_repo_with_beads_branch(&fixture)?;
     let before = git_stdout(fixture.repo(), &["rev-parse", "origin/beads"])?;
     fs::create_dir_all(fixture.worktree_remote_dir())?;
-    fs::write(
-        fixture.worktree_remote_dir().join("db.txt"),
-        "canonical remote data\n",
-    )?;
+    let local_payload = fixture.repo().join(".beads/dolt/pending-remote");
+    fs::create_dir_all(&local_payload)?;
+    fs::write(local_payload.join("db.txt"), "local Dolt state\n")?;
     fs::remove_dir_all(fixture.repo().join(".git/worktrees/beads"))?;
 
     let output = invoke_push(fixture.repo(), &[fixture.fake_bin()], |command| {
@@ -531,7 +630,7 @@ fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
     );
     assert_eq!(
         fs::read_to_string(fixture.worktree_remote_dir().join("db.txt"))?,
-        "canonical remote data\n"
+        "local Dolt state\n"
     );
     assert_ne!(
         before,
@@ -644,36 +743,23 @@ fn invoke_push(
     extra_paths: &[&Path],
     configure: impl FnOnce(&mut ProcessCommand),
 ) -> TestResult<PushOutput> {
-    let output_dir = tempfile::Builder::new().prefix("push-output").tempdir()?;
-    let stdout_path = output_dir.path().join("stdout");
-    let stderr_path = output_dir.path().join("stderr");
-    let status_path = output_dir.path().join("status");
-    let mut command = ProcessCommand::new(env::current_exe()?);
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_wrix"));
     command
-        .arg("--exact")
-        .arg(CHILD_TEST)
-        .arg("--nocapture")
+        .args(["beads", "push"])
         .current_dir(cwd)
-        .env(CHILD_ENV, "1")
-        .env("WRIX_BEADS_CHILD_STDOUT", &stdout_path)
-        .env("WRIX_BEADS_CHILD_STDERR", &stderr_path)
-        .env("WRIX_BEADS_CHILD_STATUS", &status_path)
         .env("PATH", path_with_binary_dirs(extra_paths)?)
         .env_remove("LOOM_INSIDE")
         .env_remove("IS_SANDBOX");
     configure(&mut command);
-    let harness = command.output()?;
-    assert!(
-        harness.status.success(),
-        "child harness failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&harness.stdout),
-        String::from_utf8_lossy(&harness.stderr)
-    );
-    let code_text = fs::read_to_string(status_path)?;
+    let output = command.output()?;
+    let code = output
+        .status
+        .code()
+        .ok_or_else(|| io::Error::other("wrix beads push terminated by signal"))?;
     Ok(PushOutput {
-        code: code_text.trim().parse()?,
-        stdout: fs::read_to_string(stdout_path)?,
-        stderr: fs::read_to_string(stderr_path)?,
+        code,
+        stdout: String::from_utf8(output.stdout)?,
+        stderr: String::from_utf8(output.stderr)?,
     })
 }
 
@@ -753,12 +839,6 @@ fn read_log_lines(path: &Path) -> TestResult<Vec<String>> {
         .lines()
         .map(ToOwned::to_owned)
         .collect())
-}
-
-fn required_path(name: &str) -> TestResult<PathBuf> {
-    env::var_os(name)
-        .map(PathBuf::from)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} is not set")).into())
 }
 
 fn command_index(lines: &[String], command: &str) -> TestResult<usize> {

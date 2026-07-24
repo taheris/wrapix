@@ -1385,14 +1385,20 @@ test_service_mounts_beads_worktree_remote() {
   mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
   local workspace="$TEST_TMP/beads-remote-repo"
-  local worktree_remote="$workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
+  local branch="team-beads"
+  local worktree_remote="$workspace/.git/beads-worktrees/$branch/.beads/dolt-remote"
   mkdir -p "$workspace/.beads/dolt" "$worktree_remote"
+  printf 'sync-branch: "%s"\n' "$branch" >"$workspace/.beads/config.yaml"
   (cd "$workspace" && "$wrix_bin" service start --no-cache >"$TEST_TMP/beads-remote-start.txt")
 
   assert_file_contains \
-    "beads remote bind mount" \
+    "beads remote host bind mount" \
     "$WRIX_FAKE_RUNTIME_STATE/run-beads-remote-repo-service" \
     "$worktree_remote:$worktree_remote:rw"
+  assert_file_contains \
+    "beads remote sandbox bind mount" \
+    "$WRIX_FAKE_RUNTIME_STATE/run-beads-remote-repo-service" \
+    "$worktree_remote:/workspace/.git/beads-worktrees/$branch/.beads/dolt-remote:rw"
 }
 
 ALL_TESTS=(

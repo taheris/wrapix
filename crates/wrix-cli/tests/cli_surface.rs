@@ -73,7 +73,11 @@ fn root_and_subcommand_help() -> TestResult {
     let beads = run_wrix(&["beads", "--help"])?;
     assert_success_with_clean_stderr(&beads);
     assert_contains("beads help", &beads.stdout, "Usage: wrix beads <command>");
-    assert_contains("beads help", &beads.stdout, "push");
+    assert_contains(
+        "beads help",
+        &beads.stdout,
+        "push  Synchronize session-close beads state.",
+    );
 
     let init = run_wrix(&["init", "--help"])?;
     assert_success_with_clean_stderr(&init);

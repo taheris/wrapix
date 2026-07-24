@@ -7,6 +7,7 @@
 let
   inherit (pkgs.lib) escapeShellArg makeBinPath;
 
+  syncBranch = "team-beads";
   serviceImage = import ../../lib/services/image.nix {
     inherit pkgs;
     inherit (wrix.rustPackage) cacheServe;
@@ -99,7 +100,7 @@ let
     git -C "$repo" config user.email "wrix@example.invalid"
     mkdir -p \
       "$repo/.beads/dolt" \
-      "$repo/.git/beads-worktrees/beads/.beads/dolt-remote" \
+      "$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote" \
       "$repo/.wrix" \
       "$XDG_STATE_HOME" \
       "$XDG_CACHE_HOME"
@@ -127,7 +128,7 @@ let
     ${commonEnvironment}
 
     repo="$HOME/beads-repo"
-    remote="$repo/.git/beads-worktrees/beads/.beads/dolt-remote"
+    remote="$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote"
     socket=$(cd "$repo" && wrix service dolt socket)
     export BEADS_DOLT_SERVER_SOCKET="$socket"
     export BEADS_DOLT_AUTO_START=0
@@ -143,6 +144,11 @@ let
       --database wx \
       >/dev/null
     chmod 700 .beads
+    if grep -q '^sync-branch:' .beads/config.yaml; then
+      sed -i 's/^sync-branch:.*/sync-branch: "${syncBranch}"/' .beads/config.yaml
+    else
+      printf 'sync-branch: "%s"\n' '${syncBranch}' >>.beads/config.yaml
+    fi
     bd config set export.auto false >/dev/null
     bd dolt remote add origin "file://$remote" >/dev/null
     bd dolt commit >/dev/null
@@ -153,7 +159,8 @@ let
     }
 
     before=$(remote_digest)
-    bd create --title "sandbox sync probe" --type task --silent >/dev/null
+    issue_id=$(bd create --title "sandbox sync probe" --type task --silent)
+    printf '%s\n' "$issue_id" >"$HOME/beads-issue-id"
     bd dolt commit >/dev/null
     if [[ "$(remote_digest)" != "$before" ]]; then
       printf 'remote changed before sandbox push\n' >&2
@@ -187,24 +194,85 @@ let
       spawn --spawn-config "$HOME/spawn.json"
   '';
   verifySync = pkgs.writeShellScript "wrix-beads-system-verify-sync" ''
-    set -euo pipefail
-    ${commonEnvironment}
+        set -euo pipefail
+        ${commonEnvironment}
 
-    repo="$HOME/beads-repo"
-    remote="$repo/.git/beads-worktrees/beads/.beads/dolt-remote"
-    after=$(find "$remote" -type f -printf '%P:%s\n' | sort | sha256sum | cut -d' ' -f1)
-    before=$(<"$HOME/beads-remote.before")
-    if [[ "$after" == "$before" ]]; then
-      printf 'sandbox push did not update the real Dolt remote\n' >&2
+        repo="$HOME/beads-repo"
+        remote="$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote"
+        after=$(find "$remote" -type f -printf '%P:%s\n' | sort | sha256sum | cut -d' ' -f1)
+        before=$(<"$HOME/beads-remote.before")
+        if [[ "$after" == "$before" ]]; then
+          printf 'sandbox push did not update the real Dolt remote\n' >&2
+          exit 1
+        fi
+
+        socket=$(cd "$repo" && wrix service dolt socket)
+        export BEADS_DOLT_SERVER_SOCKET="$socket"
+        export BEADS_DOLT_AUTO_START=0
+        cd "$repo"
+        wrix service dolt wait >/dev/null
+        bd dolt remote list | grep -F 'file:///host-only/beads/dolt-remote' >/dev/null
+
+        bd sql "CALL DOLT_REMOTE('remove', 'origin')" >/dev/null
+        bd sql "CALL DOLT_REMOTE('add', 'origin', 'file://$remote')" >/dev/null
+        issue_id=$(<"$HOME/beads-issue-id")
+        bd close "$issue_id" >/dev/null
+        bd dolt commit >/dev/null
+
+        real_bd=$(command -v bd)
+        fallback_bin="$HOME/beads-fallback-bin"
+        fallback_log="$HOME/beads-fallback.log"
+        mkdir -p "$fallback_bin"
+        cat >"$fallback_bin/bd" <<'BD_WRAPPER'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    printf '%s\n' "$*" >>"$WRIX_FALLBACK_LOG"
+    if [[ "$1" == "dolt" && "$2" == "push" ]]; then
+      "$WRIX_REAL_BD" sql "CALL DOLT_FETCH('origin')" >/dev/null
+      printf 'non-fast-forward update rejected\n' >&2
       exit 1
     fi
+    if [[ "$1" == "dolt" && "$2" == "pull" ]]; then
+      "$WRIX_REAL_BD" sql \
+        "UPDATE issues SET status='blocked' WHERE id='$WRIX_INTENT_ID'" \
+        >/dev/null
+      exit 0
+    fi
+    exec "$WRIX_REAL_BD" "$@"
+    BD_WRAPPER
+        chmod +x "$fallback_bin/bd"
+        export WRIX_REAL_BD="$real_bd"
+        export WRIX_FALLBACK_LOG="$fallback_log"
+        export WRIX_INTENT_ID="$issue_id"
+        export PATH="$fallback_bin:$PATH"
 
-    socket=$(cd "$repo" && wrix service dolt socket)
-    export BEADS_DOLT_SERVER_SOCKET="$socket"
-    export BEADS_DOLT_AUTO_START=0
-    cd "$repo"
-    wrix service dolt wait >/dev/null
-    bd dolt remote list | grep -F 'file:///host-only/beads/dolt-remote' >/dev/null
+        set +e
+        "$fallback_bin/bd" dolt push >"$HOME/wrapper-push.out" 2>"$HOME/wrapper-push.err"
+        wrapper_push_status=$?
+        set -e
+        [[ "$wrapper_push_status" -eq 1 ]]
+        grep -F 'non-fast-forward update rejected' "$HOME/wrapper-push.err" >/dev/null
+        "$fallback_bin/bd" dolt pull
+        "$real_bd" sql --csv "SELECT status FROM issues WHERE id='$issue_id'" \
+          | grep -Fx 'blocked' >/dev/null
+        "$real_bd" sql "UPDATE issues SET status='closed' WHERE id='$issue_id'" >/dev/null
+        "$real_bd" dolt commit >/dev/null
+        : >"$fallback_log"
+
+        set +e
+        wrix beads push >"$HOME/beads-fallback.out" 2>"$HOME/beads-fallback.err"
+        fallback_status=$?
+        set -e
+        if [[ "$fallback_status" -eq 0 ]]; then
+          printf 'conflicting real Dolt fallback unexpectedly succeeded\n' >&2
+          exit 1
+        fi
+        grep -F 'dolt_commit_diff_issues' "$fallback_log" >/dev/null
+        grep -F 'dolt_commit_diff_labels' "$fallback_log" >/dev/null
+        grep -F 'pull-fallback diverged from local status/label intent' \
+          "$HOME/beads-fallback.err" >/dev/null
+        grep -F "$issue_id" "$HOME/beads-fallback.err" >/dev/null
   '';
 in
 pkgs.testers.runNixOSTest {
