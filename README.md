@@ -5,7 +5,7 @@ Secure sandbox for running AI coding agents in isolated containers.
 - **Linux**: Podman rootless container
 - **macOS**: Apple [container CLI](https://github.com/apple/container) (macOS 26+, Apple Silicon)
 
-Provides filesystem and process isolation — code inside the container cannot access your host filesystem outside `/workspace` or affect host processes. Network access is unrestricted by design. See [docs/architecture.md](docs/architecture.md) for details.
+Provides filesystem and process isolation — code inside the container cannot access your host filesystem outside `/workspace` or affect host processes. Public-internet egress is available by default, while LAN/private/host-local/VPN/special ranges remain blocked. See the [security model](docs/architecture.md#security-model) for details.
 
 ## Quick Start
 
