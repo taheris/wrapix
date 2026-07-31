@@ -16,8 +16,8 @@ fail() {
 write_fake_container() {
   local path="$1"
 
-  cat >"$path" <<'FAKE'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$(command -v bash)" >"$path"
+  cat >>"$path" <<'FAKE'
 set -euo pipefail
 
 if [[ "$#" -ne 2 || "$1" != "inspect" ]]; then
