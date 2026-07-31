@@ -466,8 +466,8 @@ integration and publish hook for the complete contract.
 The lifecycle owns the devshell side of `core.hooksPath` configuration for
 prek-using repositories. `specs/pre-commit.md` owns the hook bundle export,
 stage set, shim behavior, wrappers, and pre-push retry stamp; `cli.md` owns
-`wrix init` hook setup for ordinary host Git and Loom driver worktrees outside
-devshell entry. Two conditions gate the devshell install: (1)
+`wrix init` hook setup for ordinary host Git and Loom clones outside devshell
+entry. Two conditions gate the devshell install: (1)
 `.pre-commit-config.yaml` exists in the working
 directory, AND (2) `prekHooks` resolves to a derivation. When both hold, the
 lifecycle runs `git config --local core.hooksPath ${derivation}` on every

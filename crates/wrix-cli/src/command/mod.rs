@@ -114,7 +114,11 @@ fn run_sandbox(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    if args.first().is_some_and(|arg| is_help(arg)) {
+    let help_requested = match command {
+        wrix_sandbox::command::Command::Run => args.first().is_some_and(|arg| is_help(arg)),
+        wrix_sandbox::command::Command::Spawn => requests_help(args),
+    };
+    if help_requested {
         match command {
             wrix_sandbox::command::Command::Run => wrix_sandbox::command::write_run_help(stdout)?,
             wrix_sandbox::command::Command::Spawn => {
@@ -137,7 +141,7 @@ fn run_service(
     }
 
     if let Some(command) = wrix_service::command::Top::parse(&args[0]) {
-        if args.get(1).is_some_and(|arg| is_help(arg)) {
+        if requests_help(&args[1..]) {
             wrix_service::command::write_help(stdout)?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -160,7 +164,7 @@ fn run_dolt(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    if args.is_empty() || is_help(&args[0]) {
+    if args.is_empty() || requests_help(args) {
         wrix_service::command::write_dolt_help(stdout)?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -177,7 +181,7 @@ fn run_cache(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    if args.is_empty() || is_help(&args[0]) {
+    if args.is_empty() || requests_help(args) {
         wrix_cache::command::write_help(stdout).map_err(io::Error::other)?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -194,7 +198,7 @@ fn run_beads(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    if args.is_empty() || is_help(&args[0]) {
+    if args.is_empty() || requests_help(args) {
         wrix_beads::command::write_help(stdout).map_err(io::Error::other)?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -242,6 +246,13 @@ fn is_help(arg: &str) -> bool {
     matches!(arg, "--help" | "-h" | "help")
 }
 
+fn requests_help(args: &[String]) -> bool {
+    args.first().is_some_and(|arg| is_help(arg))
+        || args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+}
+
 pub fn write_help(stdout: &mut impl Write) -> io::Result<()> {
     root_command().write_help(stdout)
 }
@@ -259,7 +270,7 @@ fn root_command() -> ClapCommand {
                 .long(PROFILE_CONFIG)
                 .value_name("file")
                 .num_args(1)
-                .help("Read launcher defaults from a profile config."),
+                .help("Read launcher defaults for run, spawn, and init from <file>."),
         )
         .subcommand(passthrough_command(
             "run",
@@ -289,7 +300,7 @@ fn root_command() -> ClapCommand {
         .subcommand(passthrough_command(
             "help",
             "Print command help.",
-            "Print command help.\n\nUsage: wrix help [command]\n",
+            "Print command help.\n\nUsage: wrix help [command]\n\nOptions:\n  -h, --help  Print help.\n",
         ))
 }
 

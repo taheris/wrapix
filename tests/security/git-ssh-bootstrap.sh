@@ -384,7 +384,7 @@ test_fresh_container_git_ssh_bootstrap() {
 }
 
 test_host_container_and_loom_helper() {
-  local wrix_bin bin_dir workspace repo home env_deploy env_signing home_deploy home_signing ambient_home fake_bin output common_dir state_dir helper known_hosts env_signing_public home_signing_public allowed_signers allowed_content integration command linked_command origin capture args missing_output missing_capture host_deploy_public env_deploy_public parity_spawn out err rc
+  local wrix_bin bin_dir workspace repo home env_deploy env_signing home_deploy home_signing ambient_home fake_bin output common_dir integration_common_dir state_dir helper integration_helper known_hosts env_signing_public home_signing_public allowed_signers allowed_content integration command integration_command origin capture args missing_output missing_capture host_deploy_public env_deploy_public parity_spawn out err rc
 
   wrix_bin="$LAUNCHER/bin/wrix"
   bin_dir="$(dirname "$wrix_bin")"
@@ -432,13 +432,33 @@ test_host_container_and_loom_helper() {
 
   mkdir -p "$repo/.loom"
   integration="$repo/.loom/integration"
-  git -C "$repo" worktree add -q "$integration" -b loom-integration || { fail "failed to create .loom/integration worktree"; return; }
+  git -C "$repo" clone -q . "$integration" || { fail "failed to create independent .loom/integration clone"; return; }
+  integration_common_dir="$(git_common_dir "$integration")"
+  if [[ "$integration_common_dir" == "$common_dir" ]]; then
+    fail ".loom/integration fixture shares the outer Git common directory"
+    return
+  fi
+  if git -C "$integration" config --local --get core.sshCommand >/dev/null 2>&1; then
+    fail "outer init mutated the independent .loom/integration clone"
+    return
+  fi
+  if ! output="$(cd "$integration" && PATH="$bin_dir:$PATH" HOME="$home" WRIX_DEPLOY_KEY="$env_deploy" WRIX_SIGNING_KEY="$env_signing" "$wrix_bin" init --offline --key parity-key 2>&1)"; then
+    fail "wrix init inside the integration clone failed: $output"
+    return
+  fi
+  assert_contains "integration init output" "$output" "wrix init: repository policy resolved" || return 0
+
   command="$(git -C "$repo" config --get core.sshCommand)"
-  linked_command="$(git -C "$integration" config --get core.sshCommand)"
-  assert_equals "loom integration inherited core.sshCommand" "$linked_command" "$command" || return 0
+  integration_command="$(git -C "$integration" config --get core.sshCommand)"
+  assert_equals "loom integration core.sshCommand" "$integration_command" "$command" || return 0
   origin="$(git -C "$integration" config --show-origin --get core.sshCommand)"
-  assert_contains "loom integration config origin" "$origin" "file:$common_dir/config" || return 0
+  if [[ "$origin" != *"file:$integration_common_dir/config"* && "$origin" != file:.git/config* ]]; then
+    fail "loom integration config did not come from its own common config: $origin"
+    return
+  fi
   assert_equals "loom integration signing program" "$(git -C "$integration" config --get gpg.ssh.program)" "wrix-git-sign" || return 0
+  integration_helper="$integration_common_dir/wrix/git-ssh"
+  [[ -x "$integration_helper" ]] || { fail "missing integration transport helper at $integration_helper"; return; }
 
   capture="$TEST_TMP/parity-ssh-env.args"
   if ! PATH="$fake_bin:$PATH" WRIX_TEST_CAPTURE="$capture" WRIX_DEPLOY_KEY="$env_deploy" HOME="$home" SSH_AUTH_SOCK="$TEST_TMP/agent.sock" \
@@ -543,7 +563,7 @@ test_host_container_and_loom_helper() {
   host_deploy_public="$(ssh-keygen -y -f "$home_deploy")"
   assert_not_contains "deploy public keys differ" "$env_deploy_public" "$host_deploy_public" || return 0
 
-  pass "host, container, and .loom/integration use strict context-resolved Git helpers"
+  pass "host, container, and independently initialized .loom/integration use strict context-resolved Git helpers"
 }
 
 ALL_TESTS=(

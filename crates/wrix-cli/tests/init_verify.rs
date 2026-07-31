@@ -13,14 +13,17 @@ use common::{
 };
 
 #[test]
-fn online_verification_uses_generated_helper() -> TestResult {
+fn outer_init_verifies_its_own_repository_with_independent_integration_clone() -> TestResult {
     let fixture = VerifyFixture::new()?;
     let repo = setup_committed_repo("online-helper", false)?;
-    let integration = add_integration_worktree(repo.path())?;
+    let integration = clone_integration(repo.path())?;
+    let integration_config_path = integration.join(".git/config");
+    let integration_config = fs::read(&integration_config_path)?;
     let home = fixture.home("online-helper");
     let deploy_key = write_deploy_key(&home, 0o600)?;
     fixture.set_mode("success")?;
 
+    assert_ne!(common_git_dir(repo.path())?, common_git_dir(&integration)?);
     let result = fixture.run_init(
         repo.path(),
         &home,
@@ -33,13 +36,59 @@ fn online_verification_uses_generated_helper() -> TestResult {
     assert_online_capture(
         &fixture.git_capture_dir,
         &fixture.ssh_capture_dir,
-        &integration,
+        &repo.path().canonicalize()?,
         &common_git_dir(repo.path())?,
         &deploy_key,
         &home,
+        "example/online-helper.git",
     )?;
+    assert_eq!(fs::read(integration_config_path)?, integration_config);
+    let command = git_stdout(repo.path(), &["config", "--get", "core.sshCommand"])?;
+    assert_contains("outer helper config", &command, "wrix/git-ssh");
+    Ok(())
+}
+
+#[test]
+fn init_inside_integration_clone_verifies_that_repository() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("integration-helper", false)?;
+    let integration = clone_integration(repo.path())?;
+    run_git(
+        &integration,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "git@github.com:example/integration-helper.git",
+        ],
+    )?;
+    let outer_config_path = repo.path().join(".git/config");
+    let outer_config = fs::read(&outer_config_path)?;
+    let home = fixture.home("integration-helper");
+    let deploy_key = write_deploy_key(&home, 0o600)?;
+    fixture.set_mode("success")?;
+
+    let result = fixture.run_init(
+        &integration,
+        &home,
+        &deploy_key,
+        &["--no-sign", "--key", "verify-key"],
+    )?;
+
+    assert_success_with_clean_stderr(&result);
+    assert_contains("integration output", &result.stdout, "online_verify: true");
+    assert_online_capture(
+        &fixture.git_capture_dir,
+        &fixture.ssh_capture_dir,
+        &integration,
+        &common_git_dir(&integration)?,
+        &deploy_key,
+        &home,
+        "example/integration-helper.git",
+    )?;
+    assert_eq!(fs::read(outer_config_path)?, outer_config);
     let command = git_stdout(&integration, &["config", "--get", "core.sshCommand"])?;
-    assert_contains("linked helper config", &command, "wrix/git-ssh");
+    assert_contains("integration helper config", &command, "wrix/git-ssh");
     Ok(())
 }
 
@@ -286,21 +335,11 @@ impl VerifyFixture {
     }
 }
 
-fn add_integration_worktree(repo: &Path) -> TestResult<PathBuf> {
+fn clone_integration(repo: &Path) -> TestResult<PathBuf> {
     let integration = repo.join(".loom/integration");
     fs::create_dir_all(repo.join(".loom"))?;
     let integration_path = integration.display().to_string();
-    run_git(
-        repo,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            &integration_path,
-            "-b",
-            "loom-integration",
-        ],
-    )?;
+    run_git(repo, &["clone", "-q", ".", &integration_path])?;
     Ok(integration.canonicalize()?)
 }
 
@@ -320,6 +359,7 @@ fn assert_online_capture(
     common_dir: &Path,
     deploy_key: &Path,
     home: &Path,
+    expected_repo: &str,
 ) -> TestResult {
     let git_cwd = fs::read_to_string(git_capture_dir.join("cwd"))?;
     assert_eq!(git_cwd.trim(), expected_cwd.display().to_string());
@@ -351,7 +391,7 @@ fn assert_online_capture(
     assert_contains(
         "live ssh args",
         &args,
-        "git-upload-pack 'example/online-helper.git'",
+        &format!("git-upload-pack '{expected_repo}'"),
     );
     assert_not_contains("live ssh args", &args, "StrictHostKeyChecking=no");
 

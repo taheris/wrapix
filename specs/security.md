@@ -119,8 +119,9 @@ that observes its keys at the same paths under the same env vars.
 
 **Host and repository Git bootstrap.** `cli.md` owns the `wrix init`
 command that applies repo-local Git config for host shells, devshells,
-containers, and Loom linked worktrees. The security invariant is that
-Wrix-managed Git transport uses only the context-resolved deploy key:
+containers, and Loom clones when invoked in each repository. The security
+invariant is that Wrix-managed Git transport uses only the context-resolved
+deploy key:
 `WRIX_DEPLOY_KEY` when the launcher supplied an in-container path, or
 `$HOME/.ssh/deploy_keys/<name>` on the host. If neither exists, the
 operation fails instead of trying the user's default SSH identities,
@@ -318,11 +319,11 @@ this section is the index, not a restatement.
   makes an empty signed commit, and verifies that commit as a good SSH
   signature without manual `ssh-keyscan` or `git config`.
   [system](verify:security.git-ssh-bootstrap)
-- Wrix-initialized host Git, container Git, and a `.loom/integration`-style
-  linked worktree all use context-resolved repo deploy/signing keys, strict
-  pinned GitHub host-key verification, and no ambient user SSH identities;
-  a fresh host-side GitHub SSH operation reaches authentication or repository
-  authorization without host-key verification failure.
+- Wrix-initialized host Git, container Git, and Loom's independent
+  `.loom/integration` clone all use context-resolved repo deploy/signing keys,
+  strict pinned GitHub host-key verification, and no ambient user SSH
+  identities; a fresh host-side GitHub SSH operation reaches authentication or
+  repository authorization without host-key verification failure.
   [system](verify:security.host-container-loom-git-helper)
 - When `WRIX_DEPLOY_KEY` or `WRIX_SIGNING_KEY` is set in the
   launcher's environment but the pointed-at file does not exist, the
@@ -391,10 +392,10 @@ this section is the index, not a restatement.
    same precedence rule; behavior is identical across platforms
    modulo the launcher's outer shell/applescript wrapping.
 4. **Host/repository Git transport** — Wrix-initialized host Git,
-   container Git, and Loom linked worktrees use context-resolved
-   repo deploy/signing keys with strict pinned GitHub host-key
-   verification, and fail rather than falling back to ambient user
-   SSH identities or trust-on-first-use host keys.
+   container Git, and independently initialized Loom clones use
+   context-resolved repo deploy/signing keys with strict pinned GitHub host-key
+   verification, and fail rather than falling back to ambient user SSH
+   identities or trust-on-first-use host keys.
 5. **Agent credentials** — provider keys cross the boundary only through declared runtime environment delivery, while Pi auth crosses through the platform-specific file delivery described in *Credential Surfaces*. Runtime declarations serialize only validated names plus required/optional policy; neither channel contributes secret values to Nix evaluation, `ProfileConfig`, image config, or image layers.
 6. **Audit anchor** — every sandbox session writes one uniquely named
    session-metadata index whose complete field set identifies the session and

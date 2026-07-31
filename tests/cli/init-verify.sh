@@ -57,6 +57,15 @@ assert_not_contains() {
   fi
 }
 
+assert_equals() {
+  local label="$1"
+  local actual="$2"
+  local expected="$3"
+  if [[ "$actual" != "$expected" ]]; then
+    fail "$label: got '$actual', expected '$expected'"
+  fi
+}
+
 assert_file_absent() {
   local path="$1"
   if [[ -e "$path" ]]; then
@@ -67,6 +76,16 @@ assert_file_absent() {
 canonical_dir() {
   local path="$1"
   (cd "$path" && pwd -P)
+}
+
+git_common_dir() {
+  local repo="$1"
+  local common_dir
+  common_dir="$(git -C "$repo" rev-parse --git-common-dir)"
+  if [[ "$common_dir" != /* ]]; then
+    common_dir="$repo/$common_dir"
+  fi
+  canonical_dir "$common_dir"
 }
 
 setup_repo() {
@@ -83,11 +102,11 @@ setup_repo() {
   printf '%s\n' "$repo"
 }
 
-add_integration_worktree() {
+add_integration_clone() {
   local repo="$1"
   local integration="$repo/.loom/integration"
   mkdir -p "$repo/.loom"
-  git -C "$repo" worktree add -q "$integration" -b "loom-integration-$(basename "$repo")"
+  git -C "$repo" clone -q . "$integration"
   canonical_dir "$integration"
 }
 
@@ -219,7 +238,7 @@ assert_fake_git_contract() {
 
 test_online_and_offline_verification() {
   require_tools
-  local wrix_bin real_git mode_file capture_dir fake_git repo integration home deploy_key output command output_file config_repo bad_repo bad_home bad_key
+  local wrix_bin real_git mode_file capture_dir fake_git repo integration integration_config home deploy_key output command output_file config_repo bad_repo bad_home bad_key
   wrix_bin="$(build_wrix)"
   real_git="$(command -v git)"
   mode_file="$TEST_TMP/git-mode"
@@ -228,7 +247,11 @@ test_online_and_offline_verification() {
   assert_fake_git_contract "$fake_git" "$real_git" "$mode_file"
 
   repo="$(setup_repo online-success)"
-  integration="$(add_integration_worktree "$repo")"
+  integration="$(add_integration_clone "$repo")"
+  integration_config="$(git -C "$integration" config --local --list)"
+  if [[ "$(git_common_dir "$repo")" == "$(git_common_dir "$integration")" ]]; then
+    fail "integration fixture is not an independent clone"
+  fi
   home="$TEST_TMP/home-online"
   mkdir -p "$home"
   deploy_key="$(write_deploy_key "$home" 600)"
@@ -236,9 +259,10 @@ test_online_and_offline_verification() {
   reset_capture "$capture_dir"
   output="$(run_init "$repo" "$home" "$deploy_key" "$wrix_bin" "$fake_git" --no-sign --key verify-key)"
   assert_contains "online output" "$output" "online_verify: true"
-  assert_online_capture "$capture_dir" "$integration" "$deploy_key" "$home"
-  command="$(git -C "$integration" config --get core.sshCommand)"
-  assert_contains "linked helper config" "$command" "wrix/git-ssh"
+  assert_online_capture "$capture_dir" "$(canonical_dir "$repo")" "$deploy_key" "$home"
+  assert_equals "integration config unchanged" "$(git -C "$integration" config --local --list)" "$integration_config"
+  command="$(git -C "$repo" config --get core.sshCommand)"
+  assert_contains "outer helper config" "$command" "wrix/git-ssh"
 
   repo="$(setup_repo offline-flag)"
   home="$TEST_TMP/home-offline"

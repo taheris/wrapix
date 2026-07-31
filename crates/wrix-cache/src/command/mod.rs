@@ -52,7 +52,7 @@ impl Command {
 
 pub fn write_help(stdout: &mut impl Write) -> Result<()> {
     stdout.write_all(
-        b"Manage the workspace project cache.\n\nUsage: wrix service cache <command> [options]\n\nCommands:\n  status\n  publish\n  warm [--checks]\n  prune\n  rotate-key\n",
+        b"Manage the workspace project cache.\n\nUsage: wrix service cache <command> [options]\n\nCommands:\n  status      Show project-cache status and warnings.\n  publish     Publish realized project outputs.\n  warm        Build and publish configured warm roots.\n  prune       Remove cache entries outside current roots.\n  rotate-key  Replace the cache signing key and clear cached content.\n\nOptions:\n  --checks    Include flake checks when warming the cache (default: off).\n  -h, --help  Print help.\n",
     )?;
     Ok(())
 }

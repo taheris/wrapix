@@ -4,7 +4,7 @@ Human-facing command surface, repository initialization, and CLI-level delegatio
 
 ## Problem Statement
 
-Wrix needs one predictable command line that works from host shells, devshells, containers, and Loom-managed worktrees. The CLI must delegate sandbox, service, cache, and beads behavior to the specs that own those domains while also providing a repository bootstrap path that makes Git transport, commit signing, and hook configuration strict and repeatable outside the devshell.
+Wrix needs one predictable command line that works from host shells, devshells, containers, and Loom-managed clones. The CLI must delegate sandbox, service, cache, and beads behavior to the specs that own those domains while also providing a repository bootstrap path that makes Git transport, commit signing, and hook configuration strict and repeatable outside the devshell.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Supported flags:
 | `--no-hooks` | Explicitly skip repo-local `core.hooksPath` setup for this invocation, equivalent to invocation-scoped `wrix.init.prek_hooks = false` |
 | `--force` | Replace existing local/remote key material where the selected operation supports replacement |
 
-`wrix init` writes Git configuration to the repository's shared/common Git config when Git worktree layout permits it, so linked worktrees inherit the same transport and signing policy. A Loom driver worktree such as `.loom/integration` therefore uses the same strict Git behavior without a separate init pass. Per-worktree config may be added only when Git requires it, and it must not weaken the common policy.
+`wrix init` writes Git configuration to the shared/common Git config of the repository where it is invoked, so that repository's linked worktrees inherit the same transport and signing policy. Loom owns `.loom/integration` as an independent clone: init in the outer repository neither reads nor mutates the nested repository, and init invoked inside `.loom/integration` applies and verifies policy for that clone. Per-worktree config may be added only when Git requires it, and it must not weaken the common policy.
 
 Git-executed helper config and other Git-read signing/transport paths must be context-stable. This includes `core.sshCommand`, `gpg.ssh.program` when used, and `gpg.ssh.allowedSignersFile`. Each may name a Wrix executable expected on `PATH` in every supported context, or a trampoline/file resolved from the Git common directory, but it must not point at a host-only Nix store path, a container-only path, an absolute workspace path, or an absolute private-key path.
 
@@ -78,7 +78,7 @@ The applied Git state includes:
 
 ### Context-Aware Git Helpers
 
-The Git transport and signing helpers are context-aware. They keep repo-local Git config stable across host checkouts, profile containers, and linked worktrees by resolving key paths at runtime instead of storing host-only or container-only private-key paths in Git config. The helper command or trampoline recorded in Git config is part of the CLI contract because Git executes it outside an interactive Wrix process.
+The Git transport and signing helpers are context-aware. They keep repo-local Git config stable across host checkouts, profile containers, and Git worktrees by resolving key paths at runtime instead of storing host-only or container-only private-key paths in Git config. The helper command or trampoline recorded in Git config is part of the CLI contract because Git executes it outside an interactive Wrix process.
 
 The deploy/signing-key resolution order, explicit signing opt-out, strict GitHub
 host verification, and prohibition on ambient SSH identities are owned by
@@ -98,12 +98,14 @@ Existing keys or remote registrations are reused when they match the requested s
 
 Verification is part of `wrix init`, not a separate best-effort suggestion. Online verification is the default and proves that a fresh host-side Git operation uses the Wrix helper, strict host-key checking, the pinned GitHub host keys, and the selected deploy key. `--offline` or `wrix.init.online_verify = false` skips network and GitHub API calls but still checks local config, key presence, permissions, signing requirements, helper path stability, and hook configuration; it does not claim to prove GitHub reachability or repository authorization.
 
-The online verifier must exercise the same Git config path Loom uses from `.loom/integration`-style linked worktrees. A host-side `git ls-remote` that reaches GitHub authentication or repository authorization without host-key verification failure is sufficient to prove host-key bootstrap; authorization failure is reported separately from host-key failure.
+The online verifier runs from the root of the repository where init was invoked and exercises that repository's effective Git config. It does not redirect verification into a nested `.loom/integration` clone. A host-side `git ls-remote` that reaches GitHub authentication or repository authorization without host-key verification failure is sufficient to prove host-key bootstrap; authorization failure is reported separately from host-key failure.
 
 ## Success Criteria
 
 - Root help and subcommand help expose `run`, `spawn`, `service`, `beads`, and `init`, and delegated command help reaches the owning command group.
   [test](../crates/wrix-cli/tests/cli_surface.rs::root_and_subcommand_help)
+- Every public root and subcommand flag has a non-blank user-facing description, including defaults and constraints where useful.
+  [test](../crates/wrix-cli/tests/cli_surface.rs::public_flags_have_descriptions)
 - The packaged `wrix` output installs no legacy `wrix-svc`, `beads-dolt`, `beads-push`, or `<repo>-beads` public binaries.
   [check](verify:cli.package-surface)
 - `.#verify --list` exposes the supported `verify:<domain>.<check-id>` target IDs, and `.#verify <id>...` runs the requested IDs in one process with actionable failures for unknown IDs.
@@ -124,8 +126,10 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [test](../crates/wrix-cli/tests/init_config.rs::defaults_and_overrides)
 - ProfileConfig security policy rejects wrong-typed `security` and `security.deploy_key` values before repository mutation.
   [test](../crates/wrix-cli/tests/init_config.rs::profile_config_rejects_wrong_typed_security_policy)
-- `wrix init` writes shared/common transport and signing config that is inherited by a `.loom/integration`-style linked worktree, and that config contains no context-specific private-key, helper, or allowed-signers paths.
-  [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::common_config_inherited_by_loom_integration)
+- `wrix init` applies context-stable transport and signing config only to the repository where it is invoked and leaves an independent nested `.loom/integration` clone unchanged.
+  [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::outer_init_leaves_independent_loom_integration_clone_unchanged)
+- `wrix init` invoked inside an independent `.loom/integration` clone applies and verifies policy for that clone without mutating the outer repository.
+  [test](../crates/wrix-cli/tests/init_verify.rs::init_inside_integration_clone_verifies_that_repository)
 - With `$HOME` and the effective-user home differing, the Git transport helper
   conforms to the credential-resolution, host-verification, and ambient-identity
   policy owned by `security.md`, and leaves Wrix-created SSH directories at
@@ -133,7 +137,7 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::strict_context_aware_ssh_helper)
 - An effective worktree-local `core.sshCommand` override that weakens the common transport policy makes local init verification fail.
   [test](../crates/wrix-cli/tests/init_verify.rs::worktree_transport_override_fails_verification)
-- SSH commit signing is enabled by default, a signed test commit verifies against the generated allowed-signers file, and a linked worktree verifies the same commit.
+- SSH commit signing is enabled by default, and a signed test commit verifies against the generated allowed-signers file.
   [test](../crates/wrix-cli/tests/init_signing.rs::signing_required_by_default)
 - Missing fallback signing material is a hard failure when signing is enabled.
   [test](../crates/wrix-cli/tests/init_signing.rs::fallback_signing_key_is_required)
@@ -151,8 +155,8 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [test](../crates/wrix-cli/tests/init_deploy.rs::remote_key_conflict_requires_force)
 - Deploy provisioning rejects non-GitHub remotes before remote API mutation.
   [test](../crates/wrix-cli/tests/init_deploy.rs::unsupported_deploy_remote_fails_before_api_mutation)
-- Online verification runs real Git from a minimal Loom-driver-like environment through the configured common-dir trampoline and generated strict SSH helper.
-  [test](../crates/wrix-cli/tests/init_verify.rs::online_verification_uses_generated_helper)
+- Online verification runs real Git from the invoked repository root through the configured common-dir trampoline and generated strict SSH helper, even when that repository contains an independent `.loom/integration` clone.
+  [test](../crates/wrix-cli/tests/init_verify.rs::outer_init_verifies_its_own_repository_with_independent_integration_clone)
 - Online verification reports host-key verification failure separately from authentication or repository authorization failure.
   [test](../crates/wrix-cli/tests/init_verify.rs::online_failures_distinguish_host_key_from_authorization)
 - `--offline` skips network verification while preserving local helper and key verification.
@@ -163,7 +167,7 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
   [test](../crates/wrix-cli/tests/init_verify.rs::offline_verification_rejects_insecure_key_permissions)
 - Repeated identical `wrix init --deploy` runs preserve key, config, hook, and generated-helper content and file metadata while avoiding remote mutation.
   [test](../crates/wrix-cli/tests/init_idempotency.rs::repeated_init_does_not_churn_managed_state)
-- When `.pre-commit-config.yaml` exists and hook setup is enabled, `wrix init` points repo-local `core.hooksPath` at Wrix's prek hook bundle in the same shared config inherited by `.loom/integration`; when hooks are disabled by flag or config it leaves hook config unchanged.
+- When `.pre-commit-config.yaml` exists and hook setup is enabled, `wrix init` points the invoked repository's `core.hooksPath` at Wrix's prek hook bundle without mutating a nested integration clone; running init inside that clone configures its own hooks. When hooks are disabled by flag or config, init leaves hook config unchanged.
   [test](../crates/wrix-cli/tests/init_prek.rs::prek_hooks)
 
 ## Requirements
@@ -175,7 +179,7 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
 3. **Delegation boundaries** — `sandbox.md` owns `run`/`spawn` launch semantics, `services.md` owns service/cache semantics, `beads.md` owns `beads push` behavior, `pre-commit.md` owns the hook bundle, and `security.md` owns credential trust invariants.
 4. **Optional config** — `wrix.toml` is read only when present and stores override policy only. Defaults must not require a tracked Wrix config file. `--no-hooks` is the invocation-scoped form of `wrix.init.prek_hooks = false`.
 5. **Init apply-and-verify** — `wrix init` applies repository-local Git transport, signing, hook, and known-host state, then verifies the result before exiting success.
-6. **Common worktree inheritance** — init writes shared/common Git config when possible so linked worktrees, including `.loom/integration`, inherit Wrix transport/signing/hook policy.
+6. **Repository scope** — init writes shared/common Git config only for the invoked repository. Linked worktrees of that repository inherit its policy, while Loom's independent `.loom/integration` clone requires its own init invocation and is not silently mutated from the outer checkout.
 7. **Context-aware key resolution** — Git helpers implement the credential
    resolution and ambient-identity policy owned by `security.md`.
 8. **Signing default** — SSH commit signing is enabled by default. Missing signing material is a hard failure unless the operator disables signing explicitly by flag or config.
@@ -189,7 +193,7 @@ The online verifier must exercise the same Git config path Loom uses from `.loom
 
 1. **Idempotent** — repeated `wrix init` runs converge on the same state and do not churn keys, config, hooks, or generated helper files.
 2. **Fail-loud** — missing keys, unsupported remotes, permission problems, helper failures, and verification failures return non-zero with remediation text.
-3. **Host/container parity** — the same repository Git config works from host shells, devshells, Wrix containers, and linked Loom driver worktrees.
+3. **Host/container parity** — each initialized repository's Git config works from host shells, devshells, and Wrix containers, including when the repository is a Loom integration or bead clone.
 4. **No secrets in config** — Wrix config and Git config do not store private key material or secrets.
 5. **Implementation freedom** — argument-parser library choice, helper language, and generated helper file layout are implementation details as long as the public contracts hold.
 

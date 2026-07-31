@@ -60,23 +60,6 @@ fn signing_required_by_default() -> TestResult {
     run_git_with_signing_env(repo.path(), &["commit", "-qm", "signed commit"], &home)?;
     run_git_with_signing_env(repo.path(), &["verify-commit", "HEAD"], &home)?;
 
-    let integration = repo.path().join(".loom/integration");
-    fs::create_dir_all(repo.path().join(".loom"))?;
-    run_git_with_signing_env(
-        repo.path(),
-        &[
-            "-c",
-            "core.hooksPath=/dev/null",
-            "worktree",
-            "add",
-            "-q",
-            integration.to_str().expect("integration path is UTF-8"),
-            "-b",
-            "loom-integration",
-        ],
-        &home,
-    )?;
-    run_git_with_signing_env(&integration, &["verify-commit", "HEAD"], &home)?;
     Ok(())
 }
 

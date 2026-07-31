@@ -51,7 +51,7 @@ impl Command {
     }
 }
 
-pub const HELP: &str = "Manage beads workflows.\n\nUsage: wrix beads <command>\n\nCommands:\n  push  Synchronize session-close beads state.\n";
+pub const HELP: &str = "Manage beads workflows.\n\nUsage: wrix beads <command>\n\nCommands:\n  push  Synchronize session-close beads state.\n\nOptions:\n  -h, --help  Print help.\n";
 
 pub fn write_help(stdout: &mut impl Write) -> Result<()> {
     stdout.write_all(HELP.as_bytes())?;

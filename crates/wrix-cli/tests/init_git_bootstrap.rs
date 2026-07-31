@@ -9,8 +9,23 @@ use common::{
 };
 
 #[test]
-fn common_config_inherited_by_loom_integration() -> TestResult {
+fn outer_init_leaves_independent_loom_integration_clone_unchanged() -> TestResult {
     let repo = setup_committed_repo("common-config", false)?;
+    let integration = repo.path().join(".loom/integration");
+    fs::create_dir_all(repo.path().join(".loom"))?;
+    run_git(
+        repo.path(),
+        &[
+            "clone",
+            "-q",
+            ".",
+            integration.to_str().expect("integration path is UTF-8"),
+        ],
+    )?;
+    let integration_config_path = integration.join(".git/config");
+    let integration_config = fs::read(&integration_config_path)?;
+    assert_ne!(common_git_dir(repo.path())?, common_git_dir(&integration)?);
+
     let fixture = tempfile::Builder::new()
         .prefix("wrix-init-common-fixtures")
         .tempdir()?;
@@ -32,22 +47,7 @@ fn common_config_inherited_by_loom_integration() -> TestResult {
         &result.stdout,
         "wrix init: repository policy resolved",
     );
-
-    let integration = repo.path().join(".loom/integration");
-    fs::create_dir_all(repo.path().join(".loom"))?;
-    run_git(
-        repo.path(),
-        &[
-            "-c",
-            "core.hooksPath=/dev/null",
-            "worktree",
-            "add",
-            "-q",
-            integration.to_str().expect("integration path is UTF-8"),
-            "-b",
-            "loom-integration",
-        ],
-    )?;
+    assert_eq!(fs::read(integration_config_path)?, integration_config);
 
     let common_dir = common_git_dir(repo.path())?;
     for (key, expected) in [
@@ -62,17 +62,15 @@ fn common_config_inherited_by_loom_integration() -> TestResult {
         ("commit.gpgsign", Some("true")),
     ] {
         let value = git_stdout(repo.path(), &["config", "--get", key])?;
-        let linked_value = git_stdout(&integration, &["config", "--get", key])?;
-        assert_eq!(value, linked_value, "linked worktree did not inherit {key}");
         if let Some(expected) = expected {
             assert_eq!(value, expected, "unexpected {key}");
         }
         assert_stable_config_value(key, &value, repo.path(), &home);
-        let origin = git_stdout(&integration, &["config", "--show-origin", "--get", key])?;
-        assert_contains(
-            &format!("linked {key} origin"),
-            &origin,
-            &format!("file:{}", common_dir.join("config").display()),
+        let origin = git_stdout(repo.path(), &["config", "--show-origin", "--get", key])?;
+        let common_config = format!("file:{}", common_dir.join("config").display());
+        assert!(
+            origin.contains(&common_config) || origin.starts_with("file:.git/config"),
+            "outer {key} origin was not the repository common config: {origin}",
         );
     }
     let command = git_stdout(repo.path(), &["config", "--get", "core.sshCommand"])?;

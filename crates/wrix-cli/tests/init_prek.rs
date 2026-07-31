@@ -18,6 +18,21 @@ fn prek_hooks() -> TestResult {
     write_empty_key(&deploy_key)?;
 
     let repo = setup_committed_repo("prek-enabled", true)?;
+    let integration = repo.path().join(".loom/integration");
+    fs::create_dir_all(repo.path().join(".loom"))?;
+    run_git(
+        repo.path(),
+        &[
+            "clone",
+            "-q",
+            ".",
+            integration.to_str().expect("integration path is UTF-8"),
+        ],
+    )?;
+    let integration_config_path = integration.join(".git/config");
+    let integration_config = fs::read(&integration_config_path)?;
+    assert_ne!(common_git_dir(repo.path())?, common_git_dir(&integration)?);
+
     let mut command = init_command(repo.path(), &home, &deploy_key, &hooks)?;
     command
         .arg("init")
@@ -27,24 +42,21 @@ fn prek_hooks() -> TestResult {
     assert_contains("enabled init output", &result.stdout, "prek_hooks: true");
     assert_eq!(core_hooks_path(repo.path())?, hooks.display().to_string());
     assert_common_config_origin("enabled hooks origin", repo.path())?;
+    assert_eq!(fs::read(&integration_config_path)?, integration_config);
 
-    let integration = repo.path().join(".loom/integration");
-    fs::create_dir_all(repo.path().join(".loom"))?;
-    run_git(
-        repo.path(),
-        &[
-            "-c",
-            "core.hooksPath=/dev/null",
-            "worktree",
-            "add",
-            "-q",
-            integration.to_str().expect("integration path is UTF-8"),
-            "-b",
-            "loom-integration",
-        ],
-    )?;
+    let mut command = init_command(&integration, &home, &deploy_key, &hooks)?;
+    command
+        .arg("init")
+        .args(["--offline", "--no-sign", "--key", "prek-key"]);
+    let result = run_command(&mut command)?;
+    assert_success_with_clean_stderr(&result);
+    assert_contains(
+        "integration init output",
+        &result.stdout,
+        "prek_hooks: true",
+    );
     assert_eq!(core_hooks_path(&integration)?, hooks.display().to_string());
-    assert_common_config_origin("linked hooks origin", &integration)?;
+    assert_common_config_origin("integration hooks origin", &integration)?;
 
     let sentinel = "legacy-hooks";
     let flag_repo = setup_committed_repo("prek-disabled-flag", true)?;

@@ -89,6 +89,70 @@ fn root_and_subcommand_help() -> TestResult {
 }
 
 #[test]
+fn public_flags_have_descriptions() -> TestResult {
+    let cases = [
+        (
+            "root",
+            vec!["--help"],
+            vec!["-h, --help", "--profile-config <file>"],
+        ),
+        (
+            "run",
+            vec!["run", "--help"],
+            vec!["--profile-config <file>", "-h, --help"],
+        ),
+        (
+            "spawn",
+            vec!["spawn", "--stdio", "--help"],
+            vec![
+                "--profile-config <file>",
+                "--spawn-config <file>",
+                "--stdio",
+                "-h, --help",
+            ],
+        ),
+        (
+            "service",
+            vec!["service", "start", "--no-cache", "--help"],
+            vec!["--no-cache", "-h, --help"],
+        ),
+        (
+            "dolt",
+            vec!["service", "dolt", "status", "--help"],
+            vec!["-h, --help"],
+        ),
+        (
+            "cache",
+            vec!["service", "cache", "warm", "--help"],
+            vec!["--checks", "-h, --help"],
+        ),
+        ("beads", vec!["beads", "push", "--help"], vec!["-h, --help"]),
+        (
+            "init",
+            vec!["init", "--offline", "--help"],
+            vec![
+                "--deploy",
+                "--key <name>",
+                "--remote <name>",
+                "--offline",
+                "--no-sign",
+                "--no-hooks",
+                "--force",
+                "-h, --help",
+            ],
+        ),
+        ("help", vec!["help", "--help"], vec!["-h, --help"]),
+    ];
+
+    for (label, args, expected) in cases {
+        let result = run_wrix(&args)?;
+        assert_success_with_clean_stderr(&result);
+        assert_described_options(label, &result.stdout, &expected);
+    }
+    Ok(())
+}
+
+#[test]
 fn init_help_is_non_mutating() -> TestResult {
     let repo = setup_repo("cli-init-help")?;
     let before = git_config(repo.path())?;
@@ -248,4 +312,32 @@ fn assert_contains(label: &str, haystack: &str, needle: &str) {
         haystack.contains(needle),
         "{label}: missing {needle:?} in {haystack:?}",
     );
+}
+
+fn assert_described_options(label: &str, help: &str, expected: &[&str]) {
+    const OPTIONS_HEADING: &str = "Options:\n";
+    let options_start = help.find(OPTIONS_HEADING);
+    assert!(
+        options_start.is_some(),
+        "{label}: help has no Options section: {help:?}",
+    );
+    let options_start = options_start.map_or(help.len(), |index| index + OPTIONS_HEADING.len());
+    let options = &help[options_start..];
+    let mut actual = Vec::new();
+    for line in options.lines().filter(|line| !line.trim().is_empty()) {
+        let option = line.trim();
+        let description_start = option.find("  ");
+        assert!(
+            description_start.is_some(),
+            "{label}: option has no description: {line:?}",
+        );
+        let description_start = description_start.map_or(option.len(), |index| index);
+        let (syntax, description) = option.split_at(description_start);
+        assert!(
+            !description.trim().is_empty(),
+            "{label}: option {syntax:?} has a blank description",
+        );
+        actual.push(syntax);
+    }
+    assert_eq!(actual, expected, "{label}: unexpected public option set");
 }

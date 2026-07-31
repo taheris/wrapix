@@ -115,11 +115,11 @@ assert_common_config_origin() {
   fail "$label: hooksPath was not read from common config $common_dir/config: $origin"
 }
 
-add_integration_worktree() {
+add_integration_clone() {
   local repo="$1"
   local integration="$repo/.loom/integration"
   mkdir -p "$repo/.loom"
-  git -C "$repo" -c core.hooksPath=/dev/null worktree add -q "$integration" -b loom-integration
+  git -C "$repo" clone -q . "$integration"
   printf '%s\n' "$integration"
 }
 
@@ -131,22 +131,30 @@ run_init() {
 }
 
 test_prek_hooks() {
-  local wrix_bin expected_hooks deploy_key repo output actual integration sentinel config_repo flag_repo
+  local wrix_bin expected_hooks deploy_key repo output actual integration integration_config sentinel config_repo flag_repo
   wrix_bin="$(build_wrix)"
   expected_hooks="$(expected_prek_hooks)"
   deploy_key="$(write_deploy_key)"
 
   repo="$(setup_repo prek-enabled)"
+  integration="$(add_integration_clone "$repo")"
+  integration_config="$(git -C "$integration" config --local --list)"
+  if [[ "$(git_common_dir "$repo")" == "$(git_common_dir "$integration")" ]]; then
+    fail "integration fixture is not an independent clone"
+  fi
+
   output="$(run_init "$repo" "$deploy_key" "$wrix_bin" init --offline --no-sign --key prek-key)"
   assert_contains "enabled init output" "$output" "prek_hooks: true"
   actual="$(core_hooks_path "$repo")"
   assert_equals "enabled hooksPath" "$actual" "$expected_hooks"
   assert_common_config_origin "enabled hooks origin" "$repo"
+  assert_equals "integration config unchanged" "$(git -C "$integration" config --local --list)" "$integration_config"
 
-  integration="$(add_integration_worktree "$repo")"
+  output="$(run_init "$integration" "$deploy_key" "$wrix_bin" init --offline --no-sign --key prek-key)"
+  assert_contains "integration init output" "$output" "prek_hooks: true"
   actual="$(core_hooks_path "$integration")"
-  assert_equals "linked hooksPath" "$actual" "$expected_hooks"
-  assert_common_config_origin "linked hooks origin" "$integration"
+  assert_equals "integration hooksPath" "$actual" "$expected_hooks"
+  assert_common_config_origin "integration hooks origin" "$integration"
 
   sentinel="legacy-hooks"
 

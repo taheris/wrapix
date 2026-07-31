@@ -56,7 +56,7 @@ The Dolt database remains at `.beads/dolt` so existing beads branch sync semanti
 
 `mkDevShell` starts the service container by default because the project Nix cache is default-on. `nixCache = false` opts out of cache service/integration but still starts the service container when beads needs Dolt (`.beads/dolt` exists). `wrix run` and `wrix spawn` call `wrix service start` as an idempotent ensure/health-check before launching the agent container; if the service is already healthy, this is a no-op.
 
-The service container has a caller-independent lifecycle invariant: stopping the shell, editor, or service that evaluated shellHook does not tear down or SIGKILL the workspace service container. `wrix service stop` removes only the selected workspace's service container. Cache-only service startup is suppressed for temp-directory scratch workspaces, so `/tmp` test or integration directories do not create persistent service containers. Loom bead clones and integration worktrees under `.loom/` share the outer repository's service identity instead of starting persistent `*-service` containers named after the internal path.
+The service container has a caller-independent lifecycle invariant: stopping the shell, editor, or service that evaluated shellHook does not tear down or SIGKILL the workspace service container. `wrix service stop` removes only the selected workspace's service container. Cache-only service startup is suppressed for temp-directory scratch workspaces, so `/tmp` test or integration directories do not create persistent service containers. Loom bead clones and the independent integration clone under `.loom/` share the outer repository's service identity instead of starting persistent `*-service` containers named after the internal path.
 
 ### Service image source
 
@@ -161,7 +161,7 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
   [system](verify:services.temp-cache-only)
 - Loom bead clone paths under `.loom/beads/<id>` use the outer repository service identity, so launches do not accumulate bead-named `*-service` containers
   [test](../crates/wrix-service/tests/lifecycle.rs::loom_bead_workspace_uses_repo_service_identity)
-- Loom integration worktrees under `.loom/integration` use the outer repository service identity, so devshell entry does not accumulate integration-named `*-service` containers
+- Loom's independent clone under `.loom/integration` uses the outer repository service identity, so devshell entry does not accumulate integration-named `*-service` containers
   [test](../crates/wrix-service/tests/lifecycle.rs::loom_integration_workspace_uses_repo_service_identity)
 - Service management is exposed through `wrix service ...`, session-close sync is exposed through `wrix beads push` per `cli.md`, and no `beads-dolt`, `beads-push`, `wrix-svc`, or `<repo>-beads` compatibility surface is installed or required
   [test](../crates/wrix-service/tests/command_surface.rs::service_surface_is_reached_through_wrix_root)

@@ -43,7 +43,7 @@ pub fn run(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    if args.first().is_some_and(|arg| is_help(arg)) {
+    if requests_help(args) {
         write_help(stdout)?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -64,14 +64,17 @@ pub fn run(
     }
 }
 
-pub const HELP: &str = "Initialize repository Git policy.\n\nUsage: wrix init [--deploy] [--key <name>] [--remote <name>] [--offline] [--no-sign] [--no-hooks] [--force]\n\nOptions:\n  --deploy\n  --key <name>\n  --remote <name>\n  --offline\n  --no-sign\n  --no-hooks\n  --force\n";
+pub const HELP: &str = "Initialize repository Git policy.\n\nUsage: wrix init [options]\n\nOptions:\n  --deploy         Generate and register GitHub keys; requires online verification.\n  --key <name>     Use <name> for deploy and signing keys (default: policy or <repo>-<host>).\n  --remote <name>  Use <name> for GitHub detection and verification (default: policy or origin).\n  --offline        Skip network and API checks; cannot be combined with --deploy.\n  --no-sign        Disable SSH commit signing, which is enabled by default.\n  --no-hooks       Skip prek hook setup (default: enabled when prek config exists).\n  --force          Replace conflicting key material and registrations when supported.\n  -h, --help       Print help.\n";
 
 pub fn write_help(stdout: &mut impl Write) -> io::Result<()> {
     stdout.write_all(HELP.as_bytes())
 }
 
-fn is_help(arg: &str) -> bool {
-    matches!(arg, "--help" | "-h" | "help")
+fn requests_help(args: &[String]) -> bool {
+    args.first().is_some_and(|arg| arg == "help")
+        || args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
 }
 
 fn parse_key_name(value: &str, origin: &'static str) -> Result<KeyName, Error> {
@@ -372,7 +375,7 @@ impl Plan {
             verify_signing_commit(&self.root, &identity)?;
         }
         if self.verification == VerificationPolicy::Online {
-            verify_online(&self.root, &common_dir, &self.remote)?;
+            verify_online(&self.root, &self.remote)?;
         }
         Ok(())
     }
@@ -1652,10 +1655,9 @@ fn verify_transport_helper(
     )
 }
 
-fn verify_online(root: &Path, common_dir: &Path, remote: &RemoteName) -> Result<(), Error> {
-    let cwd = online_verification_cwd(root, common_dir)?;
-    require_runtime_git_config(&cwd, "core.sshCommand", TRANSPORT_TRAMPOLINE)?;
-    let output = online_git_ls_remote(&cwd, remote)?;
+fn verify_online(root: &Path, remote: &RemoteName) -> Result<(), Error> {
+    require_runtime_git_config(root, "core.sshCommand", TRANSPORT_TRAMPOLINE)?;
+    let output = online_git_ls_remote(root, remote)?;
     if output.status.success() {
         return Ok(());
     }
@@ -1674,22 +1676,6 @@ fn verify_online(root: &Path, common_dir: &Path, remote: &RemoteName) -> Result<
             detail,
         }),
     }
-}
-
-fn online_verification_cwd(root: &Path, common_dir: &Path) -> Result<PathBuf, Error> {
-    let integration = root.join(".loom").join("integration");
-    if !integration.is_dir() {
-        return Ok(root.to_path_buf());
-    }
-    let integration_common_dir = git_common_dir(&integration)?;
-    if integration_common_dir == common_dir {
-        return Ok(integration);
-    }
-    Err(Error::OnlineWorktreeCommonDir {
-        path: path_string(&integration),
-        expected: path_string(common_dir),
-        actual: path_string(&integration_common_dir),
-    })
 }
 
 fn require_runtime_git_config(cwd: &Path, key: &str, expected: &str) -> Result<(), Error> {
@@ -2242,12 +2228,6 @@ enum Error {
         value: String,
         expected: String,
         cwd: String,
-    },
-    /// online verification worktree {path} uses common dir {actual}, expected {expected}
-    OnlineWorktreeCommonDir {
-        path: String,
-        expected: String,
-        actual: String,
     },
     /// online verification failed host-key verification for remote '{remote}': {detail}
     OnlineHostKey { remote: RemoteName, detail: String },

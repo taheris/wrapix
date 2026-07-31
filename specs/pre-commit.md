@@ -4,7 +4,7 @@ Staged git hooks via [prek](https://github.com/j178/prek), packaged as a Nix-sto
 
 ## Problem Statement
 
-A wrix consumer using prek wants the same hook chain to fire in every context — host devshell, initialized host checkout, profile container, Loom driver worktree, and agent-driven bead clone — without per-context shim files, manual `prek install` steps, or consumer-owned `core.hooksPath` book-keeping. Wrix ships one frozen Nix-store hook bundle and threads it through Wrix-owned install paths so the consumer's `.pre-commit-config.yaml` is the only place hooks are configured.
+A wrix consumer using prek wants the same hook chain to fire in every context — host devshell, initialized host checkout, profile container, Loom integration clone, and agent-driven bead clone — without per-context shim files, manual `prek install` steps, or consumer-owned `core.hooksPath` book-keeping. Wrix ships one frozen Nix-store hook bundle and threads it through Wrix-owned install paths so the consumer's `.pre-commit-config.yaml` is the only place hooks are configured.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ All git hooks for prek-using wrix repositories are served from a single Nix-stor
 
 Each shim uses `prek hook-impl --hook-type=<stage>` rather than `prek run` because git passes positional args that `prek run` would mistake for hook/project selectors.
 
-`profiles.md` § Prek hook management owns devshell installation, `cli.md` owns `wrix init` installation for ordinary host Git and Loom driver worktrees, and `image-builder.md` § Hook Installation owns profile-image and container-entrypoint installation. This spec owns the shared bundle and its behavior after those surfaces select it.
+`profiles.md` § Prek hook management owns devshell installation, `cli.md` owns repository-scoped `wrix init` installation for ordinary host Git and Loom clones, and `image-builder.md` § Hook Installation owns profile-image and container-entrypoint installation. This spec owns the shared bundle and its behavior after those surfaces select it.
 
 Consumers do not vendor shims, do not set `core.hooksPath` themselves, and do not run `prek install`. Git never reads `.git/hooks/` while `core.hooksPath` is set, so whatever lands there (e.g. `bd hooks install`) is inert — no chmod-lockdown is needed and no `prek install -f` runs from any wrix lifecycle.
 

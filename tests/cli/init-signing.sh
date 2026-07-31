@@ -141,7 +141,7 @@ assert_stable_config_value() {
 
 test_signing_required_by_default() {
   require_tools
-  local wrix_bin bin_dir repo home deploy_key signing_key output common_dir allowed_signers allowed_content public_key integration missing_repo missing_home missing_output no_sign_repo no_sign_home config_repo config_home
+  local wrix_bin bin_dir repo home deploy_key signing_key output common_dir allowed_signers allowed_content public_key missing_repo missing_home missing_output no_sign_repo no_sign_home config_repo config_home
   wrix_bin="$(build_wrix)"
   bin_dir="$(dirname "$wrix_bin")"
 
@@ -180,11 +180,6 @@ test_signing_required_by_default() {
   git -C "$repo" add signed.txt
   env -u WRIX_SIGNING_KEY -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_EMAIL PATH="$bin_dir:$PATH" HOME="$home" git -C "$repo" commit -qm "signed commit"
   env -u WRIX_SIGNING_KEY -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_EMAIL PATH="$bin_dir:$PATH" HOME="$home" git -C "$repo" verify-commit HEAD >/dev/null
-
-  mkdir -p "$repo/.loom"
-  integration="$repo/.loom/integration"
-  git -C "$repo" worktree add -q "$integration" -b loom-integration
-  env -u WRIX_SIGNING_KEY -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_EMAIL PATH="$bin_dir:$PATH" HOME="$home" git -C "$integration" verify-commit HEAD >/dev/null
 
   missing_repo="$(setup_repo signing-missing-env)"
   missing_home="$TEST_TMP/home-missing-env"

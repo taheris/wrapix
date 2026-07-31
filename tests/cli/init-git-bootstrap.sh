@@ -132,26 +132,28 @@ SH
   chmod 700 "$bin_dir/ssh"
 }
 
-test_common_config_inherited_by_loom_integration() {
-  local wrix_bin repo home key output integration command linked_command origin common_dir state_dir
+test_outer_init_leaves_independent_loom_integration_unchanged() {
+  local wrix_bin repo home key output integration integration_config command common_dir state_dir
   wrix_bin="$(build_wrix)"
   repo="$(setup_repo common-config)"
+  mkdir -p "$repo/.loom"
+  integration="$repo/.loom/integration"
+  git -C "$repo" clone -q . "$integration"
+  integration_config="$(git -C "$integration" config --local --list)"
+  if [[ "$(git_common_dir "$repo")" == "$(git_common_dir "$integration")" ]]; then
+    fail "integration fixture is not an independent clone"
+  fi
+
   home="$TEST_TMP/home-common"
   key="$home/.ssh/deploy_keys/common-key"
   write_key "$key"
-
   output="$(cd "$repo" && HOME="$home" "$wrix_bin" init --offline --no-sign --key common-key)"
   assert_contains "init output" "$output" "wrix init: repository policy resolved"
-
-  mkdir -p "$repo/.loom"
-  integration="$repo/.loom/integration"
-  git -C "$repo" worktree add -q "$integration" -b loom-integration
+  if [[ "$(git -C "$integration" config --local --list)" != "$integration_config" ]]; then
+    fail "outer init mutated the independent integration clone"
+  fi
 
   command="$(core_ssh_command "$repo")"
-  linked_command="$(core_ssh_command "$integration")"
-  if [[ "$command" != "$linked_command" ]]; then
-    fail "linked worktree did not inherit core.sshCommand"
-  fi
   assert_contains "ssh command" "$command" "git rev-parse --git-common-dir"
   assert_not_contains "ssh command" "$command" "$repo"
   assert_not_contains "ssh command" "$command" "$key"
@@ -161,9 +163,6 @@ test_common_config_inherited_by_loom_integration() {
   assert_not_contains "ssh command" "$command" ".ssh/deploy_keys"
 
   common_dir="$(git_common_dir "$repo")"
-  origin="$(git -C "$integration" config --show-origin --get core.sshCommand)"
-  assert_contains "linked config origin" "$origin" "file:$common_dir/config"
-
   state_dir="$common_dir/wrix"
   if [[ ! -x "$state_dir/git-ssh" ]]; then
     fail "missing executable transport helper at $state_dir/git-ssh"
@@ -240,7 +239,7 @@ test_strict_context_aware_ssh_helper() {
 }
 
 ALL_TESTS=(
-  test_common_config_inherited_by_loom_integration
+  test_outer_init_leaves_independent_loom_integration_unchanged
   test_strict_context_aware_ssh_helper
 )
 

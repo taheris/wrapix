@@ -36,9 +36,8 @@ impl Command {
     }
 }
 
-pub const RUN_HELP: &str =
-    "Run an interactive sandbox.\n\nUsage: wrix [--profile-config <file>] run [DIR] [CMD ...]\n";
-pub const SPAWN_HELP: &str = "Spawn a programmatic sandbox.\n\nUsage: wrix [--profile-config <file>] spawn --spawn-config <file> [--stdio]\n";
+pub const RUN_HELP: &str = "Run an interactive sandbox.\n\nUsage: wrix [--profile-config <file>] run [DIR] [CMD ...]\n\nOptions:\n  --profile-config <file>  Read launcher defaults from <file> (required).\n  -h, --help               Print help.\n";
+pub const SPAWN_HELP: &str = "Spawn a programmatic sandbox.\n\nUsage: wrix [--profile-config <file>] spawn --spawn-config <file> [--stdio]\n\nOptions:\n  --profile-config <file>  Read launcher defaults from <file> (required).\n  --spawn-config <file>    Read per-launch settings from <file> (required).\n  --stdio                  Enable the selected agent's JSONL protocol on standard I/O (default: off).\n  -h, --help               Print help.\n";
 
 pub fn write_run_help(stdout: &mut impl Write) -> io::Result<()> {
     stdout.write_all(RUN_HELP.as_bytes())
