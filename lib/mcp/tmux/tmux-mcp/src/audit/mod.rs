@@ -13,7 +13,7 @@ use crate::pane::PaneId;
 use displaydoc::Display;
 use serde::Serialize;
 use std::env;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -306,7 +306,7 @@ impl AuditLogger {
         Ok(())
     }
 
-    /// Save full capture content to a file
+    /// Save full capture content to a process-scoped file claimed without overwriting.
     ///
     /// Returns the filename if saved, or `None` if full capture is not enabled.
     pub fn save_full_capture(&self, pane_id: &PaneId, content: &str) -> Result<Option<String>> {
@@ -318,14 +318,25 @@ impl AuditLogger {
             fs::create_dir_all(capture_dir)?;
         }
 
-        let counter = self.capture_counter.fetch_add(1, Ordering::SeqCst);
-        let filename = format!("{}-capture-{:03}.txt", pane_id, counter);
-        let path = capture_dir.join(&filename);
+        loop {
+            let counter = self.capture_counter.fetch_add(1, Ordering::SeqCst);
+            let filename = format!(
+                "{}-capture-{}-{:03}.txt",
+                pane_id,
+                std::process::id(),
+                counter
+            );
+            let path = capture_dir.join(&filename);
 
-        let mut file = File::create(&path)?;
-        file.write_all(content.as_bytes())?;
-
-        Ok(Some(filename))
+            match OpenOptions::new().write(true).create_new(true).open(path) {
+                Ok(mut file) => {
+                    file.write_all(content.as_bytes())?;
+                    return Ok(Some(filename));
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 }
 
@@ -763,10 +774,36 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // Filenames should have sequential numbers
-        assert_eq!(f1, "debug-1-capture-001.txt");
-        assert_eq!(f2, "debug-1-capture-002.txt");
-        assert_eq!(f3, "debug-2-capture-003.txt");
+        let process_id = std::process::id();
+        assert_eq!(f1, format!("debug-1-capture-{process_id}-001.txt"));
+        assert_eq!(f2, format!("debug-1-capture-{process_id}-002.txt"));
+        assert_eq!(f3, format!("debug-2-capture-{process_id}-003.txt"));
+    }
+
+    #[test]
+    fn full_capture_name_collision_preserves_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit.log");
+        let capture_dir = temp_dir.path().join("captures");
+        fs::create_dir(&capture_dir).unwrap();
+
+        let process_id = std::process::id();
+        let existing_filename = format!("debug-1-capture-{process_id}-001.txt");
+        let existing_path = capture_dir.join(existing_filename);
+        fs::write(&existing_path, "prior capture").unwrap();
+
+        let logger = AuditLogger::new(&log_path, Some(capture_dir.clone()));
+        let filename = logger
+            .save_full_capture(&pane_id("debug-1"), "new capture")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(filename, format!("debug-1-capture-{process_id}-002.txt"));
+        assert_eq!(fs::read_to_string(existing_path).unwrap(), "prior capture");
+        assert_eq!(
+            fs::read_to_string(capture_dir.join(filename)).unwrap(),
+            "new capture"
+        );
     }
 
     #[test]
