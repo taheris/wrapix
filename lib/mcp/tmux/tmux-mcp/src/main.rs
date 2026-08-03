@@ -504,18 +504,42 @@ mod tests {
     }
 
     #[test]
-    fn mock_executor_preserves_command_output_contract() {
-        let executor = MockExecutor::default();
-        let args = ["capture-pane", "-t", "debug-1:debug-1"];
+    fn mock_executor_matches_real_executor_output_contract() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let real = RealExecutor::for_test(temp_dir.path().join("tmux.sock"));
+        let mock = MockExecutor::default();
+        let session = format!("tmux-mcp-conformance-{}", std::process::id());
+        let create = ["new-session", "-d", "-s", session.as_str()];
+        let display = [
+            "display-message",
+            "-p",
+            "-t",
+            session.as_str(),
+            "debug-1|12345|0",
+        ];
+        let kill = ["kill-session", "-t", session.as_str()];
+        let cases: &[&[&str]] = &[&create, &display, &kill];
 
-        let output = executor.execute(&args).unwrap();
+        let real_outputs = cases
+            .iter()
+            .map(|args| real.execute(args).unwrap())
+            .collect::<Vec<_>>();
+        let mock_outputs = cases
+            .iter()
+            .map(|args| mock.execute(args).unwrap())
+            .collect::<Vec<_>>();
 
-        assert!(output.status.success());
-        assert_eq!(output.stdout, b"line 1\nline 2\nline 3\n");
-        assert!(output.stderr.is_empty());
+        for (mock_output, real_output) in mock_outputs.iter().zip(&real_outputs) {
+            assert_eq!(mock_output.status.success(), real_output.status.success());
+            assert_eq!(mock_output.stdout, real_output.stdout);
+            assert_eq!(mock_output.stderr, real_output.stderr);
+        }
         assert_eq!(
-            executor.calls(),
-            vec![args.map(std::string::ToString::to_string).to_vec()]
+            mock.calls(),
+            cases
+                .iter()
+                .map(|args| { args.iter().map(std::string::ToString::to_string).collect() })
+                .collect::<Vec<Vec<String>>>()
         );
     }
 

@@ -251,7 +251,7 @@ echo "[PASS] Sent keys to pane"
 
 # Send Enter to execute the command
 mcp_send_keys "$PANE_ID" "Enter" >&3
-read -r -t 5 response <&4 || true
+read -r -t 5 response <&4 || { echo "[FAIL] No response to send_keys Enter"; exit 1; }
 
 # Wait for command to execute
 sleep 0.5

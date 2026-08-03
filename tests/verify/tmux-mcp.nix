@@ -10,6 +10,7 @@ let
 
   containerRuntimePath = makeBinPath (
     optionals pkgs.stdenv.isLinux [
+      pkgs.gnutar
       pkgs.podman
       pkgs.shadow
       pkgs.skopeo

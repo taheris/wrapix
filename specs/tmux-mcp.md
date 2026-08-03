@@ -8,16 +8,20 @@ AI agents lack the ability to debug applications the way humans do — running a
 
 ## Architecture
 
-A Rust binary implementing the MCP protocol (JSON-RPC over stdio) that drives a tmux session named `debug-{pid}`. The server runs inside the wrix container — `sandbox.md` is the security boundary; this spec adds no further isolation. Container construction, explicit MCP opt-in plumbing (`mcp.tmux = { … }`), runtime MCP image bundles (`mcpRuntime` / `sandbox-*-mcp`), and trust model belong to `sandbox.md` and `profiles.md`. This spec owns the wire protocol, pane lifecycle, and component diagnostic
-format.
+A Rust binary implementing the MCP protocol (JSON-RPC over stdio) drives a tmux
+session named `debug-{pid}`. The server runs inside the wrix container —
+`sandbox.md` is the security boundary; this spec adds no further isolation.
+Container construction, MCP opt-in plumbing, runtime MCP image bundles, and the
+trust model belong to `sandbox.md` and `profiles.md`. This spec owns the wire
+protocol, pane lifecycle, and tmux-specific diagnostic emission format.
 
 Load-bearing decisions:
 
 - MCP server runs inside the wrix container — the sandbox IS the trust boundary, not the server
 - Open command policy — pane processes inherit sandbox constraints, no extra command filtering
 - `remain-on-exit on` so panes survive their process for post-mortem capture
-- Optional, default-off component diagnostics (JSON Lines) for review and
-  debugging-the-debugger, under the scoped policy in `security.md`
+- tmux-specific JSON Lines diagnostics under the component policy owned by
+  `security.md`
 
 ## MCP Tools
 
@@ -53,18 +57,16 @@ Messages are descriptive and may include recovery hints. There are no structured
 
 ## Component Diagnostic Format
 
-Under the scoped diagnostic policy in `security.md`, tmux-mcp diagnostics are
-an explicit, default-off debugging feature. The operator enables JSON Lines
-output by setting the `mcp.tmux.audit` path or `TMUX_DEBUG_AUDIT` environment
-variable. The resulting files supplement debugging; they are not the
-agent transcript, the `.wrix/log/` session-metadata index, or an authoritative
-Wrix audit trail. Wrix does not automatically enable, index, synthesize, or
-aggregate them.
+The component-diagnostic enablement posture, relationship to Wrix's security
+audit surface, and artifact-lifecycle ownership are defined by `security.md`.
+tmux-mcp defines two inputs and their emission behavior:
 
-tmux-mcp owns the configuration names, record format, and artifact emission.
-The enabling operator owns the configured destination and resulting artifacts,
-including access control, retention, and deletion. Output is JSON Lines, one
-event per line:
+- `mcp.tmux.audit = "<path>"` maps to `TMUX_DEBUG_AUDIT` and writes JSON
+  Lines, one event per line.
+- When base diagnostics are configured, `mcp.tmux.auditFull = "<dir>"` maps
+  to `TMUX_DEBUG_AUDIT_FULL` and writes each full capture to a numbered file.
+
+The JSON Lines records have these shapes:
 
 ```json
 {"ts": "2026-01-30T10:15:32Z", "tool": "create_pane", "pane_id": "debug-1", "command": "RUST_LOG=debug cargo run", "name": "server"}
@@ -75,38 +77,13 @@ event per line:
 
 JSON Lines records include pane commands and sent keystrokes without secret
 classification or redaction; either field may contain credentials or other
-secrets. Capture events record byte counts only. When base diagnostics are
-enabled, `mcp.tmux.auditFull = "<dir>"` (or `TMUX_DEBUG_AUDIT_FULL`)
-additionally writes unredacted full capture contents to numbered files in the
-directory, which may also contain credentials or other secrets. Enabling these
-outputs and safeguarding their destinations is the operator's responsibility.
-
-## Configuration
-
-Enabled per sandbox via the `mcp` parameter on `mkSandbox` (see `sandbox.md`):
-
-```nix
-mkSandbox {
-  profile = profiles.rust;
-  mcp.tmux = {
-    audit = "/workspace/.debug-audit.log";       # optional JSONL diagnostics
-    auditFull = "/workspace/.debug-audit/";      # optional full captures
-  };
-}
-```
-
-The tmux server does not define a per-server `-debug` or `-tmux` profile variant. Explicit `mcp.tmux` opt-in composes with the selected workspace profile; all-server runtime MCP bundles are owned by `sandbox.md` and `profiles.md`.
+secrets. Capture events record byte counts only. Full-capture files contain the
+unredacted pane output and may also contain credentials or other secrets.
 
 ## Success Criteria
 
 - The tmux-mcp integration suite passes: pane lifecycle (create/list/kill), `send_keys` + `capture_pane` round-trip, exited-pane status reporting, error-handling envelopes, component-diagnostic JSON-Lines format, and session cleanup on server exit
   [system](verify:tmux-mcp.integration)
-- tmux-mcp diagnostics conform to the security policy's scoped exception: they
-  are explicitly operator-enabled and default-off, remain separate from Wrix's
-  authoritative transcript/index audit surface, assign artifact retention to
-  the operator, and disclose that commands, keystrokes, and optional full
-  captures may contain unredacted credentials or other secrets.
-  [judge](../tests/judges/security.sh#test_scoped_component_diagnostics_policy)
 - `mcp.tmux` composes with the rust profile via an explicit `mkSandbox { mcp.tmux = { }; }` instantiation: the image build succeeds, tmux and tmux-mcp resolve on PATH inside the container, and the MCP server responds to a JSON-RPC `initialize` request
   [system](verify:tmux-mcp.e2e-sandbox)
 - Tool error responses construct `isError: true` envelopes via the MCP standard path
@@ -120,13 +97,11 @@ The tmux server does not define a per-server `-debug` or `-tmux` profile variant
 
 1. **MCP tool surface** — the five tools above are registered and respond to the documented parameters; capture defaults to 100 lines and caps at 1000.
 2. **Pane lifecycle visibility** — exited panes remain inspectable until explicitly killed; the server tracks `running` vs `exited` state.
-3. **Component diagnostics** — default-off, operator-enabled JSONL output uses
-   the documented record shape; capture bodies optionally land in an unredacted
-   per-capture file under `auditFull`. tmux-mcp owns emission and format, while
-   the operator owns the configured destination, access control, retention,
-   deletion, and the risk of secret-bearing commands, keystrokes, or captures.
-4. **MCP opt-in via sandbox** — the server is enabled per-sandbox via `mcp.tmux = { … }`; it does not define a tmux-specific `-debug` or `-tmux` profile variant. Runtime MCP bundles that include every registered server are owned by `sandbox.md`/`profiles.md`, not this server spec.
-5. **Single managed tmux session** — the server owns one `debug-{pid}` session and tears it down on exit.
+3. **Component diagnostics** — `audit` emits the documented JSONL record
+   shape, and `auditFull` adds numbered files containing unredacted capture
+   bodies when base diagnostics are configured.
+4. **Single managed tmux session** — the server owns one `debug-{pid}` session
+   and tears it down on exit.
 
 ### Non-Functional
 
@@ -141,9 +116,5 @@ The tmux server does not define a per-server `-debug` or `-tmux` profile variant
 - **Cross-container debugging** — single-sandbox scope
 - **Debugger integration (gdb / lldb)** — this is terminal-level debugging
 - **Persistent sessions** — tmux session is ephemeral, tied to MCP server lifetime
-- **Diagnostic redaction, rotation, retention, or deletion** — tmux-mcp emits
-  configured artifacts without secret classification; the enabling operator
-  owns their lifecycle
-- **Security-audit synthesis or aggregation** — component diagnostics remain
-  outside the authoritative transcript and `.wrix/log/` index owned by
+- **Component-diagnostic security policy and artifact lifecycle** — owned by
   `security.md`

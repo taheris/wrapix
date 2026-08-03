@@ -807,6 +807,51 @@ mod tests {
     }
 
     #[test]
+    fn full_capture_naming_is_unique_under_concurrent_load() {
+        const WORKERS: usize = 32;
+
+        let temp_dir = TempDir::new().unwrap();
+        let capture_dir = temp_dir.path().join("captures");
+        let logger = std::sync::Arc::new(AuditLogger::new(
+            temp_dir.path().join("audit.log"),
+            Some(capture_dir.clone()),
+        ));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WORKERS));
+
+        let mut handles = Vec::with_capacity(WORKERS);
+        for worker in 0..WORKERS {
+            let logger = std::sync::Arc::clone(&logger);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let content = format!("capture from worker {worker}");
+                barrier.wait();
+                let filename = logger
+                    .save_full_capture(&pane_id("debug-1"), &content)
+                    .unwrap()
+                    .unwrap();
+                (filename, content)
+            }));
+        }
+
+        let captures = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        let filenames = captures
+            .iter()
+            .map(|(filename, _)| filename.as_str())
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(filenames.len(), WORKERS);
+        for (filename, content) in captures {
+            assert_eq!(
+                fs::read_to_string(capture_dir.join(filename)).unwrap(),
+                content
+            );
+        }
+    }
+
+    #[test]
     fn test_audit_logger_creates_capture_dir() {
         let temp_dir = TempDir::new().unwrap();
         let log_path = temp_dir.path().join("audit.log");

@@ -78,6 +78,11 @@ impl RealExecutor {
         Self { socket_path }
     }
 
+    #[cfg(test)]
+    pub const fn for_test(socket_path: PathBuf) -> Self {
+        Self::new(SocketPath(socket_path))
+    }
+
     fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new("tmux");
         command.arg("-S").arg(self.socket_path.as_path()).args(args);
