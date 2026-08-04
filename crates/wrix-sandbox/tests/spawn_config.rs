@@ -179,6 +179,46 @@ fn invalid_environment_names_fail_before_launch() -> TestResult {
 }
 
 #[test]
+fn bootstrap_sensitive_environment_names_fail_before_launch() -> TestResult {
+    let fixture = SpawnFixture::new("spawn-bootstrap-env")?;
+    for (index, name) in [
+        "BASH_ENV",
+        "LD_PRELOAD",
+        "PATH",
+        "WRIX_NETWORK_LOCAL_ENDPOINTS",
+        "WRIX_NETWORK_DNS_SERVERS",
+        "BEADS_DOLT_SERVER_HOST",
+        "WRIX_PROJECT_CACHE_PORT",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let label = format!("bootstrap-env-{index}");
+        let config = fixture.write(
+            &label,
+            &json!({
+                "workspace": path_text(&fixture.workspace),
+                "env": [[name, "must-not-launch"]],
+                "agent_args": [],
+                "mounts": []
+            }),
+        )?;
+
+        let run = fixture.run(&label, &config)?;
+
+        assert!(!run.success, "{name}: {}", run.stdout);
+        assert!(
+            run.stderr
+                .contains("cannot set sandbox bootstrap environment variable"),
+            "{name}: {}",
+            run.stderr
+        );
+        assert!(!run.stdout.contains("must-not-launch"), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
 fn image_source_override_requires_source_kind() -> TestResult {
     let fixture = SpawnFixture::new("spawn-missing-kind")?;
     let config = fixture.write(

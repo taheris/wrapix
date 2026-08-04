@@ -98,6 +98,34 @@ test_mksandbox_accepts_documented_parameters() {
       invalidStaticName = builtins.tryEval (
         (lib.mkSandbox { env = { \"OPENAI_API_KEY=shadow\" = \"canary\"; }; }).profile.name
       );
+      bootstrapSensitiveNames = [
+        \"BASH_ENV\"
+        \"LD_PRELOAD\"
+        \"PATH\"
+        \"WRIX_NETWORK_LOCAL_ENDPOINTS\"
+        \"WRIX_NETWORK_DNS_SERVERS\"
+        \"BEADS_DOLT_SERVER_HOST\"
+        \"WRIX_PROJECT_CACHE_PORT\"
+      ];
+      bootstrapSensitiveStatic = builtins.map (
+        name:
+          builtins.tryEval (
+            (lib.mkSandbox {
+              env = builtins.listToAttrs [ { inherit name; value = \"must-not-reach-bootstrap\"; } ];
+            }).profile.name
+          )
+      ) bootstrapSensitiveNames;
+      bootstrapSensitiveRuntimeSecret = builtins.tryEval (
+        (lib.mkSandbox { runtimeSecrets = { BASH_ENV = \"optional\"; }; }).profile.name
+      );
+      bootstrapSensitiveAgentSetting = builtins.tryEval (
+        builtins.deepSeq
+          (lib.mkSandbox {
+            agent = \"claude\";
+            agentSettings.env = { LD_PRELOAD = \"/workspace/agent.so\"; };
+          }).image.source
+          true
+      );
     in
     {
       required_present = builtins.all (name: builtins.hasAttr name sandbox) required;
@@ -119,6 +147,9 @@ test_mksandbox_accepts_documented_parameters() {
       invalid_secret_name_accepted = invalidSecretName.success;
       invalid_secret_policy_accepted = invalidSecretPolicy.success;
       invalid_static_name_accepted = invalidStaticName.success;
+      bootstrap_sensitive_static_accepted = builtins.any (result: result.success) bootstrapSensitiveStatic;
+      bootstrap_sensitive_runtime_secret_accepted = bootstrapSensitiveRuntimeSecret.success;
+      bootstrap_sensitive_agent_setting_accepted = bootstrapSensitiveAgentSetting.success;
       mount_present = builtins.any (
         mount:
           mount.source == extraMount.source
@@ -153,6 +184,9 @@ test_mksandbox_accepts_documented_parameters() {
     .invalid_secret_name_accepted == false and
     .invalid_secret_policy_accepted == false and
     .invalid_static_name_accepted == false and
+    .bootstrap_sensitive_static_accepted == false and
+    .bootstrap_sensitive_runtime_secret_accepted == false and
+    .bootstrap_sensitive_agent_setting_accepted == false and
     .mount_present == true and
     (.package_count > .base_package_count)
   ' <<<"$result" >/dev/null; then

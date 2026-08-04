@@ -280,6 +280,10 @@ pub enum ConfigError {
     MissingAgentKind,
     /// ProfileConfig profile.env cannot contain runtime credential {name}
     StaticCredentialInProfileEnv { name: EnvName },
+    /// ProfileConfig profile.env cannot set sandbox bootstrap environment variable {name}
+    BootstrapEnvironmentInProfileEnv { name: EnvName },
+    /// ProfileConfig security.runtime_secrets cannot declare sandbox bootstrap environment variable {name}
+    BootstrapEnvironmentInRuntimeSecrets { name: EnvName },
     /// invalid ProfileConfig security.deploy_key: {source}
     InvalidDeployKeyName { source: KeyNameParseError },
     /// invalid ProfileConfig schema: {source}
@@ -304,6 +308,8 @@ pub enum ConfigError {
         expected: &'static str,
         platform: &'static str,
     },
+    /// SpawnConfig.env cannot set sandbox bootstrap environment variable {name}
+    BootstrapEnvironmentInSpawnEnv { name: EnvName },
     /// {source}
     Io { source: io::Error },
 }
@@ -437,6 +443,19 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
     {
         return Err(ConfigError::StaticCredentialInProfileEnv { name: name.clone() });
     }
+    if let Some(name) = profile
+        .env
+        .keys()
+        .find(|name| is_bootstrap_sensitive_env(name.as_str()))
+    {
+        return Err(ConfigError::BootstrapEnvironmentInProfileEnv { name: name.clone() });
+    }
+    if let Some(name) = runtime_secrets
+        .keys()
+        .find(|name| is_bootstrap_sensitive_env(name.as_str()))
+    {
+        return Err(ConfigError::BootstrapEnvironmentInRuntimeSecrets { name: name.clone() });
+    }
     Ok(ProfileConfig {
         profile,
         image: Image {
@@ -488,6 +507,13 @@ fn parse_spawn_value(value: Value, platform: Platform) -> Result<SpawnConfig, Co
 
     let spawn = serde_json::from_value::<SpawnConfig>(value)
         .map_err(|_source| ConfigError::InvalidSpawnConfigSchema)?;
+    if let Some((name, _value)) = spawn
+        .env
+        .iter()
+        .find(|(name, _value)| is_bootstrap_sensitive_env(name.as_str()))
+    {
+        return Err(ConfigError::BootstrapEnvironmentInSpawnEnv { name: name.clone() });
+    }
     if spawn.workspace.is_empty()
         || spawn
             .mounts
@@ -590,6 +616,31 @@ pub fn is_known_credential_env(name: &str) -> bool {
     )
 }
 
+fn is_bootstrap_sensitive_env(name: &str) -> bool {
+    const EXACT_NAMES: &[&str] = &[
+        "BASHOPTS",
+        "BASH_ENV",
+        "ENV",
+        "GLIBC_TUNABLES",
+        "PATH",
+        "PS4",
+        "SHELLOPTS",
+        "WRIX_FIREWALL_BACKEND",
+        "WRIX_NETWORK",
+        "WRIX_NOTIFY_TCP",
+        "WRIX_WAIT_FOR_ROUTE",
+    ];
+    const PREFIXES: &[&str] = &[
+        "BEADS_DOLT_SERVER_",
+        "LD_",
+        "WRIX_NETWORK_",
+        "WRIX_NIX_CACHE_",
+        "WRIX_PROJECT_CACHE_",
+    ];
+
+    EXACT_NAMES.contains(&name) || PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+}
+
 fn is_valid_env_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     bytes
@@ -603,8 +654,8 @@ mod test {
     use serde_json::json;
 
     use super::{
-        AgentKind, ConfigError, Platform, ProfileName, SourceKind, parse_profile_value,
-        parse_spawn_value,
+        AgentKind, ConfigError, Platform, ProfileName, SourceKind, is_bootstrap_sensitive_env,
+        parse_profile_value, parse_spawn_value,
     };
 
     #[test]
@@ -768,6 +819,85 @@ mod test {
             ));
             assert!(error.to_string().contains(name));
         }
+    }
+
+    #[test]
+    fn bootstrap_sensitive_environment_names_are_reserved() {
+        for name in [
+            "BASHOPTS",
+            "BASH_ENV",
+            "BEADS_DOLT_SERVER_HOST",
+            "ENV",
+            "GLIBC_TUNABLES",
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "PATH",
+            "PS4",
+            "SHELLOPTS",
+            "WRIX_FIREWALL_BACKEND",
+            "WRIX_NETWORK",
+            "WRIX_NETWORK_DNS_SERVERS",
+            "WRIX_NETWORK_LOCAL_ENDPOINTS",
+            "WRIX_NIX_CACHE_HOST",
+            "WRIX_NOTIFY_TCP",
+            "WRIX_PROJECT_CACHE_PORT",
+            "WRIX_WAIT_FOR_ROUTE",
+        ] {
+            assert!(is_bootstrap_sensitive_env(name), "{name}");
+        }
+        for name in [
+            "APP_PATH",
+            "LD",
+            "WRIX_NETWORKING",
+            "WRIX_NOTIFY_TCP_VERBOSE",
+        ] {
+            assert!(!is_bootstrap_sensitive_env(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn config_env_surfaces_reject_bootstrap_sensitive_names() {
+        let profile = json!({
+            "schema": 1,
+            "profile": { "name": "base", "env": { "BASH_ENV": "/workspace/bootstrap.sh" } },
+            "image": {
+                "ref": "wrix:test",
+                "source": "/nix/store/fake",
+                "source_kind": "nix-descriptor"
+            },
+            "agent": { "kind": "direct" }
+        });
+        assert!(matches!(
+            parse_profile_value(profile, Platform::Linux),
+            Err(ConfigError::BootstrapEnvironmentInProfileEnv { .. })
+        ));
+
+        let runtime_secret = json!({
+            "schema": 1,
+            "profile": { "name": "base" },
+            "image": {
+                "ref": "wrix:test",
+                "source": "/nix/store/fake",
+                "source_kind": "nix-descriptor"
+            },
+            "agent": { "kind": "direct" },
+            "security": { "runtime_secrets": { "LD_PRELOAD": "optional" } }
+        });
+        assert!(matches!(
+            parse_profile_value(runtime_secret, Platform::Linux),
+            Err(ConfigError::BootstrapEnvironmentInRuntimeSecrets { .. })
+        ));
+
+        let spawn = json!({
+            "workspace": "/workspace",
+            "env": [["WRIX_NETWORK_LOCAL_ENDPOINTS", "192.168.1.2:80/tcp"]],
+            "agent_args": [],
+            "mounts": []
+        });
+        assert!(matches!(
+            parse_spawn_value(spawn, Platform::Linux),
+            Err(ConfigError::BootstrapEnvironmentInSpawnEnv { .. })
+        ));
     }
 
     #[test]

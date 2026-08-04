@@ -20,7 +20,12 @@ let
     match
     seq
     ;
-  inherit (pkgs.lib) concatStringsSep makeBinPath optionals;
+  inherit (pkgs.lib)
+    concatStringsSep
+    hasPrefix
+    makeBinPath
+    optionals
+    ;
 
   isDarwin = elem system [ "aarch64-darwin" ];
   isLinux = elem system [
@@ -57,6 +62,30 @@ let
     "optional"
     "required"
   ];
+  bootstrapSensitiveEnvNames = [
+    "BASHOPTS"
+    "BASH_ENV"
+    "ENV"
+    "GLIBC_TUNABLES"
+    "PATH"
+    "PS4"
+    "SHELLOPTS"
+    "WRIX_FIREWALL_BACKEND"
+    "WRIX_NETWORK"
+    "WRIX_NOTIFY_TCP"
+    "WRIX_WAIT_FOR_ROUTE"
+  ];
+  bootstrapSensitiveEnvPrefixes = [
+    "BEADS_DOLT_SERVER_"
+    "LD_"
+    "WRIX_NETWORK_"
+    "WRIX_NIX_CACHE_"
+    "WRIX_PROJECT_CACHE_"
+  ];
+  isBootstrapSensitiveEnv =
+    name:
+    elem name bootstrapSensitiveEnvNames
+    || builtins.any (prefix: hasPrefix prefix name) bootstrapSensitiveEnvPrefixes;
 
   validateRuntimeSecrets =
     runtimeSecrets:
@@ -70,11 +99,14 @@ let
         invalidPolicies = filter (name: !elem runtimeSecrets.${name} runtimeSecretPolicies) (
           attrNames runtimeSecrets
         );
+        bootstrapSensitiveNames = filter isBootstrapSensitiveEnv (attrNames runtimeSecrets);
       in
       if invalidNames != [ ] then
         throw "runtimeSecrets contains invalid environment names: ${concatStringsSep ", " invalidNames}"
       else if invalidPolicies != [ ] then
         throw "runtimeSecrets policies must be 'optional' or 'required': ${concatStringsSep ", " invalidPolicies}"
+      else if bootstrapSensitiveNames != [ ] then
+        throw "runtimeSecrets cannot declare sandbox bootstrap environment variables: ${concatStringsSep ", " bootstrapSensitiveNames}"
       else
         runtimeSecrets;
 
@@ -86,11 +118,14 @@ let
       forbidden = filter (
         name: elem name knownCredentialNames || builtins.hasAttr name runtimeSecrets
       ) names;
+      bootstrapSensitiveNames = filter isBootstrapSensitiveEnv names;
     in
     if invalidNames != [ ] then
       throw "${label} contains invalid environment names: ${concatStringsSep ", " invalidNames}"
     else if forbidden != [ ] then
       throw "${label} cannot contain runtime credentials: ${concatStringsSep ", " forbidden}"
+    else if bootstrapSensitiveNames != [ ] then
+      throw "${label} cannot set sandbox bootstrap environment variables: ${concatStringsSep ", " bootstrapSensitiveNames}"
     else
       null;
 
