@@ -239,6 +239,12 @@ struct DarwinMounts {
     mounts: Vec<RenderedMount>,
     dir_mappings: Vec<(String, String)>,
     file_mappings: Vec<(String, String)>,
+    file_syncs: Vec<DarwinFileSync>,
+}
+
+struct DarwinFileSync {
+    source: PathBuf,
+    staged: PathBuf,
 }
 
 #[derive(Default)]
@@ -835,6 +841,7 @@ impl<'a> Plan<'a> {
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());
             let status = command.status()?;
+            darwin_mounts.sync_files()?;
             if let Some(auth) = &pi_auth {
                 auth.sync_darwin(staging)?;
             }
@@ -1322,11 +1329,22 @@ impl RenderedMount {
 
 impl DarwinMountPlan {
     pub fn dir_env(&self) -> Option<String> {
-        mapping_env(&self.dir_mappings)
+        mapping_env(&self.dir_mappings, |source| {
+            self.mapping_is_read_only(source)
+        })
     }
 
     pub fn file_env(&self) -> Option<String> {
-        mapping_env(&self.file_mappings)
+        mapping_env(&self.file_mappings, |source| {
+            self.mapping_is_read_only(source)
+        })
+    }
+
+    fn mapping_is_read_only(&self, source: &str) -> bool {
+        self.mounts
+            .iter()
+            .find(|mount| mapping_uses_mount(source, &mount.container))
+            .is_none_or(|mount| mount.read_only)
     }
 }
 
@@ -1401,54 +1419,60 @@ impl DarwinMounts {
             self.mounts.push(RenderedMount {
                 host: host.display().to_string(),
                 container: container.clone(),
-                mode: MountMode::Rw,
+                mode: mount.mode,
                 optional: false,
             });
             self.dir_mappings.push((container, mount.container.clone()));
             return Ok(());
         }
-        let parent = source.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+        let index = self.file_mappings.len();
         let file_name = source
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let container_parent = self.file_parent_mount(&parent);
-        self.file_mappings.push((
-            format!("{container_parent}/{file_name}"),
-            mount.container.clone(),
-        ));
+        let host = staging_root.join(format!("file{index}"));
+        fs::create_dir_all(&host)?;
+        let staged = host.join(&file_name);
+        fs::copy(&source, &staged)?;
+        let container = format!("/mnt/wrix/file{index}");
+        self.mounts.push(RenderedMount {
+            host: host.display().to_string(),
+            container: container.clone(),
+            mode: mount.mode,
+            optional: false,
+        });
+        self.file_mappings
+            .push((format!("{container}/{file_name}"), mount.container.clone()));
+        if mount.mode == MountMode::Rw {
+            self.file_syncs.push(DarwinFileSync { source, staged });
+        }
         Ok(())
     }
 
-    fn file_parent_mount(&mut self, parent: &Path) -> String {
-        for mount in &self.mounts {
-            if mount.host == parent.display().to_string()
-                && mount.container.starts_with("/mnt/wrix/file")
-            {
-                return mount.container.clone();
-            }
-        }
-        let index = self
-            .mounts
-            .iter()
-            .filter(|mount| mount.container.starts_with("/mnt/wrix/file"))
-            .count();
-        let container = format!("/mnt/wrix/file{index}");
-        self.mounts.push(RenderedMount {
-            host: parent.display().to_string(),
-            container: container.clone(),
-            mode: MountMode::Rw,
-            optional: false,
-        });
-        container
-    }
-
     fn dir_env(&self) -> Option<String> {
-        mapping_env(&self.dir_mappings)
+        mapping_env(&self.dir_mappings, |source| {
+            self.mapping_is_read_only(source)
+        })
     }
 
     fn file_env(&self) -> Option<String> {
-        mapping_env(&self.file_mappings)
+        mapping_env(&self.file_mappings, |source| {
+            self.mapping_is_read_only(source)
+        })
+    }
+
+    fn mapping_is_read_only(&self, source: &str) -> bool {
+        self.mounts
+            .iter()
+            .find(|mount| mapping_uses_mount(source, &mount.container))
+            .is_none_or(|mount| mount.mode == MountMode::Ro)
+    }
+
+    fn sync_files(&self) -> Result<(), LaunchError> {
+        for sync in &self.file_syncs {
+            fs::copy(&sync.staged, &sync.source)?;
+        }
+        Ok(())
     }
 
     fn write_dry_run(&self, stdout: &mut impl Write) -> Result<(), LaunchError> {
@@ -2022,14 +2046,27 @@ fn non_empty_override(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.is_empty())
 }
 
-fn mapping_env(mappings: &[(String, String)]) -> Option<String> {
+fn mapping_env(
+    mappings: &[(String, String)],
+    is_read_only: impl Fn(&str) -> bool,
+) -> Option<String> {
     (!mappings.is_empty()).then(|| {
         mappings
             .iter()
-            .map(|(source, dest)| format!("{source}:{dest}"))
+            .map(|(source, dest)| {
+                let mode = if is_read_only(source) { "ro" } else { "rw" };
+                format!("{source}:{dest}:{mode}")
+            })
             .collect::<Vec<_>>()
             .join(",")
     })
+}
+
+fn mapping_uses_mount(source: &str, container: &str) -> bool {
+    source == container
+        || source
+            .strip_prefix(container)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn first_configured_value(values: &[Option<String>]) -> Option<String> {
@@ -2582,14 +2619,70 @@ mod test {
 
         assert_eq!(
             mounts.dir_env().as_deref(),
-            Some("/mnt/wrix/dir0:/mnt/profile-dir")
+            Some("/mnt/wrix/dir0:/mnt/profile-dir:ro")
         );
-        assert!(
-            mounts
-                .file_env()
-                .is_some_and(|value| value.ends_with(":/etc/spawn-file"))
+        assert_eq!(
+            mounts.file_env().as_deref(),
+            Some("/mnt/wrix/file0/host-file:/etc/spawn-file:ro")
         );
         assert_eq!(mounts.mounts.len(), 2);
+        assert!(
+            mounts
+                .mounts
+                .iter()
+                .all(|mount| mount.mode == MountMode::Ro)
+        );
+        assert_eq!(
+            mounts.mounts[1].host,
+            staging.root.join("file0").display().to_string()
+        );
+    }
+
+    #[test]
+    fn darwin_file_sync_updates_only_requested_rw_sources() {
+        let root = scratch_dir("darwin-file-sync");
+        let host_dir = root.join("host");
+        let staging_root = root.join("stage");
+        std::fs::create_dir_all(&host_dir).unwrap();
+        std::fs::create_dir_all(&staging_root).unwrap();
+        let read_only = host_dir.join("read-only");
+        let writable = host_dir.join("writable");
+        let sibling = host_dir.join("sibling-secret");
+        std::fs::write(&read_only, b"read-only original\n").unwrap();
+        std::fs::write(&writable, b"writable original\n").unwrap();
+        std::fs::write(&sibling, b"private\n").unwrap();
+
+        let mut mounts = DarwinMounts::default();
+        mounts
+            .push(
+                &RenderedMount {
+                    host: read_only.display().to_string(),
+                    container: String::from("/etc/read-only"),
+                    mode: MountMode::Ro,
+                    optional: false,
+                },
+                &staging_root,
+            )
+            .unwrap();
+        mounts
+            .push(
+                &RenderedMount {
+                    host: writable.display().to_string(),
+                    container: String::from("/etc/writable"),
+                    mode: MountMode::Rw,
+                    optional: false,
+                },
+                &staging_root,
+            )
+            .unwrap();
+
+        std::fs::write(staging_root.join("file0/read-only"), b"ignored\n").unwrap();
+        std::fs::write(staging_root.join("file1/writable"), b"updated\n").unwrap();
+        mounts.sync_files().unwrap();
+
+        assert_eq!(std::fs::read(&read_only).unwrap(), b"read-only original\n");
+        assert_eq!(std::fs::read(&writable).unwrap(), b"updated\n");
+        assert_eq!(std::fs::read(&sibling).unwrap(), b"private\n");
     }
 
     #[test]

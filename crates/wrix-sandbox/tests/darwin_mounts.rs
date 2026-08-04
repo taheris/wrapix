@@ -9,11 +9,13 @@ fn mount_classifier_handles_profile_and_spawn_mounts_uniformly() -> TestResult {
     let root = tempfile::Builder::new().prefix("darwin-mounts").tempdir()?;
     let host_dir = root.path().join("host-dir");
     let host_file = root.path().join("host-file");
+    let sibling_file = root.path().join("sibling-secret");
     let staging = root.path().join("staging");
     fs::create_dir_all(&host_dir)?;
     fs::create_dir_all(&staging)?;
     fs::write(host_dir.join("payload"), "profile dir\n")?;
     fs::write(&host_file, "spawn file\n")?;
+    fs::write(&sibling_file, "private\n")?;
 
     let profile_mounts = vec![ProfileMount {
         source: host_dir.display().to_string(),
@@ -30,12 +32,12 @@ fn mount_classifier_handles_profile_and_spawn_mounts_uniformly() -> TestResult {
     let plan = classify_darwin_mounts(&profile_mounts, &spawn_mounts, &staging)?;
     assert_eq!(
         plan.dir_env().as_deref(),
-        Some("/mnt/wrix/dir0:/mnt/profile-dir")
+        Some("/mnt/wrix/dir0:/mnt/profile-dir:ro")
     );
     assert!(staging.join("dir0/payload").is_file());
-    assert!(
-        plan.file_env()
-            .is_some_and(|value| value.ends_with(":/etc/spawn-file"))
+    assert_eq!(
+        plan.file_env().as_deref(),
+        Some("/mnt/wrix/file0/host-file:/etc/spawn-file:ro")
     );
     assert_eq!(plan.mounts.len(), 2);
     assert!(
@@ -43,12 +45,21 @@ fn mount_classifier_handles_profile_and_spawn_mounts_uniformly() -> TestResult {
             .iter()
             .any(|mount| mount.container == "/mnt/wrix/dir0")
     );
-    assert!(
-        plan.mounts
-            .iter()
-            .any(|mount| mount.container == "/mnt/wrix/file0")
+    let file_mount = plan
+        .mounts
+        .iter()
+        .find(|mount| mount.container == "/mnt/wrix/file0")
+        .expect("file mount should be classified");
+    assert_eq!(file_mount.host, staging.join("file0").display().to_string());
+    assert!(plan.mounts.iter().all(|mount| mount.read_only));
+    assert_eq!(
+        fs::read_dir(&file_mount.host)?
+            .collect::<Result<Vec<_>, _>>()?
+            .len(),
+        1
     );
-    assert!(plan.mounts.iter().all(|mount| !mount.read_only));
+    assert_eq!(fs::read(staging.join("file0/host-file"))?, b"spawn file\n");
+    assert!(!staging.join("file0/sibling-secret").exists());
 
     Ok(())
 }

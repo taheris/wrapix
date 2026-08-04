@@ -91,10 +91,10 @@ expand_path() {
     echo "$p"
 }
 
-# Validate mount mapping format: must be "src:dst" with exactly one colon
+# Validate mount mapping format: "src:dst" or "src:dst:ro|rw".
 validate_mount_mapping() {
     local mapping="$1"
-    [[ "$mapping" =~ ^[^:]+:[^:]+$ ]]
+    [[ "$mapping" =~ ^[^:]+:[^:]+(:ro|:rw)?$ ]]
 }
 
 # Copy directories from staging to destination
@@ -109,16 +109,27 @@ if [[ -n "${WRIX_DIR_MOUNTS:-}" ]]; then
             continue
         fi
         src="${mapping%%:*}"
-        dst=$(expand_path "${mapping#*:}")
+        mapping_tail="${mapping#*:}"
+        if [[ "$mapping_tail" == *:* ]]; then
+            mode="${mapping_tail##*:}"
+            dst=$(expand_path "${mapping_tail%:*}")
+        else
+            mode="rw"
+            dst=$(expand_path "$mapping_tail")
+        fi
         if [[ -d "$src" ]]; then
             mkdir -p "$(dirname "$dst")"
             cp -r "$src" "$dst"
+            if [[ "$mode" == "ro" ]]; then
+                chmod -R a-w "$dst"
+            else
+                chmod -R u+w "$dst"
+            fi
         fi
     done
 fi
 
-# Copy files from staging to destination
-# This includes deploy keys which are needed for SSH config
+# Copy writable files into the guest; read-only files remain on their ro mount.
 if [[ -n "${WRIX_FILE_MOUNTS:-}" ]]; then
     IFS=',' read -ra MOUNTS <<< "$WRIX_FILE_MOUNTS"
     for mapping in "${MOUNTS[@]}"; do
@@ -128,13 +139,55 @@ if [[ -n "${WRIX_FILE_MOUNTS:-}" ]]; then
             continue
         fi
         src="${mapping%%:*}"
-        dst=$(expand_path "${mapping#*:}")
+        mapping_tail="${mapping#*:}"
+        if [[ "$mapping_tail" == *:* ]]; then
+            mode="${mapping_tail##*:}"
+            dst=$(expand_path "${mapping_tail%:*}")
+        else
+            mode="rw"
+            dst=$(expand_path "$mapping_tail")
+        fi
         if [[ -f "$src" ]]; then
             mkdir -p "$(dirname "$dst")"
-            cp "$src" "$dst"
+            if [[ "$mode" == "ro" ]]; then
+                if [[ -d "$dst" && ! -L "$dst" ]]; then
+                    echo "Error: read-only file mount destination is a directory: $dst" >&2
+                    exit 1
+                fi
+                rm -f "$dst"
+                ln -s "$src" "$dst"
+            else
+                cp "$src" "$dst"
+                chmod u+w "$dst"
+            fi
         fi
     done
 fi
+
+wrix_sync_file_mounts() {
+    local mapping src mapping_tail mode dst
+    local -a mounts
+    [[ -n "${WRIX_FILE_MOUNTS:-}" ]] || return 0
+    IFS=',' read -ra mounts <<< "$WRIX_FILE_MOUNTS"
+    for mapping in "${mounts[@]}"; do
+        validate_mount_mapping "$mapping" || continue
+        src="${mapping%%:*}"
+        mapping_tail="${mapping#*:}"
+        if [[ "$mapping_tail" == *:* ]]; then
+            mode="${mapping_tail##*:}"
+            dst=$(expand_path "${mapping_tail%:*}")
+        else
+            mode="rw"
+            dst=$(expand_path "$mapping_tail")
+        fi
+        [[ "$mode" == "rw" ]] || continue
+        if [[ ! -f "$dst" ]]; then
+            echo "Error: writable file mount destination disappeared: $dst" >&2
+            return 1
+        fi
+        cp "$dst" "$src"
+    done
+}
 
 # Copy known_hosts from mounted directory (VirtioFS only supports dirs, not files)
 KNOWN_HOSTS_SRC="/etc/wrix/known_hosts_dir/known_hosts"
@@ -525,6 +578,12 @@ $(cat /workspace/docs/README.md)"
   fi
   run_without_net_admin unshare --user --map-user="$HOST_UID" --map-group="$HOST_UID" -- \
     claude --dangerously-skip-permissions --append-system-prompt "$SYSTEM_PROMPT" || MAIN_EXIT=$?
+fi
+
+FILE_SYNC_EXIT=0
+wrix_sync_file_mounts || FILE_SYNC_EXIT=$?
+if [[ "$MAIN_EXIT" -eq 0 && "$FILE_SYNC_EXIT" -ne 0 ]]; then
+  MAIN_EXIT="$FILE_SYNC_EXIT"
 fi
 
 write_session_log "$MAIN_EXIT"

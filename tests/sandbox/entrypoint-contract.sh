@@ -556,6 +556,55 @@ test_linked_worktree_core_hooks_path_both() {
   printf 'PASS: both entrypoints configure core.hooksPath in linked worktrees\n' >&2
 }
 
+test_darwin_file_mount_modes_sync_only_writable_files() {
+  require_command jq
+  local workspace="$TEST_TMP/file-mount-darwin/workspace"
+  local staging="$TEST_TMP/file-mount-darwin/staging"
+  local read_only_source="$staging/read-only"
+  local writable_source="$staging/writable"
+  local sibling="$staging/sibling-secret"
+  local read_only_dest="$workspace/read-only"
+  local writable_dest="$workspace/writable"
+  local stdout_path="$TEST_TMP/file-mount-darwin.out"
+  local stderr_path="$TEST_TMP/file-mount-darwin.err"
+  local entrypoint_status=0
+  mkdir -p "$workspace" "$staging"
+  printf 'read-only-content\n' >"$read_only_source"
+  printf 'writable-content\n' >"$writable_source"
+  printf 'private\n' >"$sibling"
+
+  export WRIX_FILE_MOUNTS="$read_only_source:$read_only_dest:ro,$writable_source:$writable_dest:rw"
+  # shellcheck disable=SC2016 # The command override expands its positional arguments.
+  run_entrypoint darwin direct "$stdout_path" "$stderr_path" "$workspace" \
+    /bin/bash -c '
+      set -euo pipefail
+      [[ -L "$1" ]]
+      [[ "$(readlink "$1")" == "$3" ]]
+      [[ "$(<"$1")" == "read-only-content" ]]
+      [[ ! -L "$2" ]]
+      printf "updated-content\n" >"$2"
+    ' probe "$read_only_dest" "$writable_dest" "$read_only_source" || entrypoint_status=$?
+  unset WRIX_FILE_MOUNTS
+
+  if [[ "$entrypoint_status" -ne 0 ]]; then
+    fail "Darwin file mount entrypoint failed: $(<"$stderr_path")"
+    return 1
+  fi
+  [[ "$(<"$read_only_source")" == "read-only-content" ]] || {
+    fail "Darwin read-only file source changed"
+    return 1
+  }
+  [[ "$(<"$writable_source")" == "updated-content" ]] || {
+    fail "Darwin writable file source was not synchronized"
+    return 1
+  }
+  [[ "$(<"$sibling")" == "private" ]] || {
+    fail "Darwin file synchronization changed an unselected sibling"
+    return 1
+  }
+  printf 'PASS: Darwin file mounts preserve read-only mode and sync only writable files\n' >&2
+}
+
 test_darwin_entrypoint_rejects_net_admin() {
   local workspace="$TEST_TMP/net-admin-darwin/workspace"
   local stdout_path="$TEST_TMP/net-admin-darwin.out"
@@ -596,6 +645,7 @@ ALL_TESTS=(
   test_linux_core_hooks_path
   test_darwin_core_hooks_path
   test_linked_worktree_core_hooks_path_both
+  test_darwin_file_mount_modes_sync_only_writable_files
   test_darwin_entrypoint_rejects_net_admin
 )
 
