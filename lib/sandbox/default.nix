@@ -81,14 +81,18 @@ let
   validateStaticEnv =
     label: runtimeSecrets: staticEnv:
     let
-      forbidden = filter (name: elem name knownCredentialNames || builtins.hasAttr name runtimeSecrets) (
-        attrNames staticEnv
-      );
+      names = attrNames staticEnv;
+      invalidNames = filter (name: match "^[A-Za-z_][A-Za-z0-9_]*$" name == null) names;
+      forbidden = filter (
+        name: elem name knownCredentialNames || builtins.hasAttr name runtimeSecrets
+      ) names;
     in
-    if forbidden == [ ] then
-      null
+    if invalidNames != [ ] then
+      throw "${label} contains invalid environment names: ${concatStringsSep ", " invalidNames}"
+    else if forbidden != [ ] then
+      throw "${label} cannot contain runtime credentials: ${concatStringsSep ", " forbidden}"
     else
-      throw "${label} cannot contain runtime credentials: ${concatStringsSep ", " forbidden}";
+      null;
 
   validateProfile =
     profile:

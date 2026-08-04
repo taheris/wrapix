@@ -166,6 +166,10 @@ assert_audit_log_for_agent() {
   write_agent_stub "$agent" "$workspace"
   wrix_write_profile_config "$profile_config" "$image_ref" "$image_source" "$agent"
   wrix_write_spawn_config "$spawn_config" "$workspace"
+  jq --arg bead_id "audit-$agent" \
+    '.bead_id = $bead_id | .env += [["LOOM_MODE", "1"]]' \
+    "$spawn_config" >"$spawn_config.tmp"
+  mv "$spawn_config.tmp" "$spawn_config"
 
   rc=0
   if [[ "$agent" = "pi" ]]; then
@@ -199,6 +203,12 @@ assert_audit_log_for_agent() {
   fi
   if jq -e 'has("claude_session_dir")' "$log_file" >/dev/null; then
     fail "$agent: deprecated claude_session_dir present in $log_file"
+    sed 's/^/    /' "$log_file" >&2
+    return
+  fi
+  if ! jq -e --arg bead_id "audit-$agent" \
+    '.mode == "loom" and .bead_id == $bead_id' "$log_file" >/dev/null; then
+    fail "$agent: mounted SpawnConfig bead_id did not reach the audit index"
     sed 's/^/    /' "$log_file" >&2
     return
   fi
@@ -313,6 +323,107 @@ assert_same_second_sessions_have_distinct_indexes() {
   fail "could not schedule two audit sessions within the same UTC second"
 }
 
+assert_setup_failure_writes_audit_index() {
+  local agent="direct"
+  local image_source image_ref profile_config spawn_config workspace out err rc log_count log_file marker
+
+  image_source=$(wrix_realize_test_image_source "$agent")
+  image_ref=$(wrix_live_image_ref "audit-setup-failure-$$")
+  IMAGE_REFS+=("$image_ref")
+  wrix_remove_image_ref "$image_ref"
+  profile_config="$TEST_TMP/profile-setup-failure.json"
+  spawn_config="$TEST_TMP/spawn-setup-failure.json"
+  workspace="$TEST_TMP/workspace-setup-failure"
+  out="$TEST_TMP/setup-failure.out"
+  err="$TEST_TMP/setup-failure.err"
+  marker="$workspace/.wrix/selected-agent.json"
+  mkdir -p "$workspace/.beads"
+  write_agent_stub "$agent" "$workspace"
+  printf 'sync-branch: beads\n' >"$workspace/.beads/config.yaml"
+  printf '{"backend":"dolt"}\n' >"$workspace/.beads/metadata.json"
+  wrix_write_profile_config "$profile_config" "$image_ref" "$image_source" "$agent"
+  wrix_write_spawn_config "$spawn_config" "$workspace"
+
+  rc=0
+  HOME="$HOME_DIR" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
+    WRIX_DEPLOY_KEY="$DEPLOY_KEY" WRIX_GIT_SIGN=0 \
+    wrix_run_spawn "$LAUNCHER" "$profile_config" "$spawn_config" >"$out" 2>"$err" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fail "setup failure unexpectedly succeeded"
+    return
+  fi
+  if [[ -f "$marker" ]]; then
+    fail "setup failure reached the selected agent"
+    return
+  fi
+  if [[ ! -d "$workspace/.wrix/log" ]]; then
+    fail "setup failure did not create the audit-index directory"
+    return
+  fi
+  log_count=$(find "$workspace/.wrix/log" -maxdepth 1 -name '*.json' -type f | wc -l)
+  if [[ "$log_count" -ne 1 ]]; then
+    fail "setup failure wrote $log_count metadata indexes instead of one"
+    return
+  fi
+  log_file=$(find "$workspace/.wrix/log" -maxdepth 1 -name '*.json' -type f -print -quit)
+  if ! assert_session_metadata_schema "setup failure" "$log_file"; then
+    fail "setup failure did not write a valid session-metadata index"
+    return
+  fi
+  if ! jq -e '.exit_code != 0' "$log_file" >/dev/null; then
+    fail "setup failure audit index recorded a successful exit"
+    return
+  fi
+  pass "setup failure writes one non-success session-metadata index"
+}
+
+assert_signaled_session_writes_audit_index() {
+  local agent="direct"
+  local image_source image_ref profile_config spawn_config workspace out err rc log_count log_file
+
+  image_source=$(wrix_realize_test_image_source "$agent")
+  image_ref=$(wrix_live_image_ref "audit-signal-$$")
+  IMAGE_REFS+=("$image_ref")
+  wrix_remove_image_ref "$image_ref"
+  profile_config="$TEST_TMP/profile-signal.json"
+  spawn_config="$TEST_TMP/spawn-signal.json"
+  workspace="$TEST_TMP/workspace-signal"
+  out="$TEST_TMP/signal.out"
+  err="$TEST_TMP/signal.err"
+  mkdir -p "$workspace"
+  write_agent_stub "$agent" "$workspace"
+  wrix_write_profile_config "$profile_config" "$image_ref" "$image_source" "$agent"
+  wrix_write_spawn_config "$spawn_config" "$workspace" bash -lc 'kill -TERM 1; sleep 5'
+
+  rc=0
+  HOME="$HOME_DIR" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
+    WRIX_DEPLOY_KEY="$DEPLOY_KEY" WRIX_GIT_SIGN=0 \
+    wrix_run_spawn "$LAUNCHER" "$profile_config" "$spawn_config" >"$out" 2>"$err" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fail "signaled session unexpectedly succeeded"
+    return
+  fi
+  if [[ ! -d "$workspace/.wrix/log" ]]; then
+    fail "signaled session did not create the audit-index directory"
+    return
+  fi
+  log_count=$(find "$workspace/.wrix/log" -maxdepth 1 -name '*.json' -type f | wc -l)
+  if [[ "$log_count" -ne 1 ]]; then
+    fail "signaled session wrote $log_count metadata indexes instead of one"
+    return
+  fi
+  log_file=$(find "$workspace/.wrix/log" -maxdepth 1 -name '*.json' -type f -print -quit)
+  if ! assert_session_metadata_schema "signaled session" "$log_file"; then
+    return
+  fi
+  if ! jq -e '.exit_code == 143' "$log_file" >/dev/null; then
+    fail "signaled session audit index did not record SIGTERM exit 143"
+    sed 's/^/    /' "$log_file" >&2
+    return
+  fi
+  pass "SIGTERM writes exactly one interrupted session-metadata index"
+}
+
 test_agent_probe_contracts() {
   assert_agent_probe_contract claude
   assert_agent_probe_contract pi
@@ -339,6 +450,8 @@ test_agent_probe_contracts
 assert_audit_log_for_agent claude
 assert_audit_log_for_agent pi
 assert_audit_log_for_agent direct
+assert_setup_failure_writes_audit_index
+assert_signaled_session_writes_audit_index
 assert_same_second_sessions_have_distinct_indexes
 
 echo

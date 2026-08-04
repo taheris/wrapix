@@ -97,6 +97,8 @@ pub enum LaunchError {
     PiAuthMissing { path: String },
     /// wrix spawn: Pi auth file not found at {path} — run 'pi' and /login on the host, or set WRIX_PI_AUTH_FILE to an existing auth.json
     SpawnPiAuthMissing { path: String },
+    /// Darwin Pi auth synchronization source is not a regular file: {path}
+    PiAuthSyncSourceInvalid { path: String },
     /// WRIX_UNSAFE_PODMAN_SOCKET set but socket not found at {path}
     UnsafePodmanSocketMissing { path: String },
     /// path expansion requires environment variable {name}
@@ -499,7 +501,7 @@ impl<'a> Plan<'a> {
                     .config
                     .env
                     .iter()
-                    .map(|pair| (pair[0].clone(), pair[1].clone()))
+                    .map(|(name, value)| (name.as_str().to_owned(), value.clone()))
                     .collect(),
                 spawn
                     .config
@@ -1064,7 +1066,7 @@ impl<'a> Plan<'a> {
             .profile
             .env
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, value)| (key.as_str().to_owned(), value.clone()))
             .collect::<Vec<_>>();
         pairs.extend(self.runtime_passthrough_env.iter().cloned());
         pairs.extend(self.runtime_secret_env.iter().cloned());
@@ -1623,7 +1625,13 @@ impl PiAuth {
     }
 
     fn sync_darwin(&self, staging: &Staging) -> Result<(), LaunchError> {
-        fs::copy(staging.root.join("pi-auth/auth.json"), &self.host)?;
+        let source = staging.root.join("pi-auth/auth.json");
+        if !fs::symlink_metadata(&source)?.file_type().is_file() {
+            return Err(LaunchError::PiAuthSyncSourceInvalid {
+                path: source.display().to_string(),
+            });
+        }
+        fs::copy(source, &self.host)?;
         Ok(())
     }
 
@@ -2771,6 +2779,31 @@ mod test {
             std::fs::read(host_dir.join("sibling-secret")).unwrap(),
             b"private\n"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn darwin_pi_auth_sync_rejects_guest_controlled_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch_dir("darwin-pi-auth-symlink");
+        let host_dir = root.join("host");
+        let staging_root = root.join("stage");
+        std::fs::create_dir_all(&host_dir).unwrap();
+        std::fs::create_dir_all(staging_root.join("pi-auth")).unwrap();
+        let host_auth = host_dir.join("auth.json");
+        let target = host_dir.join("target");
+        std::fs::write(&host_auth, b"original\n").unwrap();
+        std::fs::write(&target, b"private\n").unwrap();
+        symlink(&target, staging_root.join("pi-auth/auth.json")).unwrap();
+        let auth = PiAuth { host: host_auth };
+        let staging = Staging { root: staging_root };
+
+        let error = auth.sync_darwin(&staging).unwrap_err();
+
+        assert!(matches!(error, LaunchError::PiAuthSyncSourceInvalid { .. }));
+        assert_eq!(std::fs::read(&auth.host).unwrap(), b"original\n");
+        assert_eq!(std::fs::read(target).unwrap(), b"private\n");
     }
 
     #[test]

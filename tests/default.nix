@@ -294,6 +294,12 @@ let
     (mkCiApp testBeadsLiveSystem "test-beads-live-system")
     (mkCiApp testServicesDevshellStartIndependent "test-services-devshell-start-independent")
     (mkCiApp testServicesLimitModeCacheEndpoint "test-services-limit-mode-cache-endpoint")
+    (mkCiApp testSecurityAuditTrailAnchor "test-security-audit-trail-anchor")
+    (mkCiApp testSecurityGitSshBootstrap "test-security-git-ssh-bootstrap")
+    (mkCiApp testSecurityHostContainerLoomGitHelper "test-security-host-container-loom-git-helper")
+    (mkCiApp testSecurityNestedKeyPropagation "test-security-nested-key-propagation")
+    (mkCiApp testSecurityPiAuthIsolation "test-security-pi-auth-isolation")
+    (mkCiApp testSecurityProviderCredentialEnv "test-security-provider-credential-env")
   ];
 
   ciAppNameLines = concatStringsSep "\n" (map (app: "      ${app.name}") ciApps);
@@ -530,6 +536,56 @@ let
         args = [ "test_limit_mode_cache_endpoint" ];
         environment = serviceCiEnvironment;
       };
+
+  securityCiPath = makeBinPath (
+    [
+      pkgs.findutils
+      pkgs.openssh
+    ]
+    ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+      pkgs.podman
+      pkgs.skopeo
+    ]
+  );
+  securityCiEnvironment = ''
+    export PATH="${securityCiPath}:$PATH"
+  '';
+  testSecurityAuditTrailAnchor = mkRepoScriptCiApp {
+    name = "test-security-audit-trail-anchor";
+    script = "tests/security/audit-trail-anchor.sh";
+    args = [ ];
+    environment = securityCiEnvironment;
+  };
+  testSecurityGitSshBootstrap = mkRepoScriptCiApp {
+    name = "test-security-git-ssh-bootstrap";
+    script = "tests/security/git-ssh-bootstrap.sh";
+    args = [ "test_fresh_container_git_ssh_bootstrap" ];
+    environment = securityCiEnvironment;
+  };
+  testSecurityHostContainerLoomGitHelper = mkRepoScriptCiApp {
+    name = "test-security-host-container-loom-git-helper";
+    script = "tests/security/git-ssh-bootstrap.sh";
+    args = [ "test_host_container_and_loom_helper" ];
+    environment = securityCiEnvironment;
+  };
+  testSecurityNestedKeyPropagation = mkRepoScriptCiApp {
+    name = "test-security-nested-key-propagation";
+    script = "tests/security/nested-key-propagation.sh";
+    args = [ ];
+    environment = securityCiEnvironment;
+  };
+  testSecurityPiAuthIsolation = mkRepoScriptCiApp {
+    name = "test-security-pi-auth-isolation";
+    script = "tests/security/pi-auth-isolation.sh";
+    args = [ ];
+    environment = securityCiEnvironment;
+  };
+  testSecurityProviderCredentialEnv = mkRepoScriptCiApp {
+    name = "test-security-provider-credential-env";
+    script = "tests/security/provider-credential-env.sh";
+    args = [ ];
+    environment = securityCiEnvironment;
+  };
 
   notifyFixture = import ./standalone/notify-fixture.nix { inherit pkgs; };
 

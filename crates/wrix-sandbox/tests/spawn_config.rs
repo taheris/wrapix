@@ -158,6 +158,27 @@ fn provider_credentials_in_spawn_config_are_redacted() -> TestResult {
 }
 
 #[test]
+fn invalid_environment_names_fail_before_launch() -> TestResult {
+    let fixture = SpawnFixture::new("spawn-invalid-env-name")?;
+    let config = fixture.write(
+        "invalid-env-name",
+        &json!({
+            "workspace": path_text(&fixture.workspace),
+            "env": [["OPENAI_API_KEY=shadow", "must-not-launch"]],
+            "agent_args": [],
+            "mounts": []
+        }),
+    )?;
+
+    let run = fixture.run("invalid-env-name", &config)?;
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("invalid SpawnConfig schema"));
+    assert!(!run.stdout.contains("must-not-launch"));
+    Ok(())
+}
+
+#[test]
 fn image_source_override_requires_source_kind() -> TestResult {
     let fixture = SpawnFixture::new("spawn-missing-kind")?;
     let config = fixture.write(

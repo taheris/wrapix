@@ -68,7 +68,7 @@ pub struct ProfileConfig {
 pub struct Profile {
     pub name: ProfileName,
     #[serde(default)]
-    pub env: BTreeMap<String, String>,
+    pub env: BTreeMap<EnvName, String>,
     #[serde(default)]
     pub mounts: Vec<ProfileMount>,
     #[serde(default)]
@@ -163,6 +163,16 @@ pub struct Security {
 pub struct EnvName(String);
 
 impl EnvName {
+    pub fn parse(value: &str) -> Result<Self, EnvNameParseError> {
+        if is_valid_env_name(value) {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(EnvNameParseError {
+                value: value.to_owned(),
+            })
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -180,14 +190,14 @@ impl<'de> Deserialize<'de> for EnvName {
         D: Deserializer<'de>,
     {
         let name = String::deserialize(deserializer)?;
-        if is_valid_env_name(&name) {
-            Ok(Self(name))
-        } else {
-            Err(de::Error::custom(format!(
-                "invalid environment variable name: {name}"
-            )))
-        }
+        Self::parse(&name).map_err(de::Error::custom)
     }
+}
+
+#[derive(Clone, Debug, Display, Error)]
+/// invalid environment variable name: {value}
+pub struct EnvNameParseError {
+    value: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -216,7 +226,7 @@ pub struct SpawnConfig {
     #[serde(default)]
     pub image_source_kind: Option<SourceKind>,
     pub workspace: String,
-    pub env: Vec<[String; 2]>,
+    pub env: Vec<(EnvName, String)>,
     pub agent_args: Vec<String>,
     #[serde(default)]
     pub mounts: Vec<SpawnMount>,
@@ -420,15 +430,12 @@ fn parse_profile_value(value: Value, platform: Platform) -> Result<ProfileConfig
             KeyName::parse(&value).map_err(|source| ConfigError::InvalidDeployKeyName { source })
         })
         .transpose()?;
-    if let Some(name) = profile.env.keys().find(|name| {
-        is_known_credential_env(name)
-            || runtime_secrets
-                .keys()
-                .any(|secret| secret.as_str() == *name)
-    }) {
-        return Err(ConfigError::StaticCredentialInProfileEnv {
-            name: EnvName(name.clone()),
-        });
+    if let Some(name) = profile
+        .env
+        .keys()
+        .find(|name| is_known_credential_env(name.as_str()) || runtime_secrets.contains_key(*name))
+    {
+        return Err(ConfigError::StaticCredentialInProfileEnv { name: name.clone() });
     }
     Ok(ProfileConfig {
         profile,
@@ -482,7 +489,6 @@ fn parse_spawn_value(value: Value, platform: Platform) -> Result<SpawnConfig, Co
     let spawn = serde_json::from_value::<SpawnConfig>(value)
         .map_err(|_source| ConfigError::InvalidSpawnConfigSchema)?;
     if spawn.workspace.is_empty()
-        || spawn.env.iter().any(|pair| pair[0].is_empty())
         || spawn
             .mounts
             .iter()
@@ -703,7 +709,9 @@ mod test {
             }
         });
         let config = parse_profile_value(value, Platform::Linux).unwrap();
-        assert_eq!(config.profile.env.get("FOO"), Some(&String::from("bar")));
+        let (name, value) = config.profile.env.first_key_value().unwrap();
+        assert_eq!(name.as_str(), "FOO");
+        assert_eq!(value, "bar");
         assert_eq!(
             config
                 .security
@@ -760,6 +768,35 @@ mod test {
             ));
             assert!(error.to_string().contains(name));
         }
+    }
+
+    #[test]
+    fn config_env_surfaces_reject_invalid_names() {
+        let profile = json!({
+            "schema": 1,
+            "profile": { "name": "base", "env": { "OPENAI_API_KEY=shadow": "secret" } },
+            "image": {
+                "ref": "wrix:test",
+                "source": "/nix/store/fake",
+                "source_kind": "nix-descriptor"
+            },
+            "agent": { "kind": "direct" }
+        });
+        assert!(matches!(
+            parse_profile_value(profile, Platform::Linux),
+            Err(ConfigError::InvalidProfileConfigSchemaShape { .. })
+        ));
+
+        let spawn = json!({
+            "workspace": "/workspace",
+            "env": [["OPENAI_API_KEY=shadow", "secret"]],
+            "agent_args": [],
+            "mounts": []
+        });
+        assert!(matches!(
+            parse_spawn_value(spawn, Platform::Linux),
+            Err(ConfigError::InvalidSpawnConfigSchema)
+        ));
     }
 
     #[test]

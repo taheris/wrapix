@@ -280,6 +280,10 @@ Plus consumer-defined fields the entrypoint reads from the original config mount
   [system](verify:sandbox.agent-config-homes)
 - Deploy key `<name>` is mounted read-only at `/etc/wrix/keys/<name>` inside the container when `deployKey = "<name>"` is set, without mounting the `.pub` file
   [test](../crates/wrix-sandbox/tests/launch.rs::deploy_key_mount_uses_container_key_dir_without_public_key)
+- `ProfileConfig.security.deploy_key` accepts only a validated,
+  single-component deploy-key name; absolute paths, separators, whitespace,
+  and dot traversal fail during config parsing before credential staging
+  [test](../crates/wrix-sandbox/tests/launch.rs::profile_config_rejects_unsafe_deploy_key_names_before_staging)
 - Both entrypoints can derive the deploy public key from the mounted private key on demand with `ssh-keygen -y`
   [system](verify:sandbox.entrypoint-deploy-key-public)
 - `agentSettings` merges into the selected agent's baked settings; non-empty `agentSettings` with `agent = "direct"` fails at evaluation time
@@ -320,7 +324,13 @@ Plus consumer-defined fields the entrypoint reads from the original config mount
 3. **Workspace mount** — CWD bind-mounts at `/workspace`; profile mounts merge on top.
 4. **UID mapping** — files created in `/workspace` carry host UID/GID.
 5. **Custom mounts and env** — `mkSandbox`'s `mounts`, non-secret `env`, and `runtimeSecrets` extend the profile rather than replace it. Runtime-secret maps right-merge by environment name; values are resolved only by the launcher.
-6. **Deploy keys** — `deployKey = "<name>"` mounts the host key read-only inside the container at `/etc/wrix/keys/<name>` (and `/etc/wrix/keys/<name>-signing` when a signing key is present). The `.pub` file is not mounted; callers can derive it from the mounted private key on demand via `ssh-keygen -y`. Host-source resolution and the env-first override (`WRIX_DEPLOY_KEY`, `WRIX_SIGNING_KEY`) are owned by `security.md`.
+6. **Deploy keys** — `deployKey = "<name>"` parses `<name>` as a validated,
+   single-component identifier and mounts the host key read-only inside the
+   container at `/etc/wrix/keys/<name>` (and
+   `/etc/wrix/keys/<name>-signing` when a signing key is present). The `.pub`
+   file is not mounted; callers can derive it from the mounted private key on
+   demand via `ssh-keygen -y`. Host-source resolution and the env-first
+   override (`WRIX_DEPLOY_KEY`, `WRIX_SIGNING_KEY`) are owned by `security.md`.
 7. **MCP opt-in** — `mcp.<server>` enables a named server per `tmux-mcp.md` / `playwright-mcp.md`. Wrix owns registry selection and the schema-v1 stdio manifest; every agent receives its path through `WRIX_MCP_MANIFEST`. `mcpRuntime = true` bakes every registered server and applies `WRIX_MCP` selection before publishing that same manifest. Claude and Pi consume it through their Wrix adapters, while an external direct runner consumes the documented handoff itself. Profile output naming remains in `profiles.md`.
 8. **Agent runtime axis** — `agent` selects, at build time, the single agent binary baked into the image and launched by the entrypoint; exactly one agent per image (a non-claude image carries no `claude-code`). Selection is encoded in immutable `ProfileConfig`, not caller env. `WRIX_AGENT` remains only the launcher→entrypoint wire derived from that config. The entrypoint guards on binary presence (`command -v`) and seeds/persists each agent's own config home (claude `~/.claude`, pi `~/.pi/agent`). Agent selection adds only that agent's required config: Claude images get Claude settings, Pi images get non-secret Pi settings (`openai-codex`, `gpt-5.6-sol`, xhigh reasoning, `defaultProjectTrust = "always"`, `editorPaddingX = 1`, `enableInstallTelemetry = false`, steering/follow-up modes set to `"all"`, explicit `/workspace/.pi/agent/sessions` session dir) plus a runtime `auth.json` mount when selected, and direct images get no agent config. `agentPkg` overrides the selected agent package; `agentSettings` merges into the selected agent's settings schema and is rejected for direct. Pi does not import arbitrary files from `/workspace/.pi/agent`; only the session directory and auth mount are wired. Secrets are delivered through declared runtime environment sources or credential-file mounts (owned by `security.md`). The agent runtime is its own image tier (`image-builder.md`), composing orthogonally with the profile.
 9. **Launcher contract** — `wrix run` reads immutable Nix-generated `ProfileConfig` JSON plus CLI/host-env runtime inputs; `wrix spawn` reads the same `ProfileConfig` plus per-launch `SpawnConfig` JSON. Both share container construction, including workspace service startup and endpoint injection when services are enabled. Wrapper config-generation rules are owned by *Architecture > `package`*; workspace service contracts are owned by `services.md`.

@@ -27,9 +27,8 @@ code, secrets, or credentials through legitimate channels. No kernel
 escape or boundary exploit is required.
 
 The secondary threat is **boundary escape**: the agent breaks out of
-the container/microVM into the host. This is mitigated by the
-hardware-virtualized boundary owned by `sandbox.md` (microVM on macOS,
-opt-in via `WRIX_MICROVM=1` on Linux).
+the sandbox into the host. Boundary classes and their operator controls are
+owned by `sandbox.md`; this spec relies on that isolation contract.
 
 The normal boundary model excludes host container-runtime control. The unsafe host-Podman exception defined by `sandbox.md` can start containers with host bind mounts and is therefore outside the normal sandbox mitigations.
 
@@ -99,23 +98,17 @@ push).
 
 This precedence exists to support **nested sandboxes**: a parent
 wrix container can spawn a child wrix container, injecting keys at
-arbitrary host paths (e.g. `/etc/wrix/keys/`) and passing those
-paths through `WRIX_DEPLOY_KEY` / `WRIX_SIGNING_KEY`. Without this
-rule the child would boot without keys (the parent's `$HOME` has no
+arbitrary host paths and passing those paths through `WRIX_DEPLOY_KEY` /
+`WRIX_SIGNING_KEY`. Without this rule the child would boot without keys (the
+parent's `$HOME` has no
 `~/.ssh/deploy_keys/`), agents would produce unsigned commits, and
 `git push` would fail.
 
-**In-container destination is fixed.** `ProfileConfig.security.deploy_key` is
-parsed at the configuration boundary into a validating deploy-key-name
-identifier. It accepts one non-empty filename component and rejects whitespace,
-path separators, and dot traversal before staging. Regardless of which source
-won, the launcher mounts the key at `/etc/wrix/keys/<name>`
-(`<name>-signing` for the signing key) inside the container and sets
-the child's `WRIX_DEPLOY_KEY` / `WRIX_SIGNING_KEY` env vars to
-those in-container paths. The host source path never crosses the
-boundary. This makes the launcher recursively composable: every
-wrix launch — host-spawned or container-spawned — produces a child
-that observes its keys at the same paths under the same env vars.
+**In-container delivery is fixed.** `sandbox.md` owns deploy-key-name
+validation, mount destinations, and the child environment values. The security
+invariant is that the selected host source path never crosses the boundary and
+every launch applies that same delivery contract, which makes nested wrix
+launches recursively composable.
 
 **Host and repository Git bootstrap.** `cli.md` owns the `wrix init`
 command that applies repo-local Git config for host shells, devshells,
@@ -158,9 +151,8 @@ The environment surface is split into static defaults and runtime secrets:
 - `profile.env`, `profile.hostEnv`, `mkSandbox.env`, and agent-settings env are
   non-secret static defaults. They enter Nix evaluation and may be serialized
   into a Nix-store `ProfileConfig`, OCI config `Env`, or agent-settings image
-  layer. Nix rejects
-  known provider credential names and every declared runtime-secret name from
-  these static surfaces.
+  layer. Nix rejects malformed environment names, known provider credential
+  names, and every declared runtime-secret name from these static surfaces.
 - `runtimeSecrets` is a typed attrset from validated environment-variable name
   to `"optional"` or `"required"`. Built-in profiles declare
   `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` optional.
@@ -238,28 +230,34 @@ of the sandbox network contract.
 
 ### Audit Trail
 
-Policy-leakage detection is anchored in the selected **agent's own
-session transcript**. Claude uses `/workspace/.claude/`, Pi uses
-`/workspace/.pi/agent/sessions`, and direct mode uses `/workspace` as
-the transcript root for the externally supplied runner. At session end,
+Policy-leakage detection is anchored in the selected **agent's own session
+transcript** when the runtime produces one. Claude uses
+`/workspace/.claude/`, Pi uses `/workspace/.pi/agent/sessions`, and an external
+direct runner owns any transcript it persists under its `/workspace` session
+root. Wrix's placeholder direct runner does not synthesize intent or reasoning
+content. At every session termination, including setup failure and signals,
 wrix writes a **session-metadata index** to a collision-resistant,
 timestamp-prefixed JSON file under `/workspace/.wrix/log/` containing:
 
 - `timestamp_start`, `timestamp_end`, `duration_seconds`
 - `exit_code`, `mode`
-- `bead_id` (null in non-orchestrated sessions)
+- `bead_id` (read from the mounted orchestrator `SpawnConfig`; null in
+  non-orchestrated sessions)
 - `wrix_session_id`, `claude_session_id`
-- `agent_session_dir` — pointer to the selected agent's transcript directory
+- `agent_session_dir` — pointer to the selected runtime's session root
 
-The index is the **audit anchor**; the agent transcript is the
+The index is the **audit anchor**; a runtime-provided agent transcript is the
 **audit content**. Together they are Wrix's authoritative security audit
-surface. The index is the smallest artefact that makes a session findable
-post-hoc (by bead, by time, by exit code); the agent transcript is the only
-place rich enough to reason about what the agent intended at each step.
+surface for transcript-producing runtimes. The index remains authoritative
+session metadata when a placeholder direct runtime produces no transcript. It
+is the smallest artefact that makes a session findable post-hoc (by bead, by
+time, by exit code); only a real agent transcript is rich enough to reason
+about what the agent intended at each step.
 
 Wrix deliberately does not synthesize a parallel global syscall-level or
-tool-call-level audit log. The agent transcript already contains intent,
-reasoning, and outcome at the granularity that matters for policy leakage;
+tool-call-level audit log. When the selected runtime provides a transcript, it
+already contains intent, reasoning, and outcome at the granularity that matters
+for policy leakage;
 OS-level audit (strace, process tree) would only add value against an
 adversarial agent that hides its actions from its own transcript — a different
 threat class.
@@ -278,98 +276,93 @@ access control, retention, and deletion.
 
 ### Component-Specific Security (Cross-References)
 
-The following security-relevant facts are owned by sibling specs;
-this section is the index, not a restatement.
+The following security-relevant concerns are owned by sibling specs; this
+section is a reference index only.
 
-- **Boundary class** (microVM on macOS always; opt-in via
-  `WRIX_MICROVM=1` on Linux; krun memory overhead) — `sandbox.md`
-- **Network mode mechanics** (`open` vs `limit`, always-on local-network
-  blocking, exact endpoint/DNS exceptions, one-time domain resolution, IPv6
-  policy, fail-closed in-sandbox firewall setup, and `capsh` `NET_ADMIN`
-  drop) — `sandbox.md`
-- **Base allowlist enumeration** — `profiles.md`
-- **Per-profile allowlist additions** — `profiles.md`
-- **Nix build sandbox disabled inside the container image** —
-  `image-builder.md`
-- **Builder SSH keys and trust model** — `linux-builder.md`
-- **Project Nix cache** (per-workspace explicit binary cache, no host
-  `/nix/store` serving, no host Nix daemon socket, no sandbox signing key) —
-  `services.md`
-- **Host repo Git bootstrap** (`wrix init`, optional `wrix.toml`, helper
-  verification, and GitHub deploy/signing key provisioning) — `cli.md`
-- **Unsafe host Podman socket opt-in** (Linux-only socket mount mechanics,
-  legacy-env rejection, and fail-loud missing-socket behavior) —
-  `sandbox.md`
-- **tmux component diagnostics** (configuration, record format, secret-bearing
-  fields, and operator retention responsibility) — `tmux-mcp.md`
+- **Boundary class and network mechanics** — `sandbox.md`
+- **Base and per-profile network allowlists** — `profiles.md`
+- **In-container Nix build policy** — `image-builder.md`
+- **Builder credentials and trust** — `linux-builder.md`
+- **Project Nix cache boundary** — `services.md`
+- **Host repository Git bootstrap** — `cli.md`
+- **Unsafe host container-runtime control** — `sandbox.md`
+- **tmux component diagnostics** — `tmux-mcp.md`
 
 ## Success Criteria
 
 - When the launcher's environment sets `WRIX_DEPLOY_KEY` and
   `WRIX_SIGNING_KEY` to existing files outside
   `$HOME/.ssh/deploy_keys/`, the child container observes both env
-  vars set to `/etc/wrix/keys/<name>{,-signing}`, the files are
-  present at those in-container paths, and `git commit` in the child
-  produces a commit whose `git cat-file -p HEAD` output contains a
+  vars and files at the sandbox-owned in-container destinations, and
+  `git commit` in the child produces a commit whose `git cat-file -p HEAD`
+  output contains a
   non-empty `gpgsig` field.
-  [system](verify:security.nested-key-propagation)
+  [system](test-ci:test-security-nested-key-propagation)
 - A fresh spawned sandbox configures global `user.name` / `user.email`,
   installs pinned GitHub host keys at `/etc/ssh/ssh_known_hosts`, uses
   the mounted deploy key with strict host-key checking for GitHub SSH,
   makes an empty signed commit, and verifies that commit as a good SSH
   signature without manual `ssh-keyscan` or `git config`.
-  [system](verify:security.git-ssh-bootstrap)
+  [system](test-ci:test-security-git-ssh-bootstrap)
 - Wrix-initialized host Git, container Git, and Loom's independent
   `.loom/integration` clone all use context-resolved repo deploy/signing keys,
   strict pinned GitHub host-key verification, and no ambient user SSH
   identities; a fresh host-side GitHub SSH operation reaches authentication or
   repository authorization without host-key verification failure.
-  [system](verify:security.host-container-loom-git-helper)
+  [system](test-ci:test-security-host-container-loom-git-helper)
 - When `WRIX_DEPLOY_KEY` or `WRIX_SIGNING_KEY` is set in the
   launcher's environment but the pointed-at file does not exist, the
   launcher exits non-zero with a stderr message naming the missing
   path, before the container is started.
   [test](../crates/wrix-sandbox/tests/launch.rs::missing_key_env_paths_fail_before_container_start)
-- `ProfileConfig.security.deploy_key` accepts only a validated, single-component
-  deploy-key name; absolute paths, separators, whitespace, and dot traversal
-  fail during config parsing before credential staging.
-  [test](../crates/wrix-sandbox/tests/launch.rs::profile_config_rejects_unsafe_deploy_key_names_before_staging)
 - Under `wrix spawn`, when the deploy key does not resolve (no env pointer and
   no `$HOME/.ssh/deploy_keys/` fallback), the launcher exits non-zero before
   the container starts. An unresolved signing key does the same unless
   `WRIX_GIT_SIGN=0` explicitly disables signing. Both failures name the
   unresolved key, while interactive `wrix run` permits the no-mount case.
   [test](../crates/wrix-sandbox/tests/launch.rs::spawn_requires_resolved_keys_but_run_allows_missing_keys)
-- Every sandbox session contributes exactly one collision-resistant
-  session-metadata index under `/workspace/.wrix/log/`; all audit-index fields have their
-  documented types, `agent_session_dir` resolves to an existing directory, and
-  same-workspace sessions starting within one UTC second retain distinct files.
-  [system](verify:security.audit-trail-anchor)
+- Every sandbox session, including setup failures and signal interruption,
+  contributes exactly one collision-resistant session-metadata index under
+  `/workspace/.wrix/log/`; all fields have their documented types,
+  orchestrator-provided `bead_id` is preserved, `agent_session_dir` resolves to
+  an existing directory, and same-workspace sessions starting within one UTC
+  second retain distinct files.
+  [system](test-ci:test-security-audit-trail-anchor)
 - Explicit, default-off component diagnostics remain separate from the agent
   transcript and session-metadata index: they are not automatically enabled,
   indexed, synthesized, or aggregated as authoritative Wrix audit content, and
   their component/operator ownership boundary is explicit.
   [judge](../tests/judges/security.sh#test_scoped_component_diagnostics_policy)
 - Host provider credentials declared through `runtimeSecrets` reach the selected runtime while `ProfileConfig` and assembled image content contain no secret values
-  [system](verify:security.provider-credential-env)
+  [system](test-ci:test-security-provider-credential-env)
 - Launcher dry-run output identifies built-in provider credential env names but redacts their values
   [test](../crates/wrix-sandbox/tests/launch.rs::host_provider_credentials_reach_run_environment)
 - A custom provider name declared through `runtimeSecrets` resolves from the host environment and is redacted in launcher dry-run output
   [test](../crates/wrix-sandbox/tests/launch.rs::declared_custom_runtime_secret_reaches_run_environment)
 - A missing `"required"` runtime-secret source fails before the container starts
   [test](../crates/wrix-sandbox/tests/launch.rs::required_runtime_secret_fails_before_container_start)
-- `profile.env`, `profile.hostEnv`, `mkSandbox.env`, and agent-settings env reject known provider credential names, and `runtimeSecrets` rejects invalid names or policies at Nix evaluation
+- `profile.env`, `profile.hostEnv`, `mkSandbox.env`, and agent-settings env
+  reject malformed names and known provider credential names, and
+  `runtimeSecrets` rejects invalid names or policies at Nix evaluation
   [check](verify:sandbox.mksandbox-api)
+- `ProfileConfig.profile.env` and `SpawnConfig.env` parse environment names into
+  validated identifiers and reject malformed names before launch-plan
+  construction
+  [test](../crates/wrix-sandbox/tests/spawn_config.rs::invalid_environment_names_fail_before_launch)
 - A declared runtime secret supplied through `SpawnConfig.env` satisfies required-source policy and is redacted in launcher dry-run output
   [test](../crates/wrix-sandbox/tests/spawn_config.rs::provider_credentials_in_spawn_config_are_redacted)
-- Linux delivers Pi's selected auth file as a single-file runtime bind
-  [test](../crates/wrix-sandbox/tests/launch.rs::pi_auth_file_uses_platform_delivery_path)
-- On Darwin, an assembled sandbox sees only the selected Pi auth file in its
-  internal staging directory, cannot read sibling host files, and synchronizes
-  auth updates back only to the selected host file.
-  [system](verify:security.pi-auth-isolation)
-- The selected agent transcript is fit-for-purpose audit content for the stated
-  policy-leakage threat model without claiming adversarial-agent detection.
+- On Linux, an assembled sandbox delivers Pi's selected auth file as a
+  single-file bind. On Darwin, its isolated staging directory exposes only the
+  selected file. On both platforms, auth updates synchronize only to the
+  selected host file.
+  [system](test-ci:test-security-pi-auth-isolation)
+- Darwin auth synchronization rejects a guest-controlled symlink or other
+  non-regular staging source without reading its target.
+  [test](command::launch::test::darwin_pi_auth_sync_rejects_guest_controlled_symlink)
+- A transcript-producing built-in agent, or an external direct runner that
+  persists its own transcript, provides fit-for-purpose audit content for the
+  stated policy-leakage threat model without claiming adversarial-agent
+  detection or content from Wrix's placeholder direct runner.
   [judge](../tests/judges/security.sh#test_agent_transcript_audit_fit)
 
 ## Requirements
@@ -382,12 +375,9 @@ this section is the index, not a restatement.
    exist. Under `wrix spawn`, an unresolved deploy key is fail-loud, as is an
    unresolved signing key unless `WRIX_GIT_SIGN=0`; interactive `run` permits
    the no-mount fall-through. (See *Credential Surfaces*.)
-2. **In-container destination fixed** — the launcher parses `<name>` as a
-   validated deploy-key-name identifier before staging, mounts the deploy key
-   at `/etc/wrix/keys/<name>` and the signing key at
-   `/etc/wrix/keys/<name>-signing`, and always sets `WRIX_DEPLOY_KEY` /
-   `WRIX_SIGNING_KEY` in the child's env to those in-container
-   paths. Host source paths do not cross the boundary.
+2. **In-container key delivery** — after host-source resolution, the launcher
+   uses the validation, mount, and child-environment contract owned by
+   `sandbox.md`. Host source paths do not cross the boundary.
 3. **Platform symmetry** — Linux and macOS launchers implement the
    same precedence rule; behavior is identical across platforms
    modulo the launcher's outer shell/applescript wrapping.
@@ -399,8 +389,9 @@ this section is the index, not a restatement.
 5. **Agent credentials** — provider keys cross the boundary only through declared runtime environment delivery, while Pi auth crosses through the platform-specific file delivery described in *Credential Surfaces*. Runtime declarations serialize only validated names plus required/optional policy; neither channel contributes secret values to Nix evaluation, `ProfileConfig`, image config, or image layers.
 6. **Audit anchor** — every sandbox session writes one uniquely named
    session-metadata index whose complete field set identifies the session and
-   whose `agent_session_dir` points at the directory containing the selected
-   agent's transcript for that session.
+   whose `agent_session_dir` points at the selected runtime's session root. For
+   Claude and Pi that root contains the agent transcript; an external direct
+   runner owns any transcript content under its session root.
 7. **Scoped component diagnostics** — a component may emit operator-enabled,
    default-off diagnostics without changing the authoritative audit anchor.
    Wrix does not automatically index, synthesize, or aggregate those artifacts;
@@ -415,9 +406,10 @@ this section is the index, not a restatement.
 2. **Composability** — every wrix launcher behaves identically with
    respect to keys regardless of whether its parent is a shell or
    another wrix container.
-3. **Audit fit** — the agent transcript is treated as fit-for-purpose
-   audit content for the stated threat model (policy leakage from a
-   misbehaving but not adversarial agent).
+3. **Audit fit** — when a selected runtime produces an agent transcript, it is
+   treated as fit-for-purpose audit content for the stated threat model (policy
+   leakage from a misbehaving but not adversarial agent). Wrix's placeholder
+   direct runner supplies metadata only.
 
 ## Out of Scope
 

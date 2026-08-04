@@ -95,6 +95,9 @@ test_mksandbox_accepts_documented_parameters() {
       invalidSecretPolicy = builtins.tryEval (
         (lib.mkSandbox { runtimeSecrets = { WRIX_API_SECRET = \"sometimes\"; }; }).profile.name
       );
+      invalidStaticName = builtins.tryEval (
+        (lib.mkSandbox { env = { \"OPENAI_API_KEY=shadow\" = \"canary\"; }; }).profile.name
+      );
     in
     {
       required_present = builtins.all (name: builtins.hasAttr name sandbox) required;
@@ -115,6 +118,7 @@ test_mksandbox_accepts_documented_parameters() {
       static_pi_credential_accepted = staticPiCredential.success;
       invalid_secret_name_accepted = invalidSecretName.success;
       invalid_secret_policy_accepted = invalidSecretPolicy.success;
+      invalid_static_name_accepted = invalidStaticName.success;
       mount_present = builtins.any (
         mount:
           mount.source == extraMount.source
@@ -148,6 +152,7 @@ test_mksandbox_accepts_documented_parameters() {
     .static_pi_credential_accepted == false and
     .invalid_secret_name_accepted == false and
     .invalid_secret_policy_accepted == false and
+    .invalid_static_name_accepted == false and
     .mount_present == true and
     (.package_count > .base_package_count)
   ' <<<"$result" >/dev/null; then
