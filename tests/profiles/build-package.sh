@@ -88,6 +88,37 @@ eval_drvs() {
   "
 }
 
+eval_toolchain_path() {
+  local profile_expr="$1"
+
+  nix eval --raw --impure --no-warn-dirty --expr "
+    let
+      system = builtins.currentSystem;
+      flake = builtins.getFlake \"git+file://$REPO_ROOT\";
+      lib = flake.legacyPackages.\${system}.lib;
+      profile = $profile_expr;
+    in profile.toolchain.outPath
+  "
+}
+
+set_expected_rustc() {
+  local source="$1"
+  local expected="$2"
+
+  python3 - "$source" "$expected" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+expected = sys.argv[2]
+marker = "@EXPECTED_RUSTC@"
+contents = source.read_text(encoding="utf-8")
+if contents.count(marker) != 2:
+    raise SystemExit(f"expected two {marker} markers in {source}")
+source.write_text(contents.replace(marker, expected), encoding="utf-8")
+PY
+}
+
 assert_eq() {
   local label="$1" got="$2" want="$3"
   if [[ "$got" != "$want" ]]; then
@@ -265,9 +296,6 @@ test_extra_srcs_scoped_to_lint_test() {
 # 6. Cargo selects profile.toolchain for bin/clippy/nextest
 # ============================================================================
 test_build_package_toolchain_alignment() {
-  local fixture
-  fixture=$(make_fixture)
-
   local default_profile='lib.profiles.rust'
   local with_profile="lib.rustProfile { toolchain = $REPO_ROOT/tests/fixtures/rust-toolchain.toml; sha256 = \"$TOOLCHAIN_FIXTURE_SHA\"; }"
 
@@ -275,23 +303,21 @@ test_build_package_toolchain_alignment() {
   for label in "default:$default_profile" "rustProfile:$with_profile"; do
     local name="${label%%:*}"
     local profile_expr="${label#*:}"
+    local toolchain
+    local fixture
     local expression
+    toolchain=$(eval_toolchain_path "$profile_expr")
+    fixture=$(make_fixture)
+    set_expected_rustc "$fixture/build.rs" "$toolchain/bin/rustc"
     expression="
       let
         system = builtins.currentSystem;
         flake = builtins.getFlake \"git+file://$REPO_ROOT\";
-        pkgs = flake.inputs.nixpkgs.legacyPackages.\${system};
         lib = flake.legacyPackages.\${system}.lib;
         profile = $profile_expr;
-        checkedSrc = pkgs.runCommand \"build-package-toolchain-fixture\" { } ''
-          cp -r $fixture \"\$out\"
-          chmod -R u+w \"\$out\"
-          substituteInPlace \"\$out/build.rs\" \\
-            --replace-fail '@EXPECTED_RUSTC@' \"\${profile.toolchain}/bin/rustc\"
-        '';
         package = profile.buildPackage {
-          src = checkedSrc;
-          cargoLock = checkedSrc + \"/Cargo.lock\";
+          src = $fixture;
+          cargoLock = $fixture/Cargo.lock;
         };
       in [ package.bin package.clippy package.nextest ]
     "
