@@ -9,6 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+TOOLCHAIN_FIXTURE_SHA="sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk="
 
 require_tools() {
   local tool
@@ -146,6 +147,55 @@ test_nested_derive_profile() {
   [[ "$(json_field "$result" hasCowsayCore)" == "false" ]] || fail "second extension package leaked into corePackages"
 }
 
+test_runtime_secrets_validated() {
+  local result
+  result=$(eval_profile_json "
+    let
+      invalidDerivedName = builtins.tryEval (
+        (wlib.deriveProfile wlib.profiles.base {
+          runtimeSecrets.\"BAD-NAME\" = \"optional\";
+        }).runtimeSecrets.\"BAD-NAME\"
+      );
+      invalidDerivedPolicy = builtins.tryEval (
+        (wlib.deriveProfile wlib.profiles.base {
+          runtimeSecrets.PROVIDER_TOKEN = \"sometimes\";
+        }).runtimeSecrets.PROVIDER_TOKEN
+      );
+      invalidRustName = builtins.tryEval (
+        (wlib.rustProfile {
+          toolchain = $REPO_ROOT/tests/fixtures/rust-toolchain.toml;
+          sha256 = \"$TOOLCHAIN_FIXTURE_SHA\";
+          runtimeSecrets.\"BAD-NAME\" = \"required\";
+        }).runtimeSecrets.\"BAD-NAME\"
+      );
+      invalidRustPolicy = builtins.tryEval (
+        (wlib.rustProfile {
+          toolchain = $REPO_ROOT/tests/fixtures/rust-toolchain.toml;
+          sha256 = \"$TOOLCHAIN_FIXTURE_SHA\";
+          runtimeSecrets.PROVIDER_TOKEN = \"sometimes\";
+        }).runtimeSecrets.PROVIDER_TOKEN
+      );
+      valid = wlib.deriveProfile wlib.profiles.base {
+        runtimeSecrets.PROVIDER_TOKEN = \"required\";
+      };
+    in {
+      deriveNameAccepted = invalidDerivedName.success;
+      derivePolicyAccepted = invalidDerivedPolicy.success;
+      rustNameAccepted = invalidRustName.success;
+      rustPolicyAccepted = invalidRustPolicy.success;
+      validPolicy = valid.runtimeSecrets.PROVIDER_TOKEN;
+    }
+  ")
+
+  jq -e '
+    (.deriveNameAccepted | not) and
+    (.derivePolicyAccepted | not) and
+    (.rustNameAccepted | not) and
+    (.rustPolicyAccepted | not) and
+    .validPolicy == "required"
+  ' <<<"$result" >/dev/null || fail "profile constructors did not validate runtime-secret names and policies"
+}
+
 test_host_packages_split() {
   local result
   result=$(eval_profile_json '
@@ -175,6 +225,7 @@ test_host_packages_split() {
 
 ALL_TESTS=(
   test_nested_derive_profile
+  test_runtime_secrets_validated
   test_host_packages_split
 )
 

@@ -2,21 +2,48 @@
 
 {
   deriveProfile =
-    baseProfile: extensions:
+    baseProfile@{
+      corePackages ? [ ],
+      packages ? [ ],
+      hostPackages ? [ ],
+      mounts ? [ ],
+      env ? { },
+      hostEnv ? env,
+      runtimeSecrets ? { },
+      networkAllowlist ? [ ],
+      ...
+    }:
+    let
+      baseCorePackages = corePackages;
+      basePackages = packages;
+      baseHostPackages = hostPackages;
+      baseMounts = mounts;
+      baseEnv = env;
+      baseHostEnv = hostEnv;
+      baseRuntimeSecrets = runtimeSecrets;
+      baseNetworkAllowlist = networkAllowlist;
+    in
+    extensions@{
+      packages ? [ ],
+      hostPackages ? [ ],
+      mounts ? [ ],
+      env ? { },
+      hostEnv ? { },
+      runtimeSecrets ? { },
+      networkAllowlist ? [ ],
+      ...
+    }:
     baseProfile
     // extensions
     // {
-      corePackages = baseProfile.corePackages or [ ];
-      packages = (baseProfile.packages or [ ]) ++ (extensions.packages or [ ]);
-      hostPackages = (baseProfile.hostPackages or [ ]) ++ (extensions.hostPackages or [ ]);
-      mounts = (baseProfile.mounts or [ ]) ++ (extensions.mounts or [ ]);
-      env = (baseProfile.env or { }) // (extensions.env or { });
-      hostEnv =
-        (baseProfile.hostEnv or baseProfile.env or { })
-        // (extensions.env or { })
-        // (extensions.hostEnv or { });
-      runtimeSecrets = (baseProfile.runtimeSecrets or { }) // (extensions.runtimeSecrets or { });
-      networkAllowlist = (baseProfile.networkAllowlist or [ ]) ++ (extensions.networkAllowlist or [ ]);
+      corePackages = baseCorePackages;
+      packages = basePackages ++ packages;
+      hostPackages = baseHostPackages ++ hostPackages;
+      mounts = baseMounts ++ mounts;
+      env = baseEnv // env;
+      hostEnv = baseHostEnv // env // hostEnv;
+      runtimeSecrets = sandbox.validateRuntimeSecrets (baseRuntimeSecrets // runtimeSecrets);
+      networkAllowlist = baseNetworkAllowlist ++ networkAllowlist;
     };
 
   rustProfile =
@@ -43,7 +70,7 @@
       hostPackages = (base.hostPackages or [ ]) ++ hostPackages;
       env = base.env // env;
       hostEnv = (base.hostEnv or { }) // env // hostEnv;
-      runtimeSecrets = (base.runtimeSecrets or { }) // runtimeSecrets;
+      runtimeSecrets = sandbox.validateRuntimeSecrets ((base.runtimeSecrets or { }) // runtimeSecrets);
       mounts = base.mounts ++ mounts;
       networkAllowlist = base.networkAllowlist ++ networkAllowlist;
     };

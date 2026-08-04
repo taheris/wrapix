@@ -12,7 +12,7 @@
 #   5. test_extra_srcs_scoped_to_lint_test
 #      Editing a file in extraSrcs invalidates clippy+nextest only.
 #   6. test_build_package_toolchain_alignment
-#      bin/clippy/nextest all close over profile.toolchain on both
+#      Cargo selects profile.toolchain for bin/clippy/nextest on both
 #      profiles.rust and rustProfile { toolchain; sha256; }.
 #   7. test_consumer_boundary
 #      The tmux-mcp consumer calls profile.buildPackage, the flake package
@@ -28,9 +28,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 FIXTURE_DIR="$REPO_ROOT/tests/fixtures/build-package-fixture"
 
-# Pinned sha256 for tests/fixtures/rust-toolchain.toml (channel 1.75.0).
+# Pinned sha256 for tests/fixtures/rust-toolchain.toml (channel 1.85.1).
 # Same value as no-nightly-closure.sh; update both if the fixture changes.
-TOOLCHAIN_FIXTURE_SHA="sha256-SXRtAuO4IqNOQq+nLbrsDFbVk+3aVA8NNpSZsKlVH/8="
+TOOLCHAIN_FIXTURE_SHA="sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk="
 
 TMPDIRS=()
 cleanup() {
@@ -262,10 +262,11 @@ test_extra_srcs_scoped_to_lint_test() {
 }
 
 # ============================================================================
-# 6. bin/clippy/nextest all close over profile.toolchain
+# 6. Cargo selects profile.toolchain for bin/clippy/nextest
 # ============================================================================
 test_build_package_toolchain_alignment() {
-  local fixture; fixture=$(make_fixture)
+  local fixture
+  fixture=$(make_fixture)
 
   local default_profile='lib.profiles.rust'
   local with_profile="lib.rustProfile { toolchain = $REPO_ROOT/tests/fixtures/rust-toolchain.toml; sha256 = \"$TOOLCHAIN_FIXTURE_SHA\"; }"
@@ -274,28 +275,31 @@ test_build_package_toolchain_alignment() {
   for label in "default:$default_profile" "rustProfile:$with_profile"; do
     local name="${label%%:*}"
     local profile_expr="${label#*:}"
+    local expression
+    expression="
+      let
+        system = builtins.currentSystem;
+        flake = builtins.getFlake \"git+file://$REPO_ROOT\";
+        pkgs = flake.inputs.nixpkgs.legacyPackages.\${system};
+        lib = flake.legacyPackages.\${system}.lib;
+        profile = $profile_expr;
+        checkedSrc = pkgs.runCommand \"build-package-toolchain-fixture\" { } ''
+          cp -r $fixture \"\$out\"
+          chmod -R u+w \"\$out\"
+          substituteInPlace \"\$out/build.rs\" \\
+            --replace-fail '@EXPECTED_RUSTC@' \"\${profile.toolchain}/bin/rustc\"
+        '';
+        package = profile.buildPackage {
+          src = checkedSrc;
+          cargoLock = checkedSrc + \"/Cargo.lock\";
+        };
+      in [ package.bin package.clippy package.nextest ]
+    "
 
-    local result
-    result=$(eval_drvs "$fixture" '{}' "$profile_expr")
-
-    local toolchain bin clippy nextest
-    toolchain=$(echo "$result" | jq -r '.toolchain')
-    bin=$(echo "$result" | jq -r '.bin')
-    clippy=$(echo "$result" | jq -r '.clippy')
-    nextest=$(echo "$result" | jq -r '.nextest')
-
-    if [[ -z "$toolchain" ]] || [[ "$toolchain" = "null" ]]; then
-      echo "FAIL: [$name] profile.toolchain.drvPath is empty" >&2
+    if ! nix build --no-link --impure --no-warn-dirty --expr "$expression"; then
+      echo "FAIL: [$name] Cargo did not select profile.toolchain for every buildPackage output" >&2
       return 1
     fi
-
-    local drv
-    for drv in "$bin" "$clippy" "$nextest"; do
-      if ! nix-store -q --requisites "$drv" | grep -qxF "$toolchain"; then
-        echo "FAIL: [$name] $drv does not reference toolchain $toolchain" >&2
-        return 1
-      fi
-    done
   done
 }
 
@@ -308,76 +312,46 @@ test_consumer_boundary() {
     let
       system = builtins.currentSystem;
       flake = builtins.getFlake \"git+file://$REPO_ROOT\";
-      pkgs = import flake.inputs.nixpkgs { inherit system; };
-      sentinelBin = pkgs.writeText \"tmux-mcp-bin-sentinel\" \"bin\";
-      sentinelClippy = pkgs.writeText \"tmux-mcp-clippy-sentinel\" \"clippy\";
-      sentinelNextest = pkgs.writeText \"tmux-mcp-nextest-sentinel\" \"nextest\";
-      sentinelArtifacts = pkgs.writeText \"tmux-mcp-artifacts-sentinel\" \"artifacts\";
-      captured = import $REPO_ROOT/lib/mcp/tmux/mcp-server.nix {
-        inherit pkgs;
-        rustProfile = {
-          buildPackage = args: {
-            passthruArgs = args;
-            bin = sentinelBin;
-            clippy = sentinelClippy;
-            nextest = sentinelNextest;
-            cargoArtifacts = sentinelArtifacts;
-          };
+      pkgs = flake.inputs.nixpkgs.legacyPackages.\${system};
+      profile = flake.legacyPackages.\${system}.lib.profiles.rust;
+      expected = profile.buildPackage {
+        src = flake.outPath;
+        cargoLock = builtins.path {
+          path = flake.outPath + \"/Cargo.lock\";
+          name = \"Cargo.lock\";
+        };
+        cargoExtraArgs = \"-p tmux-mcp\";
+        buildInputs = [ pkgs.tmux ];
+        propagatedBuildInputs = [ pkgs.tmux ];
+        meta = {
+          description = \"MCP server providing tmux pane management for AI-assisted debugging\";
+          mainProgram = \"tmux-mcp\";
         };
       };
-      tmuxDrv = pkgs.tmux.drvPath;
-      inputDrvPaths = map (drv: drv.drvPath) captured.passthruArgs.buildInputs;
-      propagatedDrvPaths = map (drv: drv.drvPath) captured.passthruArgs.propagatedBuildInputs;
       ciChecks = flake.legacyPackages.\${system}.ciChecks;
+      package = flake.packages.\${system}.tmux-mcp;
     in {
-      consumerReturnedSentinels =
-        captured.bin.drvPath == sentinelBin.drvPath
-        && captured.clippy.drvPath == sentinelClippy.drvPath
-        && captured.nextest.drvPath == sentinelNextest.drvPath
-        && captured.cargoArtifacts.drvPath == sentinelArtifacts.drvPath;
-      cargoExtraArgs = captured.passthruArgs.cargoExtraArgs or null;
-      tmuxInBuildInputs = builtins.elem tmuxDrv inputDrvPaths;
-      tmuxInPropagatedBuildInputs = builtins.elem tmuxDrv propagatedDrvPaths;
-      packageType = flake.packages.\${system}.tmux-mcp.type or null;
-      packageMainProgram = flake.packages.\${system}.tmux-mcp.meta.mainProgram or null;
-      clippyCheckType = ciChecks.tmux-mcp-clippy.type or null;
-      nextestCheckType = ciChecks.tmux-mcp-nextest.type or null;
+      packageMatchesBin = package.drvPath == expected.bin.drvPath;
+      packageMainProgram = package.meta.mainProgram or null;
+      clippyMatches = ciChecks.tmux-mcp-clippy.drvPath == expected.clippy.drvPath;
+      nextestMatches = ciChecks.tmux-mcp-nextest.drvPath == expected.nextest.drvPath;
+      checksIndependent =
+        expected.clippy.drvPath != expected.bin.drvPath
+        && expected.nextest.drvPath != expected.bin.drvPath;
     }
   "); then
     echo "FAIL: nix eval tmux-mcp consumer wiring failed" >&2
     return 1
   fi
 
-  if [[ "$(echo "$result" | jq -r '.consumerReturnedSentinels')" != "true" ]]; then
-    echo "FAIL: tmux-mcp consumer did not return the buildPackage outputs" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.cargoExtraArgs')" != "-p tmux-mcp" ]]; then
-    echo "FAIL: tmux-mcp consumer did not pass the tmux-mcp package selector" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.tmuxInBuildInputs')" != "true" ]]; then
-    echo "FAIL: tmux-mcp consumer did not pass tmux as a build input" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.tmuxInPropagatedBuildInputs')" != "true" ]]; then
-    echo "FAIL: tmux-mcp consumer did not propagate tmux at runtime" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.packageType')" != "derivation" ]]; then
-    echo "FAIL: flake package tmux-mcp is not a derivation" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.packageMainProgram')" != "tmux-mcp" ]]; then
-    echo "FAIL: flake package tmux-mcp is not the runnable bin output" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.clippyCheckType')" != "derivation" ]]; then
-    echo "FAIL: ciChecks.tmux-mcp-clippy is not a derivation" >&2
-    return 1
-  fi
-  if [[ "$(echo "$result" | jq -r '.nextestCheckType')" != "derivation" ]]; then
-    echo "FAIL: ciChecks.tmux-mcp-nextest is not a derivation" >&2
+  if ! jq -e '
+    .packageMatchesBin and
+    .packageMainProgram == "tmux-mcp" and
+    .clippyMatches and
+    .nextestMatches and
+    .checksIndependent
+  ' <<<"$result" >/dev/null; then
+    echo "FAIL: live tmux-mcp outputs do not match the Rust profile buildPackage outputs" >&2
     return 1
   fi
 }

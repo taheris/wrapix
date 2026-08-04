@@ -86,5 +86,6 @@ in
   "profiles.rust-no-nightly-closure" =
     repoScript "tests/profiles/no-nightly-closure.sh" "test_no_nightly_closure";
   "profiles.rust-required-args" = rustProfileCtor "test_required_args";
+  "profiles.runtime-secret-validation" = profileComposition "test_runtime_secrets_validated";
   "profiles.sandbox-entrypoints-no-rustup" = nixEval "profiles.sandbox-entrypoints-no-rustup";
 }

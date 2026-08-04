@@ -10,7 +10,7 @@ Provides filesystem and process isolation — code inside the container cannot a
 ## Quick Start
 
 ```bash
-nix run github:taheris/wrix                      # base profile, pi agent
+nix run github:taheris/wrix                      # rust profile, pi agent
 nix run github:taheris/wrix#sandbox-rust         # rust profile, direct base image
 nix run github:taheris/wrix#sandbox-rust-pi      # rust profile, pi agent overlay
 nix run github:taheris/wrix#sandbox-rust-claude  # rust profile, claude overlay

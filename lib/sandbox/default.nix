@@ -580,6 +580,7 @@ in
     rustProfileFromFile
     serviceImage
     baseClaudeSettings
+    validateRuntimeSecrets
     ;
   inherit (manifest) mkProfileImages;
 }

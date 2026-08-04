@@ -154,10 +154,9 @@ The environment surface is split into static defaults and runtime secrets:
   layer. Nix rejects malformed environment names, known provider credential
   names, and every declared runtime-secret name from these static surfaces.
 - `runtimeSecrets` is a typed attrset from validated environment-variable name
-  to `"optional"` or `"required"`. Built-in profiles declare
-  `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` optional.
-  `ProfileConfig.security.runtime_secrets` contains only those names and
-  policies, never their values.
+  to `"optional"` or `"required"`. `profiles.md` owns the built-in declaration
+  names and policies. `ProfileConfig.security.runtime_secrets` contains only
+  names and policies, never their values.
 - Immediately before launch, the host launcher resolves each declaration. A
   matching `SpawnConfig.env` pair wins for `wrix spawn`; otherwise the launcher
   reads the same-named host environment variable. An absent optional source is

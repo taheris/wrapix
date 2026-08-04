@@ -28,8 +28,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
-# Pinned sha256 for tests/fixtures/rust-toolchain.toml (channel 1.75.0).
-TOOLCHAIN_FIXTURE_SHA="sha256-SXRtAuO4IqNOQq+nLbrsDFbVk+3aVA8NNpSZsKlVH/8="
+# Pinned sha256 for tests/fixtures/rust-toolchain.toml (channel 1.85.1).
+TOOLCHAIN_FIXTURE_SHA="sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk="
 
 require_tools() {
   local tool
@@ -97,66 +97,122 @@ test_core_membership() {
         sha256 = \"$TOOLCHAIN_FIXTURE_SHA\";
         packages = [ np.hello ];
       };
+      imageSystem =
+        if system == \"aarch64-darwin\" then
+          \"aarch64-linux\"
+        else if system == \"x86_64-darwin\" then
+          \"x86_64-linux\"
+        else
+          system;
+      imagePkgs = flake.inputs.nixpkgs.legacyPackages.\${imageSystem};
+      packageLabel = package:
+        builtins.unsafeDiscardStringContext
+          (package.pname or (package.name or (builtins.baseNameOf package.outPath)));
+      pathOf = package: builtins.unsafeDiscardStringContext package.outPath;
+      sortPaths = packages: builtins.sort builtins.lessThan (map pathOf packages);
+      sortPathStrings = builtins.sort builtins.lessThan;
+      expectedBaseDirectPackages = with imagePkgs; [
+        bash
+        beads
+        coreutils
+        curl
+        diffutils
+        dolt
+        fd
+        file
+        findutils
+        gawk
+        gh
+        git
+        gnugrep
+        gnused
+        gnutar
+        gnumake
+        gzip
+        jq
+        less
+        lsof
+        man
+        nix
+        openssh
+        patch
+        prek
+        python3
+        ripgrep
+        rsync
+        shellcheck
+        sqlite
+        tmux
+        tree
+        unzip
+        vim
+        yq
+        zip
+        getent.provider
+        iproute2
+        nftables
+        iptables
+        iputils
+        libcap
+        netcat
+        procps
+        util-linux
+      ];
+      expectedBaseDirect = sortPaths expectedBaseDirectPackages;
+      baseExtras = builtins.filter (
+        package: !(builtins.elem (pathOf package) expectedBaseDirect)
+      ) base.corePackages;
+      expectedBase = sortPathStrings (expectedBaseDirect ++ map pathOf baseExtras);
+      rustSupport = with imagePkgs; [
+        gcc
+        openssl
+        openssl.dev
+        pkg-config
+        postgresql.lib
+        sccache
+      ];
+      imageToolchain = profile:
+        builtins.unsafeDiscardStringContext (builtins.dirOf (builtins.dirOf profile.env.RUSTC));
+      expectedRustCoreFor = profile:
+        sortPathStrings (expectedBase ++ [ (imageToolchain profile) ] ++ sortPaths rustSupport);
+      expectedRustCore = expectedRustCoreFor rust;
+      expectedPinnedCore = expectedRustCoreFor pinned;
+      expectedPythonCore = sortPathStrings (expectedBase ++ sortPaths (with imagePkgs; [ ruff ty uv ]));
+      expectedRustPackages = sortPathStrings (expectedRustCore ++ sortPaths [ imagePkgs.cargo-nextest ]);
+      expectedPinnedPackages = sortPathStrings (
+        expectedPinnedCore ++ sortPaths [ imagePkgs.cargo-nextest np.hello ]
+      );
+      countPath = path: packages:
+        builtins.length (builtins.filter (package: package.outPath == path) packages);
     in {
-      baseCore = coreLen base;
-      basePkgs = pkgsLen base;
-      baseLeaf = leafLen base;
-      rustCore = coreLen rust;
-      rustLeaf = leafLen rust;
-      pythonCore = coreLen python;
-      pythonLeaf = leafLen python;
-      pinnedCore = coreLen pinned;
-      pinnedLeaf = leafLen pinned;
-      hasRustSccacheCore = hasPackage \"sccache\" rust.corePackages;
-      hasRustNextestLeaf = hasPackage \"cargo-nextest\" (leaf rust);
-      hasRustNextestCore = hasPackage \"cargo-nextest\" rust.corePackages;
-      hasMakeCore = hasPackage \"gnumake\" base.corePackages || hasPackage \"make\" base.corePackages;
-      hasOpenSshCore = hasPackage \"openssh\" base.corePackages;
-      hasBasePythonCore = hasPackage \"python3\" base.corePackages;
-      hasPythonCore = hasPackage \"python3\" python.corePackages;
-      hasUvCore = hasPackage \"uv\" python.corePackages;
-      hasRuffCore = hasPackage \"ruff\" python.corePackages;
-      hasTyCore = hasPackage \"ty\" python.corePackages;
-      hasUvLeaf = hasPackage \"uv\" (leaf python);
-      hasPinnedRustCore = hasPackage \"rust\" pinned.corePackages;
-      hasPinnedHelloLeaf = hasPackage \"hello\" (leaf pinned);
+      inherit expectedBase expectedRustCore expectedPinnedCore expectedPythonCore expectedRustPackages expectedPinnedPackages;
+      baseExtras = builtins.sort builtins.lessThan (map packageLabel baseExtras);
+      baseCore = sortPaths base.corePackages;
+      basePackages = sortPaths base.packages;
+      rustCore = sortPaths rust.corePackages;
+      rustPackages = sortPaths rust.packages;
+      pythonCore = sortPaths python.corePackages;
+      pythonPackages = sortPaths python.packages;
+      pinnedCore = sortPaths pinned.corePackages;
+      pinnedPackages = sortPaths pinned.packages;
+      rustToolchainCoreCount = countPath rust.toolchain.outPath rust.corePackages;
+      pinnedToolchainCoreCount = countPath pinned.toolchain.outPath pinned.corePackages;
     }
   ")
 
-  local base_core base_pkgs base_leaf rust_core rust_leaf python_core python_leaf pinned_core pinned_leaf
-  base_core=$(json_field "$result" baseCore)
-  base_pkgs=$(json_field "$result" basePkgs)
-  base_leaf=$(json_field "$result" baseLeaf)
-  rust_core=$(json_field "$result" rustCore)
-  rust_leaf=$(json_field "$result" rustLeaf)
-  python_core=$(json_field "$result" pythonCore)
-  python_leaf=$(json_field "$result" pythonLeaf)
-  pinned_core=$(json_field "$result" pinnedCore)
-  pinned_leaf=$(json_field "$result" pinnedLeaf)
-
-  [[ "$base_core" -gt 0 ]] || fail "base corePackages should be non-empty, got $base_core"
-  [[ "$base_core" -eq "$base_pkgs" ]] || fail "base corePackages ($base_core) should equal packages ($base_pkgs)"
-  [[ "$base_leaf" -eq 0 ]] || fail "base leaf delta should be empty, got $base_leaf"
-  [[ "$(json_field "$result" hasMakeCore)" == "true" ]] || fail "make should be a member of base corePackages"
-  [[ "$(json_field "$result" hasOpenSshCore)" == "true" ]] || fail "openssh should be a member of base corePackages"
-  [[ "$(json_field "$result" hasBasePythonCore)" == "true" ]] || fail "python3 should be a member of base corePackages"
-  [[ "$rust_core" -gt "$base_core" ]] || fail "rust corePackages ($rust_core) should exceed base ($base_core)"
-  [[ "$rust_leaf" -eq 1 ]] || fail "rust leaf delta should contain only cargo-nextest, got $rust_leaf"
-  [[ "$python_core" -gt "$base_core" ]] || fail "python corePackages ($python_core) should exceed base ($base_core)"
-  [[ "$python_leaf" -eq 0 ]] || fail "python leaf delta should be empty, got $python_leaf"
-  [[ "$pinned_core" -gt "$base_core" ]] || fail "pinned rust corePackages ($pinned_core) should exceed base ($base_core)"
-  [[ "$pinned_leaf" -eq 2 ]] || fail "pinned leaf should contain cargo-nextest and hello, got $pinned_leaf"
-
-  [[ "$(json_field "$result" hasRustSccacheCore)" == "true" ]] || fail "sccache should be a member of rust corePackages"
-  [[ "$(json_field "$result" hasRustNextestLeaf)" == "true" ]] || fail "cargo-nextest should be rust leaf tooling"
-  [[ "$(json_field "$result" hasRustNextestCore)" == "false" ]] || fail "cargo-nextest should not be a member of rust corePackages"
-  [[ "$(json_field "$result" hasPythonCore)" == "true" ]] || fail "python3 should be a member of python corePackages"
-  [[ "$(json_field "$result" hasUvCore)" == "true" ]] || fail "uv should be a member of python corePackages"
-  [[ "$(json_field "$result" hasRuffCore)" == "true" ]] || fail "ruff should be a member of python corePackages"
-  [[ "$(json_field "$result" hasTyCore)" == "true" ]] || fail "ty should be a member of python corePackages"
-  [[ "$(json_field "$result" hasUvLeaf)" == "false" ]] || fail "uv should not be python leaf tooling"
-  [[ "$(json_field "$result" hasPinnedRustCore)" == "true" ]] || fail "pinned rust toolchain should be a member of corePackages"
-  [[ "$(json_field "$result" hasPinnedHelloLeaf)" == "true" ]] || fail "extension package should remain leaf on pinned rustProfile"
+  jq -e '
+    .baseExtras == ["treefmt", "which"] and
+    .baseCore == .expectedBase and
+    .basePackages == .expectedBase and
+    .rustCore == .expectedRustCore and
+    .rustPackages == .expectedRustPackages and
+    .pythonCore == .expectedPythonCore and
+    .pythonPackages == .expectedPythonCore and
+    .pinnedCore == .expectedPinnedCore and
+    .pinnedPackages == .expectedPinnedPackages and
+    .rustToolchainCoreCount == 1 and
+    .pinnedToolchainCoreCount == 1
+  ' <<<"$result" >/dev/null || fail "profile package membership differs from the documented exact sets"
 }
 
 # ============================================================================

@@ -17,7 +17,46 @@ let
   # The function accepts a package set so it can be instantiated with
   # linuxPkgs (container images) or hostPkgs (devshells).
   commonPackagesFn =
-    p: with p; [
+    {
+      bash,
+      beads,
+      coreutils,
+      curl,
+      diffutils,
+      dolt,
+      fd,
+      file,
+      findutils,
+      gawk,
+      gh,
+      git,
+      gnugrep,
+      gnused,
+      gnutar,
+      gnumake,
+      gzip,
+      jq,
+      less,
+      lsof,
+      man,
+      nix,
+      openssh,
+      patch,
+      prek,
+      python3,
+      ripgrep,
+      rsync,
+      shellcheck,
+      sqlite,
+      tmux,
+      tree,
+      unzip,
+      vim,
+      yq,
+      zip,
+      ...
+    }:
+    [
       bash
       beads
       coreutils
@@ -149,12 +188,13 @@ let
   hostFenixPkgs = fenix.packages.${hostPkgs.stdenv.hostPlatform.system};
 
   mkRustToolchain =
-    fenixSet: base:
-    fenixSet.combine [
+    { combine, stable, ... }:
+    base:
+    combine [
       base
       # stable RA from manifest avoids dragging matching nightly toolchain into closure
-      fenixSet.stable.rust-analyzer-preview
-      fenixSet.stable.rust-src
+      stable.rust-analyzer-preview
+      stable.rust-src
     ];
 
   # fenix's minimalToolchain omits clippy/rustfmt; defaultToolchain is the
@@ -268,10 +308,6 @@ let
     mkProfile {
       name = "rust";
 
-      # The toolchain and its fixed support packages are wrix-controlled and
-      # fixed per instance, so they are corePackages (tier 1). A downstream
-      # `rustProfile { toolchain = ...; }` pins a different toolchain but it
-      # still lands here via mkRustProfile, keeping pinned toolchains tier-1.
       corePackages = [
         imageToolchain
         pkgs.gcc

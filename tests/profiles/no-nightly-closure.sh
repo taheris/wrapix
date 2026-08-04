@@ -1,75 +1,92 @@
 #!/usr/bin/env bash
-# Verify that the rust profile's toolchain closures contain zero *-nightly-*
-# derivations. Regression guard against re-introducing
-# fenix.packages.${system}.rust-analyzer (built from the nightly source branch),
-# which drags a matching nightly cargo/rustc/rust-std closure into every
-# downstream flake on each input update.
+# Verify that every Rust profile package surface has no nightly derivation after
+# updating a disposable copy of the live flake.
 #
 # Usage: tests/profiles/no-nightly-closure.sh [test_no_nightly_closure]
-# Exit 0 on success, 1 on regression, with a clear stderr message on failure.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+FIXTURE_SHA="sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk="
+TMPDIRS=()
 
-# Pinned sha256 for tests/fixtures/rust-toolchain.toml (channel 1.75.0).
-# Update this if the fixture's channel/components change.
-FIXTURE_SHA="sha256-SXRtAuO4IqNOQq+nLbrsDFbVk+3aVA8NNpSZsKlVH/8="
+cleanup() {
+  local directory
+  for directory in "${TMPDIRS[@]+"${TMPDIRS[@]}"}"; do
+    if [[ -d "$directory" ]]; then
+      rm -rf "$directory"
+    fi
+  done
+}
+trap cleanup EXIT
 
-count_nightly_in_closure() {
-  local drv="$1"
-  nix-store -qR "$drv" | awk 'tolower($0) ~ /nightly/ {n++} END {print n+0}'
+copy_tracked_flake() {
+  local destination
+  local relative_path
+  destination=$(mktemp -d -t wrix-fresh-flake.XXXXXX)
+  while IFS= read -r -d '' relative_path; do
+    mkdir -p "$destination/$(dirname "$relative_path")"
+    cp -a "$REPO_ROOT/$relative_path" "$destination/$relative_path"
+  done < <(git -C "$REPO_ROOT" ls-files -z)
+  printf '%s\n' "$destination"
+}
+
+count_nightly_in_closures() {
+  local derivations_json="$1"
+  local derivations=()
+  mapfile -t derivations < <(jq -r '.[]' <<<"$derivations_json")
+  if [[ "${#derivations[@]}" -eq 0 ]]; then
+    echo "no Rust profile derivations were returned" >&2
+    return 1
+  fi
+  nix-store -q --requisites "${derivations[@]}" | awk 'tolower($0) ~ /nightly/ {n++} END {print n+0}'
+}
+
+profile_derivations() {
+  local flake_root="$1"
+  local system="$2"
+  nix eval --json --impure --no-warn-dirty --expr "
+    let
+      flake = builtins.getFlake \"path:$flake_root\";
+      lib = flake.legacyPackages.${system}.lib;
+      surfaces = profile:
+        map (package: package.drvPath) (
+          profile.packages
+          ++ (profile.hostPackages or [ ])
+          ++ [ profile.toolchain ]
+        );
+      pinned = lib.rustProfile {
+        toolchain = $flake_root/tests/fixtures/rust-toolchain.toml;
+        sha256 = \"$FIXTURE_SHA\";
+      };
+    in {
+      default = surfaces lib.profiles.rust;
+      pinned = surfaces pinned;
+    }
+  "
 }
 
 test_no_nightly_closure() {
-  local fixture_path="$REPO_ROOT/tests/fixtures/rust-toolchain.toml"
-  if [[ ! -f "$fixture_path" ]]; then
-    echo "fixture not found: $fixture_path" >&2
-    return 1
-  fi
-
-  local flake_url="git+file://$REPO_ROOT"
-
+  local fresh_flake
   local system
-  if ! system=$(nix eval --raw --impure --no-warn-dirty --expr 'builtins.currentSystem'); then
-    echo "nix eval builtins.currentSystem failed" >&2
-    return 1
-  fi
+  local derivations
+  local profile
+  local count
+  fresh_flake=$(copy_tracked_flake)
+  TMPDIRS+=("$fresh_flake")
 
-  local default_drv
-  if ! default_drv=$(nix eval --raw --impure --no-warn-dirty --expr "
-    (builtins.getFlake \"$flake_url\").legacyPackages.${system}.lib.profiles.rust.toolchain.drvPath
-  "); then
-    echo "nix eval for default rust toolchain drvPath failed" >&2
-    return 1
-  fi
+  nix flake update --flake "path:$fresh_flake"
+  system=$(nix eval --raw --impure --no-warn-dirty --expr 'builtins.currentSystem')
+  derivations=$(profile_derivations "$fresh_flake" "$system")
 
-  local default_count
-  default_count=$(count_nightly_in_closure "$default_drv")
-  if [[ "$default_count" -ne 0 ]]; then
-    echo "default rust toolchain closure contains $default_count nightly-* derivation(s) — likely regression to fenix.packages.\${system}.rust-analyzer" >&2
-    return 1
-  fi
-
-  local pinned_drv
-  if ! pinned_drv=$(nix eval --raw --impure --no-warn-dirty --expr "
-    let
-      flake = builtins.getFlake \"$flake_url\";
-      lib = flake.legacyPackages.${system}.lib;
-      pinned = lib.rustProfile { toolchain = $fixture_path; sha256 = \"$FIXTURE_SHA\"; };
-    in pinned.toolchain.drvPath
-  "); then
-    echo "nix eval for rustProfile toolchain drvPath failed" >&2
-    return 1
-  fi
-
-  local pinned_count
-  pinned_count=$(count_nightly_in_closure "$pinned_drv")
-  if [[ "$pinned_count" -ne 0 ]]; then
-    echo "rustProfile toolchain closure contains $pinned_count nightly-* derivation(s) — likely regression to fenix.packages.\${system}.rust-analyzer" >&2
-    return 1
-  fi
+  for profile in default pinned; do
+    count=$(count_nightly_in_closures "$(jq -c ".$profile" <<<"$derivations")")
+    if [[ "$count" -ne 0 ]]; then
+      echo "$profile Rust profile package closures contain $count nightly derivation(s)" >&2
+      return 1
+    fi
+  done
 }
 
 fn="${1:-test_no_nightly_closure}"

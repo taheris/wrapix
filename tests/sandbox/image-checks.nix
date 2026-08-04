@@ -2264,7 +2264,7 @@ let
     '';
   };
 
-  toolchainFixtureSha = "sha256-SXRtAuO4IqNOQq+nLbrsDFbVk+3aVA8NNpSZsKlVH/8=";
+  toolchainFixtureSha = "sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk=";
   pinnedProfile = serviceProfiles.rustProfileFromFile {
     file = ../fixtures/rust-toolchain.toml;
     sha256 = toolchainFixtureSha;
