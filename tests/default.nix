@@ -176,7 +176,6 @@ let
   prePushSmokeTests = removeAttrs smokeTests [
     "builder-keys-structure"
     "image-builds"
-    "linux-microvm-krun-detection"
     "linux-pasta-port-forwarding-disabled"
     "network-mode-configuration"
     "package-runtime-path"
@@ -189,7 +188,6 @@ let
     inherit (smokeTests)
       builder-keys-structure
       image-builds
-      linux-microvm-krun-detection
       linux-pasta-port-forwarding-disabled
       network-mode-configuration
       package-runtime-path
@@ -325,7 +323,6 @@ let
           wrix-rust-clippy
           wrix-rust-nextest
           image-builds
-          linux-microvm-krun-detection
           linux-pasta-port-forwarding-disabled
           network-mode-configuration
           package-runtime-path

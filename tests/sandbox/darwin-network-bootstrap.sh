@@ -32,7 +32,8 @@ test_darwin_network_bootstrap() {
   wrix_require_live_sandbox_darwin
   cd "$REPO_ROOT"
 
-  local command_line output sandbox stage_line verification_line workspace
+  local command_line image_ref image_source launcher output poison_error poison_profile
+  local profile_config sandbox spawn_config stage_line verification_line workspace
   local -a command
   workspace="$TEST_TMP/workspace"
   mkdir -p "$workspace/bin"
@@ -94,6 +95,31 @@ exit 97
 EOF
     chmod +x "$workspace/bin/$tool"
   done
+
+  launcher=$(wrix_build_live_launcher)
+  image_source=$(wrix_realize_test_image_source direct)
+  image_ref=$(wrix_unique_image_ref "wrix-test-bootstrap-env")
+  profile_config="$TEST_TMP/profile.json"
+  poison_profile="$TEST_TMP/poison-profile.json"
+  spawn_config="$TEST_TMP/spawn.json"
+  poison_error="$TEST_TMP/poison.err"
+  wrix_write_profile_config "$profile_config" "$image_ref" "$image_source" direct
+
+  jq '.profile.env.BASH_ENV = "/workspace/profile-poison.sh"' "$profile_config" >"$poison_profile"
+  if "$launcher/bin/wrix" --profile-config "$poison_profile" run "$workspace" true 2>"$poison_error"; then
+    fail "Darwin launcher accepted BASH_ENV from ProfileConfig"
+    return 1
+  fi
+  assert_contains "ProfileConfig bootstrap env rejection" "$(<"$poison_error")" "bootstrap-sensitive" || return 1
+
+  jq -n --arg workspace "$workspace" \
+    '{workspace:$workspace,env:[["LD_PRELOAD","/workspace/spawn-poison.so"]],agent_args:["true"],mounts:[]}' \
+    >"$spawn_config"
+  if "$launcher/bin/wrix" --profile-config "$profile_config" spawn --spawn-config "$spawn_config" 2>"$poison_error"; then
+    fail "Darwin launcher accepted LD_PRELOAD from SpawnConfig"
+    return 1
+  fi
+  assert_contains "SpawnConfig bootstrap env rejection" "$(<"$poison_error")" "bootstrap-sensitive" || return 1
 
   sandbox=$(wrix_build_packaged_live_sandbox)
   command=(

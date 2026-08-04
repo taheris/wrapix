@@ -199,6 +199,38 @@ fn container_cleanup_preserves_images_used_by_apple_containers() -> TestResult {
 }
 
 #[test]
+fn container_cleanup_preserves_unlabelled_wrix_refs() -> TestResult {
+    let root = tempfile::Builder::new()
+        .prefix("image-retention-container-unlabelled")
+        .tempdir()?;
+    let mru_path = root.path().join("image-mru.json");
+    let mut store = FakeStore::with_images(vec![
+        fake_image("wrix-current:live", "current-id").managed(),
+        fake_image("wrix-user-owned:old", "user-id"),
+    ]);
+
+    image::remember_and_prune(
+        &mut store,
+        &RetentionRequest {
+            runtime: Runtime::Container,
+            image_ref: "wrix-current:live",
+            image_source: "",
+            source_kind: SourceKind::DockerArchive,
+            digest: None,
+            mru_path: &mru_path,
+        },
+    )?;
+
+    assert!(
+        !store
+            .deleted
+            .iter()
+            .any(|target| target == "wrix-user-owned:old")
+    );
+    Ok(())
+}
+
+#[test]
 fn fake_store_matches_podman_listing_contract() -> TestResult {
     let mut store = FakeStore::with_images(vec![
         fake_image("localhost/wrix-test:old", "image-id").with_digest(digest('a').as_str()),
@@ -299,8 +331,15 @@ impl FakeStore {
 }
 
 impl Store for FakeStore {
-    fn digest_present(&mut self, _runtime: Runtime, digest: &str) -> Result<bool, image::Error> {
-        Ok(self.present_digests.contains(digest))
+    fn image_for_digest(
+        &mut self,
+        _runtime: Runtime,
+        digest: &str,
+    ) -> Result<Option<String>, image::Error> {
+        Ok(self
+            .present_digests
+            .contains(digest)
+            .then(|| digest.to_owned()))
     }
 
     fn tag(&mut self, _runtime: Runtime, _source: &str, _target: &str) -> Result<(), image::Error> {

@@ -39,6 +39,41 @@ fn digest_preflight_skips_source_execution_on_hit() -> TestResult {
 }
 
 #[test]
+fn digest_preflight_tags_matching_store_reference_as_selected_ref() -> TestResult {
+    let root = tempfile::Builder::new()
+        .prefix("image-digest-retag")
+        .tempdir()?;
+    let digest = digest('9');
+    let missing_source = root.path().join("source-that-must-not-run");
+    let mut store = FakeStore {
+        digest_source: Some(String::from("wrix-existing:old")),
+        ..FakeStore::default()
+    };
+    store.present_digests.insert(digest.clone());
+
+    image::install(
+        &mut store,
+        &InstallRequest {
+            runtime: Runtime::Container,
+            image_ref: "wrix-selected:live",
+            image_source: &missing_source.display().to_string(),
+            source_kind: SourceKind::DockerArchive,
+            digest: Some(&digest),
+        },
+    )?;
+
+    assert_eq!(
+        store.calls,
+        vec![Call::Tag {
+            source: String::from("wrix-existing:old"),
+            target: String::from("wrix-selected:live"),
+        }]
+    );
+    assert!(!missing_source.exists());
+    Ok(())
+}
+
+#[test]
 fn linux_descriptor_sources_use_archiveless_install_path() -> TestResult {
     let root = tempfile::Builder::new().prefix("image-oci").tempdir()?;
     let digest = digest('b');
@@ -263,6 +298,7 @@ struct FakeStore {
     calls: Vec<Call>,
     docker_archive_digest: Option<String>,
     loaded_archive_ref: Option<String>,
+    digest_source: Option<String>,
     tag_error: bool,
     delete_error: bool,
 }
@@ -294,8 +330,22 @@ impl FakeStore {
 }
 
 impl Store for FakeStore {
-    fn digest_present(&mut self, _runtime: Runtime, digest: &str) -> Result<bool, image::Error> {
-        Ok(Digest::parse(digest).is_ok_and(|digest| self.present_digests.contains(&digest)))
+    fn image_for_digest(
+        &mut self,
+        _runtime: Runtime,
+        digest: &str,
+    ) -> Result<Option<String>, image::Error> {
+        let Ok(digest) = Digest::parse(digest) else {
+            return Ok(None);
+        };
+        if !self.present_digests.contains(&digest) {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.digest_source
+                .clone()
+                .unwrap_or_else(|| digest.as_str().to_owned()),
+        ))
     }
 
     fn tag(&mut self, _runtime: Runtime, source: &str, target: &str) -> Result<(), image::Error> {

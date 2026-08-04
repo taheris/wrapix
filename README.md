@@ -111,7 +111,7 @@ in
 The launcher exposes two entry points (both honour the profile's mounts, env passthrough, and deploy key):
 
 - `wrix run [DIR] [CMD…]` — interactive TTY.
-- `wrix spawn --spawn-config <file> [--stdio]` — programmatic JSONL dispatch. The orchestrator writes a `SpawnConfig` JSON file with `image_ref`, `image_source`, `workspace`, `env`, and `agent_args`, then pipes JSONL on stdin/stdout.
+- `wrix spawn --spawn-config <file> [--stdio]` — programmatic JSONL dispatch. The orchestrator writes a `SpawnConfig` JSON file with `image_ref`, `image_source`, the matching `image_source_kind`, `workspace`, `env`, and `agent_args`, then pipes JSONL on stdin/stdout.
 
 ## MCP Servers
 

@@ -25,7 +25,8 @@ let
       body
     else
       ''
-        printf '%s\n' 'PASS: Darwin-only verifier is not applicable on this host'
+        printf '%s\n' 'SKIP: Darwin-only verifier is not applicable on this host' >&2
+        exit 77
       '';
   linuxOnly =
     body:
@@ -62,12 +63,13 @@ in
 
   "sandbox.linux-container-starts" = containerStarts "test_linux_container_starts";
 
-  "sandbox.linux-microvm-runtime" = linuxOnly (
-    sandboxScriptWithWrix "rust-launcher-live" "test_linux_microvm_runtime"
+  "sandbox.linux-microvm-missing-kvm" = linuxOnly (
+    sandboxScriptWithWrix "rust-launcher-live" "test_linux_microvm_missing_kvm_fails_before_podman"
   );
 
-  "sandbox.mksandbox-api" =
-    sandboxScript "mksandbox-api" "test_mksandbox_accepts_documented_parameters";
+  "sandbox.linux-microvm-runtime" = linuxOnly (sandboxScriptAll "microvm-runtime");
+
+  "sandbox.mksandbox-api" = sandboxScriptAll "mksandbox-api";
 
   "sandbox.mcp-agent-adapters" = sandboxScriptAll "mcp-agent-adapters";
 

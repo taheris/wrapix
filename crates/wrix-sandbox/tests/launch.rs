@@ -1,6 +1,11 @@
 mod common;
 
-use std::{collections::BTreeMap, ffi::OsString, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde_json::json;
 use wrix_sandbox::command::Command;
@@ -8,13 +13,107 @@ use wrix_sandbox::command::Command;
 use common::{ChildSpec, ProfileFixture, TestResult};
 
 #[test]
-fn unsafe_podman_socket_env_is_ignored_without_explicit_opt_in() -> TestResult {
-    assert_podman_api_socket_requires_explicit_unsafe_opt_in("unsafe-podman")
+fn default_launch_omits_host_podman_socket() -> TestResult {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let (root, profile_config, workspace) = podman_socket_fixture("podman-default")?;
+
+    let run = run_launch(
+        root.path(),
+        "default",
+        &profile_config,
+        &workspace,
+        Vec::new(),
+    )?;
+
+    assert!(run.success, "{}", run.stderr);
+    assert_socket_absent(&run.stdout);
+    Ok(())
 }
 
 #[test]
-fn podman_api_socket_requires_explicit_unsafe_opt_in() -> TestResult {
-    assert_podman_api_socket_requires_explicit_unsafe_opt_in("podman-api")
+fn legacy_podman_socket_env_is_ignored() -> TestResult {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let (root, profile_config, workspace) = podman_socket_fixture("podman-legacy")?;
+
+    let run = run_launch(
+        root.path(),
+        "legacy",
+        &profile_config,
+        &workspace,
+        vec![(String::from("WRIX_PODMAN_SOCKET"), OsString::from("1"))],
+    )?;
+
+    assert!(run.success, "{}", run.stderr);
+    assert_socket_absent(&run.stdout);
+    Ok(())
+}
+
+#[test]
+fn unsafe_podman_socket_opt_in_requires_existing_socket() -> TestResult {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let (root, profile_config, workspace) = podman_socket_fixture("podman-missing")?;
+
+    let run = run_launch(
+        root.path(),
+        "missing",
+        &profile_config,
+        &workspace,
+        vec![(
+            String::from("WRIX_UNSAFE_PODMAN_SOCKET"),
+            OsString::from("1"),
+        )],
+    )?;
+
+    assert!(!run.success);
+    assert!(
+        run.stderr
+            .contains("WRIX_UNSAFE_PODMAN_SOCKET set but socket not found")
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn unsafe_podman_socket_opt_in_mounts_existing_socket() -> TestResult {
+    use std::os::unix::net::UnixListener;
+
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let (root, profile_config, workspace) = podman_socket_fixture("podman-opt-in")?;
+    let socket_dir = root.path().join("runtime/podman");
+    fs::create_dir_all(&socket_dir)?;
+    let socket_path = socket_dir.join("podman.sock");
+    let _listener = UnixListener::bind(&socket_path)?;
+
+    let run = run_launch(
+        root.path(),
+        "opted-in",
+        &profile_config,
+        &workspace,
+        vec![(
+            String::from("WRIX_UNSAFE_PODMAN_SOCKET"),
+            OsString::from("1"),
+        )],
+    )?;
+
+    assert!(run.success, "{}", run.stderr);
+    assert!(run.stdout.contains(&format!(
+        "MOUNT=-v {}:/run/podman/podman.sock",
+        socket_path.display()
+    )));
+    assert!(
+        run.stdout
+            .contains("ENV=CONTAINER_HOST=unix:///run/podman/podman.sock")
+    );
+    assert!(run.stdout.contains("ENV=GC_HOST_WORKSPACE="));
+    Ok(())
 }
 
 #[test]
@@ -596,86 +695,13 @@ fn run_spawn_launch(
     )
 }
 
-fn assert_podman_api_socket_requires_explicit_unsafe_opt_in(prefix: &str) -> TestResult {
-    if !cfg!(target_os = "linux") {
-        return Ok(());
-    }
-
+fn podman_socket_fixture(prefix: &str) -> TestResult<(tempfile::TempDir, PathBuf, PathBuf)> {
     let root = tempfile::Builder::new().prefix(prefix).tempdir()?;
     let workspace = root.path().join("workspace");
     let profile_config = root.path().join("profile.json");
     fs::create_dir_all(&workspace)?;
     common::write_profile_config(&profile_config, &ProfileFixture::default())?;
-
-    let default_run = run_launch(
-        root.path(),
-        "default",
-        &profile_config,
-        &workspace,
-        Vec::new(),
-    )?;
-    assert!(default_run.success, "{}", default_run.stderr);
-    assert_socket_absent(&default_run.stdout);
-
-    let legacy = run_launch(
-        root.path(),
-        "legacy",
-        &profile_config,
-        &workspace,
-        vec![(String::from("WRIX_PODMAN_SOCKET"), OsString::from("1"))],
-    )?;
-    assert!(legacy.success, "{}", legacy.stderr);
-    assert_socket_absent(&legacy.stdout);
-
-    let missing = run_launch(
-        root.path(),
-        "missing",
-        &profile_config,
-        &workspace,
-        vec![(
-            String::from("WRIX_UNSAFE_PODMAN_SOCKET"),
-            OsString::from("1"),
-        )],
-    )?;
-    assert!(!missing.success);
-    assert!(
-        missing
-            .stderr
-            .contains("WRIX_UNSAFE_PODMAN_SOCKET set but socket not found")
-    );
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::net::UnixListener;
-
-        let socket_dir = root.path().join("runtime/podman");
-        fs::create_dir_all(&socket_dir)?;
-        let socket_path = socket_dir.join("podman.sock");
-        let _listener = UnixListener::bind(&socket_path)?;
-        let opted_in = run_launch(
-            root.path(),
-            "opted-in",
-            &profile_config,
-            &workspace,
-            vec![(
-                String::from("WRIX_UNSAFE_PODMAN_SOCKET"),
-                OsString::from("1"),
-            )],
-        )?;
-        assert!(opted_in.success, "{}", opted_in.stderr);
-        assert!(opted_in.stdout.contains(&format!(
-            "MOUNT=-v {}:/run/podman/podman.sock",
-            socket_path.display()
-        )));
-        assert!(
-            opted_in
-                .stdout
-                .contains("ENV=CONTAINER_HOST=unix:///run/podman/podman.sock")
-        );
-        assert!(opted_in.stdout.contains("ENV=GC_HOST_WORKSPACE="));
-    }
-
-    Ok(())
+    Ok((root, profile_config, workspace))
 }
 
 fn assert_socket_absent(output: &str) {

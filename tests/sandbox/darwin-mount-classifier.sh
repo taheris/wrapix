@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifier for criterion 134 of specs/sandbox.md:
+# Verifier for the Darwin mount-classifier contract in specs/sandbox.md:
 #
 #   On Darwin, the same mount classifier handles `profile.mounts` and
 #   `SpawnConfig.mounts` — one mechanism, not two. Directories are

@@ -1002,7 +1002,7 @@ let
               if [[ "$*" == *'--format json'* ]]; then
                 printf '[]\n'
               else
-                printf 'REPOSITORY TAG ID\nwrix-digestskip live sha256:image-id\n'
+                printf 'REPOSITORY TAG ID\nwrix-existing old sha256:image-id\n'
               fi
               ;;
             'image inspect')
@@ -1064,8 +1064,13 @@ let
             cat "$tmp/state/container.log" >&2
             exit 1
           fi
-          if ! grep -qF -- "image inspect wrix-digestskip:live" "$tmp/state/container.log"; then
+          if ! grep -qF -- "image inspect wrix-existing:old" "$tmp/state/container.log"; then
             echo "Darwin digest preflight did not inspect the stored image" >&2
+            cat "$tmp/state/container.log" >&2
+            exit 1
+          fi
+          if ! grep -qF -- "image tag wrix-existing:old wrix-digestskip:live" "$tmp/state/container.log"; then
+            echo "Darwin digest preflight did not tag the matching stored image with the selected ref" >&2
             cat "$tmp/state/container.log" >&2
             exit 1
           fi

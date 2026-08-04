@@ -12,7 +12,7 @@ set -euo pipefail
 die() { echo "error: $*" >&2; exit 1; }
 
 # Must be root
-[[ $EUID -eq 0 ]] || die "run with sudo"
+[[ "$EUID" -eq 0 ]] || die "run with sudo"
 
 # Check Tailscale is active with exit node
 command -v tailscale >/dev/null || die "tailscale not installed"
@@ -42,17 +42,13 @@ echo "  vmnet bridge: $VMNET_BRIDGE"
 
 # 1. Route vmnet subnet to bridge100 (so return traffic reaches containers).
 #    Tailscale adds routes for 192.168.x.x through utun6 which breaks return path.
-# best-effort: `route delete` fails noisily when no matching route exists
-# (first run); this script must be idempotent so we swallow that case.
-route delete -net "$VMNET_SUBNET" 2>/dev/null || true
+route delete -net "$VMNET_SUBNET" 2>/dev/null || true # best-effort: the first run has no matching route to delete.
 route add -net "$VMNET_SUBNET" -interface "$VMNET_BRIDGE"
 echo "  Added route: $VMNET_SUBNET -> $VMNET_BRIDGE"
 
 # 2. Add NAT rule to forward container traffic through Tailscale.
 #    This makes outbound container traffic go through the exit node.
-# best-effort: `-F nat` on an empty anchor warns to stderr; the flush is
-# idempotent in either direction, we just want to start from a clean slate.
-pfctl -a "com.apple.internet-sharing" -F nat 2>/dev/null || true
+pfctl -a "com.apple.internet-sharing" -F nat 2>/dev/null || true # best-effort: an empty anchor has no NAT state to flush.
 # best-effort: pfctl chatters about syntax/loading on stderr; the exit
 # code is the contract.
 echo "nat on $TAILSCALE_IF from $VMNET_SUBNET to any -> ($TAILSCALE_IF)" | \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifier for criterion 110 of specs/sandbox.md:
+# Verifier for the custom mounts and environment contract in specs/sandbox.md:
 #
 #   `mounts` and `env` passed to `mkSandbox` are merged into the profile
 #   and reach the container as configured.

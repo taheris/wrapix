@@ -456,34 +456,6 @@ in
       mkdir $out
     '';
 
-  linux-microvm-krun-detection =
-    if isLinux then
-      runCommandLocal "smoke-linux-microvm-krun"
-        {
-          nativeBuildInputs = [
-            bash
-            pkgs.coreutils
-            pkgs.gnugrep
-            pkgs.jq
-          ];
-        }
-        ''
-          set -euo pipefail
-
-          WRIX_TEST_WRIX_BIN="${wrixLauncher}/bin/wrix" \
-            REPO_ROOT="${../..}" \
-            bash "${../../tests/sandbox/rust-launcher-live.sh}" test_linux_microvm_runtime
-          mkdir "$out"
-        ''
-    else
-      runCommandLocal "smoke-linux-microvm-krun" { } ''
-        set -euo pipefail
-
-        trap '_ec=$?; if [[ "$_ec" -eq 77 ]]; then mkdir -p "$out"; exit 0; fi' EXIT
-        echo "SKIP: krun microVM detection (Linux-only test)" >&2
-        exit 77
-      '';
-
   linux-pasta-port-forwarding-disabled =
     if isLinux then
       runCommandLocal "smoke-linux-pasta-port-forwarding-disabled"
@@ -585,23 +557,6 @@ in
           exit 1
         fi
         grep -q "WRIX_NETWORK must be 'open' or 'limit'" /tmp/wrix-network.err || { cat /tmp/wrix-network.err >&2; exit 1; }
-
-        # Entrypoint checks (source files, no build needed)
-        LINUX_EP="${../../lib/sandbox/linux/entrypoint.sh}"
-        grep -q 'WRIX_FIREWALL_BACKEND="nft"' "$LINUX_EP" || { echo "FAIL: Missing nft firewall default in Linux entrypoint"; exit 1; }
-        grep -q 'WRIX_FIREWALL_BACKEND="iptables"' "$LINUX_EP" || { echo "FAIL: Missing iptables fallback in Linux entrypoint"; exit 1; }
-        grep -q 'WRIX_NETWORK' "$LINUX_EP" || { echo "FAIL: Missing WRIX_NETWORK check in Linux entrypoint"; exit 1; }
-        echo "PASS: Linux entrypoint has network filtering"
-
-        DARWIN_EP="${../../lib/sandbox/darwin/entrypoint.sh}"
-        DARWIN_BOOTSTRAP="${../../lib/sandbox/darwin/network-bootstrap.sh}"
-        grep -q 'WRIX_FIREWALL_BACKEND="nft"' "$DARWIN_BOOTSTRAP" || { echo "FAIL: Missing nft firewall default in Darwin bootstrap"; exit 1; }
-        grep -q 'WRIX_FIREWALL_BACKEND="iptables"' "$DARWIN_BOOTSTRAP" || { echo "FAIL: Missing iptables fallback in Darwin bootstrap"; exit 1; }
-        grep -q 'WRIX_NETWORK' "$DARWIN_BOOTSTRAP" || { echo "FAIL: Missing WRIX_NETWORK check in Darwin bootstrap"; exit 1; }
-        grep -q -- '--drop=cap_net_admin' "$DARWIN_BOOTSTRAP" || { echo "FAIL: Darwin bootstrap does not drop NET_ADMIN"; exit 1; }
-        grep -q 'CapBnd:' "$DARWIN_EP" || { echo "FAIL: Darwin agent entrypoint does not reject retained NET_ADMIN"; exit 1; }
-        grep -q -- '--cap-add CAP_NET_ADMIN' ${../../lib/sandbox/darwin/default.nix} || { echo "FAIL: Darwin launcher does not grant temporary NET_ADMIN"; exit 1; }
-        echo "PASS: Darwin bootstrap installs network filtering before capability-free agent setup"
 
         echo ""
         echo "WRIX_NETWORK configuration validation passed"

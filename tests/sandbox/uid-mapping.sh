@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifier for criterion 106 of specs/sandbox.md:
+# Verifier for the sandbox UID/GID mapping contract in specs/sandbox.md:
 #
 #   Files created inside /workspace carry the host UID/GID, not a
 #   container-internal UID.

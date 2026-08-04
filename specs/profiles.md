@@ -527,17 +527,18 @@ wrix.lib.${system}.mkProfileImages {
 ```
 
 Each input is the `.image` value returned by `mkSandbox`: an image-source
-derivation/attrset carrying the selected agent, source path, source kind,
-digest, ref, and immutable `ProfileConfig` path.
+derivation/attrset carrying the sandbox-selected agent key, source path, source
+kind, digest, ref, and immutable `ProfileConfig` path. `sandbox.md` owns the
+selector values and meanings; this section owns only profile-manifest naming
+and lookup.
 
 The output is a `pkgs.writeText "profile-images.json" <…>` derivation whose
-content is a JSON object keyed by profile name. Each value is keyed by the
-image's selected agent (`direct`, `claude`, or `pi`) and contains `{ ref,
-source, source_kind, profile_config }` — `ref` is the platform image reference
+content is a JSON object keyed by profile name. Each value is keyed by the image's selected agent and contains `{ ref, source,
+source_kind, profile_config }` — `ref` is the platform image reference
 (`localhost/wrix-<name>:<hash>` on Linux), `source` is the Nix store path
-installed by the runtime image installer, `source_kind` is the explicit source kind from
-`image-builder.md` (`nix-descriptor` on Linux, `docker-archive` on Darwin),
-and `profile_config` is the immutable `ProfileConfig` path passed to
+installed by the runtime image installer, `source_kind` is the explicit value
+defined by `image-builder.md`, and `profile_config` is the immutable
+`ProfileConfig` path passed to
 `wrix spawn`. These fields are computed Nix-side from the image derivation so
 consumers never re-implement the tag or source-kind logic. Loom maps the
 selected agent variant's fields to `wrix spawn` inputs when building each
@@ -555,13 +556,15 @@ produce a manifest covering their full profile set, then point
 
 ## Flake Outputs
 
-Profiles surface as three sibling output families:
+This section owns output names and their profile/manifest lookup shape;
+`sandbox.md` owns agent selection semantics and `image-builder.md` owns image
+composition. Profiles surface as three sibling output families:
 
 | Output | Shape | Use |
 |--------|-------|-----|
-| `packages.image-<profile>` | OCI image source (Linux: archive-less `nix-descriptor`; Darwin: tarball `docker-archive`); built with `agent = "direct"` (the default base image) | Orchestrators that install images through wrix's platform install path; manifest entries |
-| `packages.image-<profile>-claude` | OCI image source built with `agent = "claude"` and the platform `source_kind` | Orchestrators that install Claude images through wrix's platform install path |
-| `packages.image-<profile>-pi` | OCI image source built with `agent = "pi"` and the platform `source_kind` | Orchestrators that install Pi images through wrix's platform install path |
+| `packages.image-<profile>` | OCI image source under the `image-builder.md` source-kind contract; selected with `agent = "direct"` | Orchestrators that install images through wrix's platform install path; manifest entries |
+| `packages.image-<profile>-claude` | Same image-source contract, selected with `agent = "claude"` | Orchestrators that install Claude images through wrix's platform install path |
+| `packages.image-<profile>-pi` | Same image-source contract, selected with `agent = "pi"` | Orchestrators that install Pi images through wrix's platform install path |
 | `packages.sandbox-<profile>` | Configured sandbox package with explicit `bin/wrix` plus `meta.mainProgram = "wrix-run"` for default `nix run`; direct agent variant | One-shot users (`nix run .#sandbox-rust`) |
 | `packages.sandbox-<profile>-claude` | Configured Claude variant with explicit `bin/wrix` plus `wrix-run` main program | One-shot users that want Claude |
 | `packages.sandbox-<profile>-pi` | Configured Pi variant with explicit `bin/wrix` plus `wrix-run` main program | One-shot users that want Pi; `packages.default` points at rust `sandbox-rust-pi` |
@@ -731,7 +734,7 @@ dests live under `/home/wrix/` inside the container, not under
   [check](verify:profiles.rust-no-nightly-closure)
 - `mkProfileImages { rust = …; }` produces a JSON file whose entry for `rust` is keyed by the image's selected agent and whose selected-agent entry has `ref`, `source`, `source_kind`, and `profile_config` fields, with `source` and `source_kind` resolving to the same image source path and source kind as the corresponding `(wrix.mkSandbox { profile = wrix.profiles.rust; agent = …; }).image`
   [check](test-ci:test-profile-images-manifest-shape)
-- `packages.image-<name>[-<agent>]` resolves to the matching sandbox's selected `.image.source` (Linux `nix-descriptor`, Darwin `docker-archive`); all sandbox and profile-manifest outputs evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
+- `packages.image-<name>[-<agent>]` resolves to the matching sandbox's selected `.image.source` under the source-kind contract owned by `image-builder.md`; all sandbox and profile-manifest outputs evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
   [check](verify:profiles.image-flake-outputs)
 - `profiles.rust.buildPackage` is exposed and returns an attrset with `bin`, `clippy`, `nextest`, and `cargoArtifacts` fields
   [check](verify:profiles.rust-build-package-exposed)

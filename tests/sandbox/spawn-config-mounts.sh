@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifier for criterion 132 of specs/sandbox.md:
+# Verifier for the SpawnConfig mount contract in specs/sandbox.md:
 #
 #   On Linux, each `SpawnConfig.mounts` entry becomes a
 #   `-v <host_path>:<container_path>` podman argument, with `:ro` appended

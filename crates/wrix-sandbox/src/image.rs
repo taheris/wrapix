@@ -122,7 +122,7 @@ impl ImageRef {
                 value: value.to_owned(),
             });
         };
-        if value.chars().any(char::is_whitespace) {
+        if !valid_image_reference(&value) {
             return Err(ImageRefParseError { value });
         }
         Ok(Self(value))
@@ -131,6 +131,72 @@ impl ImageRef {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn valid_image_reference(value: &str) -> bool {
+    if value.starts_with('-') || value.contains("://") {
+        return false;
+    }
+    let mut digest_parts = value.split('@');
+    let Some(name) = digest_parts.next() else {
+        return false;
+    };
+    let digest = digest_parts.next();
+    if digest_parts.next().is_some() || digest.is_some_and(|digest| Digest::parse(digest).is_err())
+    {
+        return false;
+    }
+    let last_slash = name.rfind('/');
+    let last_colon = name.rfind(':');
+    let (repository, tag) = match last_colon {
+        Some(index) if last_slash.is_none_or(|slash| index > slash) => {
+            (&name[..index], Some(&name[index + 1..]))
+        }
+        _ => (name, None),
+    };
+    valid_repository(repository) && tag.is_none_or(valid_image_tag)
+}
+
+fn valid_repository(value: &str) -> bool {
+    let mut components = value.split('/');
+    let Some(first) = components.next() else {
+        return false;
+    };
+    valid_registry_or_component(first) && components.all(valid_repository_component)
+}
+
+fn valid_registry_or_component(value: &str) -> bool {
+    if let Some((host, port)) = value.rsplit_once(':') {
+        return valid_repository_component(host)
+            && !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    valid_repository_component(value)
+}
+
+fn valid_repository_component(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value
+            .bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn valid_image_tag(value: &str) -> bool {
+    (1..=128).contains(&value.len())
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
 }
 
 impl<'de> Deserialize<'de> for ImageRef {
@@ -267,7 +333,8 @@ impl From<io::Error> for Error {
 }
 
 pub trait Store {
-    fn digest_present(&mut self, runtime: Runtime, digest: &str) -> Result<bool, Error>;
+    fn image_for_digest(&mut self, runtime: Runtime, digest: &str)
+    -> Result<Option<String>, Error>;
 
     fn tag(&mut self, runtime: Runtime, source: &str, target: &str) -> Result<(), Error>;
 
@@ -307,9 +374,9 @@ pub fn install(store: &mut impl Store, request: &InstallRequest<'_>) -> Result<(
         request.source_kind,
         request.digest,
     )?;
-    if store.digest_present(request.runtime, desired.as_str())? {
-        if request.runtime == Runtime::Podman {
-            store.tag(request.runtime, desired.as_str(), request.image_ref)?;
+    if let Some(source) = store.image_for_digest(request.runtime, desired.as_str())? {
+        if source != request.image_ref {
+            store.tag(request.runtime, &source, request.image_ref)?;
         }
         return Ok(());
     }
@@ -630,14 +697,10 @@ fn listed_image_from_line(
         .map(|value| Digest::parse(&value))
         .transpose()?;
     let managed = store.image_managed(runtime, &target)?;
-    let legacy = match runtime {
-        Runtime::Podman => ref_name
+    let legacy = runtime == Runtime::Podman
+        && ref_name
             .as_ref()
-            .is_some_and(|name| name.as_str().starts_with("localhost/wrix-")),
-        Runtime::Container => ref_name
-            .as_ref()
-            .is_some_and(|name| name.as_str().starts_with("wrix-")),
-    };
+            .is_some_and(|name| name.as_str().starts_with("localhost/wrix-"));
     Ok(Some(ListedImage {
         ref_name,
         target,
@@ -711,14 +774,20 @@ fn normalized_value(value: &str) -> Option<String> {
 }
 
 impl Store for CommandStore {
-    fn digest_present(&mut self, runtime: Runtime, digest: &str) -> Result<bool, Error> {
+    fn image_for_digest(
+        &mut self,
+        runtime: Runtime,
+        digest: &str,
+    ) -> Result<Option<String>, Error> {
         match runtime {
-            Runtime::Podman => Ok(run_output(
-                "podman",
-                &["image", "inspect", "--format", "{{.Id}}", digest],
-            )
-            .is_ok_and(|output| output.status.success())),
-            Runtime::Container => darwin_digest_present(digest),
+            Runtime::Podman => {
+                let output = run_output(
+                    "podman",
+                    &["image", "inspect", "--format", "{{.Id}}", digest],
+                )?;
+                Ok(output.status.success().then(|| digest.to_owned()))
+            }
+            Runtime::Container => darwin_image_for_digest(digest),
         }
     }
 
@@ -998,12 +1067,10 @@ fn container_image_in_use(stdout: &[u8], target: &str, id: Option<&str>) -> Resu
     }))
 }
 
-fn darwin_digest_present(digest: &str) -> Result<bool, Error> {
-    let Ok(output) = run_output("container", &["image", "list"]) else {
-        return Ok(false);
-    };
+fn darwin_image_for_digest(digest: &str) -> Result<Option<String>, Error> {
+    let output = run_output("container", &["image", "list"])?;
     if !output.status.success() {
-        return Ok(false);
+        return Ok(None);
     }
     let text = String::from_utf8_lossy(&output.stdout);
     for line in text.lines().skip(1) {
@@ -1024,10 +1091,10 @@ fn darwin_digest_present(digest: &str) -> Result<bool, Error> {
             continue;
         };
         if actual.trim_start_matches("sha256:") == digest.trim_start_matches("sha256:") {
-            return Ok(true);
+            return Ok(Some(reference));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn container_reference_from_line(line: &str) -> Option<String> {
@@ -1169,8 +1236,23 @@ mod test {
     }
 
     #[test]
-    fn image_ref_rejects_whitespace() {
-        assert!(super::ImageRef::parse("localhost/wrix image:latest").is_err());
+    fn image_ref_accepts_registry_port_tag_and_digest() {
+        assert!(super::ImageRef::parse("localhost:5000/wrix/image:test-1").is_ok());
+        assert!(super::ImageRef::parse(&format!("wrix/image@sha256:{}", "a".repeat(64))).is_ok());
+    }
+
+    #[test]
+    fn image_ref_rejects_option_like_and_malformed_values() {
+        for value in [
+            "--privileged",
+            "localhost/wrix image:latest",
+            "docker://wrix:test",
+            "wrix//image:test",
+            "wrix/image:",
+            "wrix/image@sha256:short",
+        ] {
+            assert!(super::ImageRef::parse(value).is_err(), "accepted {value}");
+        }
     }
 
     #[test]

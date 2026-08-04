@@ -32,6 +32,14 @@ let
     "aarch64-linux"
     "x86_64-linux"
   ];
+  krunRuntime = linuxPkgs.crun.overrideAttrs (old: {
+    pname = "crun-krun";
+    buildInputs = old.buildInputs ++ [ linuxPkgs.libkrun ];
+    configureFlags = (old.configureFlags or [ ]) ++ [ "--with-libkrun" ];
+    postFixup = (old.postFixup or "") + ''
+      patchelf --add-rpath ${linuxPkgs.lib.getLib linuxPkgs.libkrun}/lib $out/bin/crun
+    '';
+  });
 
   manifest = import ./manifest.nix { inherit pkgs; };
   imageTagLib = import ../util/image-tag.nix { };
@@ -351,26 +359,14 @@ let
       runtimeSecrets ? { },
       mcp ? { },
       mcpRuntime ? false,
-      # Agent runtime axis composed onto the workspace profile. "direct" is
-      # the default base image; "claude" and "pi" are explicit agent overlays.
       agent ? "direct",
-      # Linux-built package whose `bin/` directory contains the selected
-      # agent binary. Defaults according to `agent`.
       agentPkg ? null,
-      # Settings for the selected agent. Schema depends on `agent`.
       agentSettings ? { },
     }:
     let
-      # mcpRuntime: include ALL MCP server packages, defer selection to runtime.
-      # Mutually exclusive with explicit mcp server config.
       effectiveMcp = if mcpRuntime then mapAttrs (_: _: { }) mcpRegistry else mcp;
-
-      # Build MCP configuration from enabled servers
       mcpConfig = buildMcpConfig effectiveMcp;
-
       mcpServerConfigs = mcpConfig.mcpServers;
-
-      # Extend profile with wrix-owned sandbox tools, user packages, and MCP server packages.
       finalProfile = extendProfile profile {
         packages = sandboxToolPackages ++ packages ++ mcpConfig.packages;
         inherit mounts env runtimeSecrets;
@@ -417,6 +413,7 @@ let
       launcherRuntimePath = makeBinPath (
         [ pkgs.nix ]
         ++ optionals isLinux [
+          krunRuntime
           pkgs.podman
           pkgs.skopeo
         ]
@@ -436,9 +433,6 @@ let
         export WRIX_SERVICE_IMAGE_DIGEST="''${WRIX_SERVICE_IMAGE_DIGEST:-${serviceImage.digest}}"
       '';
 
-      # Expose the image derivation for consumers that inspect the image directly.
-      # Its `.source` metadata is the platform install source: a Linux descriptor
-      # or a Darwin tar-loadable archive.
       image = mkImage {
         profile = finalProfile;
         entrypointSh =
@@ -524,8 +518,6 @@ let
         inherit agent profileConfig;
       };
 
-      # Profile-specific sandbox: wrapper composes launcher + immutable
-      # ProfileConfig so `wrix run` works without mutable image or agent env.
       packageName = "wrix-${finalProfile.name}${packageSuffix}";
       packageSuffix = if agent == "direct" then "" else "-${agent}";
       package =

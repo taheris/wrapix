@@ -109,6 +109,8 @@ pub enum LaunchError {
     KvmMissing,
     /// krun runtime not found. A microVM boundary requires crun with libkrun.
     KrunMissing,
+    /// child process returned an unsupported exit status: {code}
+    InvalidExitStatus { code: i32 },
     /// {source}
     Io { source: io::Error },
     /// launch failed ({operation}) and cleanup also failed: {cleanup}
@@ -770,7 +772,7 @@ impl<'a> Plan<'a> {
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit());
-            Ok(status_to_exit(command.status()?))
+            status_to_exit(command.status()?)
         })
     }
 
@@ -847,7 +849,7 @@ impl<'a> Plan<'a> {
             if let Some(auth) = &pi_auth {
                 auth.sync_darwin(staging)?;
             }
-            Ok(status_to_exit(status))
+            status_to_exit(status)
         })
     }
 
@@ -2034,11 +2036,12 @@ fn vmnet_interface(stdout: &[u8], gateway: &str) -> Option<String> {
     None
 }
 
-fn status_to_exit(status: std::process::ExitStatus) -> ExitCode {
-    status
-        .code()
-        .and_then(|code| u8::try_from(code).ok())
-        .map_or(ExitCode::FAILURE, ExitCode::from)
+fn status_to_exit(status: std::process::ExitStatus) -> Result<ExitCode, LaunchError> {
+    let Some(code) = status.code() else {
+        return Ok(ExitCode::FAILURE);
+    };
+    let code = u8::try_from(code).map_err(|_source| LaunchError::InvalidExitStatus { code })?;
+    Ok(ExitCode::from(code))
 }
 
 fn current_uid() -> Result<String, LaunchError> {
@@ -2223,16 +2226,30 @@ fn podman_runtime_dir() -> Result<PathBuf, LaunchError> {
 
 fn tmux_session_id() -> Option<String> {
     env::var_os("TMUX")?;
-    let output = run_output(
+    let output = match run_output(
         "tmux",
         &[
             "display-message",
             "-p",
             "#{session_name}:#{window_index}.#{pane_index}",
         ],
-    )
-    .ok()?;
-    output.status.success().then(|| trim_stdout(&output.stdout))
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            tracing::warn!(error = %error, "could not query tmux session");
+            return None;
+        }
+    };
+    if !output.status.success() {
+        tracing::warn!(
+            status = ?output.status.code(),
+            stderr = %String::from_utf8_lossy(&output.stderr),
+            "tmux session query failed"
+        );
+        return None;
+    }
+    let session_id = trim_stdout(&output.stdout);
+    (!session_id.is_empty()).then_some(session_id)
 }
 
 fn session_directory(platform: Platform) -> PathBuf {
@@ -2255,19 +2272,37 @@ fn focus_target(platform: Platform) -> Option<String> {
             ],
         ),
     };
-    let output = run_output(program, args).ok()?;
+    let output = match run_output(program, args) {
+        Ok(output) => output,
+        Err(error) => {
+            tracing::warn!(program = %program, error = %error, "could not query focus target");
+            return None;
+        }
+    };
     if !output.status.success() {
+        tracing::warn!(
+            program = %program,
+            status = ?output.status.code(),
+            stderr = %String::from_utf8_lossy(&output.stderr),
+            "focus target query failed"
+        );
         return None;
     }
     match platform {
-        Platform::Linux => serde_json::from_slice::<Value>(&output.stdout)
-            .ok()?
-            .get("id")
-            .and_then(|value| match value {
+        Platform::Linux => {
+            let value = match serde_json::from_slice::<Value>(&output.stdout) {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!(program = %program, error = %error, "focus target returned invalid JSON");
+                    return None;
+                }
+            };
+            value.get("id").and_then(|value| match value {
                 Value::String(text) => Some(text.clone()),
                 Value::Number(number) => Some(number.to_string()),
                 _ => None,
-            }),
+            })
+        }
         Platform::Darwin => {
             let target = trim_stdout(&output.stdout);
             (!target.is_empty()).then_some(target)
@@ -2276,20 +2311,57 @@ fn focus_target(platform: Platform) -> Option<String> {
 }
 
 fn terminal_size() -> Option<(u32, u32)> {
-    let terminal = fs::File::open("/dev/tty").ok()?;
-    let output = ProcessCommand::new("stty")
+    let terminal = match fs::File::open("/dev/tty") {
+        Ok(terminal) => terminal,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::warn!(error = %error, "could not open terminal for size query");
+            return None;
+        }
+    };
+    let output = match ProcessCommand::new("stty")
         .arg("size")
         .stdin(terminal)
         .output()
-        .ok()?;
+    {
+        Ok(output) => output,
+        Err(error) => {
+            tracing::warn!(error = %error, "could not run terminal size query");
+            return None;
+        }
+    };
     if !output.status.success() {
+        tracing::warn!(
+            status = ?output.status.code(),
+            stderr = %String::from_utf8_lossy(&output.stderr),
+            "terminal size query failed"
+        );
         return None;
     }
     let text = trim_stdout(&output.stdout);
-    let mut dimensions = text
-        .split_whitespace()
-        .filter_map(|value| value.parse::<u32>().ok());
-    Some((dimensions.next()?, dimensions.next()?))
+    let mut dimensions = text.split_whitespace();
+    let rows = parse_terminal_dimension(dimensions.next(), "rows")?;
+    let columns = parse_terminal_dimension(dimensions.next(), "columns")?;
+    Some((rows, columns))
+}
+
+fn parse_terminal_dimension(value: Option<&str>, dimension: &'static str) -> Option<u32> {
+    let Some(value) = value else {
+        tracing::warn!(dimension = %dimension, "terminal size query omitted a dimension");
+        return None;
+    };
+    match value.parse::<u32>() {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(
+                dimension = %dimension,
+                value = %value,
+                error = %error,
+                "terminal size query returned an invalid dimension"
+            );
+            None
+        }
+    }
 }
 
 fn serialize_shell_args(args: &[String]) -> String {
@@ -2300,25 +2372,37 @@ fn serialize_shell_args(args: &[String]) -> String {
 }
 
 fn ensure_krun() -> Result<(), LaunchError> {
-    if !Path::new("/dev/kvm").exists() {
-        return Err(LaunchError::KvmMissing);
-    }
-    if run_output("krun", &["--version"]).is_ok_and(|output| output.status.success()) {
+    require_kvm(Path::new("/dev/kvm"))?;
+    if matches!(run_output("krun", &["--version"]), Ok(output) if output.status.success()) {
         return Ok(());
     }
-    if run_output(
+    let podman_has_krun = match run_output(
         "podman",
         &[
             "info",
             "--format",
             "{{range .Host.OCIRuntime.Alternatives}}{{.}}{{end}}",
         ],
-    )
-    .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("krun"))
-    {
-        return Ok(());
+    ) {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).contains("krun")
+        }
+        Ok(_output) => false,
+        Err(_error) => false,
+    };
+    if podman_has_krun {
+        Ok(())
+    } else {
+        Err(LaunchError::KrunMissing)
     }
-    Err(LaunchError::KrunMissing)
+}
+
+fn require_kvm(path: &Path) -> Result<(), LaunchError> {
+    if path.exists() {
+        Ok(())
+    } else {
+        Err(LaunchError::KvmMissing)
+    }
 }
 
 fn deploy_key_name(workspace: &Path, configured: Option<&KeyName>) -> Result<KeyName, LaunchError> {
@@ -2830,6 +2914,15 @@ mod test {
             super::stable_mount_index(&PathBuf::from("/tmp/a")),
             super::stable_mount_index(&PathBuf::from("/tmp/a"))
         );
+    }
+
+    #[test]
+    fn microvm_opt_in_without_kvm_fails_loudly() {
+        let missing = scratch_dir("missing-kvm").join("dev/kvm");
+        assert!(matches!(
+            super::require_kvm(&missing),
+            Err(LaunchError::KvmMissing)
+        ));
     }
 
     #[test]

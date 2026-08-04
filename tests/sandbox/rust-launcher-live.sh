@@ -145,15 +145,6 @@ for arg in "$@"; do
 done
 SKOPEO_SHIM
   chmod +x "$bin/skopeo"
-
-  cat >"$bin/krun" <<'KRUN_SHIM'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "--version" ]]; then
-  printf 'krun test shim\n'
-fi
-KRUN_SHIM
-  chmod +x "$bin/krun"
 }
 
 write_profile_config() {
@@ -198,22 +189,6 @@ run_live_run() {
   WRIX_IMAGE_KEEP_FILE="$tmp/state/image-mru.json" \
   WRIX_TEST_STATE="$tmp/state" \
   WRIX_TEST_DIGEST="$digest" \
-    "$wrix" --profile-config "$profile_config" run "$workspace" true
-}
-
-run_live_run_microvm() {
-  local tmp="$1"
-  local profile_config="$2"
-  local workspace="$3"
-  local digest="$4"
-  local wrix="$5"
-  PATH="$tmp/bin:$PATH" \
-  HOME="$tmp/home" \
-  XDG_CACHE_HOME="$tmp/cache" \
-  WRIX_IMAGE_KEEP_FILE="$tmp/state/image-mru.json" \
-  WRIX_TEST_STATE="$tmp/state" \
-  WRIX_TEST_DIGEST="$digest" \
-  WRIX_MICROVM=1 \
     "$wrix" --profile-config "$profile_config" run "$workspace" true
 }
 
@@ -288,8 +263,9 @@ test_linux_sets_is_sandbox_without_fakeuid() {
   printf 'PASS: live Rust Linux launcher sets IS_SANDBOX without libfakeuid\n'
 }
 
-test_linux_microvm_runtime() {
+test_linux_microvm_missing_kvm_fails_before_podman() {
   require_linux
+  [[ ! -e /dev/kvm ]] || skip "missing-KVM verifier requires a host without /dev/kvm"
   local tmp wrix workspace descriptor layout profile_config digest output status
   tmp=$(mktemp -d -t wrix-live.XXXXXX)
   register_tmp "$tmp"
@@ -304,29 +280,23 @@ test_linux_microvm_runtime() {
   write_profile_config "$profile_config" "$workspace" "$descriptor" "$digest"
 
   set +e
-  output=$(run_live_run_microvm "$tmp" "$profile_config" "$workspace" "$digest" "$wrix" 2>&1)
+  output=$(PATH="$tmp/bin:$PATH" \
+    HOME="$tmp/home" \
+    XDG_CACHE_HOME="$tmp/cache" \
+    WRIX_IMAGE_KEEP_FILE="$tmp/state/image-mru.json" \
+    WRIX_TEST_STATE="$tmp/state" \
+    WRIX_TEST_DIGEST="$digest" \
+    WRIX_MICROVM=1 \
+    "$wrix" --profile-config "$profile_config" run "$workspace" true 2>&1)
   status="$?"
   set -e
 
-  if [[ -e /dev/kvm ]]; then
-    [[ "$status" -eq 0 ]] || fail "microVM launch failed despite /dev/kvm: $output"
-    grep -q -- '--runtime krun --userns=keep-id --entrypoint /krun-relay' "$tmp/state/podman.log" || fail "microVM launch did not select krun relay with keep-id"
-    grep -q -- '-e WRIX_TERM_ROWS=' "$tmp/state/podman.log" || fail "microVM launch did not pass terminal rows"
-    grep -q -- '-e WRIX_TERM_COLS=' "$tmp/state/podman.log" || fail "microVM launch did not pass terminal columns"
-    grep -q -- '-e WRIX_KRUN_CMD=' "$tmp/state/podman.log" || fail "microVM launch did not serialize the container command"
-    grep -q -- "'true'" "$tmp/state/podman.log" || fail "microVM serialized command omitted the requested command"
-    if grep -q -- '-e IS_SANDBOX=1' "$tmp/state/podman.log"; then
-      fail "microVM boundary used default-boundary IS_SANDBOX env"
-    fi
-    printf 'PASS: live Rust Linux launcher selects krun runtime when KVM is present\n'
-  else
-    [[ "$status" -ne 0 ]] || fail "microVM launch without /dev/kvm unexpectedly succeeded"
-    [[ "$output" == *'/dev/kvm not found'* ]] || fail "missing-KVM error did not name /dev/kvm: $output"
-    if grep -q '^run ' "$tmp/state/podman.log"; then
-      fail "launcher reached podman run after missing-KVM failure"
-    fi
-    printf 'PASS: live Rust Linux launcher fails loudly when KVM is missing\n'
+  [[ "$status" -ne 0 ]] || fail "microVM launch without /dev/kvm unexpectedly succeeded"
+  [[ "$output" == *'/dev/kvm not found'* ]] || fail "missing-KVM error did not name /dev/kvm: $output"
+  if grep -q '^run ' "$tmp/state/podman.log"; then
+    fail "launcher reached podman run after missing-KVM failure"
   fi
+  printf 'PASS: live Rust Linux launcher fails before podman dispatch when KVM is missing\n'
 }
 
 test_linux_archiveless_install_uses_oci_layout() {
@@ -453,7 +423,6 @@ IMAGES
 if [[ $# -eq 0 ]]; then
   test_linux_custom_mounts_env_reach_live_launcher
   test_linux_sets_is_sandbox_without_fakeuid
-  test_linux_microvm_runtime
   test_linux_archiveless_install_uses_oci_layout
   test_linux_second_spawn_skips_loaded_image
   test_linux_delta_bounded_uses_descriptor_transport
