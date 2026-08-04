@@ -14,6 +14,7 @@ let
   inherit (pkgs.lib)
     concatStringsSep
     escapeShellArg
+    makeBinPath
     optionalAttrs
     removeAttrs
     ;
@@ -166,6 +167,10 @@ let
     services-devshell-start-independent = import ./services/devshell-lifecycle.nix {
       inherit pkgs wrix;
     };
+    services-limit-mode-cache-endpoint = import ./services/cache-network-system.nix {
+      inherit pkgs wrix;
+      sandboxImage = testImages.base;
+    };
   };
 
   prePushSmokeTests = removeAttrs smokeTests [
@@ -230,6 +235,13 @@ let
     inherit package executable;
   };
 
+  mkSystemTestCiApp =
+    name: test:
+    writeShellScriptBin name ''
+      set -euo pipefail
+      [[ -e "${test}" ]]
+    '';
+
   ciApps = [
     (mkCiApp sandboxImageChecks.wrixSpawnLoadTest "test-wrix-spawn-load")
     (mkCiApp sandboxImageChecks.imageInstallArchivelessTest "test-image-install-archiveless")
@@ -280,6 +292,8 @@ let
     (mkCiApp testPlaywrightMandatoryFlags "test-playwright-mandatory-flags")
     (mkCiApp testPlaywrightUserOptionsConfig "test-playwright-user-options-config")
     (mkCiApp testBeadsLiveSystem "test-beads-live-system")
+    (mkCiApp testServicesDevshellStartIndependent "test-services-devshell-start-independent")
+    (mkCiApp testServicesLimitModeCacheEndpoint "test-services-limit-mode-cache-endpoint")
   ];
 
   ciAppNameLines = concatStringsSep "\n" (map (app: "      ${app.name}") ciApps);
@@ -485,6 +499,37 @@ let
     exec ${nix}/bin/nix build --no-link --no-warn-dirty \
       "$REPO_ROOT#legacyPackages.${ciLinuxSystem}.systemTests.beads-live-system"
   '';
+
+  serviceCiPath = makeBinPath [
+    pkgs.curl
+    pkgs.openssh
+    pkgs.python3
+    wrix.rustPackage.wrix
+  ];
+  serviceCiEnvironment = ''
+    export PATH="${serviceCiPath}:$PATH"
+    export WRIX_TEST_WRIX_BIN=${escapeShellArg "${wrix.rustPackage.wrix}/bin/wrix"}
+  '';
+  testServicesDevshellStartIndependent =
+    if pkgs.stdenv.isLinux then
+      mkSystemTestCiApp "test-services-devshell-start-independent" systemTests.services-devshell-start-independent
+    else
+      mkRepoScriptCiApp {
+        name = "test-services-devshell-start-independent";
+        script = "tests/services/host-nix-config.sh";
+        args = [ "test_mkdevshell_nix_cache" ];
+        environment = serviceCiEnvironment;
+      };
+  testServicesLimitModeCacheEndpoint =
+    if pkgs.stdenv.isLinux then
+      mkSystemTestCiApp "test-services-limit-mode-cache-endpoint" systemTests.services-limit-mode-cache-endpoint
+    else
+      mkRepoScriptCiApp {
+        name = "test-services-limit-mode-cache-endpoint";
+        script = "tests/services/cache-network-live.sh";
+        args = [ "test_limit_mode_cache_endpoint" ];
+        environment = serviceCiEnvironment;
+      };
 
   notifyFixture = import ./standalone/notify-fixture.nix { inherit pkgs; };
 

@@ -12,7 +12,7 @@ Wrix workspaces need long-lived local services that are shared by host commands 
 
 The service container owns two service families:
 
-- **Dolt for beads** — the Dolt SQL server for the workspace's `.beads/dolt` database. The Beads issue-tracking contract remains in `beads.md`; this spec owns only the shared container lifecycle and endpoint publication.
+- **Dolt for beads** — the Dolt SQL server for the Beads-owned workspace database. `beads.md` owns issue tracking and database storage; this spec owns only the shared container lifecycle and endpoint publication.
 - **Project Nix cache** — a kiss-cache-compatible flat binary cache. Host Nix reads/writes the cache through the local filesystem; sandboxes read the same cache through a read-only HTTP server in the service container. The cache is an explicit project cache, not a host-store server: only paths published by wrix's project-scoped publishing rules are present.
 
 ### State layout
@@ -50,11 +50,11 @@ Bulky cache:
 └── log/                    # optional
 ```
 
-The Dolt database remains at `.beads/dolt` so existing beads branch sync semantics do not change. The service container may mount `.beads/dolt` and mounts `<cache-root>` read-only for HTTP serving. Sandboxes do not receive the durable state root, cache signing key, host `/nix/store`, host Nix daemon socket, or any authoritative cache publish manifest. Workspace-local `.wrix` may contain non-authoritative endpoint/debug pointers, but not cache signing keys, publish manifests, or trusted state.
+`beads.md` owns the Dolt database location and branch-sync state. The service container may mount that database and mounts `<cache-root>` read-only for HTTP serving. Sandboxes do not receive the durable state root, cache signing key, host `/nix/store`, host Nix daemon socket, or any authoritative cache publish manifest. Workspace-local `.wrix` may contain non-authoritative endpoint/debug pointers, but not cache signing keys, publish manifests, or trusted state.
 
 ### Lifecycle
 
-`mkDevShell` starts the service container by default because the project Nix cache is default-on. `nixCache = false` opts out of cache service/integration but still starts the service container when beads needs Dolt (`.beads/dolt` exists). `wrix run` and `wrix spawn` call `wrix service start` as an idempotent ensure/health-check before launching the agent container; if the service is already healthy, this is a no-op.
+`mkDevShell` starts the service container by default because the project Nix cache is default-on. `nixCache = false` opts out of cache service/integration but still starts the service container when the Beads-owned workspace database exists. `wrix run` and `wrix spawn` call `wrix service start` as an idempotent ensure/health-check before launching the agent container; if the service is already healthy, this is a no-op.
 
 The service container has a caller-independent lifecycle invariant: stopping the shell, editor, or service that evaluated shellHook does not tear down or SIGKILL the workspace service container. `wrix service stop` removes only the selected workspace's service container. Cache-only service startup is suppressed for temp-directory scratch workspaces, so `/tmp` test or integration directories do not create persistent service containers. Loom bead clones and the independent integration clone under `.loom/` share the outer repository's service identity instead of starting persistent `*-service` containers named after the internal path.
 
@@ -65,24 +65,24 @@ The `<repo>-service` container image is a wrix-managed Nix-built image.
 `sandbox.md` owns installation and retention through the shared runtime image
 path. This spec owns only the service lifecycle's use of that image path.
 
-### Service Command Ownership
+### Service operations
 
-`wrix service` is for service/container/cache/Dolt-server management. `cli.md` owns the root command shape and help behavior; this spec owns the service operations behind these command groups:
+`cli.md` owns public command placement, root help behavior, and the packaged
+binary surface. This spec owns the operations delegated to its service command
+group:
 
-```text
-wrix service start|stop|status|logs|endpoints
-wrix service dolt status|socket|port|host|attach|gc|wait
-wrix service cache status|publish|warm|prune|rotate-key
-```
+- lifecycle and diagnostics: `start`, `stop`, `status`, `logs`, `endpoints`;
+- Dolt endpoint and maintenance operations: `status`, `socket`, `port`, `host`,
+  `attach`, `gc`, `wait`;
+- project-cache operations: `status`, `publish`, `warm`, `prune`, `rotate-key`.
 
-`wrix beads push` is the Beads session-close workflow owned by `beads.md`; wrix does not expose a `wrix service dolt push` command because that collides semantically with upstream `bd dolt push`. No `beads-dolt`, `beads-push`, or `<repo>-beads` compatibility surface is part of Wrix.
-
-The service implementation is Rust-first. Service internals are proper Rust crates/helper binaries rather than hidden private multiplexer subcommands:
+The delegated implementation is Rust-first. Service internals are proper Rust
+crates and helper binaries:
 
 - `wrix-service` — service-container lifecycle, endpoint metadata, port leasing, Dolt service management.
 - `wrix-cache` — project-cache library plus helper binaries `wrix-cache-hook`, `wrix-cache-publish`, and `wrix-cache-serve`; the HTTP cache server lives here rather than in a separate crate.
 
-Nix may install immutable helper binaries for privileged hook/static-server entry points, but only `wrix` is the intended human-facing CLI.
+Nix may install immutable helper binaries for privileged hook/static-server entry points.
 
 ### Dolt service
 
@@ -150,7 +150,7 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
 - A workspace that starts services gets a container named `<repo>-service`; the same service identity path yields the same container name, preferred service ports, state roots, and cache root, while two different checkout paths do not collide
   [test](../crates/wrix-service/tests/lifecycle.rs::workspace_identity_is_stable_and_collision_resistant)
 - `mkDevShell` starts the service container by default for the project cache, `nixCache = false` suppresses cache-only startup, and any service container survives the process that evaluated the shell hook
-  [system](verify:services.devshell-start-independent)
+  [system](test-ci:test-services-devshell-start-independent)
 - `wrix service start` delegates service-image installation to the shared
   runtime image installer using the source metadata defined by
   `image-builder.md`, with no service-specific install path
@@ -163,9 +163,7 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
   [test](../crates/wrix-service/tests/lifecycle.rs::loom_bead_workspace_uses_repo_service_identity)
 - Loom's independent clone under `.loom/integration` uses the outer repository service identity, so devshell entry does not accumulate integration-named `*-service` containers
   [test](../crates/wrix-service/tests/lifecycle.rs::loom_integration_workspace_uses_repo_service_identity)
-- Service management is exposed through `wrix service ...`, session-close sync is exposed through `wrix beads push` per `cli.md`, and no `beads-dolt`, `beads-push`, `wrix-svc`, or `<repo>-beads` compatibility surface is installed or required
-  [test](../crates/wrix-service/tests/command_surface.rs::service_surface_is_reached_through_wrix_root)
-- Rust packaging exposes `wrix` as the human-facing CLI plus explicit helper binaries from `wrix-cache`; wrix does not rely on hidden private multiplexer subcommands
+- Rust packaging exposes the explicit `wrix-cache-hook`, `wrix-cache-publish`, and `wrix-cache-serve` helper binaries from `wrix-cache`
   [check](verify:services.rust-helper-binaries)
 - Linux beads clients reach Dolt through the workspace Unix socket, while Darwin beads clients receive the service container's TCP host/port endpoint
   [system](verify:services.dolt-platform-transport)
@@ -180,7 +178,7 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
 - Sandboxes receive no cache signing key, no durable state root mount, no host `/nix/store` mount, and no host Nix daemon socket as part of project-cache integration
   [system](verify:services.sandbox-cache-boundary)
 - With `WRIX_NETWORK=limit`, sandbox Nix can reach exactly the project cache endpoint while unrelated host-local services remain outside the generated allowlist
-  [system](verify:services.limit-mode-cache-endpoint)
+  [system](test-ci:test-services-limit-mode-cache-endpoint)
 - The post-build hook drops privileges before publishing, never executes workspace files, and publishes only when `DRV_PATH` matches a configured publish-root derivation in `<state-root>/publish-roots.json`
   [test](../crates/wrix-cache/tests/hook.rs::post_build_hook_scopes_publish_to_manifest_roots)
 - `wrix service cache publish` refreshes the publish manifest, publishes only already-realized configured roots, drains matching pending records, updates GC markers, and does not build missing roots
@@ -207,13 +205,15 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
 ### Functional
 
 1. **Workspace identity** — services are keyed by the canonical repository root for paths inside a Git checkout, and by the canonical current path otherwise. Container names use `<repo>-service`; ports and state/cache roots derive from the identity path hash. Loom-managed paths under `.loom/` use the outer repository identity.
-2. **Service command surface** — public service/cache orchestration is exposed through `wrix service ...` under the root CLI owned by `cli.md`, not through standalone `wrix-svc`, `beads-dolt`, or `beads-push` binaries. Separable internals are proper Rust crates/helper binaries, not hidden public subcommands.
+2. **Service operations** — the service command group provides lifecycle,
+   diagnostics, Dolt endpoint maintenance, and project-cache operations.
+   Separable internals are proper Rust crates and helper binaries.
 3. **Lifecycle management** — `wrix service start` is idempotent and caller-independent; `stop`, `status`, `logs`, and endpoint queries operate on the selected workspace only. Cache-only starts in temp-directory scratch workspaces are no-ops rather than persistent service containers.
 4. **Service image source** — `wrix service start` installs the selected service
    image through the shared runtime image installer. `image-builder.md` owns
    source metadata and labels; `sandbox.md` owns install dispatch and image
    retention.
-5. **Dolt hosting** — when `.beads/dolt` exists, the service container runs the Dolt SQL server for beads and publishes the endpoint in the shape `beads.md` expects.
+5. **Dolt hosting** — when the Beads-owned workspace database exists, the service container runs its Dolt SQL server and publishes the endpoint in the shape `beads.md` expects.
 6. **Cache enablement** — `mkDevShell` enables the standard project cache by default; `nixCache = false` disables it.
 7. **Host cache pull** — enabled host devshells configure Nix to use `file://<cache-root>` plus the generated public key and `builders-use-substitutes = true`.
 8. **Host cache push** — successful host builds of manifest-matching workspace roots publish the filtered path set into the project cache with the host-only signing key.

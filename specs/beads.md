@@ -26,27 +26,6 @@ provides:
   Dolt endpoint diagnostics; this spec owns the behavior behind
   `wrix beads push` session-close branch sync.
 
-### Container lifecycle isolation
-
-The service container started by `beads.shellHook` / `services.md` has a
-lifecycle independent of the process that triggered shellHook evaluation.
-Stopping or restarting the caller (a shell, an editor process, a systemd user
-service) does not block on container teardown, nor cause the service
-container to be SIGKILLed as a side effect of the caller's stop timeout.
-
-Rationale: shellHook fires from any process that enters the devShell —
-direnv, `nix print-dev-env`, an editor's `.envrc`-driven evaluation. When
-the caller is a long-running service (e.g. an emacs daemon under
-`systemd --user` with `envrc-mode` active), the container otherwise
-inherits the caller's cgroup. Stopping the caller then waits the full
-`TimeoutStopSec` before SIGKILL because conmon keeps the cgroup populated
-— and SIGKILL takes out both the caller and the container.
-
-The mechanism is platform-conditional (e.g. `systemd-run --user --scope` on
-systemd-based Linux; Darwin's Apple `container` and podman-via-VM already
-satisfy the invariant via separate process trees). The spec states the
-invariant; the implementation chooses the mechanism per platform.
-
 ## Command Surface
 
 `bd …` commands are upstream beads. `wrix beads push` is the Wrix-provided
@@ -260,13 +239,6 @@ upstream, not by this spec.
   remote after the command
   [system](test-ci:test-beads-live-system)
 
-- `beads.shellHook` launches the workspace service container with a lifecycle independent
-  of the caller, so stopping a long-running parent (e.g. a `systemd --user`
-  service that triggered shellHook evaluation via envrc) does not block on
-  container teardown nor deliver SIGKILL to the service container as a side effect
-  of the caller's stop timeout
-  [system](test-ci:test-beads-live-system)
-
 - `beads.shellHook` fails non-zero with a stderr message when no container
   runtime is available or when Dolt does not become reachable within the
   startup budget — no fallback to embedded Dolt
@@ -352,18 +324,15 @@ upstream, not by this spec.
    in the configured sync-branch worktree.
 5. **Shared Dolt service** — `beads.shellHook` reaches Dolt through the
    endpoint published by the workspace service defined in `services.md`.
-6. **Lifecycle isolation** — the service container started by
-   `beads.shellHook` has a lifecycle independent of the process that
-   triggered its evaluation.
-7. **Session-close sync** — `wrix beads push` attempts `bd dolt push` before
+6. **Session-close sync** — `wrix beads push` attempts `bd dolt push` before
    `bd dolt pull`; on the pull-fallback path it snapshots local `status`
    and `labels` intent before pulling and refuses to overwrite divergent
    rows.
-8. **Auto-export suppression** — `wrix beads push` disables bd's auto-export
+7. **Auto-export suppression** — `wrix beads push` disables bd's auto-export
    hook on every invocation past the context guard (idempotent); the
    pre-pull cleanup in the beads worktree uses `git status --porcelain` so
    any dirt the rebase would refuse is committed first.
-9. **Dolt origin remote handling** — on host invocations, `wrix beads push`
+8. **Dolt origin remote handling** — on host invocations, `wrix beads push`
    repairs a missing or stale Dolt `origin` remote to the current checkout's
    host-path beads worktree remote before Dolt sync. The repair updates the
    SQL Dolt remote directly rather than writing `sync.remote`, so it cannot
@@ -371,22 +340,22 @@ upstream, not by this spec.
    invocations use the same current-checkout remote only as a temporary sync
    override and restore the prior `origin` before exit, so they do not leave
    `/workspace` paths in shared config.
-10. **Context-aware invocation** — `wrix beads push` is safe to invoke
+9. **Context-aware invocation** — `wrix beads push` is safe to invoke
    unconditionally. Under `$LOOM_INSIDE` it is a full no-op (exit 0); when
    the git root is unresolvable it fails fast with an actionable message;
    otherwise it runs the dolt-sync and sync-branch sync. Consumers need no
    `$LOOM_INSIDE` guard around the call.
-11. **Beads-worktree resilience** — the sync-branch sync recreates the
+10. **Beads-worktree resilience** — the sync-branch sync recreates the
    beads worktree when it is absent or present-but-invalid (dangling gitdir
    after the admin directory was pruned/removed), rebuilding relative to the
    current `$ROOT` so host and container paths stay correct; and every git
    invocation in that section, including the recreating `git worktree add`,
    skips prek so the config-less sync branch does not abort the sync.
-12. **Sandbox config staging** — sandbox launchers stage beads config and
+11. **Sandbox config staging** — sandbox launchers stage beads config and
    metadata only. They do not stage `.beads/issues.jsonl`, and they do not
    permit JSONL auto-import or embedded Dolt fallback when the Dolt service is
    unavailable.
-13. **Sandbox Dolt remote mapping** — direct `bd dolt pull` / `bd dolt push`
+12. **Sandbox Dolt remote mapping** — direct `bd dolt pull` / `bd dolt push`
    inside a sandbox temporarily remap Dolt `origin` to the container-visible
    `/workspace/.git/beads-worktrees/<branch>/.beads/dolt-remote` for the
    command and restore the persisted host-path remote afterwards, so the same
@@ -415,9 +384,8 @@ upstream, not by this spec.
 - `bd` CLI implementation (external upstream tool)
 - Web UI for issue management
 - Integration with external trackers (Jira, Linear)
-- Lifecycle management of the process that triggers shellHook — beads
-  ensures its own container is independent; what the caller does is the
-  caller's concern
+- Lifecycle management of the process that triggers shellHook; `services.md`
+  owns the service-container lifetime, while the caller owns its own process
 - Downstream consumers' session-close documentation (e.g. another repo's
   `AGENTS.md` land-the-plane block) — `wrix beads push` owns the context-handling
   behavior so consumers invoke it unconditionally; how each repo documents

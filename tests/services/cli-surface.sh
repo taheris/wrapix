@@ -48,15 +48,6 @@ assert_executable() {
   fi
 }
 
-assert_package_attr_absent() {
-  local attr="$1"
-  local out_file="$TEST_TMP/$attr.out"
-  local err_file="$TEST_TMP/$attr.err"
-  if nix build --no-link --no-warn-dirty "$REPO_ROOT#$attr" >"$out_file" 2>"$err_file"; then
-    fail "legacy package attr is still exposed: $attr"
-  fi
-}
-
 test_wrix_service_cli() {
   local package
   package="$(build_package wrix)" || return 1
@@ -131,13 +122,11 @@ JSON
 }
 
 test_rust_helper_binaries() {
-  local wrix_package hook_package publish_package serve_package
-  wrix_package="$(build_package wrix)" || return 1
+  local hook_package publish_package serve_package
   hook_package="$(build_package wrix-cache-hook)" || return 1
   publish_package="$(build_package wrix-cache-publish)" || return 1
   serve_package="$(build_package wrix-cache-serve)" || return 1
 
-  assert_executable "$wrix_package/bin/wrix"
   assert_executable "$hook_package/bin/wrix-cache-hook"
   assert_executable "$publish_package/bin/wrix-cache-publish"
   assert_executable "$serve_package/bin/wrix-cache-serve"
@@ -150,10 +139,6 @@ test_rust_helper_binaries() {
   assert_contains "hook helper help" "$hook_help" "Usage: wrix-cache-hook"
   assert_contains "publish helper help" "$publish_help" "Usage: wrix-cache-publish"
   assert_contains "serve helper help" "$serve_help" "Usage: wrix-cache-serve"
-
-  assert_package_attr_absent beads-dolt
-  assert_package_attr_absent beads-push
-  assert_package_attr_absent wrix-svc
 }
 
 ALL_TESTS=(

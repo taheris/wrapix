@@ -1,4 +1,4 @@
-{ pkgs, system }:
+{ pkgs, ... }:
 
 let
   inherit (pkgs.lib) escapeShellArg;
@@ -15,17 +15,6 @@ let
   dolt = serviceScriptWithWrix "dolt-endpoints";
 in
 {
-  "services.devshell-start-independent" =
-    if pkgs.stdenv.isLinux then
-      ''
-        local root
-        root="$(repo_root)"
-        nix build --no-link --no-warn-dirty \
-          "$root#legacyPackages.${system}.systemTests.services-devshell-start-independent"
-      ''
-    else
-      hostNix "test_mkdevshell_nix_cache";
-
   "services.start-loads-image-source" = lifecycle "test_service_start_loads_image_source";
 
   "services.temp-cache-only" = lifecycle "test_temp_cache_only_workspace_does_not_start_service";
@@ -56,9 +45,6 @@ in
     ${hostNix "test_host_nix_config_fails_when_trusted_setting_ignored"}
     ${hostNix "test_host_nix_config_rejects_non_wrix_hook"}
   '';
-
-  "services.limit-mode-cache-endpoint" =
-    serviceScript "cache-network-live" "test_limit_mode_cache_endpoint";
 
   "services.cache-transport-http-only" = ''
     local root
