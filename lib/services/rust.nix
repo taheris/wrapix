@@ -79,6 +79,7 @@ in
         pkgs.hostname
         pkgs.jq
         pkgs.openssh
+        pkgs.tmux
       ];
       WRIX_TEST_PUBLISHER_HELPER = "${cacheHookTestPublisher}/bin/wrix-cache-test-publisher";
     }
