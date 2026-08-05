@@ -1,5 +1,5 @@
 use std::{
-    env, fs, io,
+    env, fmt, fs, io,
     io::Write,
     net::Ipv4Addr,
     num::NonZeroU16,
@@ -8,7 +8,8 @@ use std::{
 };
 
 use displaydoc::Display;
-use serde::Deserialize;
+use fs2::FileExt;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use wrix_core::{
@@ -118,6 +119,13 @@ pub enum LaunchError {
         operation: Box<LaunchError>,
         cleanup: io::Error,
     },
+    /// notification session registration count overflowed
+    SessionRegistrationOverflow,
+    /// invalid notification session registration JSON at {path}: {source}
+    SessionRegistrationJson {
+        path: String,
+        source: serde_json::Error,
+    },
     /// invalid service endpoint JSON: {source}
     ServiceJson { source: serde_json::Error },
     /// invalid Apple container network JSON: {source}
@@ -198,7 +206,7 @@ struct Plan<'a> {
     host_podman_socket: Option<HostPodmanSocket>,
     network_mode: NetworkMode,
     git_identity: GitIdentity,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -327,25 +335,43 @@ struct ImageSource {
     digest: Option<Digest>,
 }
 
-struct SessionRegistration {
-    path: Option<PathBuf>,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+struct SessionId(String);
+
+#[derive(Debug, Display, Error)]
+enum SessionIdParseError {
+    /// invalid tmux session identifier: {value}
+    Invalid { value: String },
 }
 
-impl SessionRegistration {
-    fn create(session_id: Option<&str>, platform: Platform) -> Result<Self, LaunchError> {
-        Self::create_in(session_id, platform, &session_directory(platform))
+impl SessionId {
+    fn parse(value: &str) -> Result<Self, SessionIdParseError> {
+        let valid = value.rsplit_once(':').is_some_and(|(session, target)| {
+            !session.is_empty()
+                && !session.chars().any(char::is_control)
+                && target.split_once('.').is_some_and(|(window, pane)| {
+                    !window.is_empty()
+                        && window.bytes().all(|byte| byte.is_ascii_digit())
+                        && !pane.is_empty()
+                        && pane.bytes().all(|byte| byte.is_ascii_digit())
+                })
+        });
+        if !valid {
+            return Err(SessionIdParseError::Invalid {
+                value: value.to_owned(),
+            });
+        }
+        Ok(Self(value.to_owned()))
     }
 
-    fn create_in(
-        session_id: Option<&str>,
-        platform: Platform,
-        directory: &Path,
-    ) -> Result<Self, LaunchError> {
-        let Some(session_id) = session_id else {
-            return Ok(Self { path: None });
-        };
-        fs::create_dir_all(directory)?;
-        let safe_id = session_id
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn file_name(&self) -> String {
+        let safe_id = self
+            .0
             .chars()
             .map(|character| {
                 if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
@@ -355,30 +381,196 @@ impl SessionRegistration {
                 }
             })
             .collect::<String>();
-        let path = directory.join(format!("{safe_id}.json"));
-        let focus = focus_target(platform);
-        let value = match platform {
-            Platform::Linux => serde_json::json!({
-                "session_id": session_id,
-                "window_id": focus,
-            }),
-            Platform::Darwin => serde_json::json!({
-                "session_id": session_id,
-                "terminal_app": focus,
-            }),
+        format!("{safe_id}.json")
+    }
+}
+
+impl fmt::Display for SessionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct SessionRecord {
+    session_id: SessionId,
+    #[serde(default)]
+    window_id: Option<String>,
+    #[serde(default)]
+    terminal_app: Option<String>,
+    #[serde(default = "initial_registration_count")]
+    registration_count: u64,
+}
+
+impl SessionRecord {
+    fn new(session_id: &SessionId, platform: Platform, focus: Option<String>) -> Self {
+        let (window_id, terminal_app) = match platform {
+            Platform::Linux => (focus, None),
+            Platform::Darwin => (None, focus),
         };
-        let content =
-            serde_json::to_vec(&value).map_err(|source| LaunchError::ServiceJson { source })?;
-        fs::write(&path, content)?;
-        Ok(Self { path: Some(path) })
+        Self {
+            session_id: session_id.clone(),
+            window_id,
+            terminal_app,
+            registration_count: 1,
+        }
     }
 
-    fn remove(self) -> Result<(), LaunchError> {
-        if let Some(path) = self.path {
-            fs::remove_file(path)?;
+    fn add_registration(
+        &mut self,
+        platform: Platform,
+        focus: Option<String>,
+    ) -> Result<(), LaunchError> {
+        self.registration_count = self
+            .registration_count
+            .checked_add(1)
+            .ok_or(LaunchError::SessionRegistrationOverflow)?;
+        match (platform, focus) {
+            (Platform::Linux, Some(window_id)) => self.window_id = Some(window_id),
+            (Platform::Darwin, Some(terminal_app)) => self.terminal_app = Some(terminal_app),
+            (_, None) => {}
         }
         Ok(())
     }
+}
+
+const fn initial_registration_count() -> u64 {
+    1
+}
+
+enum SessionRegistration {
+    Absent,
+    Active { path: PathBuf, id: SessionId },
+}
+
+impl SessionRegistration {
+    fn create(session_id: Option<&SessionId>, platform: Platform) -> Result<Self, LaunchError> {
+        Self::create_in(session_id, platform, &session_directory(platform))
+    }
+
+    fn create_in(
+        session_id: Option<&SessionId>,
+        platform: Platform,
+        directory: &Path,
+    ) -> Result<Self, LaunchError> {
+        let Some(session_id) = session_id else {
+            return Ok(Self::Absent);
+        };
+        fs::create_dir_all(directory)?;
+        let path = directory.join(session_id.file_name());
+        let focus = focus_target(platform);
+        with_session_lock(&path, || {
+            let record = if path.try_exists()? {
+                match read_session_record(&path) {
+                    Ok(mut record) if &record.session_id == session_id => {
+                        record.add_registration(platform, focus)?;
+                        record
+                    }
+                    Ok(record) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            registered_session_id = %record.session_id,
+                            session_id = %session_id,
+                            "replacing colliding notification session registration"
+                        );
+                        SessionRecord::new(session_id, platform, focus)
+                    }
+                    Err(LaunchError::SessionRegistrationJson { source, .. }) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %source,
+                            "replacing malformed notification session registration"
+                        );
+                        SessionRecord::new(session_id, platform, focus)
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                SessionRecord::new(session_id, platform, focus)
+            };
+            write_session_record(&path, &record)
+        })?;
+        Ok(Self::Active {
+            path,
+            id: session_id.clone(),
+        })
+    }
+
+    fn remove(self) -> Result<(), LaunchError> {
+        let Self::Active { path, id } = self else {
+            return Ok(());
+        };
+        with_session_lock(&path, || {
+            if !path.try_exists()? {
+                tracing::warn!(
+                    path = %path.display(),
+                    session_id = %id,
+                    "notification session registration disappeared before cleanup"
+                );
+                return Ok(());
+            }
+            let mut record = read_session_record(&path)?;
+            if record.session_id != id {
+                tracing::warn!(
+                    path = %path.display(),
+                    registered_session_id = %record.session_id,
+                    session_id = %id,
+                    "notification session registration changed before cleanup"
+                );
+                return Ok(());
+            }
+            if record.registration_count > 1 {
+                record.registration_count -= 1;
+                write_session_record(&path, &record)
+            } else {
+                fs::remove_file(&path).map_err(LaunchError::from)
+            }
+        })
+    }
+}
+
+fn read_session_record(path: &Path) -> Result<SessionRecord, LaunchError> {
+    let content = fs::read(path)?;
+    serde_json::from_slice(&content).map_err(|source| LaunchError::SessionRegistrationJson {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn write_session_record(path: &Path, record: &SessionRecord) -> Result<(), LaunchError> {
+    let content =
+        serde_json::to_vec(record).map_err(|source| LaunchError::SessionRegistrationJson {
+            path: path.display().to_string(),
+            source,
+        })?;
+    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    fs::write(&temporary, content)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn with_session_lock<T>(
+    path: &Path,
+    operation: impl FnOnce() -> Result<T, LaunchError>,
+) -> Result<T, LaunchError> {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path.with_extension("lock"))?;
+    FileExt::lock_exclusive(&lock)?;
+    operation()
 }
 
 struct KrunPlan {
@@ -658,7 +850,7 @@ impl<'a> Plan<'a> {
 
     fn launch(&self) -> Result<ExitCode, LaunchError> {
         let registration =
-            SessionRegistration::create(self.session_id.as_deref(), Platform::CURRENT)?;
+            SessionRegistration::create(self.session_id.as_ref(), Platform::CURRENT)?;
         let result = match Platform::CURRENT {
             Platform::Linux => self.launch_linux(),
             Platform::Darwin => self.launch_darwin(),
@@ -1109,7 +1301,10 @@ impl<'a> Plan<'a> {
             pairs.push((String::from("WRIX_GIT_SIGN"), value));
         }
         if let Some(session_id) = &self.session_id {
-            pairs.push((String::from("WRIX_SESSION_ID"), session_id.clone()));
+            pairs.push((
+                String::from("WRIX_SESSION_ID"),
+                session_id.as_str().to_owned(),
+            ));
         }
         if let Some(cache) = &self.services.project_cache {
             pairs.push((
@@ -2224,7 +2419,7 @@ fn podman_runtime_dir() -> Result<PathBuf, LaunchError> {
     Ok(PathBuf::from(format!("/run/user/{}", current_uid()?)))
 }
 
-fn tmux_session_id() -> Option<String> {
+fn tmux_session_id() -> Option<SessionId> {
     env::var_os("TMUX")?;
     let output = match run_output(
         "tmux",
@@ -2248,8 +2443,14 @@ fn tmux_session_id() -> Option<String> {
         );
         return None;
     }
-    let session_id = trim_stdout(&output.stdout);
-    (!session_id.is_empty()).then_some(session_id)
+    let value = trim_stdout(&output.stdout);
+    match SessionId::parse(&value) {
+        Ok(session_id) => Some(session_id),
+        Err(error) => {
+            tracing::warn!(error = %error, "tmux returned an invalid session identifier");
+            None
+        }
+    }
 }
 
 fn session_directory(platform: Platform) -> PathBuf {
@@ -2297,15 +2498,27 @@ fn focus_target(platform: Platform) -> Option<String> {
                     return None;
                 }
             };
-            value.get("id").and_then(|value| match value {
-                Value::String(text) => Some(text.clone()),
-                Value::Number(number) => Some(number.to_string()),
-                _ => None,
-            })
+            match value.get("id") {
+                Some(Value::String(text)) => Some(text.clone()),
+                Some(Value::Number(number)) => Some(number.to_string()),
+                Some(value) => {
+                    tracing::warn!(program = %program, ?value, "focus target returned an invalid window identifier");
+                    None
+                }
+                None => {
+                    tracing::warn!(program = %program, "focus target omitted the window identifier");
+                    None
+                }
+            }
         }
         Platform::Darwin => {
             let target = trim_stdout(&output.stdout);
-            (!target.is_empty()).then_some(target)
+            if target.is_empty() {
+                tracing::warn!(program = %program, "focus target returned an empty application name");
+                None
+            } else {
+                Some(target)
+            }
         }
     }
 }
@@ -2517,8 +2730,9 @@ mod test {
 
     use super::{
         DarwinMounts, DarwinNetwork, DarwinSplitRoute, HostPodmanSocket, LaunchError, NetworkMode,
-        PiAuth, RenderedMount, SessionRegistration, Staging, darwin_split_routes, deploy_key_name,
-        linux_podman_network, parse_darwin_network, route_interface, vmnet_interface,
+        PiAuth, RenderedMount, SessionId, SessionRegistration, Staging, darwin_split_routes,
+        deploy_key_name, linux_podman_network, parse_darwin_network, route_interface,
+        vmnet_interface,
     };
     use crate::command::config::{MountMode, Platform, ProfileMount, SpawnMount};
 
@@ -2891,10 +3105,20 @@ mod test {
     }
 
     #[test]
+    fn session_id_accepts_only_tmux_target_shape() {
+        assert!(SessionId::parse("main:2.1").is_ok());
+        assert!(SessionId::parse("space.name:with:colons:20.11").is_ok());
+        for invalid in ["", "main", ":2.1", "main:x.1", "main:2.x", "main:2.1.0"] {
+            assert!(SessionId::parse(invalid).is_err(), "accepted {invalid}");
+        }
+    }
+
+    #[test]
     fn session_registration_uses_daemon_filename_and_removes_current_file() {
         let root = scratch_dir("session-registration");
+        let session_id = SessionId::parse("main:2.1").unwrap();
         let registration =
-            SessionRegistration::create_in(Some("main:2.1"), Platform::Linux, &root).unwrap();
+            SessionRegistration::create_in(Some(&session_id), Platform::Linux, &root).unwrap();
         let path = root.join("main-2-1.json");
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -2905,6 +3129,40 @@ mod test {
         );
         assert!(value.get("window_id").is_some());
         registration.remove().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn overlapping_session_registrations_remove_file_after_last_cleanup() {
+        let root = scratch_dir("overlapping-session-registration");
+        let session_id = SessionId::parse("main:2.1").unwrap();
+        let first =
+            SessionRegistration::create_in(Some(&session_id), Platform::Linux, &root).unwrap();
+        let second =
+            SessionRegistration::create_in(Some(&session_id), Platform::Linux, &root).unwrap();
+        let path = root.join("main-2-1.json");
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            value
+                .get("registration_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(2)
+        );
+
+        first.remove().unwrap();
+        assert!(path.exists());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            value
+                .get("registration_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(1)
+        );
+
+        second.remove().unwrap();
         assert!(!path.exists());
     }
 

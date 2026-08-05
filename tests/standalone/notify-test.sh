@@ -158,6 +158,45 @@ start_tcp_capture() {
   wait_for_tcp_listener "$host" "$port"
 }
 
+start_non_acknowledging_tcp_capture() {
+  local host="$1"
+  local port="$2"
+  local capture="$3"
+  local log_file="$4"
+  local handler="$TEST_TMP/non-acknowledging-handler.sh"
+  local pid
+  local probe_rc=0
+
+  : >"$capture"
+  cat >"$handler" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${WRIX_NOTIFY_TEST_HOLD_CAPTURE:?}"
+line=""
+if IFS= read -r line && [[ -n "$line" ]]; then
+  printf '%s\n' "$line" >>"$WRIX_NOTIFY_TEST_HOLD_CAPTURE"
+fi
+sleep 2
+EOF
+  chmod +x "$handler"
+  WRIX_NOTIFY_TEST_HOLD_CAPTURE="$capture" \
+    socat TCP-LISTEN:"$port",bind="$host",fork,reuseaddr EXEC:"$handler" >"$log_file" 2>&1 &
+  pid="$!"
+  BACKGROUND_PIDS+=("$pid")
+  wait_for_tcp_listener "$host" "$port"
+
+  # shellcheck disable=SC2016 # $1 and $2 intentionally expand in the nested Bash process.
+  timeout 1s bash -c \
+    'exec 3<>"/dev/tcp/$1/$2"; printf "%s\n" "fixture conformance probe" >&3; IFS= read -r _ <&3' \
+    _ "$host" "$port" >/dev/null 2>&1 || probe_rc="$?"
+  if [[ "$probe_rc" -ne 124 ]]; then
+    printf 'listener conformance probe exited %s instead of blocking\n' "$probe_rc" >>"$log_file"
+    return 1
+  fi
+  : >"$capture"
+}
+
 start_notify_daemon() {
   local runtime_dir="$1"
   local capture="$2"
@@ -356,13 +395,16 @@ test_client_non_blocking() {
   local output_file="$TEST_TMP/non-blocking-client.log"
   local port="$((42000 + (BASHPID % 20000)))"
 
-  if ! start_tcp_capture "127.0.0.1" "$port" "$capture" "$listener_log"; then
-    fail_with_output "could not start TCP capture listener" "$listener_log"
+  if ! start_non_acknowledging_tcp_capture "127.0.0.1" "$port" "$capture" "$listener_log"; then
+    fail_with_output "could not start non-acknowledging TCP listener" "$listener_log"
   fi
 
   WRIX_NOTIFY_TCP="127.0.0.1:$port" \
     run_notify_with_timeout "$output_file" "non-blocking client" "no acknowledgement" "Ping"
-  pass "wrix-notify exits without waiting for an acknowledgement"
+  if ! wait_for_capture "$capture"; then
+    fail_with_output "non-acknowledging listener did not capture the client payload" "$listener_log"
+  fi
+  pass "wrix-notify exits while the server holds the unacknowledged connection open"
 }
 
 write_spawn_config() {
