@@ -177,6 +177,7 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 struct Fixture {
     _base: tempfile::TempDir,
     repo: PathBuf,
+    home: PathBuf,
     fake_bin: PathBuf,
     state_dir: PathBuf,
     real_bd: PathBuf,
@@ -194,9 +195,11 @@ impl Fixture {
     fn new(name: &str) -> TestResult<Self> {
         let base = tempfile::Builder::new().prefix(name).tempdir()?;
         let repo = base.path().join("repo");
+        let home = base.path().join("home");
         let fake_bin = base.path().join("bin");
         let state_dir = base.path().join("state");
         fs::create_dir_all(&repo)?;
+        fs::create_dir_all(&home)?;
         fs::create_dir_all(&fake_bin)?;
         fs::create_dir_all(&state_dir)?;
         let fixture = Self {
@@ -205,6 +208,7 @@ impl Fixture {
             real_bd: find_program("bd")?,
             _base: base,
             repo,
+            home,
             fake_bin,
             state_dir,
         };
@@ -218,6 +222,10 @@ impl Fixture {
 
     fn fake_bin(&self) -> &Path {
         &self.fake_bin
+    }
+
+    fn home(&self) -> &Path {
+        &self.home
     }
 
     fn real_bd(&self) -> &Path {
@@ -264,6 +272,7 @@ fn bd_fake_config_matches_real_bd() -> TestResult {
         let real_output = ProcessCommand::new(fixture.real_bd())
             .args(["config", "set", "export.auto", "false"])
             .current_dir(&reference_repo)
+            .env("HOME", fixture.home())
             .output()?;
         assert_eq!(fake_output.status, real_output.status);
         assert_eq!(fake_output.stdout, real_output.stdout);
@@ -599,6 +608,10 @@ fn pre_pull_cleanup_uses_canonical_dirty_detection() -> TestResult {
 fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
     let fixture = Fixture::new("orphaned-worktree")?;
     setup_repo_with_beads_branch(&fixture)?;
+    fs::write(
+        fixture.home().join(".gitconfig"),
+        "[commit]\n\tgpgSign = true\n[gpg]\n\tprogram = false\n",
+    )?;
     let before = git_stdout(fixture.repo(), &["rev-parse", "origin/beads"])?;
     fs::create_dir_all(fixture.worktree_remote_dir())?;
     let local_payload = fixture.repo().join(".beads/dolt/pending-remote");
@@ -824,7 +837,10 @@ fn configure_bd(command: &mut ProcessCommand, fixture: &Fixture, scenario: &str)
         .env("WRIX_BEADS_STATE_DIR", &fixture.state_dir)
         .env("WRIX_BEADS_BD_SCENARIO", scenario)
         .env("WRIX_BEADS_REAL_BD", fixture.real_bd())
-        .env("WRIX_BEADS_ROOT", fixture.repo());
+        .env("WRIX_BEADS_ROOT", fixture.repo())
+        .env("HOME", fixture.home())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
 }
 
 fn bd_command(fixture: &Fixture, scenario: &str) -> ProcessCommand {
