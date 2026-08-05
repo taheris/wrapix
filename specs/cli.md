@@ -81,12 +81,13 @@ The applied Git state includes:
 The Git transport and signing helpers are context-aware. They keep repo-local Git config stable across host checkouts, profile containers, and Git worktrees by resolving key paths at runtime instead of storing host-only or container-only private-key paths in Git config. The helper command or trampoline recorded in Git config is part of the CLI contract because Git executes it outside an interactive Wrix process.
 
 The deploy/signing-key resolution order, explicit signing opt-out, strict GitHub
-host verification, and prohibition on ambient SSH identities are owned by
-`security.md` § Credential Surfaces. The helpers installed by `wrix init`
-implement that policy at Git execution time while keeping the selected key name
-and helper locations stable across invocation contexts.
-
-If Wrix creates or repairs SSH directories or compatibility config files, directory modes are `0700` and `config` / `known_hosts` file modes are `0600`. Helper correctness must not depend on whether OpenSSH would otherwise read `$HOME/.ssh/config` or an effective-user home such as `/root/.ssh/config`.
+host verification, SSH filesystem permissions, and prohibition on ambient SSH
+identities are owned by `security.md` § Credential Surfaces. The helpers
+installed by `wrix init` implement that policy at Git execution time while
+keeping the selected key name and helper locations stable across invocation
+contexts. Helper correctness must not depend on whether OpenSSH would otherwise
+read `$HOME/.ssh/config` or an effective-user home such as
+`/root/.ssh/config`.
 
 ### Deploy Provisioning
 
@@ -98,14 +99,25 @@ Existing keys or remote registrations are reused when they match the requested s
 
 Verification is part of `wrix init`, not a separate best-effort suggestion. Online verification is the default and proves that a fresh host-side Git operation uses the Wrix helper, strict host-key checking, the pinned GitHub host keys, and the selected deploy key. `--offline` or `wrix.init.online_verify = false` skips network and GitHub API calls but still checks local config, key presence, permissions, signing requirements, helper path stability, and hook configuration; it does not claim to prove GitHub reachability or repository authorization.
 
-The online verifier runs from the root of the repository where init was invoked and exercises that repository's effective Git config. It does not redirect verification into a nested `.loom/integration` clone. A host-side `git ls-remote` that reaches GitHub authentication or repository authorization without host-key verification failure is sufficient to prove host-key bootstrap; authorization failure is reported separately from host-key failure.
+The online verifier runs from the root of the repository where init was invoked
+and exercises that repository's effective Git config. It parses the configured
+remote as a GitHub repository and runs `git ls-remote` against that repository's
+canonical SSH URL, so HTTPS configuration cannot bypass the Wrix SSH helper and
+a non-GitHub transport cannot produce a false success. It does not redirect
+verification into a nested `.loom/integration` clone. Reaching GitHub
+authentication or repository authorization without host-key verification
+failure is sufficient to prove host-key bootstrap; authorization failure is
+reported separately from host-key failure.
 
 ## Success Criteria
 
 - Root help and subcommand help expose `run`, `spawn`, `service`, `beads`, and `init`, and delegated command help reaches the owning command group.
   [test](../crates/wrix-cli/tests/cli_surface.rs::root_and_subcommand_help)
-- Every public root and subcommand flag has a non-blank user-facing description, including defaults and constraints where useful.
+- Every public root and subcommand flag has a non-blank user-facing description.
   [test](../crates/wrix-cli/tests/cli_surface.rs::public_flags_have_descriptions)
+- Public flag descriptions explain current behavior and identify defaults and
+  constraints where they are useful to the operator.
+  [judge](../tests/judges/cli.sh#test_public_flag_help_quality)
 - The packaged `wrix` output installs no legacy `wrix-svc`, `beads-dolt`, `beads-push`, or `<repo>-beads` public binaries.
   [check](verify:cli.package-surface)
 - `.#verify --list` exposes the supported `verify:<domain>.<check-id>` target IDs, and `.#verify <id>...` runs the requested IDs in one process with actionable failures for unknown IDs.
@@ -131,9 +143,8 @@ The online verifier runs from the root of the repository where init was invoked 
 - `wrix init` invoked inside an independent `.loom/integration` clone applies and verifies policy for that clone without mutating the outer repository.
   [test](../crates/wrix-cli/tests/init_verify.rs::init_inside_integration_clone_verifies_that_repository)
 - With `$HOME` and the effective-user home differing, the Git transport helper
-  conforms to the credential-resolution, host-verification, and ambient-identity
-  policy owned by `security.md`, and leaves Wrix-created SSH directories at
-  `0700` plus compatibility `config` / `known_hosts` files at `0600`.
+  conforms to the credential-resolution, host-verification, SSH
+  filesystem-permission, and ambient-identity policy owned by `security.md`.
   [test](../crates/wrix-cli/tests/init_git_bootstrap.rs::strict_context_aware_ssh_helper)
 - An effective worktree-local `core.sshCommand` override that weakens the common transport policy makes local init verification fail.
   [test](../crates/wrix-cli/tests/init_verify.rs::worktree_transport_override_fails_verification)
@@ -155,8 +166,15 @@ The online verifier runs from the root of the repository where init was invoked 
   [test](../crates/wrix-cli/tests/init_deploy.rs::remote_key_conflict_requires_force)
 - Deploy provisioning rejects non-GitHub remotes before remote API mutation.
   [test](../crates/wrix-cli/tests/init_deploy.rs::unsupported_deploy_remote_fails_before_api_mutation)
-- Online verification runs real Git from the invoked repository root through the configured common-dir trampoline and generated strict SSH helper, even when that repository contains an independent `.loom/integration` clone.
+- Online verification runs real Git from the invoked repository root through
+  the configured common-dir trampoline and generated strict SSH helper against
+  the GitHub SSH URL derived from the configured remote, even when that remote
+  is HTTPS and the repository contains an independent `.loom/integration`
+  clone.
   [test](../crates/wrix-cli/tests/init_verify.rs::outer_init_verifies_its_own_repository_with_independent_integration_clone)
+- Online verification rejects a non-GitHub configured remote before mutating
+  repository state or attempting network verification.
+  [test](../crates/wrix-cli/tests/init_verify.rs::online_verification_rejects_non_github_remote_before_mutation)
 - Online verification reports host-key verification failure separately from authentication or repository authorization failure.
   [test](../crates/wrix-cli/tests/init_verify.rs::online_failures_distinguish_host_key_from_authorization)
 - `--offline` skips network verification while preserving local helper and key verification.
@@ -165,7 +183,9 @@ The online verifier runs from the root of the repository where init was invoked 
   [test](../crates/wrix-cli/tests/init_verify.rs::offline_config_skips_network_verification)
 - Offline verification rejects insecure local deploy-key permissions without a network operation.
   [test](../crates/wrix-cli/tests/init_verify.rs::offline_verification_rejects_insecure_key_permissions)
-- Repeated identical `wrix init --deploy` runs preserve key, config, hook, and generated-helper content and file metadata while avoiding remote mutation.
+- Repeated identical `wrix init --deploy` runs preserve key, config, hook,
+  generated-helper, and Git object state while avoiding file-metadata churn and
+  remote mutation.
   [test](../crates/wrix-cli/tests/init_idempotency.rs::repeated_init_does_not_churn_managed_state)
 - When `.pre-commit-config.yaml` exists and hook setup is enabled, `wrix init` points the invoked repository's `core.hooksPath` at Wrix's prek hook bundle without mutating a nested integration clone; running init inside that clone configures its own hooks. When hooks are disabled by flag or config, init leaves hook config unchanged.
   [test](../crates/wrix-cli/tests/init_prek.rs::prek_hooks)
@@ -191,7 +211,8 @@ The online verifier runs from the root of the repository where init was invoked 
 
 ### Non-Functional
 
-1. **Idempotent** — repeated `wrix init` runs converge on the same state and do not churn keys, config, hooks, or generated helper files.
+1. **Idempotent** — repeated `wrix init` runs converge on the same state and do
+   not churn keys, config, hooks, generated helper files, or Git objects.
 2. **Fail-loud** — missing keys, unsupported remotes, permission problems, helper failures, and verification failures return non-zero with remediation text.
 3. **Host/container parity** — each initialized repository's Git config works from host shells, devshells, and Wrix containers, including when the repository is a Loom integration or bead clone.
 4. **No secrets in config** — Wrix config and Git config do not store private key material or secrets.

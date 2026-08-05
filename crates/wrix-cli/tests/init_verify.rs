@@ -17,6 +17,15 @@ fn outer_init_verifies_its_own_repository_with_independent_integration_clone() -
     let fixture = VerifyFixture::new()?;
     let repo = setup_committed_repo("online-helper", false)?;
     let integration = clone_integration(repo.path())?;
+    run_git(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/example/online-helper.git",
+        ],
+    )?;
     let integration_config_path = integration.join(".git/config");
     let integration_config = fs::read(&integration_config_path)?;
     let home = fixture.home("online-helper");
@@ -89,6 +98,44 @@ fn init_inside_integration_clone_verifies_that_repository() -> TestResult {
     assert_eq!(fs::read(outer_config_path)?, outer_config);
     let command = git_stdout(&integration, &["config", "--get", "core.sshCommand"])?;
     assert_contains("integration helper config", &command, "wrix/git-ssh");
+    Ok(())
+}
+
+#[test]
+fn online_verification_rejects_non_github_remote_before_mutation() -> TestResult {
+    let fixture = VerifyFixture::new()?;
+    let repo = setup_committed_repo("non-github-online", false)?;
+    let local_remote = repo.path().join("local-origin.git");
+    run_git(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &local_remote.display().to_string(),
+        ],
+    )?;
+    let config_path = repo.path().join(".git/config");
+    let original_config = fs::read(&config_path)?;
+    let home = fixture.home("non-github-online");
+    let deploy_key = write_deploy_key(&home, 0o600)?;
+    fixture.set_mode("fail-if-online")?;
+
+    let result = fixture.run_init(
+        repo.path(),
+        &home,
+        &deploy_key,
+        &["--no-sign", "--key", "verify-key"],
+    )?;
+
+    assert_failure_with_clean_stdout(&result);
+    assert_contains(
+        "non-GitHub online remote",
+        &result.stderr,
+        "online verification requires a github.com remote",
+    );
+    assert_eq!(fs::read(config_path)?, original_config);
+    fixture.assert_no_online_capture();
     Ok(())
 }
 
@@ -365,7 +412,7 @@ fn assert_online_capture(
     assert_eq!(git_cwd.trim(), expected_cwd.display().to_string());
     assert_eq!(
         fs::read_to_string(git_capture_dir.join("args"))?,
-        "ls-remote\norigin\nHEAD\n",
+        format!("ls-remote\ngit@github.com:{expected_repo}\nHEAD\n"),
     );
     let git_env = fs::read_to_string(git_capture_dir.join("env"))?;
     assert_minimal_online_env("online Git env", &git_env, deploy_key, home);

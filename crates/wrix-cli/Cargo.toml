@@ -13,6 +13,7 @@ clap = { workspace = true }
 displaydoc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
@@ -22,9 +23,6 @@ wrix-cache = { workspace = true }
 wrix-core = { workspace = true }
 wrix-sandbox = { workspace = true }
 wrix-service = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
 
 [lints]
 workspace = true

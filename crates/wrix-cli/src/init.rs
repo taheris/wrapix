@@ -108,9 +108,61 @@ impl fmt::Display for RemoteName {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct GithubOwner(String);
+
+impl GithubOwner {
+    fn parse(value: &str) -> Result<Self, GithubOwnerParseError> {
+        let valid = !value.is_empty()
+            && value.len() <= 39
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !value.starts_with('-')
+            && !value.ends_with('-');
+        if valid {
+            return Ok(Self(value.to_owned()));
+        }
+        Err(GithubOwnerParseError::Invalid {
+            value: value.to_owned(),
+        })
+    }
+}
+
+impl fmt::Display for GithubOwner {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GithubRepositoryName(String);
+
+impl GithubRepositoryName {
+    fn parse(value: &str) -> Result<Self, GithubRepositoryNameParseError> {
+        let valid = !value.is_empty()
+            && value.len() <= 100
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'));
+        if valid {
+            return Ok(Self(value.to_owned()));
+        }
+        Err(GithubRepositoryNameParseError::Invalid {
+            value: value.to_owned(),
+        })
+    }
+}
+
+impl fmt::Display for GithubRepositoryName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct GithubRepo {
-    owner: String,
-    name: String,
+    owner: GithubOwner,
+    name: GithubRepositoryName,
 }
 
 impl GithubRepo {
@@ -120,6 +172,47 @@ impl GithubRepo {
 
     fn label(&self) -> String {
         format!("{}/{}", self.owner, self.name)
+    }
+
+    fn ssh_url(&self) -> String {
+        format!("git@github.com:{}/{}.git", self.owner, self.name)
+    }
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+enum GithubOwnerParseError {
+    /// invalid GitHub owner identifier: {value}
+    Invalid { value: String },
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+enum GithubRepositoryNameParseError {
+    /// invalid GitHub repository identifier: {value}
+    Invalid { value: String },
+}
+
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+enum GithubRemoteParseError {
+    /// URL is not a supported GitHub repository URL
+    UnsupportedUrl,
+    /// {0}
+    Owner(#[from] GithubOwnerParseError),
+    /// {0}
+    RepositoryName(#[from] GithubRepositoryNameParseError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeyKind {
+    Deploy,
+    Signing,
+}
+
+impl fmt::Display for KeyKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Deploy => formatter.write_str("deploy key"),
+            Self::Signing => formatter.write_str("signing key"),
+        }
     }
 }
 
@@ -375,23 +468,26 @@ impl Plan {
             verify_signing_commit(&self.root, &identity)?;
         }
         if self.verification == VerificationPolicy::Online {
-            verify_online(&self.root, &self.remote)?;
+            verify_online(&self.root, &self.remote, self.github_repo()?)?;
         }
         Ok(())
     }
 
-    fn provision_deploy(&self) -> Result<(), Error> {
-        let repo = self
-            .github_repo
+    fn github_repo(&self) -> Result<&GithubRepo, Error> {
+        self.github_repo
             .as_ref()
-            .ok_or_else(|| Error::DeployRemoteMissing {
+            .ok_or_else(|| Error::GithubRemoteMissing {
                 remote: self.remote.clone(),
-            })?;
+            })
+    }
+
+    fn provision_deploy(&self) -> Result<(), Error> {
+        let repo = self.github_repo()?;
         let key_dir = deploy_key_dir()?;
         let key_name = self.key_name.to_string();
         let deploy_path = key_dir.join(&key_name);
         let deploy_comment = format!("wrix deploy key {}", repo.label());
-        ensure_local_ed25519_keypair("deploy key", &deploy_path, &deploy_comment, self.force)?;
+        ensure_local_ed25519_keypair(KeyKind::Deploy, &deploy_path, &deploy_comment, self.force)?;
         let deploy_public_key = crate::sign::public_key(&deploy_path)?;
         let deploy_plan = plan_github_deploy_key(repo, &key_name, &deploy_public_key, self.force)?;
 
@@ -400,7 +496,7 @@ impl Plan {
             let signing_path = key_dir.join(&signing_file);
             let signing_comment = format!("wrix signing key {}", repo.label());
             ensure_local_ed25519_keypair(
-                "signing key",
+                KeyKind::Signing,
                 &signing_path,
                 &signing_comment,
                 self.force,
@@ -481,8 +577,14 @@ fn build_plan(profile_config_path: Option<&Path>, args: &[String]) -> Result<Pla
         return Err(Error::DeployOfflinePolicy);
     }
     let remote_url = remote_url(&root, &remote)?;
-    let github_repo = if flags.deploy.enabled() {
-        Some(parse_github_remote(&remote, &remote_url)?)
+    let github_repo = if flags.deploy.enabled() || verification == VerificationPolicy::Online {
+        Some(
+            parse_github_remote(&remote_url).map_err(|source| Error::UnsupportedGithubRemote {
+                remote: remote.clone(),
+                url: remote_url.clone(),
+                source,
+            })?,
+        )
     } else {
         None
     };
@@ -624,7 +726,7 @@ fn remote_url(root: &Path, remote: &RemoteName) -> Result<String, Error> {
     })
 }
 
-fn parse_github_remote(remote: &RemoteName, url: &str) -> Result<GithubRepo, Error> {
+fn parse_github_remote(url: &str) -> Result<GithubRepo, GithubRemoteParseError> {
     let url = url.trim();
     let path = if let Some(path) = url.strip_prefix("git@github.com:") {
         path
@@ -641,15 +743,12 @@ fn parse_github_remote(remote: &RemoteName, url: &str) -> Result<GithubRepo, Err
     } else if let Some(path) = url.strip_prefix("git://github.com/") {
         path
     } else {
-        return Err(Error::UnsupportedDeployRemote {
-            remote: remote.clone(),
-            url: url.to_owned(),
-        });
+        return Err(GithubRemoteParseError::UnsupportedUrl);
     };
-    parse_github_repo_path(remote, url, path)
+    parse_github_repo_path(path)
 }
 
-fn parse_github_repo_path(remote: &RemoteName, url: &str, path: &str) -> Result<GithubRepo, Error> {
+fn parse_github_repo_path(path: &str) -> Result<GithubRepo, GithubRemoteParseError> {
     let path = path.split(['?', '#']).next().unwrap_or(path);
     let path = path.trim_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
@@ -657,20 +756,12 @@ fn parse_github_repo_path(remote: &RemoteName, url: &str, path: &str) -> Result<
     let mut parts = path.split('/');
     let owner = parts.next().unwrap_or_default();
     let name = parts.next().unwrap_or_default();
-    if owner.is_empty()
-        || name.is_empty()
-        || parts.next().is_some()
-        || owner.chars().any(char::is_whitespace)
-        || name.chars().any(char::is_whitespace)
-    {
-        return Err(Error::UnsupportedDeployRemote {
-            remote: remote.clone(),
-            url: url.to_owned(),
-        });
+    if parts.next().is_some() {
+        return Err(GithubRemoteParseError::UnsupportedUrl);
     }
     Ok(GithubRepo {
-        owner: owner.to_owned(),
-        name: name.to_owned(),
+        owner: GithubOwner::parse(owner)?,
+        name: GithubRepositoryName::parse(name)?,
     })
 }
 
@@ -816,7 +907,7 @@ fn deploy_key_dir() -> Result<PathBuf, Error> {
 }
 
 fn ensure_local_ed25519_keypair(
-    kind: &'static str,
+    kind: KeyKind,
     path: &Path,
     comment: &str,
     force: ForcePolicy,
@@ -836,7 +927,7 @@ fn ensure_local_ed25519_keypair(
     }
 }
 
-fn local_key_state(kind: &'static str, path: &Path) -> Result<LocalKeyState, Error> {
+fn local_key_state(kind: KeyKind, path: &Path) -> Result<LocalKeyState, Error> {
     let public_path = public_key_path(path);
     let private_exists = path_exists(path)?;
     let public_exists = path_exists(&public_path)?;
@@ -923,11 +1014,7 @@ fn remove_local_key_material(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn generate_ed25519_keypair(
-    kind: &'static str,
-    path: &Path,
-    comment: &str,
-) -> Result<PathBuf, Error> {
+fn generate_ed25519_keypair(kind: KeyKind, path: &Path, comment: &str) -> Result<PathBuf, Error> {
     if let Some(parent) = path.parent() {
         create_secure_dir(parent)?;
     }
@@ -979,7 +1066,7 @@ fn plan_github_deploy_key(
         title,
         public_key,
         force,
-        "deploy key",
+        KeyKind::Deploy,
         deploy_key_matches,
     )
 }
@@ -995,7 +1082,7 @@ fn plan_github_signing_key(
         title,
         public_key,
         force,
-        "signing key",
+        KeyKind::Signing,
         signing_key_matches,
     )
 }
@@ -1005,7 +1092,7 @@ fn remote_key_plan(
     title: &str,
     public_key: &str,
     force: ForcePolicy,
-    kind: &'static str,
+    kind: KeyKind,
     matches_requested: fn(&RemoteKey, &str, &str) -> bool,
 ) -> Result<RemoteKeyPlan, Error> {
     let conflicts = keys
@@ -1276,7 +1363,7 @@ fn configure_signing(
         write_common_git_config(common_dir, "commit.gpgsign", "false")?;
         return Ok(None);
     };
-    require_private_key_mode("signing key", signing_key)?;
+    require_private_key_mode(KeyKind::Signing, signing_key)?;
     let identity = signing_identity(root)?;
     let public_key = crate::sign::public_key(signing_key)?;
     write_allowed_signers(common_dir, &identity.principals, &public_key)?;
@@ -1479,19 +1566,38 @@ fn optional_git_config(root: &Path, key: &str) -> Result<Option<String>, Error> 
 }
 
 fn verify_signing_commit(root: &Path, identity: &SigningIdentity) -> Result<(), Error> {
-    let tree = git_stdout(root, &["mktree"])?;
-    let output = ProcessCommand::new("git")
+    let object_dir = tempfile::Builder::new()
+        .prefix("wrix-init-signing-objects-")
+        .tempdir()
+        .map_err(|source| Error::SigningObjectDirectory { source })?;
+    let object_path = path_string(object_dir.path());
+    let result = verify_signing_commit_in_object_dir(root, identity, object_dir.path());
+    object_dir
+        .close()
+        .map_err(|source| Error::SigningObjectCleanup {
+            path: object_path,
+            source,
+        })?;
+    result
+}
+
+fn verify_signing_commit_in_object_dir(
+    root: &Path,
+    identity: &SigningIdentity,
+    object_dir: &Path,
+) -> Result<(), Error> {
+    let tree = git_stdout_in_object_dir(root, object_dir, &["mktree"])?;
+    let mut command = git_in_object_dir(root, object_dir);
+    let output = command
         .arg("commit-tree")
         .arg("-S")
         .arg(&tree)
         .arg("-m")
         .arg("wrix init signing verification")
-        .current_dir(root)
         .env("GIT_AUTHOR_NAME", &identity.name)
         .env("GIT_AUTHOR_EMAIL", &identity.email)
         .env("GIT_COMMITTER_NAME", &identity.name)
         .env("GIT_COMMITTER_EMAIL", &identity.email)
-        .stdin(Stdio::null())
         .output()
         .map_err(Error::GitIo)?;
     if !output.status.success() {
@@ -1505,11 +1611,9 @@ fn verify_signing_commit(root: &Path, identity: &SigningIdentity) -> Result<(), 
             detail: String::from("git commit-tree returned an empty commit id"),
         });
     }
-    let output = ProcessCommand::new("git")
+    let output = git_in_object_dir(root, object_dir)
         .arg("verify-commit")
         .arg(&commit)
-        .current_dir(root)
-        .stdin(Stdio::null())
         .output()
         .map_err(Error::GitIo)?;
     if output.status.success() {
@@ -1520,11 +1624,13 @@ fn verify_signing_commit(root: &Path, identity: &SigningIdentity) -> Result<(), 
     })
 }
 
-fn git_stdout(root: &Path, args: &[&str]) -> Result<String, Error> {
-    let output = ProcessCommand::new("git")
+fn git_stdout_in_object_dir(
+    root: &Path,
+    object_dir: &Path,
+    args: &[&str],
+) -> Result<String, Error> {
+    let output = git_in_object_dir(root, object_dir)
         .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
         .output()
         .map_err(Error::GitIo)?;
     if output.status.success() {
@@ -1534,6 +1640,15 @@ fn git_stdout(root: &Path, args: &[&str]) -> Result<String, Error> {
         command: args.join(" "),
         detail: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
+}
+
+fn git_in_object_dir(root: &Path, object_dir: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new("git");
+    command
+        .current_dir(root)
+        .env("GIT_OBJECT_DIRECTORY", object_dir)
+        .stdin(Stdio::null());
+    command
 }
 
 fn configure_prek_hooks(root: &Path, common_dir: &Path, policy: HookPolicy) -> Result<(), Error> {
@@ -1635,7 +1750,7 @@ fn verify_transport_helper(
     require_mode(helper_path, 0o700)?;
     require_mode(known_hosts_path, 0o600)?;
     let expected_key = resolved_deploy_key(key_name)?;
-    require_private_key_mode("deploy key", &expected_key)?;
+    require_private_key_mode(KeyKind::Deploy, &expected_key)?;
     let effective_config = probe_helper_config(root, helper_path)?;
     require_ssh_config_value(&effective_config, "batchmode", "yes")?;
     require_ssh_config_value(&effective_config, "identitiesonly", "yes")?;
@@ -1655,9 +1770,9 @@ fn verify_transport_helper(
     )
 }
 
-fn verify_online(root: &Path, remote: &RemoteName) -> Result<(), Error> {
+fn verify_online(root: &Path, remote: &RemoteName, repo: &GithubRepo) -> Result<(), Error> {
     require_runtime_git_config(root, "core.sshCommand", TRANSPORT_TRAMPOLINE)?;
-    let output = online_git_ls_remote(root, remote)?;
+    let output = online_git_ls_remote(root, &repo.ssh_url())?;
     if output.status.success() {
         return Ok(());
     }
@@ -1709,11 +1824,11 @@ fn read_runtime_git_config(cwd: &Path, key: &str) -> Result<String, Error> {
     })
 }
 
-fn online_git_ls_remote(cwd: &Path, remote: &RemoteName) -> Result<std::process::Output, Error> {
+fn online_git_ls_remote(cwd: &Path, target: &str) -> Result<std::process::Output, Error> {
     let mut command = ProcessCommand::new("git");
     command
         .arg("ls-remote")
-        .arg(remote.as_str())
+        .arg(target)
         .arg("HEAD")
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -1817,7 +1932,7 @@ fn require_mode(path: impl AsRef<Path>, expected: u32) -> Result<(), Error> {
     })
 }
 
-fn require_private_key_mode(kind: &'static str, path: &Path) -> Result<(), Error> {
+fn require_private_key_mode(kind: KeyKind, path: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(path).map_err(|source| Error::StateIo {
         path: path_string(path),
         source,
@@ -2121,13 +2236,17 @@ enum Error {
     MissingGitRoot { cwd: String, detail: String },
     /// configured Git remote '{remote}' is not set
     MissingRemote { remote: RemoteName },
-    /// --deploy supports only github.com remotes; remote '{remote}' has unsupported URL {url}
-    UnsupportedDeployRemote { remote: RemoteName, url: String },
-    /// deploy provisioning has no parsed GitHub remote for '{remote}'
-    DeployRemoteMissing { remote: RemoteName },
+    /// --deploy supports only github.com remotes, and online verification requires a github.com remote; remote '{remote}' has unsupported URL {url}: {source}
+    UnsupportedGithubRemote {
+        remote: RemoteName,
+        url: String,
+        source: GithubRemoteParseError,
+    },
+    /// GitHub operation has no parsed GitHub remote for '{remote}'
+    GithubRemoteMissing { remote: RemoteName },
     /// {kind} {path} conflicts with requested deploy provisioning: {detail}
     LocalKeyConflict {
-        kind: &'static str,
+        kind: KeyKind,
         path: String,
         detail: String,
     },
@@ -2159,7 +2278,7 @@ enum Error {
     },
     /// remote {kind} registration titled {title} conflicts with requested key: {detail}
     RemoteKeyConflict {
-        kind: &'static str,
+        kind: KeyKind,
         title: String,
         detail: String,
     },
@@ -2181,7 +2300,7 @@ enum Error {
     },
     /// {kind} {path} has mode {actual}; expected owner-readable mode with no group or other permissions
     PrivateKeyMode {
-        kind: &'static str,
+        kind: KeyKind,
         path: String,
         actual: String,
     },
@@ -2195,6 +2314,10 @@ enum Error {
     SigningProgramIo { source: io::Error },
     /// wrix-git-sign PATH probe failed: {detail}
     SigningProgramProbe { detail: String },
+    /// cannot create an isolated Git object directory for signing verification: {source}
+    SigningObjectDirectory { source: io::Error },
+    /// cannot remove isolated signing-verification Git objects at {path}: {source}
+    SigningObjectCleanup { path: String, source: io::Error },
     /// signing Git config {key} is not context-stable ({reason}): {value}
     SigningConfigUnstable {
         key: String,
@@ -2288,9 +2411,9 @@ mod test {
     use std::path::Path;
 
     use super::{
-        DeployPolicy, FilePolicy, ForcePolicy, GithubRepo, HookPolicy, KeyName, OnlineFailure,
-        RemoteKeyId, RemoteName, SigningPolicy, VerificationPolicy, classify_online_failure,
-        parse_file_policy, parse_flags, parse_github_remote,
+        DeployPolicy, FilePolicy, ForcePolicy, HookPolicy, KeyName, OnlineFailure, RemoteKeyId,
+        RemoteName, SigningPolicy, VerificationPolicy, classify_online_failure, parse_file_policy,
+        parse_flags, parse_github_remote,
     };
 
     #[test]
@@ -2385,23 +2508,26 @@ deploy_key = 'second-key'
     }
 
     #[test]
-    fn github_remote_parser_accepts_github_urls_only() {
-        let remote = RemoteName(String::from("origin"));
-        assert_eq!(
-            parse_github_remote(&remote, "git@github.com:owner/repo.git").unwrap(),
-            GithubRepo {
-                owner: String::from("owner"),
-                name: String::from("repo"),
-            },
-        );
-        assert_eq!(
-            parse_github_remote(&remote, "https://github.com/owner/repo").unwrap(),
-            GithubRepo {
-                owner: String::from("owner"),
-                name: String::from("repo"),
-            },
-        );
-        assert!(parse_github_remote(&remote, "git@example.com:owner/repo.git").is_err());
+    fn github_remote_parser_accepts_supported_urls() {
+        for url in [
+            "git@github.com:owner/repo.git",
+            "https://github.com/owner/repo",
+        ] {
+            let repo = parse_github_remote(url).unwrap();
+            assert_eq!(repo.label(), "owner/repo");
+            assert_eq!(repo.ssh_url(), "git@github.com:owner/repo.git");
+        }
+    }
+
+    #[test]
+    fn github_remote_parser_rejects_invalid_identifiers_and_hosts() {
+        for url in [
+            "git@example.com:owner/repo.git",
+            "git@github.com:-owner/repo.git",
+            "git@github.com:owner/repo!.git",
+        ] {
+            assert!(parse_github_remote(url).is_err(), "accepted {url}");
+        }
     }
 
     fn assert_policy(
