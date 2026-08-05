@@ -68,7 +68,7 @@ If `<tool>` resolves on `PATH`, `exec` the command. If absent, exit 0 silently. 
 
 ### Relationship to `push-verified`
 
-The `.wrix/push-verified` stamp is an exact-transaction, one-use approval: the pre-push shim writes it automatically after successful checks, but cannot know the later network outcome. `pre-push-checks` is a different layer — a per-entry opt-in skip when an external loom run has already validated the commit. Both can be active simultaneously. The stamp is not evidence of SSH failure and is not bounded to one network attempt. Long-term removal of `push-verified` is deferred until the marker mechanism covers the SSH-retry case too.
+The `.wrix/push-verified` stamp is an exact-transaction, one-use approval: the pre-push shim writes it automatically after successful checks, but cannot know the later network outcome. `pre-push-checks` is a different layer — a per-entry opt-in skip when an external loom run has already validated the commit. Both can be active simultaneously. The stamp is not evidence of SSH failure and is not bounded to one network attempt.
 
 ## Hook Installation in Profile Containers
 
@@ -111,9 +111,9 @@ The `.wrix/push-verified` stamp is an exact-transaction, one-use approval: the p
 - The wrappers add no utility dependencies of their own: `pre-push-checks` needs only Bash and Git before handing control to optional Loom or the wrapped command, and `skip-if-missing` needs only Bash before handing control to the probed or wrapped command
   [system](verify:prek.wrapper-runtime-dependencies)
 - A pre-commit hook configured in `.pre-commit-config.yaml` fires when `git commit` runs inside a profile container
-  [system](verify:prek.container-pre-commit)
+  [system](test-ci:test-container-pre-commit)
 - A pre-push hook configured in `.pre-commit-config.yaml` fires when `git push` runs inside a profile container
-  [system](verify:prek.container-pre-push)
+  [system](test-ci:test-container-pre-push)
 - `git commit --no-verify` and `git push --no-verify` bypass otherwise-blocking pre-commit and pre-push hooks served by `wrix.prekHooks`
   [system](verify:prek.no-verify-bypasses-hooks)
 - Heavy realization checks — those whose input closure includes the full sandbox base image or the full Rust workspace build — are referenced from a CI-only flake output (e.g., `.#test-ci`), not from the fast `flake.nix#checks` set

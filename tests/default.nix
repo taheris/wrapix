@@ -16,6 +16,7 @@ let
     escapeShellArg
     makeBinPath
     optionalAttrs
+    optionals
     removeAttrs
     ;
   inherit (pkgs)
@@ -283,6 +284,8 @@ let
     (mkCiApp testProfileImagesManifestShape "test-profile-images-manifest-shape")
     (mkCiApp testProfileConfigImageSourceKind "test-profile-config-image-source-kind")
     (mkCiApp testProfileConfigWrapper "test-profile-config-wrapper")
+    (mkCiApp testContainerPreCommit "test-container-pre-commit")
+    (mkCiApp testContainerPrePush "test-container-pre-push")
     (mkCiApp testWrixCliInProfile "test-wrix-cli-in-profile")
     (mkCiApp testSandboxAgentSettings "test-sandbox-agent-settings")
     (mkCiApp testPlaywrightChromiumClosure "test-playwright-chromium-closure")
@@ -473,6 +476,36 @@ let
     script = "tests/sandbox/profile-config-wrapper.sh";
     args = [ "test_profile_config_wrapper_contract" ];
   };
+
+  profileContainerHookPath = makeBinPath (
+    [
+      pkgs.findutils
+      pkgs.openssh
+    ]
+    ++ optionals pkgs.stdenv.isLinux [
+      pkgs.podman
+      pkgs.shadow
+      pkgs.skopeo
+      pkgs.util-linux
+    ]
+  );
+  mkProfileContainerHookCiApp =
+    name: linuxScript: darwinFunction:
+    mkRepoScriptCiApp {
+      inherit name;
+      script = if pkgs.stdenv.isDarwin then "tests/sandbox/container-hooks-darwin.sh" else linuxScript;
+      args = optionals pkgs.stdenv.isDarwin [ darwinFunction ];
+      environment = ''
+        export PATH="${profileContainerHookPath}:$PATH"
+      '';
+    };
+  testContainerPreCommit =
+    mkProfileContainerHookCiApp "test-container-pre-commit" "tests/sandbox/container-pre-commit.sh"
+      "test_pre_commit_fires_in_darwin_profile_container";
+  testContainerPrePush =
+    mkProfileContainerHookCiApp "test-container-pre-push" "tests/sandbox/container-pre-push.sh"
+      "test_pre_push_fires_in_darwin_profile_container";
+
   testWrixCliInProfile = mkRepoScriptCiApp {
     name = "test-wrix-cli-in-profile";
     script = "tests/sandbox/custom-mounts-env.sh";

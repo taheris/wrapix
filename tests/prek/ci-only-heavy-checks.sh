@@ -37,7 +37,7 @@ MISSING_APPS="$WORK_DIR/missing-apps.txt"
 VERIFY_TARGETS="$WORK_DIR/verify-targets.txt"
 IMAGE_VERIFY_TARGETS="$WORK_DIR/image-verify-targets.txt"
 EXPECTED_IMAGE_VERIFY_TARGETS="$WORK_DIR/expected-image-verify-targets.txt"
-HEAVY_SANDBOX_VERIFY_TARGETS="$WORK_DIR/heavy-sandbox-verify-targets.txt"
+HEAVY_GENERIC_VERIFY_TARGETS="$WORK_DIR/heavy-generic-verify-targets.txt"
 ANNOTATED_CI_APPS="$WORK_DIR/annotated-ci-apps.txt"
 UNKNOWN_ANNOTATED_CI_APPS="$WORK_DIR/unknown-annotated-ci-apps.txt"
 
@@ -85,8 +85,8 @@ write_listed_targets() {
 write_verify_targets() {
   nix run --no-warn-dirty "$REPO_ROOT#verify" -- --list > "$VERIFY_TARGETS"
   grep '^verify:images\.' "$VERIFY_TARGETS" | sort -u > "$IMAGE_VERIFY_TARGETS"
-  grep -E '^verify:sandbox\.(agent-settings|wrix-cli-in-profile)$' "$VERIFY_TARGETS" \
-    > "$HEAVY_SANDBOX_VERIFY_TARGETS" || true
+  awk '/^verify:(sandbox\.(agent-settings|wrix-cli-in-profile)|prek\.container-pre-(commit|push))$/ { print }' \
+    "$VERIFY_TARGETS" > "$HEAVY_GENERIC_VERIFY_TARGETS"
   cat > "$EXPECTED_IMAGE_VERIFY_TARGETS" <<'TARGETS'
 verify:images.darwin-entrypoint-core-hooks-path
 verify:images.linked-worktree-core-hooks-path
@@ -138,7 +138,7 @@ if ! cmp -s "$EXPECTED_IMAGE_VERIFY_TARGETS" "$IMAGE_VERIFY_TARGETS"; then
   failed=$((failed + 1))
 fi
 
-if ! fail_if_file_nonempty "sandbox realization checks remain exposed through the generic verify registry" "$HEAVY_SANDBOX_VERIFY_TARGETS"; then
+if ! fail_if_file_nonempty "full realization checks remain exposed through the generic verify registry" "$HEAVY_GENERIC_VERIFY_TARGETS"; then
   failed=$((failed + 1))
 fi
 

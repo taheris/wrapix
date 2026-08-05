@@ -1,22 +1,7 @@
 { pkgs, ... }:
 
 let
-  inherit (pkgs.lib)
-    escapeShellArg
-    makeBinPath
-    optionalString
-    optionals
-    ;
-
-  containerRuntimePath = makeBinPath (
-    optionals pkgs.stdenv.isLinux [
-      pkgs.podman
-      pkgs.shadow
-      pkgs.skopeo
-      pkgs.util-linux
-    ]
-  );
-  containerRuntimeEnvironment = optionalString pkgs.stdenv.isLinux "PATH=${escapeShellArg containerRuntimePath}:$PATH ";
+  inherit (pkgs.lib) escapeShellArg;
 
   repoScript = path: function: ''
     run_repo_script ${escapeShellArg path} ${escapeShellArg function}
@@ -25,17 +10,6 @@ let
   wholeRepoScript = path: ''
     run_repo_script ${escapeShellArg path}
   '';
-
-  containerScript = path: ''
-    ${containerRuntimeEnvironment}run_repo_script ${escapeShellArg path}
-  '';
-
-  profileContainerHook =
-    linuxPath: darwinFunction:
-    if pkgs.stdenv.isDarwin then
-      repoScript "tests/sandbox/container-hooks-darwin.sh" darwinFunction
-    else
-      containerScript linuxPath;
 in
 {
   "prek.bundle-contents" = ''
@@ -70,10 +44,6 @@ in
   "prek.skip-if-missing-absent" = wholeRepoScript "tests/prek/skip-if-missing-absent.sh";
   "prek.wrapper-runtime-dependencies" = wholeRepoScript "tests/prek/wrapper-runtime-dependencies.sh";
   "prek.config-wrapper-contract" = wholeRepoScript "tests/prek/wrix-pre-push-config.sh";
-  "prek.container-pre-commit" =
-    profileContainerHook "tests/sandbox/container-pre-commit.sh" "test_pre_commit_fires_in_darwin_profile_container";
-  "prek.container-pre-push" =
-    profileContainerHook "tests/sandbox/container-pre-push.sh" "test_pre_push_fires_in_darwin_profile_container";
   "prek.ci-only-heavy-checks" = wholeRepoScript "tests/prek/ci-only-heavy-checks.sh";
   "prek.ci-platform-policy" = wholeRepoScript "tests/prek/test-ci-platform-policy.sh";
 }
