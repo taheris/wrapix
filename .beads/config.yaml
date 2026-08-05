@@ -40,7 +40,7 @@ issue-prefix: "wx"
 # Can also use BEADS_SYNC_BRANCH env var for local override.
 sync-branch: "beads"
 
-# Multi-repo configuration (experimental - bd-307)
+# Multi-repo configuration (experimental)
 # Allows hydrating from multiple repositories and routing writes to the correct JSONL
 # repos:
 #   primary: "."  # Primary repo (where this database lives)

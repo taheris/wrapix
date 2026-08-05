@@ -75,6 +75,7 @@ in
     }:
     {
       nativeBuildInputs = nativeBuildInputs ++ [
+        pkgs.beads
         pkgs.hostname
         pkgs.jq
         pkgs.openssh

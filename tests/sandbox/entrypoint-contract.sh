@@ -117,6 +117,43 @@ printf '93.184.216.34 STREAM %s\n' "${2:-example.com}"
 EOF
   chmod +x "$bin_dir/getent"
 
+  cat >"$bin_dir/bd" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+log="${WRIX_FAKE_BD_LOG:?}"
+state="${WRIX_FAKE_BD_STATE:?}"
+printf '%s\n' "$*" >>"$log"
+if [[ "$*" == "dolt remote list" ]]; then
+  if [[ -f "$state" ]]; then
+    printf 'origin %s\n' "$(<"$state")"
+  fi
+  exit 0
+fi
+if [[ "${1:-}" == "sql" && "${2:-}" == "CALL DOLT_REMOTE('remove', 'origin')" ]]; then
+  rm -f "$state"
+  exit 0
+fi
+if [[ "${1:-}" == "sql" && "${2:-}" == "CALL DOLT_REMOTE('add', 'origin', "* ]]; then
+  if [[ "$2" == *"${WRIX_EXPECTED_BD_REMOTE:?}"* ]]; then
+    printf '%s\n' "$WRIX_EXPECTED_BD_REMOTE" >"$state"
+  elif [[ "$2" == *"${WRIX_ORIGINAL_BD_REMOTE:?}"* ]]; then
+    printf '%s\n' "$WRIX_ORIGINAL_BD_REMOTE" >"$state"
+  else
+    printf 'unexpected Dolt origin query: %s\n' "$2" >&2
+    exit 64
+  fi
+  exit 0
+fi
+if [[ "${1:-}" == "dolt" && ( "${2:-}" == "pull" || "${2:-}" == "push" ) ]]; then
+  printf '%s-origin=%s\n' "$2" "$(<"$state")" >>"$log"
+  exit 0
+fi
+printf 'unexpected bd invocation: %s\n' "$*" >&2
+exit 64
+EOF
+  chmod +x "$bin_dir/bd"
+
   cat >"$bin_dir/unshare" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -605,6 +642,47 @@ test_darwin_file_mount_modes_sync_only_writable_files() {
   printf 'PASS: Darwin file mounts preserve read-only mode and sync only writable files\n' >&2
 }
 
+test_darwin_bd_remote_remap() {
+  require_command jq
+  local workspace="$TEST_TMP/darwin-bd-remap/workspace"
+  local stdout_path="$TEST_TMP/darwin-bd-remap.out"
+  local stderr_path="$TEST_TMP/darwin-bd-remap.err"
+  local log_file="$TEST_TMP/darwin-bd-remap.log"
+  local state_file="$TEST_TMP/darwin-bd-remap.state"
+  local original_remote="file:///host-checkout/.git/beads-worktrees/beads/.beads/dolt-remote"
+  local expected_remote="file://$workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
+  mkdir -p "$workspace/.beads/dolt" "$workspace/.git/beads-worktrees/beads/.beads/dolt-remote"
+  printf '%s\n' 'sync-branch: "beads"' >"$workspace/.beads/config.yaml"
+  printf '%s\n' '{"backend":"dolt"}' >"$workspace/.beads/metadata.json"
+  printf '%s\n' "$original_remote" >"$state_file"
+  : >"$log_file"
+
+  export BEADS_DOLT_SERVER_HOST=127.0.0.1
+  export BEADS_DOLT_SERVER_PORT=3307
+  export WRIX_EXPECTED_BD_REMOTE="$expected_remote"
+  export WRIX_FAKE_BD_LOG="$log_file"
+  export WRIX_FAKE_BD_STATE="$state_file"
+  export WRIX_ORIGINAL_BD_REMOTE="$original_remote"
+  local operation
+  for operation in pull push; do
+    if ! run_entrypoint darwin direct "$stdout_path" "$stderr_path" "$workspace" bd dolt "$operation"; then
+      unset BEADS_DOLT_SERVER_HOST BEADS_DOLT_SERVER_PORT WRIX_EXPECTED_BD_REMOTE
+      unset WRIX_FAKE_BD_LOG WRIX_FAKE_BD_STATE WRIX_ORIGINAL_BD_REMOTE
+      fail "Darwin bd remote remap failed for $operation: $(<"$stderr_path")"
+      return 1
+    fi
+    assert_output_contains "Darwin remapped $operation" "$(<"$log_file")" "$operation-origin=$expected_remote" || return 1
+  done
+  unset BEADS_DOLT_SERVER_HOST BEADS_DOLT_SERVER_PORT WRIX_EXPECTED_BD_REMOTE
+  unset WRIX_FAKE_BD_LOG WRIX_FAKE_BD_STATE WRIX_ORIGINAL_BD_REMOTE
+
+  if [[ "$(<"$state_file")" != "$original_remote" ]]; then
+    fail "Darwin bd wrapper did not restore the original remote"
+    return 1
+  fi
+  printf 'PASS: Darwin entrypoint remaps and restores the Dolt origin around pull and push\n' >&2
+}
+
 test_darwin_entrypoint_rejects_net_admin() {
   local workspace="$TEST_TMP/net-admin-darwin/workspace"
   local stdout_path="$TEST_TMP/net-admin-darwin.out"
@@ -645,6 +723,7 @@ ALL_TESTS=(
   test_linux_core_hooks_path
   test_darwin_core_hooks_path
   test_linked_worktree_core_hooks_path_both
+  test_darwin_bd_remote_remap
   test_darwin_file_mount_modes_sync_only_writable_files
   test_darwin_entrypoint_rejects_net_admin
 )

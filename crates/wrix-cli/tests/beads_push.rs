@@ -15,6 +15,7 @@ log="${WRIX_BEADS_BD_LOG:?}"
 state_dir="${WRIX_BEADS_STATE_DIR:?}"
 scenario="${WRIX_BEADS_BD_SCENARIO:?}"
 root="${WRIX_BEADS_ROOT:?}"
+real_bd="${WRIX_BEADS_REAL_BD:?}"
 arg1="${1-}"
 arg2="${2-}"
 arg3="${3-}"
@@ -43,18 +44,6 @@ next_count() {
   count="$((count + 1))"
   printf '%s\n' "$count" > "$file"
   printf '%s\n' "$count"
-}
-
-set_auto_export_false() {
-  local config="${root}/.beads/config.yaml"
-  local tmp="${config}.tmp.$$"
-  mkdir -p "$(dirname "$config")"
-  if [[ -f "$config" ]]; then
-    awk 'BEGIN { seen = 0 } /^export\.auto:/ { if (seen == 0) { print "export.auto: false"; seen = 1 } next } { print } END { if (seen == 0) print "export.auto: false" }' "$config" > "$tmp"
-  else
-    printf 'export.auto: false\n' > "$tmp"
-  fi
-  mv "$tmp" "$config"
 }
 
 publish_local_remote() {
@@ -89,8 +78,7 @@ set_origin_from_query() {
 log_invocation "$@"
 
 if [[ "$#" -eq 4 && "$arg1" == "config" && "$arg2" == "set" && "$arg3" == "export.auto" && "$arg4" == "false" ]]; then
-  set_auto_export_false
-  exit 0
+  exec "$real_bd" "$@"
 fi
 
 if [[ "$#" -eq 2 && "$arg1" == "dolt" && "$arg2" == "commit" ]]; then
@@ -191,6 +179,7 @@ struct Fixture {
     repo: PathBuf,
     fake_bin: PathBuf,
     state_dir: PathBuf,
+    real_bd: PathBuf,
     bd_log: PathBuf,
     git_log: PathBuf,
 }
@@ -213,6 +202,7 @@ impl Fixture {
         let fixture = Self {
             bd_log: base.path().join("bd.log"),
             git_log: base.path().join("git.log"),
+            real_bd: find_program("bd")?,
             _base: base,
             repo,
             fake_bin,
@@ -228,6 +218,10 @@ impl Fixture {
 
     fn fake_bin(&self) -> &Path {
         &self.fake_bin
+    }
+
+    fn real_bd(&self) -> &Path {
+        &self.real_bd
     }
 
     fn beads_worktree(&self) -> PathBuf {
@@ -256,23 +250,30 @@ impl Fixture {
 }
 
 #[test]
-fn bd_fake_records_invocations_and_updates_auto_export() -> TestResult {
+fn bd_fake_config_matches_real_bd() -> TestResult {
     let fixture = Fixture::new("bd-fake-contract")?;
     setup_minimal_repo(fixture.repo())?;
+    let reference_repo = fixture.repo().with_file_name("reference-repo");
+    fs::create_dir_all(&reference_repo)?;
+    setup_minimal_repo(&reference_repo)?;
 
     for _ in 0..2 {
-        let output = bd_command(&fixture, "success")
+        let fake_output = bd_command(&fixture, "success")
             .args(["config", "set", "export.auto", "false"])
             .output()?;
-        assert!(
-            output.status.success(),
-            "fake bd config set failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let real_output = ProcessCommand::new(fixture.real_bd())
+            .args(["config", "set", "export.auto", "false"])
+            .current_dir(&reference_repo)
+            .output()?;
+        assert_eq!(fake_output.status, real_output.status);
+        assert_eq!(fake_output.stdout, real_output.stdout);
+        assert_eq!(fake_output.stderr, real_output.stderr);
     }
 
-    let config = fs::read_to_string(fixture.repo().join(".beads/config.yaml"))?;
-    assert_eq!(config.matches("export.auto: false").count(), 1);
+    assert_eq!(
+        fs::read_to_string(fixture.repo().join(".beads/config.yaml"))?,
+        fs::read_to_string(reference_repo.join(".beads/config.yaml"))?
+    );
     assert_eq!(
         fixture.bd_lines()?,
         vec![
@@ -448,38 +449,42 @@ fn disables_auto_export_idempotently() -> TestResult {
 }
 
 #[test]
-fn repairs_or_temporarily_overrides_dolt_origin() -> TestResult {
-    let host = Fixture::new("dolt-origin-host")?;
-    setup_repo_with_beads_branch(&host)?;
-    fs::create_dir_all(host.worktree_remote_dir())?;
-    let host_remote = file_url(&host.worktree_remote_dir());
+fn repairs_host_dolt_origin() -> TestResult {
+    let fixture = Fixture::new("dolt-origin-host")?;
+    setup_repo_with_beads_branch(&fixture)?;
+    fs::create_dir_all(fixture.worktree_remote_dir())?;
+    let expected_remote = file_url(&fixture.worktree_remote_dir());
 
-    let host_output = invoke_push(host.repo(), &[host.fake_bin()], |command| {
-        configure_bd(command, &host, "success");
+    let output = invoke_push(fixture.repo(), &[fixture.fake_bin()], |command| {
+        configure_bd(command, &fixture, "success");
         command.env("WRIX_BEADS_BD_REMOTE_LIST", "origin file:///stale");
     })?;
 
-    assert_eq!(host_output.code, 0, "stderr:\n{}", host_output.stderr);
-    assert!(host_output.stderr.contains("repairing Dolt origin remote"));
-    let host_lines = host.bd_lines()?;
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert!(output.stderr.contains("repairing Dolt origin remote"));
+    let lines = fixture.bd_lines()?;
     assert!(
-        host_lines
+        lines
             .iter()
             .any(|line| line.contains("CALL DOLT_REMOTE('remove', 'origin')"))
     );
-    assert!(host_lines.iter().any(|line| line.contains(&format!(
+    assert!(lines.iter().any(|line| line.contains(&format!(
         "CALL DOLT_REMOTE('add', 'origin', '{}')",
-        host_remote
+        expected_remote
     ))));
+    Ok(())
+}
 
-    let sandbox = Fixture::new("dolt-origin-sandbox")?;
-    setup_repo_with_beads_branch(&sandbox)?;
-    fs::create_dir_all(sandbox.worktree_remote_dir())?;
+#[test]
+fn restores_sandbox_dolt_origin_after_temporary_override() -> TestResult {
+    let fixture = Fixture::new("dolt-origin-sandbox")?;
+    setup_repo_with_beads_branch(&fixture)?;
+    fs::create_dir_all(fixture.worktree_remote_dir())?;
     let original_remote = "file:///host-checkout/.git/beads-worktrees/beads/.beads/dolt-remote";
-    let sandbox_remote = file_url(&sandbox.worktree_remote_dir());
+    let sandbox_remote = file_url(&fixture.worktree_remote_dir());
 
-    let sandbox_output = invoke_push(sandbox.repo(), &[sandbox.fake_bin()], |command| {
-        configure_bd(command, &sandbox, "success");
+    let output = invoke_push(fixture.repo(), &[fixture.fake_bin()], |command| {
+        configure_bd(command, &fixture, "success");
         command.env("IS_SANDBOX", "1");
         command.env(
             "WRIX_BEADS_BD_REMOTE_LIST",
@@ -487,13 +492,13 @@ fn repairs_or_temporarily_overrides_dolt_origin() -> TestResult {
         );
     })?;
 
-    assert_eq!(sandbox_output.code, 0, "stderr:\n{}", sandbox_output.stderr);
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
     assert!(
-        sandbox_output
+        output
             .stderr
             .contains("temporarily using sandbox Dolt origin remote")
     );
-    let add_lines = sandbox
+    let add_lines = fixture
         .bd_lines()?
         .into_iter()
         .filter(|line| line.contains("CALL DOLT_REMOTE('add', 'origin'"))
@@ -640,6 +645,51 @@ fn recovers_orphaned_worktree_relative_to_root() -> TestResult {
 }
 
 #[test]
+fn recovers_missing_worktree_from_origin_on_local_branch() -> TestResult {
+    let fixture = Fixture::new("origin-only-worktree")?;
+    setup_repo_with_beads_branch(&fixture)?;
+    run_git(
+        fixture.repo(),
+        &[
+            "worktree",
+            "remove",
+            fixture.beads_worktree().to_string_lossy().as_ref(),
+            "--force",
+        ],
+    )?;
+    run_git(fixture.repo(), &["branch", "-D", "beads"])?;
+    assert!(
+        !fixture.beads_worktree().exists(),
+        "fixture unexpectedly retained the beads worktree"
+    );
+    assert!(
+        !git_command(fixture.repo(), &["rev-parse", "--verify", "beads"])
+            .output()?
+            .status
+            .success(),
+        "fixture unexpectedly retained the local beads branch"
+    );
+
+    let output = invoke_push(fixture.repo(), &[fixture.fake_bin()], |command| {
+        configure_bd(command, &fixture, "success");
+    })?;
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert_eq!(
+        git_stdout(&fixture.beads_worktree(), &["symbolic-ref", "HEAD"])?,
+        "refs/heads/beads"
+    );
+    assert_eq!(
+        git_stdout(
+            &fixture.beads_worktree(),
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+        )?,
+        "origin/beads"
+    );
+    Ok(())
+}
+
+#[test]
 fn git_sync_invocations_skip_prek() -> TestResult {
     let fixture = Fixture::new("git-sync-prek")?;
     setup_repo_with_beads_branch(&fixture)?;
@@ -664,10 +714,11 @@ fn git_sync_invocations_skip_prek() -> TestResult {
     assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
     assert!(!output.stderr.contains("No prek.toml"));
     let lines = fixture.git_lines()?;
-    let sync_lines = lines
+    let sync_start = lines
         .iter()
-        .filter(|line| !line.ends_with("\tgit\trev-parse\t--show-toplevel"))
-        .collect::<Vec<_>>();
+        .position(|line| line.contains("\tgit\trev-parse\t--verify\tbeads"))
+        .ok_or_else(|| io::Error::other("git sync did not probe the beads branch"))?;
+    let sync_lines = lines[sync_start..].iter().collect::<Vec<_>>();
     assert!(!sync_lines.is_empty());
     assert!(
         sync_lines
@@ -728,7 +779,11 @@ fn configure_git_identity(root: &Path) -> TestResult {
 
 fn write_beads_config(root: &Path, auto_export: bool) -> TestResult {
     let value = if auto_export { "true" } else { "false" };
-    fs::create_dir_all(root.join(".beads"))?;
+    let beads_dir = root.join(".beads");
+    fs::create_dir_all(&beads_dir)?;
+    let mut permissions = fs::metadata(&beads_dir)?.permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&beads_dir, permissions)?;
     fs::write(
         root.join(".beads/config.yaml"),
         format!(
@@ -768,11 +823,13 @@ fn configure_bd(command: &mut ProcessCommand, fixture: &Fixture, scenario: &str)
         .env("WRIX_BEADS_BD_LOG", &fixture.bd_log)
         .env("WRIX_BEADS_STATE_DIR", &fixture.state_dir)
         .env("WRIX_BEADS_BD_SCENARIO", scenario)
+        .env("WRIX_BEADS_REAL_BD", fixture.real_bd())
         .env("WRIX_BEADS_ROOT", fixture.repo());
 }
 
 fn bd_command(fixture: &Fixture, scenario: &str) -> ProcessCommand {
     let mut command = ProcessCommand::new(fixture.fake_bin().join("bd"));
+    command.current_dir(fixture.repo());
     configure_bd(&mut command, fixture, scenario);
     command
 }

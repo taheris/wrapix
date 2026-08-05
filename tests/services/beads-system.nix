@@ -12,12 +12,6 @@ let
     inherit pkgs;
     inherit (wrix.rustPackage) cacheServe;
   };
-  beadsShell = wrix.mkDevShell {
-    profile = wrix.profiles.base;
-    nixCache = false;
-    prekHooks = false;
-  };
-  beadsHook = pkgs.writeText "wrix-beads-system-shell-hook" beadsShell.shellHook;
   profileConfigBase = pkgs.writeText "wrix-beads-system-profile-base.json" (
     builtins.toJSON {
       schema = 1;
@@ -95,12 +89,27 @@ let
     ${commonEnvironment}
 
     repo="$HOME/beads-repo"
-    git -C "$repo" init -q
+    origin="$HOME/beads-origin.git"
+    worktree="$repo/.git/beads-worktrees/${syncBranch}"
+    git init --bare -q "$origin"
+    git -C "$repo" init -q -b main
     git -C "$repo" config user.name "Wrix Test"
     git -C "$repo" config user.email "wrix@example.invalid"
+    printf 'main\n' >"$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" commit -qm "initial"
+    git -C "$repo" remote add origin "$origin"
+    git -C "$repo" push -u origin main --quiet
+    git -C "$repo" switch -c "${syncBranch}" --quiet
+    mkdir -p "$repo/.beads/dolt-remote"
+    touch "$repo/.beads/dolt-remote/.keep"
+    git -C "$repo" add .beads/dolt-remote/.keep
+    git -C "$repo" commit -qm "beads initial"
+    git -C "$repo" push -u origin "${syncBranch}" --quiet
+    git -C "$repo" switch main --quiet
+    git -C "$repo" worktree add "$worktree" "${syncBranch}" --quiet
     mkdir -p \
       "$repo/.beads/dolt" \
-      "$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote" \
       "$repo/.wrix" \
       "$XDG_STATE_HOME" \
       "$XDG_CACHE_HOME"
@@ -110,30 +119,18 @@ let
       dolt init --name "Wrix Test" --email "wrix@example.invalid" >/dev/null
     )
   '';
-  beadsParent = pkgs.writeShellScript "wrix-beads-system-parent" ''
-    set -euo pipefail
-    ${commonEnvironment}
-
-    cd "$HOME/beads-repo"
-    source ${beadsHook}
-    printf 'socket=%s\nauto=%s\n' \
-      "''${BEADS_DOLT_SERVER_SOCKET:-}" \
-      "''${BEADS_DOLT_AUTO_START:-}" \
-      > "$HOME/beads-hook.env"
-    touch "$HOME/beads-hook.ready"
-    exec sleep infinity
-  '';
-  prepareSync = pkgs.writeShellScript "wrix-beads-system-prepare-sync" ''
+  initializeBeads = pkgs.writeShellScript "wrix-beads-system-initialize" ''
     set -euo pipefail
     ${commonEnvironment}
 
     repo="$HOME/beads-repo"
     remote="$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote"
-    socket=$(cd "$repo" && wrix service dolt socket)
+    cd "$repo"
+    wrix service start --no-cache >/dev/null
+    socket=$(wrix service dolt socket)
     export BEADS_DOLT_SERVER_SOCKET="$socket"
     export BEADS_DOLT_AUTO_START=0
 
-    cd "$repo"
     bd init \
       --prefix wx \
       --skip-hooks \
@@ -144,15 +141,145 @@ let
       --database wx \
       >/dev/null
     chmod 700 .beads
+    if grep -q '^issue-prefix:' .beads/config.yaml; then
+      sed -i 's/^issue-prefix:.*/issue-prefix: "wx"/' .beads/config.yaml
+    else
+      printf 'issue-prefix: "wx"\n' >>.beads/config.yaml
+    fi
     if grep -q '^sync-branch:' .beads/config.yaml; then
       sed -i 's/^sync-branch:.*/sync-branch: "${syncBranch}"/' .beads/config.yaml
     else
       printf 'sync-branch: "%s"\n' '${syncBranch}' >>.beads/config.yaml
     fi
-    bd config set export.auto false >/dev/null
+    if ! grep -q '^sync:' .beads/config.yaml; then
+      printf 'sync:\n  mode: dolt-native\n' >>.beads/config.yaml
+    fi
+    bd config set export.auto true >/dev/null
     bd dolt remote add origin "file://$remote" >/dev/null
     bd dolt commit >/dev/null
     bd dolt push >/dev/null
+    rm -f .beads/issues.jsonl
+  '';
+  verifyCommandSurface = pkgs.writeShellScript "wrix-beads-system-command-surface" ''
+    set -euo pipefail
+    ${commonEnvironment}
+
+    repo="$HOME/beads-repo"
+    socket=$(cd "$repo" && wrix service dolt socket)
+    export BEADS_DOLT_SERVER_SOCKET="$socket"
+    export BEADS_DOLT_AUTO_START=0
+    cd "$repo"
+
+    verify_config() {
+      local pattern="$1"
+      if ! grep -E "$pattern" .beads/config.yaml >/dev/null; then
+        printf 'missing Beads config pattern: %s\n' "$pattern" >&2
+        cat .beads/config.yaml >&2
+        exit 1
+      fi
+    }
+    verify_config '^issue-prefix: "?wx"?$'
+    verify_config '^sync-branch: "?${syncBranch}"?$'
+    verify_config 'mode: dolt-native'
+    verify_config 'export.auto: false'
+
+    task_id=$(bd create --title "command task" --type task --priority=P2 --silent)
+    bd show "$task_id" --json | jq -e \
+      --arg id "$task_id" \
+      '.[0].id == $id and (.[0].id | startswith("wx-")) and .[0].issue_type == "task" and .[0].priority == 2' \
+      >/dev/null
+    bd update "$task_id" --status=in_progress >/dev/null
+    bd list --status=in_progress --json | jq -e \
+      --arg id "$task_id" \
+      'any(.[]; .id == $id)' \
+      >/dev/null
+    bd update "$task_id" --add-label=one --add-label=two --notes="command notes" >/dev/null
+    bd update "$task_id" --remove-label=one >/dev/null
+    bd show "$task_id" --json | jq -e \
+      '.[0].notes == "command notes" and .[0].labels == ["two"]' \
+      >/dev/null
+    bd close "$task_id" >/dev/null
+
+    blocker_id=$(bd create --title "command blocker" --type task --silent)
+    dependent_id=$(bd create --title "command dependent" --type task --silent)
+    bd dep add "$dependent_id" "$blocker_id" >/dev/null
+    bd show "$dependent_id" --json | jq -e \
+      --arg blocker "$blocker_id" \
+      'any(.[0].dependencies[]; .id == $blocker and .dependency_type == "blocks")' \
+      >/dev/null
+    bd ready --json | jq -e \
+      --arg blocker "$blocker_id" \
+      --arg dependent "$dependent_id" \
+      'any(.[]; .id == $blocker) and all(.[]; .id != $dependent)' \
+      >/dev/null
+    bd close "$blocker_id" >/dev/null
+    bd ready --json | jq -e --arg id "$dependent_id" 'any(.[]; .id == $id)' >/dev/null
+
+    for issue_type in bug feature epic chore decision; do
+      issue_id=$(bd create --title "type $issue_type" --type "$issue_type" --silent)
+      bd show "$issue_id" --json | jq -e \
+        --arg issue_type "$issue_type" \
+        '.[0].issue_type == $issue_type' \
+        >/dev/null
+    done
+    for priority in 0 1 2 3 4 P0 P1 P2 P3 P4; do
+      issue_id=$(bd create --title "priority $priority" --type task --priority="$priority" --silent)
+      expected="''${priority#P}"
+      bd show "$issue_id" --json | jq -e \
+        --argjson expected "$expected" \
+        '.[0].priority == $expected' \
+        >/dev/null
+    done
+    if [[ -e .beads/issues.jsonl ]]; then
+      printf 'a direct bd command recreated issues.jsonl after auto-export suppression\n' >&2
+      exit 1
+    fi
+  '';
+  verifyAutoExport = pkgs.writeShellScript "wrix-beads-system-auto-export" ''
+    set -euo pipefail
+    ${commonEnvironment}
+
+    repo="$HOME/beads-repo"
+    socket=$(cd "$repo" && wrix service dolt socket)
+    export BEADS_DOLT_SERVER_SOCKET="$socket"
+    export BEADS_DOLT_AUTO_START=0
+    cd "$repo"
+
+    for attempt in 1 2; do
+      if ! wrix beads push >"$HOME/beads-auto-export-$attempt.out" \
+        2>"$HOME/beads-auto-export-$attempt.err"; then
+        cat "$HOME/beads-auto-export-$attempt.out" >&2
+        cat "$HOME/beads-auto-export-$attempt.err" >&2
+        exit 1
+      fi
+      if grep -F 'Warning: auto-export: git add failed' "$HOME/beads-auto-export-$attempt.err"; then
+        printf 'auto-export warning remained enabled\n' >&2
+        exit 1
+      fi
+    done
+    if [[ "$(bd config get export.auto)" != "false" ]]; then
+      printf 'auto-export config was not disabled\n' >&2
+      exit 1
+    fi
+    if [[ "$(grep -c '^export.auto: false$' .beads/config.yaml)" != "1" ]]; then
+      printf 'auto-export config was not persisted exactly once\n' >&2
+      exit 1
+    fi
+    if [[ -e .beads/issues.jsonl ]]; then
+      printf 'auto-export created issues.jsonl\n' >&2
+      exit 1
+    fi
+  '';
+  prepareSync = pkgs.writeShellScript "wrix-beads-system-prepare-sync" ''
+    set -euo pipefail
+    ${commonEnvironment}
+
+    repo="$HOME/beads-repo"
+    remote="$repo/.git/beads-worktrees/${syncBranch}/.beads/dolt-remote"
+    socket=$(cd "$repo" && wrix service dolt socket)
+    export BEADS_DOLT_SERVER_SOCKET="$socket"
+    export BEADS_DOLT_AUTO_START=0
+    cd "$repo"
 
     remote_digest() {
       find "$remote" -type f -printf '%P:%s\n' | sort | sha256sum | cut -d' ' -f1
@@ -311,29 +438,13 @@ pkgs.testers.runNixOSTest {
     machine.succeed("chown -R alice:users /home/alice")
     machine.succeed(as_alice("${fixtureSetup}"))
 
-    with subtest("beads shellHook service survives its systemd parent"):
-        machine.succeed(
-            as_alice(
-                "systemd-run --user --unit=wrix-beads-parent "
-                "--property=Type=exec --property=TimeoutStopSec=8s ${beadsParent}"
-            )
-        )
-        machine.wait_until_succeeds("test -e /home/alice/beads-hook.ready", timeout=90)
-        machine.succeed("grep -F 'auto=0' /home/alice/beads-hook.env")
-        machine.succeed(
-            as_alice(
-                "podman inspect --format '{{.State.Running}}' beads-repo-service | grep true"
-            )
-        )
-        machine.succeed(
-            as_alice("timeout 3s systemctl --user stop wrix-beads-parent.service")
-        )
-        machine.sleep(1)
-        machine.succeed(
-            as_alice(
-                "podman inspect --format '{{.State.Running}}' beads-repo-service | grep true"
-            )
-        )
+    machine.succeed(as_alice("${initializeBeads}"), timeout=120)
+
+    with subtest("wrix beads push disables real bd auto-export idempotently"):
+        machine.succeed(as_alice("${verifyAutoExport}"), timeout=120)
+
+    with subtest("real bd command and configuration surface"):
+        machine.succeed(as_alice("${verifyCommandSurface}"), timeout=120)
 
     with subtest("live sandbox uses the shared service for real Dolt sync"):
         machine.succeed(as_alice("${prepareSync}"), timeout=120)

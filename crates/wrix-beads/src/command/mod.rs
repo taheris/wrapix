@@ -1,5 +1,5 @@
 use std::{
-    env, fs, io,
+    env, fmt, fs, io,
     io::Write,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Output, Stdio},
@@ -12,6 +12,47 @@ use wrix_core::git::{Branch, ParseError as BranchParseError};
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Display, ThisError)]
+pub enum IssueIdParseError {
+    /// invalid beads issue identifier: {value}
+    Invalid { value: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IssueId(String);
+
+impl IssueId {
+    fn parse(input: &str) -> std::result::Result<Self, IssueIdParseError> {
+        let Some((prefix, local)) = input.split_once('-') else {
+            return Err(IssueIdParseError::Invalid {
+                value: input.to_owned(),
+            });
+        };
+        let valid_segment = |segment: &str| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        };
+        if !valid_segment(prefix) || !local.split('.').all(valid_segment) {
+            return Err(IssueIdParseError::Invalid {
+                value: input.to_owned(),
+            });
+        }
+        Ok(Self(input.to_owned()))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for IssueId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Display, ThisError)]
 pub enum Error {
     /// beads workflow I/O failed: {source}
     Io {
@@ -22,6 +63,11 @@ pub enum Error {
     InvalidSyncBranch {
         #[from]
         source: BranchParseError,
+    },
+    /// invalid issue identifier returned by beads: {source}
+    InvalidIssueId {
+        #[from]
+        source: IssueIdParseError,
     },
     /// {program} failed: {stderr}
     CommandFailed {
@@ -310,7 +356,11 @@ fn pull_with_intent_protection(stderr: &mut impl Write) -> Result<ExitCode> {
         writeln!(
             stderr,
             "wrix beads push: affected issue IDs: {}",
-            affected_ids.join(" ")
+            affected_ids
+                .iter()
+                .map(IssueId::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
         )?;
         return Ok(ExitCode::FAILURE);
     }
@@ -318,24 +368,27 @@ fn pull_with_intent_protection(stderr: &mut impl Write) -> Result<ExitCode> {
     Ok(status_to_exit(&push))
 }
 
-fn query_affected_ids() -> Result<Vec<String>> {
+fn query_affected_ids() -> Result<Vec<IssueId>> {
     let output = run_required_output("bd", &["sql", "--csv", AFFECTED_IDS_SQL])?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text
-        .lines()
+    parse_affected_ids(&output.stdout).map_err(Error::from)
+}
+
+fn parse_affected_ids(output: &[u8]) -> std::result::Result<Vec<IssueId>, IssueIdParseError> {
+    let text = String::from_utf8_lossy(output);
+    text.lines()
         .skip(1)
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect())
+        .map(IssueId::parse)
+        .collect()
 }
 
 const AFFECTED_IDS_SQL: &str = "\n    SELECT DISTINCT id FROM (\n      SELECT to_id AS id\n      FROM dolt_commit_diff_issues\n      WHERE to_commit = 'HEAD' AND from_commit = 'remotes/origin/main'\n        AND (from_status IS NULL OR from_status <> to_status)\n      UNION\n      SELECT to_issue_id AS id\n      FROM dolt_commit_diff_labels\n      WHERE to_commit = 'HEAD' AND from_commit = 'remotes/origin/main'\n      UNION\n      SELECT from_issue_id AS id\n      FROM dolt_commit_diff_labels\n      WHERE to_commit = 'HEAD' AND from_commit = 'remotes/origin/main'\n    ) AS touched\n    WHERE id IS NOT NULL\n";
 
-fn snapshot_query_for_ids(ids: &[String]) -> String {
+fn snapshot_query_for_ids(ids: &[IssueId]) -> String {
     let in_list = ids
         .iter()
-        .map(|id| sql_quote(id))
+        .map(|id| sql_quote(id.as_str()))
         .collect::<Vec<_>>()
         .join(",");
     format!(
@@ -440,7 +493,15 @@ fn recreate_beads_worktree(context: &Context, stderr: &mut impl Write) -> Result
             .success()
         {
             let worktree = context.worktree_text();
-            run_git_required(&["worktree", "add", &worktree, &origin_branch, "--quiet"])?;
+            run_git_required(&[
+                "worktree",
+                "add",
+                "-b",
+                context.branch.as_str(),
+                &worktree,
+                &origin_branch,
+                "--quiet",
+            ])?;
         } else {
             writeln!(
                 stderr,
@@ -594,8 +655,8 @@ mod test {
     use std::fs;
 
     use super::{
-        Command, is_fast_forward_rejection, origin_remote_url, read_sync_branch,
-        snapshot_query_for_ids,
+        Command, IssueId, is_fast_forward_rejection, origin_remote_url, parse_affected_ids,
+        read_sync_branch, snapshot_query_for_ids,
     };
 
     #[test]
@@ -614,11 +675,28 @@ mod test {
     }
 
     #[test]
-    fn snapshot_query_quotes_issue_ids() {
-        let ids = vec![String::from("wx-one"), String::from("wx-'two")];
+    fn snapshot_query_quotes_validated_issue_ids() {
+        let ids = vec![
+            IssueId::parse("wx-one").unwrap(),
+            IssueId::parse("wx-two.3").unwrap(),
+        ];
         let query = snapshot_query_for_ids(&ids);
         assert!(query.contains("'wx-one'"));
-        assert!(query.contains("'wx-''two'"));
+        assert!(query.contains("'wx-two.3'"));
+    }
+
+    #[test]
+    fn affected_id_output_rejects_malformed_query_values() {
+        assert_eq!(
+            parse_affected_ids(b"id\nwx-one\nwx-two.3\n").unwrap(),
+            vec![
+                IssueId::parse("wx-one").unwrap(),
+                IssueId::parse("wx-two.3").unwrap(),
+            ]
+        );
+        assert!(parse_affected_ids(b"id\nmissing_separator\n").is_err());
+        assert!(parse_affected_ids(b"id\nwx-'quoted'\n").is_err());
+        assert!(parse_affected_ids(b"id\nwx-empty.\n").is_err());
     }
 
     #[test]

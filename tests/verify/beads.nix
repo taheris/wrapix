@@ -6,11 +6,23 @@ let
   serviceScript = script: function: ''
     run_repo_script ${escapeShellArg "tests/services/${script}.sh"} ${escapeShellArg function}
   '';
+  sandboxScript = script: function: ''
+    run_repo_script ${escapeShellArg "tests/sandbox/${script}.sh"} ${escapeShellArg function}
+  '';
 in
 {
   "beads.no-jsonl-staged" = serviceScript "dolt-cli" "test_no_jsonl_staged";
 
-  "beads.shellhook-fail-loud" = serviceScript "beads-shellhook" "test_shellhook_fail_loud";
+  "beads.darwin-remote-remap" = sandboxScript "entrypoint-contract" "test_darwin_bd_remote_remap";
+
+  "beads.shellhook-darwin-runtime-fallback" =
+    serviceScript "beads-shellhook" "test_darwin_shellhook_selects_podman_fallback";
+
+  "beads.shellhook-endpoint-fail-loud" =
+    serviceScript "beads-shellhook" "test_shellhook_unreachable_endpoint_fails_loud";
+
+  "beads.shellhook-runtime-fail-loud" =
+    serviceScript "beads-shellhook" "test_shellhook_missing_runtime_fails_loud";
 
   "beads.tracked-files" = ''
     local actual

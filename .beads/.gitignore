@@ -68,7 +68,7 @@ backup/
 db.sqlite
 bd.db
 
-# JSONL export/import files — dead post-Dolt migration (3171e1f).
+# JSONL export/import files are unused in Dolt-native mode.
 # Dolt is the source of truth; sync uses .beads/dolt-remote/ on the beads branch.
 issues.jsonl
 interactions.jsonl

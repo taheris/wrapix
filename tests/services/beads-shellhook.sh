@@ -57,14 +57,21 @@ require_shellhook_deps() {
   require_command python3
 }
 
-write_linux_shellhook() {
-  local out_file="$1"
+write_shellhook() {
+  local platform="$1"
+  local out_file="$2"
+  local is_darwin
   local jq_out
+  case "$platform" in
+    linux) is_darwin=false ;;
+    darwin) is_darwin=true ;;
+    *) fail "unknown shellHook platform: $platform" ;;
+  esac
   jq_out="$(dirname "$(dirname "$(command -v jq)")")"
   nix eval --impure --raw --expr "
     let
       pkgs = {
-        stdenv = { isDarwin = false; };
+        stdenv = { isDarwin = $is_darwin; };
         jq = { outPath = \"$jq_out\"; };
       };
     in (import $REPO_ROOT/lib/beads/default.nix { inherit pkgs; wrix = null; }).shellHook
@@ -155,6 +162,30 @@ json_unix_endpoint() {
   jq -n --arg socket "$socket_path" '{endpoints:{dolt:{transport:"unix",socket:$socket}}}'
 }
 
+json_tcp_endpoint() {
+  local host="$1"
+  local port="$2"
+  jq -n \
+    --arg host "$host" \
+    --argjson port "$port" \
+    '{endpoints:{dolt:{transport:"tcp",host:$host,port:$port}}}'
+}
+
+start_unix_listener() {
+  local socket_path="$1"
+  python3 - "$socket_path" </dev/null >/dev/null 2>&1 <<'PY' &
+import socket
+import sys
+import time
+
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen()
+time.sleep(30)
+PY
+  printf '%s\n' "$!"
+}
+
 run_hook_with_env() {
   local workspace="$1"
   local hook_file="$2"
@@ -194,68 +225,126 @@ test_fake_shellhook_tools_contract() {
   assert_contains "fake endpoints" "$(<"$endpoint_file")" "\"transport\": \"unix\""
 }
 
-test_shellhook_fail_loud() {
+test_shellhook_missing_runtime_fails_loud() {
   require_shellhook_deps
-  local hook_file="$TEST_TMP/shellHook-fail-linux.sh"
-  write_linux_shellhook "$hook_file"
+  local platform
+  for platform in linux darwin; do
+    local hook_file="$TEST_TMP/shellHook-missing-runtime-$platform.sh"
+    local workspace="$TEST_TMP/missing-runtime-$platform-repo"
+    local bin_dir="$TEST_TMP/missing-runtime-$platform-bin"
+    local log_file="$TEST_TMP/missing-runtime-$platform.log"
+    local stdout_file="$TEST_TMP/missing-runtime-$platform.out"
+    local stderr_file="$TEST_TMP/missing-runtime-$platform.err"
+    local rc
+    write_shellhook "$platform" "$hook_file"
+    prepare_beads_workspace "$workspace"
+    write_fake_wrix "$bin_dir"
+    set +e
+    run_hook_with_env "$workspace" "$hook_file" "$stdout_file" "$stderr_file" \
+      PATH="$bin_dir:$PATH" \
+      WRIX_BIN="$bin_dir/wrix" \
+      WRIX_CONTAINER_RUNTIME=wrix-missing-runtime \
+      WRIX_FAKE_LOG="$log_file" \
+      WRIX_FAKE_ENDPOINTS="$(json_unix_endpoint "$workspace/.wrix/dolt.sock")"
+    rc="$?"
+    set -e
+    if [[ "$rc" == "0" ]]; then
+      fail "$platform shellHook succeeded without a container runtime"
+    fi
+    if [[ "$platform" == "darwin" ]]; then
+      assert_contains "$platform missing runtime" "$(<"$stderr_file")" "no service container runtime is available"
+    else
+      assert_contains "$platform missing runtime" "$(<"$stderr_file")" "service runtime 'wrix-missing-runtime' is not on PATH"
+    fi
+    if [[ -f "$log_file" ]]; then
+      assert_not_contains "$platform missing runtime did not start" "$(<"$log_file")" "wrix service start"
+    fi
+  done
+}
 
-  local runtime_workspace="$TEST_TMP/missing-runtime-repo"
-  local runtime_bin="$TEST_TMP/missing-runtime-bin"
-  local runtime_log="$TEST_TMP/missing-runtime.log"
-  local runtime_out="$TEST_TMP/missing-runtime.out"
-  local runtime_err="$TEST_TMP/missing-runtime.err"
-  local rc
-  prepare_beads_workspace "$runtime_workspace"
-  write_fake_wrix "$runtime_bin"
-  set +e
-  run_hook_with_env "$runtime_workspace" "$hook_file" "$runtime_out" "$runtime_err" \
-    PATH="$runtime_bin:$PATH" \
-    WRIX_BIN="$runtime_bin/wrix" \
-    WRIX_CONTAINER_RUNTIME=wrix-missing-runtime \
-    WRIX_FAKE_LOG="$runtime_log" \
-    WRIX_FAKE_ENDPOINTS="$(json_unix_endpoint "$runtime_workspace/.wrix/dolt.sock")"
-  rc="$?"
-  set -e
-  if [[ "$rc" == "0" ]]; then
-    fail "shellHook succeeded without a container runtime"
-  fi
-  assert_contains "missing runtime" "$(<"$runtime_err")" "service runtime 'wrix-missing-runtime' is not on PATH"
-  if [[ -f "$runtime_log" ]]; then
-    assert_not_contains "missing runtime did not start" "$(<"$runtime_log")" "wrix service start"
-  fi
+test_shellhook_unreachable_endpoint_fails_loud() {
+  require_shellhook_deps
+  local platform
+  for platform in linux darwin; do
+    local hook_file="$TEST_TMP/shellHook-unreachable-$platform.sh"
+    local workspace="$TEST_TMP/unreachable-$platform-repo"
+    local bin_dir="$TEST_TMP/unreachable-$platform-bin"
+    local log_file="$TEST_TMP/unreachable-$platform.log"
+    local stdout_file="$TEST_TMP/unreachable-$platform.out"
+    local stderr_file="$TEST_TMP/unreachable-$platform.err"
+    local endpoint
+    local expected_error
+    local rc
+    write_shellhook "$platform" "$hook_file"
+    prepare_beads_workspace "$workspace"
+    write_fake_wrix "$bin_dir"
+    write_fake_runtime "$bin_dir"
+    write_fake_systemd "$bin_dir"
+    write_fast_sleep "$bin_dir"
+    if [[ "$platform" == "darwin" ]]; then
+      endpoint="$(json_tcp_endpoint "127.0.0.1" 1)"
+      expected_error="Dolt TCP endpoint 127.0.0.1:1 is not reachable"
+    else
+      endpoint="$(json_unix_endpoint "$workspace/.wrix/missing.sock")"
+      expected_error="Dolt socket did not appear"
+    fi
+    set +e
+    run_hook_with_env "$workspace" "$hook_file" "$stdout_file" "$stderr_file" \
+      PATH="$bin_dir:$PATH" \
+      WRIX_BIN="$bin_dir/wrix" \
+      WRIX_CONTAINER_RUNTIME=podman \
+      WRIX_FAKE_LOG="$log_file" \
+      WRIX_FAKE_SYSTEMD_ACTIVE=3 \
+      WRIX_FAKE_ENDPOINTS="$endpoint"
+    rc="$?"
+    set -e
+    if [[ "$rc" == "0" ]]; then
+      fail "$platform shellHook succeeded with an unreachable Dolt endpoint"
+    fi
+    assert_file_contains "$platform unreachable started service" "$log_file" "wrix service start --no-cache"
+    assert_file_contains "$platform unreachable read endpoints" "$log_file" "wrix service endpoints --no-cache"
+    assert_contains "$platform unreachable endpoint" "$(<"$stderr_file")" "$expected_error"
+    assert_contains "$platform unreachable endpoint" "$(<"$stderr_file")" "refusing embedded Dolt fallback"
+  done
+}
 
-  local endpoint_workspace="$TEST_TMP/unreachable-endpoint-repo"
-  local endpoint_bin="$TEST_TMP/unreachable-endpoint-bin"
-  local endpoint_log="$TEST_TMP/unreachable-endpoint.log"
-  local endpoint_out="$TEST_TMP/unreachable-endpoint.out"
-  local endpoint_err="$TEST_TMP/unreachable-endpoint.err"
-  prepare_beads_workspace "$endpoint_workspace"
-  write_fake_wrix "$endpoint_bin"
-  write_fake_runtime "$endpoint_bin"
-  write_fake_systemd "$endpoint_bin"
-  write_fast_sleep "$endpoint_bin"
-  set +e
-  run_hook_with_env "$endpoint_workspace" "$hook_file" "$endpoint_out" "$endpoint_err" \
-    PATH="$endpoint_bin:$PATH" \
-    WRIX_BIN="$endpoint_bin/wrix" \
-    WRIX_CONTAINER_RUNTIME=podman \
-    WRIX_FAKE_LOG="$endpoint_log" \
-    WRIX_FAKE_SYSTEMD_ACTIVE=3 \
-    WRIX_FAKE_ENDPOINTS="$(json_unix_endpoint "$endpoint_workspace/.wrix/missing.sock")"
-  rc="$?"
-  set -e
-  if [[ "$rc" == "0" ]]; then
-    fail "shellHook succeeded with an unreachable Dolt endpoint"
-  fi
-  assert_file_contains "unreachable started service" "$endpoint_log" "wrix service start --no-cache"
-  assert_file_contains "unreachable read endpoints" "$endpoint_log" "wrix service endpoints --no-cache"
-  assert_contains "unreachable endpoint" "$(<"$endpoint_err")" "Dolt socket did not appear"
-  assert_contains "unreachable endpoint" "$(<"$endpoint_err")" "refusing embedded Dolt fallback"
+test_darwin_shellhook_selects_podman_fallback() {
+  require_shellhook_deps
+  local hook_file="$TEST_TMP/shellHook-darwin-podman.sh"
+  local workspace="$TEST_TMP/darwin-podman-repo"
+  local bin_dir="$TEST_TMP/darwin-podman-bin"
+  local log_file="$TEST_TMP/darwin-podman.log"
+  local stdout_file="$TEST_TMP/darwin-podman.out"
+  local stderr_file="$TEST_TMP/darwin-podman.err"
+  local socket_path="$workspace/.wrix/dolt.sock"
+  local listener_pid
+  write_shellhook darwin "$hook_file"
+  prepare_beads_workspace "$workspace"
+  write_fake_wrix "$bin_dir"
+  write_fake_runtime "$bin_dir"
+  ln -s "$(command -v bash)" "$bin_dir/bash"
+  listener_pid="$(start_unix_listener "$socket_path")"
+  while [[ ! -S "$socket_path" ]]; do
+    sleep 0.01
+  done
+
+  run_hook_with_env "$workspace" "$hook_file" "$stdout_file" "$stderr_file" \
+    PATH="$bin_dir" \
+    WRIX_BIN="$bin_dir/wrix" \
+    WRIX_FAKE_LOG="$log_file" \
+    WRIX_FAKE_ENDPOINTS="$(json_unix_endpoint "$socket_path")"
+  kill "$listener_pid"
+  wait "$listener_pid" 2>/dev/null || true # best-effort: the listener may exit after the explicit kill.
+
+  assert_file_contains "Darwin podman fallback starts service" "$log_file" "wrix service start --no-cache"
+  assert_contains "Darwin podman fallback exports socket" "$(<"$stdout_file")" "SOCKET=$socket_path"
 }
 
 ALL_TESTS=(
   test_fake_shellhook_tools_contract
-  test_shellhook_fail_loud
+  test_shellhook_missing_runtime_fails_loud
+  test_shellhook_unreachable_endpoint_fails_loud
+  test_darwin_shellhook_selects_podman_fallback
 )
 
 run_all() {
