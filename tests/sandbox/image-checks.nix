@@ -148,16 +148,6 @@ let
         esac
     }
 
-    materialize_archive() {
-        local archive="$1"
-        local output="$2"
-        if [[ -x "$archive" ]]; then
-            "$archive" >"$output"
-        else
-            cp "$archive" "$output"
-        fi
-    }
-
     write_layers() {
         local archive_dir="$1"
         local output="$2"
@@ -169,6 +159,19 @@ let
         local output="$2"
         write_layers "$archive_dir" "$output"
         sort -u -o "$output" "$output"
+    }
+
+    write_layer_digests() {
+        local archive_dir="$1"
+        local layers_file="$2"
+        local output="$3"
+        local layer digest
+        : >"$output"
+        while IFS= read -r layer; do
+            [[ -n "$layer" ]] || continue
+            digest=$(sha256sum "$archive_dir/$layer" | cut -d ' ' -f 1)
+            printf 'sha256:%s\n' "$digest" >>"$output"
+        done <"$layers_file"
     }
 
     write_owned_layers() {
@@ -1245,14 +1248,17 @@ let
       unpack_archive "tier 0" "${defaultImage.baseImage}" "$tmp/tier0"
       unpack_archive "tier 1" "${defaultImage.stableProfileImage}" "$tmp/tier1"
       unpack_archive "tier 2" "${defaultImage.agentImage}" "$tmp/tier2"
-      unpack_archive "leaf" "${defaultImage}" "$tmp/leaf"
-      for tier in tier0 tier1 tier2 leaf; do
+      prepare_image_artifact "selected leaf" "${defaultImage.source_kind}" "${toString defaultImage.source}" "$tmp/leaf" "$tmp/leaf.layers"
+      for tier in tier0 tier1 tier2; do
           write_layers "$tmp/$tier" "$tmp/$tier.layers"
       done
+      for tier in tier0 tier1 tier2 leaf; do
+          write_layer_digests "$tmp/$tier" "$tmp/$tier.layers" "$tmp/$tier.digests"
+      done
 
-      write_owned_layers "tier 1" "$tmp/tier0.layers" "$tmp/tier1.layers" "$tmp/tier1.owned"
-      write_owned_layers "tier 2" "$tmp/tier1.layers" "$tmp/tier2.layers" "$tmp/tier2.owned"
-      write_owned_layers "leaf" "$tmp/tier2.layers" "$tmp/leaf.layers" "$tmp/leaf.owned"
+      write_owned_layers "tier 1" "$tmp/tier0.digests" "$tmp/tier1.digests" "$tmp/tier1.owned"
+      write_owned_layers "tier 2" "$tmp/tier1.digests" "$tmp/tier2.digests" "$tmp/tier2.owned"
+      write_owned_layers "selected leaf" "$tmp/tier2.digests" "$tmp/leaf.digests" "$tmp/leaf.owned"
 
       echo "test-image-tier-graph: PASS (base -> stable-profile -> agent -> leaf layer prefixes verified)"
     '';
@@ -1366,14 +1372,12 @@ let
       tmp=$(mktemp -d)
       trap 'rm -rf "$tmp"' EXIT
 
-      unpack_archive "leaf" "${defaultImage}" "$tmp/leaf"
-      write_unique_layers "$tmp/leaf" "$tmp/leaf.layers"
-      config_file=$(jq -r '.[0].Config' "$tmp/leaf/manifest.json")
+      prepare_image_artifact "selected leaf" "${defaultImage.source_kind}" "${toString defaultImage.source}" "$tmp/leaf" "$tmp/leaf.layers"
       expected_command="${if isLinux then "/entrypoint.sh" else "/network-bootstrap.sh"}"
 
-      if ! jq -e --arg expected "$expected_command" '.config.Entrypoint == [$expected]' "$tmp/leaf/$config_file" >/dev/null; then
+      if ! jq -e --arg expected "$expected_command" '.config.Entrypoint == [$expected]' "$tmp/leaf/config.json" >/dev/null; then
           echo "FAIL: image config Entrypoint is not $expected_command" >&2
-          jq '.config.Entrypoint' "$tmp/leaf/$config_file" >&2
+          jq '.config.Entrypoint' "$tmp/leaf/config.json" >&2
           exit 1
       fi
       if ! extract_layer_member "$tmp/leaf" "$tmp/leaf.layers" "entrypoint.sh" "$tmp/entrypoint.sh"; then
@@ -1935,7 +1939,17 @@ let
 
       getent_target=""
       while IFS= read -r layer; do
-          line=$(tar -tvf "$tmp/$layer" | grep -E '(^| )\.?/bin/getent -> /nix/store/' || true)
+          listing=$(tar -tvf "$tmp/$layer")
+          line=""
+          if line=$(grep -m 1 -E '(^| )\.?/bin/getent -> /nix/store/' <<<"$listing"); then
+              :
+          else
+              grep_status="$?"
+              if [[ "$grep_status" -ne 1 ]]; then
+                  echo "FAIL: could not inspect $layer for /bin/getent" >&2
+                  exit "$grep_status"
+              fi
+          fi
           if [[ -n "$line" ]]; then
               getent_target=''${line##* -> }
           fi
@@ -3038,24 +3052,7 @@ let
         '';
   };
 
-  # Nix-DB-consistency verifier (specs/image-builder.md § In-Container Nix Store
-  # Consistency; Success Criteria "The baked image's Nix database is consistent
-  # with its on-disk store"). The image must register its FULL on-disk closure
-  # valid — the leaf's own contents AND every path the fromImage base +
-  # stable-profile tiers physically lay down (notably the tier-1 generated
-  # passwd/group/nix.conf store paths and prekHooksBundle). includeNixDB alone
-  # registers only the leaf's `contents`, leaving those tier paths on disk but
-  # unregistered — orphans that make the unprivileged in-container user's
-  # additive Nix ops try to chmod a root-owned path and fail with EPERM.
-  #
-  # The test reconstructs the composed image's on-disk store by listing every
-  # store path across all three tiers' layer tars, then reads the baked
-  # db.sqlite and asserts no on-disk store path is missing from ValidPaths. It
-  # also asserts the DB rides in the leaf customisation layer only — present in
-  # that final leaf layer, absent from both lower tiers — so registration does
-  # not perturb the tier-0/tier-1 blobs. Built via image.nix directly with a
-  # light agent package so the check does not drag in claude-code, but through
-  # the same tier chain that produces the diagnosed orphan.
+  # The selected source keeps Linux DB coverage on the production descriptor-to-OCI codec.
   nixDbProbeImage = import ../../lib/sandbox/image.nix {
     pkgs = linuxPkgs;
     hostPkgs = pkgs;
@@ -3084,92 +3081,36 @@ let
     ];
     text = ''
       ${archiveShellHelpers}
-          leaf_stream=${nixDbProbeImage}
-          tier2_tar=${nixDbProbeImage.agentImage}
-          tier1_tar=${nixDbProbeImage.stableProfileImage}
-          tier0_tar=${nixDbProbeImage.baseImage}
 
           tmp=$(mktemp -d)
           trap 'rm -rf "$tmp"' EXIT
 
-          materialize_archive "$leaf_stream" "$tmp/leaf.tar"
+          prepare_image_artifact \
+              "Nix DB probe" \
+              "${nixDbProbeImage.source_kind}" \
+              "${toString nixDbProbeImage.source}" \
+              "$tmp/image" \
+              "$tmp/image.layers"
+          list_layer_store_paths "$tmp/image" "$tmp/image.layers" >"$tmp/ondisk"
 
-          # Unpack each tier's docker-archive (manifest.json + <sha>/layer.tar
-          # blobs) and list the store paths every layer blob carries. The union
-          # across all four tiers is the composed image's on-disk store.
-          unpack_dir="$tmp/archives"
-          mkdir -p "$unpack_dir"
-          list_tier_store_paths() {
-              local arc="$1" d
-              d=$(mktemp -d -p "$unpack_dir")
-              tar -xf "$arc" -C "$d"
-              local layer
-              while IFS= read -r layer; do
-                  tar -tf "$d/$layer"
-              done < <(jq -r '.[0].Layers[]' "$d/manifest.json")
-          }
-
-          {
-              list_tier_store_paths "$tmp/leaf.tar"
-              list_tier_store_paths "$tier2_tar"
-              list_tier_store_paths "$tier1_tar"
-              list_tier_store_paths "$tier0_tar"
-          } | grep -oE 'nix/store/[a-z0-9]{32}-[^/]+' | sort -u | sed 's#^#/#' \
-              > "$tmp/ondisk"
-
-          # The baked Nix DB rides in the leaf customisation layer; find the
-          # layer carrying it and extract the whole db dir (the sqlite store is
-          # WAL-mode, so the -wal/-shm sidecars must travel with db.sqlite for
-          # the registered rows to be visible).
-          leafx="$tmp/leafx"
-          mkdir -p "$leafx"
-          tar -xf "$tmp/leaf.tar" -C "$leafx"
           dbroot="$tmp/dbroot"
           mkdir -p "$dbroot"
           db=""
-          db_layer=""
           while IFS= read -r layer; do
-              if tar -tf "$leafx/$layer" | grep -qE '(^|\./)nix/var/nix/db/db\.sqlite$'; then
-                  tar -xf "$leafx/$layer" -C "$dbroot"
+              listing=$(tar -tf "$tmp/image/$layer")
+              if grep -qE '(^|\./)nix/var/nix/db/db\.sqlite$' <<<"$listing"; then
+                  tar -xf "$tmp/image/$layer" -C "$dbroot"
                   db="$dbroot/nix/var/nix/db/db.sqlite"
-                  db_layer="$layer"
                   break
               fi
-          done < <(jq -r '.[0].Layers[]' "$leafx/manifest.json")
+          done <"$tmp/image.layers"
 
           if [[ -z "$db" || ! -f "$db" ]]; then
-              echo "FAIL: no nix/var/nix/db/db.sqlite found in any leaf layer" >&2
+              echo "FAIL: no nix/var/nix/db/db.sqlite found in the selected image layers" >&2
               echo "      (includeNixDB / load-db did not bake a database)" >&2
               exit 1
           fi
 
-          # The DB must ride in the leaf's customisation layer (its final layer):
-          # registration is metadata that copies no lower-tier store path up, so
-          # it stays in the volatile leaf tier.
-          cust_layer=$(jq -r '.[0].Layers[-1]' "$leafx/manifest.json")
-          if [[ "$db_layer" != "$cust_layer" ]]; then
-              echo "FAIL: baked Nix DB rides in leaf layer '$db_layer', not the" >&2
-              echo "      customisation layer '$cust_layer'" >&2
-              exit 1
-          fi
-
-          # The DB rides in the leaf ONLY: a db.sqlite in a lower tier would mean
-          # registration perturbed a tier-0/tier-1/tier-2 blob and broke the
-          # provenance-tiered chain's byte-identical-lower-tiers guarantee.
-          for tier_tar in "$tier2_tar" "$tier1_tar" "$tier0_tar"; do
-              td=$(mktemp -d -p "$unpack_dir")
-              tar -xf "$tier_tar" -C "$td"
-              while IFS= read -r layer; do
-                  if tar -tf "$td/$layer" | grep -qE '(^|\./)nix/var/nix/db/db\.sqlite$'; then
-                      echo "FAIL: lower tier '$tier_tar' carries a baked Nix DB;" >&2
-                      echo "      the DB must ride in the leaf customisation layer only" >&2
-                      exit 1
-                  fi
-              done < <(jq -r '.[0].Layers[]' "$td/manifest.json")
-          done
-
-          # Store paths are extracted read-only; SQLite opened read-write needs
-          # to write the -wal/-shm sidecars while reading WAL-resident rows.
           chmod -R u+rwX "$dbroot/nix/var/nix/db"
           sqlite3 "$db" 'SELECT path FROM ValidPaths' | sort -u \
               > "$tmp/registered"
@@ -3186,7 +3127,6 @@ let
               exit 1
           fi
 
-          # Every on-disk store path must be registered valid — no orphan.
           orphans=$(comm -23 "$tmp/ondisk" "$tmp/registered")
           if [[ -n "$orphans" ]]; then
               orphan_count=$(printf '%s\n' "$orphans" | grep -c '^')
@@ -3200,25 +3140,6 @@ let
     '';
   };
 
-  # Nix-DB no-dangling verifier (specs/image-builder.md § In-Container Nix Store
-  # Consistency; Success Criteria "The baked image's Nix database registers no
-  # dangling path"). The complement of the orphan check above: every path the
-  # baked DB registers VALID must exist on disk. The full build closure
-  # (leafContents ++ lowerTiersRootPaths) over-registers — it drags in
-  # prekHooksBundle (config.Env-only, never in any tier's `contents`) and its
-  # config.Env-unique closure, which buildLayeredImage never materializes into a
-  # store layer. Registering those bakes a dangling (registered-but-absent) path
-  # that makes an additive `nix build` trust the DB into feeding a missing path
-  # to a builder, which then fails with `No such file or directory`. image.nix
-  # registers over `lowerTiersContents` (the materialized contents closure), so
-  # the registered set must equal the on-disk set with zero dangling paths.
-  #
-  # The test reconstructs the composed image's on-disk store the same way the
-  # orphan check does — the union of store paths across all three tiers' layer
-  # tars — then reads the baked db.sqlite ValidPaths and asserts no REGISTERED
-  # path is absent from disk. Built via image.nix directly with a light
-  # agent package so the check does not drag in claude-code, through the same
-  # tier chain that produced the diagnosed dangling registration.
   imageNixDbNoDanglingTest = pkgs.writeShellApplication {
     name = "test-image-nix-db-no-dangling";
     runtimeInputs = [
@@ -3231,57 +3152,32 @@ let
     ];
     text = ''
       ${archiveShellHelpers}
-          leaf_stream=${nixDbProbeImage}
-          tier2_tar=${nixDbProbeImage.agentImage}
-          tier1_tar=${nixDbProbeImage.stableProfileImage}
-          tier0_tar=${nixDbProbeImage.baseImage}
 
           tmp=$(mktemp -d)
           trap 'rm -rf "$tmp"' EXIT
 
-          materialize_archive "$leaf_stream" "$tmp/leaf.tar"
+          prepare_image_artifact \
+              "Nix DB probe" \
+              "${nixDbProbeImage.source_kind}" \
+              "${toString nixDbProbeImage.source}" \
+              "$tmp/image" \
+              "$tmp/image.layers"
+          list_layer_store_paths "$tmp/image" "$tmp/image.layers" >"$tmp/ondisk"
 
-          # Unpack each tier's docker-archive and list the store paths every
-          # layer blob carries. The union across all four tiers is the composed
-          # image's on-disk store.
-          unpack_dir="$tmp/archives"
-          mkdir -p "$unpack_dir"
-          list_tier_store_paths() {
-              local arc="$1" d
-              d=$(mktemp -d -p "$unpack_dir")
-              tar -xf "$arc" -C "$d"
-              local layer
-              while IFS= read -r layer; do
-                  tar -tf "$d/$layer"
-              done < <(jq -r '.[0].Layers[]' "$d/manifest.json")
-          }
-
-          {
-              list_tier_store_paths "$tmp/leaf.tar"
-              list_tier_store_paths "$tier2_tar"
-              list_tier_store_paths "$tier1_tar"
-              list_tier_store_paths "$tier0_tar"
-          } | grep -oE 'nix/store/[a-z0-9]{32}-[^/]+' | sort -u | sed 's#^#/#' \
-              > "$tmp/ondisk"
-
-          # Extract the baked Nix DB from the leaf customisation layer (WAL-mode
-          # sqlite: the -wal/-shm sidecars must travel with db.sqlite).
-          leafx="$tmp/leafx"
-          mkdir -p "$leafx"
-          tar -xf "$tmp/leaf.tar" -C "$leafx"
           dbroot="$tmp/dbroot"
           mkdir -p "$dbroot"
           db=""
           while IFS= read -r layer; do
-              if tar -tf "$leafx/$layer" | grep -qE '(^|\./)nix/var/nix/db/db\.sqlite$'; then
-                  tar -xf "$leafx/$layer" -C "$dbroot"
+              listing=$(tar -tf "$tmp/image/$layer")
+              if grep -qE '(^|\./)nix/var/nix/db/db\.sqlite$' <<<"$listing"; then
+                  tar -xf "$tmp/image/$layer" -C "$dbroot"
                   db="$dbroot/nix/var/nix/db/db.sqlite"
                   break
               fi
-          done < <(jq -r '.[0].Layers[]' "$leafx/manifest.json")
+          done <"$tmp/image.layers"
 
           if [[ -z "$db" || ! -f "$db" ]]; then
-              echo "FAIL: no nix/var/nix/db/db.sqlite found in any leaf layer" >&2
+              echo "FAIL: no nix/var/nix/db/db.sqlite found in the selected image layers" >&2
               echo "      (includeNixDB / load-db did not bake a database)" >&2
               exit 1
           fi
@@ -3302,7 +3198,6 @@ let
               exit 1
           fi
 
-          # Every registered-valid path must exist on disk — no dangling.
           dangling=$(comm -13 "$tmp/ondisk" "$tmp/registered")
           if [[ -n "$dangling" ]]; then
               dangling_count=$(printf '%s\n' "$dangling" | grep -c '^')

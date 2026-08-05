@@ -155,8 +155,6 @@ Direct remote-builder access to the local project cache is out of scope for v1. 
   runtime image installer using the source metadata defined by
   `image-builder.md`, with no service-specific install path
   [system](verify:services.start-loads-image-source)
-- The service image carries wrix-managed image labels, including `wrix.managed=true` and `wrix.image.kind=service`
-  [system](verify:services.image-labels)
 - Cache-only service startup is suppressed for temp-directory scratch workspaces, so tests and integration runs do not accumulate `tmp.*-service` containers
   [system](verify:services.temp-cache-only)
 - Loom bead clone paths under `.loom/beads/<id>` use the outer repository service identity, so launches do not accumulate bead-named `*-service` containers

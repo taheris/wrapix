@@ -266,8 +266,9 @@ unchanged. `pre-commit.md` owns bundle contents and hook semantics.
 `wrix.lib.${system}.mkProfileImages` accepts profile names mapped to the
 `.image` values returned by `mkSandbox`. It produces JSON keyed first by
 profile name and then by the image's selected agent. Each agent entry contains
-`{ ref, source, source_kind, profile_config }`. The image builder owns source
-kind and composition; the sandbox spec owns agent selection.
+`{ ref, source, source_kind, profile_config }`; the image metadata is copied
+opaquely from the selected image. `image-builder.md` owns and verifies source
+kind and composition; `sandbox.md` owns agent selection.
 
 Bundled `packages.profile-images` covers direct images and
 `packages.profile-images-pi` covers the Pi images used by the repository
@@ -368,9 +369,9 @@ there are no per-server profile variants.
   [judge](../tests/judges/profiles.sh#test_rust_toolchain_field)
 - `wrix.profiles.rust` and `wrix.rustProfile { toolchain; sha256; }` closures contain zero `*-nightly-*` derivations after a fresh `nix flake update` (regression guard against reintroducing `fenix.packages.${system}.rust-analyzer`, which drags a nightly cargo/rustc/rust-std closure)
   [check](verify:profiles.rust-no-nightly-closure)
-- `mkProfileImages { rust = …; }` produces a JSON file whose entry for `rust` is keyed by the image's selected agent and whose selected-agent entry has `ref`, `source`, `source_kind`, and `profile_config` fields, with `source` and `source_kind` resolving to the same image source path and source kind as the corresponding `(wrix.mkSandbox { profile = wrix.profiles.rust; agent = …; }).image`
+- `mkProfileImages { rust = …; }` produces a JSON file whose entry for `rust` is keyed by the image's selected agent and whose selected-agent entry has `ref`, `source`, `source_kind`, and `profile_config` fields. Image metadata is copied opaquely from the corresponding `(wrix.mkSandbox { profile = wrix.profiles.rust; agent = …; }).image`; its values and meanings are owned and verified by `image-builder.md`
   [check](test-ci:test-profile-images-manifest-shape)
-- `packages.image-<name>[-<agent>]` resolves to the matching sandbox's selected `.image.source` under the source-kind contract owned by `image-builder.md`; all sandbox and profile-manifest outputs evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
+- `packages.image-<name>[-<agent>]` resolves to the matching sandbox's selected `.image.source`; source metadata remains owned by `image-builder.md`. All sandbox and profile-manifest outputs evaluate for each built-in profile, and `packages.default` resolves to `sandbox-rust-pi` with `meta.mainProgram = "wrix-run"`
   [check](verify:profiles.image-flake-outputs)
 - `profiles.rust.buildPackage` is exposed and returns an attrset with `bin`, `clippy`, `nextest`, and `cargoArtifacts` fields
   [check](verify:profiles.rust-build-package-exposed)

@@ -1319,61 +1319,6 @@ test_service_start_loads_image_source() {
     || return 1
 }
 
-test_service_image_labels() {
-  require_python3
-  require_nix
-
-  local wrix_bin expected_source_kind metadata_json metadata_file source_link
-  local service_image service_source workspace runtime_name
-  wrix_bin="$(build_wrix)"
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    expected_source_kind="docker-archive"
-    runtime_name="container"
-  else
-    expected_source_kind="nix-descriptor"
-    runtime_name="podman"
-  fi
-
-  metadata_json="$(nix eval --no-warn-dirty --json "$REPO_ROOT#wrix-service-image" --apply 'image: { inherit (image) labels ref source_kind; source = toString image.source; digest = toString image.digest; }')"
-  assert_service_image_metadata_contract "$metadata_json" "$expected_source_kind" || return 1
-  metadata_file="$TEST_TMP/service-image-label-metadata.json"
-  printf '%s\n' "$metadata_json" >"$metadata_file"
-  service_image="$(json_get "$metadata_file" ref)"
-  source_link="$TEST_TMP/service-image-label-source"
-  nix build --no-warn-dirty --out-link "$source_link" "$REPO_ROOT#wrix-service-image.source" >/dev/null
-  service_source="$source_link"
-
-  with_fake_runtime_env "$runtime_name"
-  export HOME="$TEST_TMP/home-image-labels"
-  export XDG_STATE_HOME="$TEST_TMP/xdg-state-image-labels"
-  export XDG_CACHE_HOME="$TEST_TMP/xdg-cache-image-labels"
-  export WRIX_SERVICE_IMAGE="$service_image"
-  export WRIX_SERVICE_IMAGE_SOURCE="$service_source"
-  export WRIX_SERVICE_IMAGE_SOURCE_KIND="$expected_source_kind"
-  export WRIX_IMAGE_KEEP_FILE="$TEST_TMP/service-image-label-mru.json"
-  mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-
-  workspace="$TEST_TMP/image-label-repo"
-  mkdir -p "$workspace/.git"
-  (cd "$workspace" && "$wrix_bin" service start >"$TEST_TMP/image-label-start.txt") || return 1
-
-  assert_file_contains \
-    "service launcher image" \
-    "$WRIX_FAKE_RUNTIME_STATE/run-image-label-repo-service" \
-    "$service_image" \
-    || return 1
-  assert_equals \
-    "launched service image managed label" \
-    "true" \
-    "$(runtime_image_label "$WRIX_CONTAINER_RUNTIME" "$service_image" "wrix.managed")" \
-    || return 1
-  assert_equals \
-    "launched service image kind label" \
-    "service" \
-    "$(runtime_image_label "$WRIX_CONTAINER_RUNTIME" "$service_image" "wrix.image.kind")" \
-    || return 1
-}
-
 test_service_mounts_beads_worktree_remote() {
   local wrix_bin
   wrix_bin="$(build_wrix)"
@@ -1413,7 +1358,6 @@ ALL_TESTS=(
   test_temp_cache_only_workspace_does_not_start_service
   test_loom_bead_workspace_uses_repo_service
   test_service_start_loads_image_source
-  test_service_image_labels
   test_service_mounts_beads_worktree_remote
 )
 

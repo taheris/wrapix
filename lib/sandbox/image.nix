@@ -232,18 +232,8 @@ let
   imageName = "wrix-${profile.name}${optionalString (agent != "direct") "-${agent}"}";
   imageEntrypoint = if networkBootstrapSh == null then "/entrypoint.sh" else "/network-bootstrap.sh";
 
-  # The leaf budgets only its tier-2 delta plus the customisation layer; with
-  # base (64) and stable-profile (48) below it, this keeps the stacked image at
-  # or under the 127-layer OCI ceiling (specs/image-builder.md § Base Image
-  # Layering).
-  maxLayers = 15;
+  leafLayerBudget = 15;
 
-  # The custom layeringPipeline (dockerMakeLayers) does not dedup `fromImage`
-  # the way the default popularity-contest path does, so remove_paths strips the
-  # UNION of all lower tiers' closures (tier 0 base + tier 1 stable-profile)
-  # first — a path a lower tier already ships is never re-emitted here. Fixed
-  # per-tier contents keep intra-tier ordering stable (specs/image-builder.md
-  # § Base Image Layering).
   layeringPipeline =
     imageBuilderPkgs.runCommandLocal "${imageName}-layering.json"
       {
@@ -254,7 +244,7 @@ let
         set -euo pipefail
         jq -n \
           --rawfile storePaths "$lowerClosure/store-paths" \
-          --argjson maxLayers ${toString maxLayers} \
+          --argjson maxLayers ${toString leafLayerBudget} \
           '($storePaths | split("\n") | map(select(length > 0))) as $lower
            | [
                [ "remove_paths", $lower ],

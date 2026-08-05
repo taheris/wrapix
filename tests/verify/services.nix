@@ -35,8 +35,6 @@ in
 
   "services.sandbox-cache-boundary" = sandboxNix "test_no_host_store_or_cache_secret";
 
-  "services.image-labels" = lifecycle "test_service_image_labels";
-
   "services.rust-helper-binaries" = serviceScript "cli-surface" "test_rust_helper_binaries";
 
   "services.host-nix-config" = ''

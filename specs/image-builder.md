@@ -8,7 +8,7 @@ Sandboxes need container images with all profile packages pre-installed, an agen
 
 ## Architecture
 
-`mkImage` (in `lib/sandbox/image.nix`) is the internal API called by `mkSandbox` (see `sandbox.md`). Inputs: a profile, the sandbox-selected runtime and resolved `agentPkg`, an entrypoint script path (Linux or Darwin), optional krun support, merged agent settings JSON, and the resolved MCP server configs. `sandbox.md` owns the selector's closed set and runtime meanings; this spec owns how the resolved selection is materialized. On Linux it emits a JSON image descriptor (`source_kind = "nix-descriptor"`) plus a prebuilt OCI layout whose layer descriptors are consumed by the runtime image installer's `skopeo oci:` install path. On Darwin it emits a Docker archive (`source_kind = "docker-archive"`) that the runtime installer converts to a temporary OCI archive for Apple's `container image load` path. Service/support images do not necessarily use `mkImage`, but they expose the same `{ ref, source, source_kind, digest }` contract and ownership labels. The Darwin-only `wrix-builder` bootstrap image is a support image in that family: `linux-builder.md` owns its Apple `container` lifecycle and persistent-store seeding contract, while this spec owns its source-kind metadata and wrix-managed labels.
+The profile image builder is called by `mkSandbox` (see `sandbox.md`). Inputs are a profile, the sandbox-selected runtime and resolved `agentPkg`, a platform entrypoint, optional krun support, merged agent settings JSON, and the resolved MCP server configs. `sandbox.md` owns the selector's closed set and runtime meanings; this spec owns how the resolved selection is materialized. On Linux the builder emits a JSON image descriptor (`source_kind = "nix-descriptor"`) plus a prebuilt OCI layout whose layer descriptors are consumed by the runtime image installer's `skopeo oci:` install path. On Darwin it emits a Docker archive (`source_kind = "docker-archive"`) that the runtime installer converts to a temporary OCI archive for Apple's `container image load` path. Service/support image builders expose the same `{ ref, source, source_kind, digest }` contract and ownership labels. The Darwin-only `wrix-builder` bootstrap image is a support image in that family: `linux-builder.md` owns its Apple `container` lifecycle and persistent-store seeding contract, while this spec owns its source-kind metadata and wrix-managed labels.
 
 Profile image layout:
 
@@ -29,7 +29,7 @@ Build pipeline:
 4. Bundle CA certificates from `pkgs.cacert`
 5. Emit a platform image source with the four-tier graph described below: Linux as a descriptor graph and Darwin as a tar-loadable image, with the entrypoint script as the OCI command
 
-`mkImageRef` (also in `lib/sandbox/`) produces the stable platform ref the launcher expects (`localhost/<name>:<hash-tag>` on Linux, bare `<name>:<hash-tag>` on Darwin's Apple `container` CLI). `mkSandbox` records both the source path and explicit source kind in `ProfileConfig` so launchers and orchestrators do not infer transport semantics from filenames or host platform alone. Other wrix-managed Nix-built images use the same source-kind distinction on Linux and Darwin.
+The image-reference boundary produces the stable platform ref the launcher expects (`localhost/<name>:<hash-tag>` on Linux, bare `<name>:<hash-tag>` on Darwin's Apple `container` CLI). `mkSandbox` records both the source path and explicit source kind in `ProfileConfig` so launchers and orchestrators do not infer transport semantics from filenames or host platform alone. Other wrix-managed Nix-built images use the same source-kind distinction on Linux and Darwin.
 
 Source kinds are stable API values:
 
@@ -40,7 +40,7 @@ Source kinds are stable API values:
 
 ## Provenance-Tiered Layering
 
-This section describes the profile-image layer graph used by `mkImage`. Service/support images follow the source-kind, digest, and label contract above; their owning specs may define a simpler layer graph when the profile-specific tiers do not apply.
+This section describes the profile-image layer graph. Service/support images follow the source-kind, digest, and label contract above; their owning specs may define a simpler layer graph when the profile-specific tiers do not apply.
 
 A profile image is a **four-tier graph**, each tier a derivation whose layer membership is fixed by its own closed set of contents. The fixed tier boundary is the cache contract: a store path keeps its layer assignment regardless of what changes above or below it, so per-blob transports can reuse unchanged layer digests instead of re-reading or re-tarring the same store paths.
 
@@ -138,7 +138,7 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
 ## Success Criteria
 
 
-- On Linux, `mkImage` emits a JSON image descriptor (`source_kind = "nix-descriptor"`) as the selected source path; the descriptor points at a prebuilt OCI layout but is not itself the raw image output, a Docker archive, an OCI archive, or a stream script
+- On Linux, the profile image builder emits a JSON image descriptor (`source_kind = "nix-descriptor"`) as the selected source path; the descriptor points at a prebuilt OCI layout but is not itself the raw image output, a Docker archive, an OCI archive, or a stream script
   [check](test-ci:test-linux-image-archiveless-source)
 - The Linux image digest used for install preflight is computed from descriptor/config metadata without executing the image source, materializing a whole-image tar, or running Docker-archive-to-OCI conversion
   [check](test-ci:test-image-digest-no-tar)
@@ -182,7 +182,7 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
   [check](test-ci:test-image-nix-db-no-dangling)
 - CA certificates from `pkgs.cacert` are baked into the image and `SSL_CERT_FILE` resolves to the bundle
   [check](test-ci:test-image-ca-certificates)
-- The Linux platform entrypoint is the image startup command; Darwin starts with its immutable network bootstrap, which drops `NET_ADMIN` before `exec`ing the Darwin agent entrypoint
+- The Linux platform entrypoint is embedded as the Linux image startup command; Darwin embeds both startup stages and selects its immutable network bootstrap as the image startup command. Bootstrap execution and capability-drop behavior are owned by `sandbox.md`
   [check](test-ci:test-image-entrypoint-command)
 - `wrix.prekHooks`, `wrix.prePushChecks`, and `wrix.skipIfMissing` all land in every profile image's store closure
   [check](test-ci:test-prek-hooks-closure)
@@ -201,12 +201,12 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
 
 ### Functional
 
-1. **OCI image generation** — `mkImage` returns a platform image source: a Linux descriptor consumed by wrix's `skopeo oci:` install path, and a Darwin Docker archive converted to a temporary OCI archive before `container image load`.
+1. **OCI image generation** — the profile image builder returns a platform image source: a Linux descriptor consumed by wrix's `skopeo oci:` install path, and a Darwin Docker archive converted to a temporary OCI archive before `container image load`.
 2. **Package bundling** — every derivation in the profile's `packages` list lands in the image's store closure.
 3. **Agent runtime composition** — the image builder materializes the runtime selected under `sandbox.md` and its resolved `agentPkg` as tier 2. Exactly that resolved package is baked, so non-selected agent packages are absent; the tier composes orthogonally with the workspace profile. The selector values, defaults, package-override API, and runtime meanings remain owned by `sandbox.md`.
 4. **Nix configuration** — `flakes` and `nix-command` are enabled; the in-container Nix sandbox is disabled (the outer container is the boundary).
 5. **CA certificates** — `pkgs.cacert` is included and `SSL_CERT_FILE` resolves to it.
-6. **Entrypoint embedding** — Linux starts with `lib/sandbox/linux/entrypoint.sh`; Darwin embeds both `network-bootstrap.sh` and `entrypoint.sh`, starts with the immutable bootstrap, and reaches the agent entrypoint only after dropping `NET_ADMIN`.
+6. **Entrypoint embedding** — Linux embeds its platform agent entrypoint as the startup command. Darwin embeds both the immutable network bootstrap and the platform agent entrypoint, and selects the bootstrap as the startup command. `sandbox.md` owns bootstrap execution and the capability-drop contract.
 7. **Hook installation** — every profile image carries `wrix.prekHooks` plus `wrix.prePushChecks` and `wrix.skipIfMissing` on `PATH`; the entrypoint configures `core.hooksPath` for the `/workspace` repository when `.pre-commit-config.yaml` is present, including when `.git` is a linked-worktree file. See `pre-commit.md` for the wrapper contracts.
 8. **Profile-image provenance-tiered layering** — each profile image is a four-tier graph (base → stable-profile → agent → leaf). Each tier's layer membership is fixed by its own closed contents and removes or skips the union of all lower tiers' closures, so a tier-3 (leaf) change leaves tier-0, tier-1, and tier-2 blobs byte-identical. Tier membership: `profile.corePackages` plus wrix-generated content is tier 1 (the field's contents are owned by `profiles.md`); the single selected `agentPkg` runtime is tier 2; downstream-appended packages and per-invocation generated files are tier 3. The agent tier rides *above* the toolchain so an agent-version bump never re-ships the heavier toolchain (which sits lowest, dragged only by a base change). Linux represents the graph as a descriptor plus OCI layer metadata; Darwin may represent it as a tar-loadable `fromImage` chain until Darwin per-blob install is verified. Service/support images follow the same source-kind contract but may define their own layer graph.
 9. **Linux descriptor source** — the Linux source artifact is a small descriptor containing the ordered layer descriptors, config digest metadata, and a prebuilt OCI layout reference. It is not a Docker archive, OCI archive, raw OCI layout path, or stream script. Runtime preflight and install dispatch are owned by `sandbox.md`.
@@ -216,7 +216,7 @@ Wrapper behavior, hook-stage semantics, and optional-tool policy remain owned by
 ### Non-Functional
 
 1. **Layered for caching** — the provenance-tiered graph (see § Provenance-Tiered Layering) fixes each tier's layer membership by construction, so a change in one tier does not re-hash a lower tier's blobs.
-2. **Reproducible** — same profile, agent selector, and consumer-supplied agent package (when applicable) produce the same image hash; `mkImageRef` is a pure function of the image.
+2. **Reproducible** — same profile, agent selector, and consumer-supplied agent package (when applicable) produce the same image hash; the stable image ref is a pure function of the image.
 3. **Iteration cost bounded by change size** — a change at tier 3 (a downstream-appended package, one MCP-config field, one entry in the agent settings JSON) re-emits only the leaf's delta; tier-0, tier-1, and tier-2 (agent) blobs stay byte-identical. On Linux, descriptor metadata and OCI layer digests isolate unchanged lower tiers from higher-tier re-hashing. An agent-version bump re-emits only the agent tier and the leaf, leaving the heavier tier-0/tier-1 blobs byte-identical. Darwin remains archive-load based until a per-blob install path is verified (see *Out of Scope*).
 
 ## Out of Scope
