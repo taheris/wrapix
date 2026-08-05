@@ -14,17 +14,16 @@
   pkgs,
   linuxPkgs,
   asTarball ? pkgs.stdenv.hostPlatform.isDarwin,
+  builderImage ? import ../sandbox/builder/image.nix {
+    pkgs = linuxPkgs;
+    hostPkgs = pkgs;
+    inherit asTarball;
+  },
 }:
 
 let
   shellLib = import ../util/shell.nix { inherit pkgs; };
   builderSystem = linuxPkgs.stdenv.hostPlatform.system;
-
-  builderImage = import ../sandbox/builder/image.nix {
-    pkgs = linuxPkgs;
-    hostPkgs = pkgs;
-    inherit asTarball;
-  };
 
   script = pkgs.writeShellScriptBin "wrix-builder" ''
       set -euo pipefail

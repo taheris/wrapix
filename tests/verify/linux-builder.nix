@@ -1,10 +1,12 @@
-{ pkgs, ... }:
+{ pkgs, linuxPkgs, ... }:
 
 let
   inherit (pkgs.lib) escapeShellArg;
 
+  fixtureBuilder = import ../builder/fixture.nix { inherit pkgs linuxPkgs; };
   builderScript = function: ''
-    run_repo_script ${escapeShellArg "tests/builder/key-material.sh"} ${escapeShellArg function}
+    WRIX_BUILDER_BIN=${escapeShellArg "${fixtureBuilder}/bin/wrix-builder"} \
+      run_repo_script ${escapeShellArg "tests/builder/key-material.sh"} ${escapeShellArg function}
   '';
 in
 {

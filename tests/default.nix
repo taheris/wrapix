@@ -158,7 +158,7 @@ let
     wrix-rust-nextest = wrix.rustPackage.nextest;
   };
 
-  verify = import ./verify { inherit pkgs system; };
+  verify = import ./verify { inherit pkgs system linuxPkgs; };
 
   systemTests = optionalAttrs pkgs.stdenv.isLinux {
     beads-live-system = import ./services/beads-system.nix {

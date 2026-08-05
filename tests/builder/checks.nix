@@ -19,10 +19,7 @@ let
     hostPkgs = pkgs;
     asTarball = true;
   };
-  darwinTransportBuilder = import ../../lib/builder {
-    inherit pkgs linuxPkgs;
-    asTarball = true;
-  };
+  fixtureBuilder = import ./fixture.nix { inherit pkgs linuxPkgs; };
   expectedSourceKind = "docker-archive";
   expectedRefPrefix = "wrix-builder:";
   labelsJson = toJSON builderImage.labels;
@@ -146,7 +143,7 @@ in
       require_directive authorizedkeysfile /home/%u/.ssh/authorized_keys
       require_directive hostkey /etc/ssh/ssh_host_ed25519_key
 
-      WRIX_BUILDER_BIN='${darwinTransportBuilder}/bin/wrix-builder' \
+      WRIX_BUILDER_BIN='${fixtureBuilder}/bin/wrix-builder' \
         bash ${./key-material.sh} test_start_publishes_ssh_only_on_host_loopback
 
       echo "test-linux-builder-sshd-hardening: PASS"
@@ -165,7 +162,7 @@ in
       openssh
     ];
     text = ''
-      WRIX_BUILDER_BIN='${darwinTransportBuilder}/bin/wrix-builder' \
+      WRIX_BUILDER_BIN='${fixtureBuilder}/bin/wrix-builder' \
         bash ${./key-material.sh} test_loads_image_through_source_kind_contract
     '';
   };
