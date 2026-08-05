@@ -54,9 +54,10 @@ as an alias.
 Beads splits state across the main worktree and the dedicated sync-branch
 worktree:
 
-- **Main worktree `.beads/`** holds the repository config (`config.yaml`)
-  and database metadata (`metadata.json`) — the only files git tracks
-  under `.beads/`. Everything else is gitignored: the local Dolt database
+- **Main worktree `.beads/`** holds the tracked ignore policy (`.gitignore`),
+  repository config (`config.yaml`), and database metadata (`metadata.json`) —
+  the only files git tracks under `.beads/`. The ignore policy is the durable
+  source of truth that keeps all remaining state local: the Dolt database
   (`dolt/`, served by the per-workspace service container), the JSONL backup
   (`backup/`), and runtime state (`bd.sock`, lock/log files, sync state).
 - **Sync-branch worktree** at `.git/beads-worktrees/<branch>/.beads/` holds
@@ -227,6 +228,10 @@ The Options Format Contract for `loom:clarify` notes is defined by loom
 upstream, not by this spec.
 
 ## Success Criteria
+
+- Git tracks exactly `.beads/.gitignore`, `.beads/config.yaml`, and
+  `.beads/metadata.json` under the main worktree's `.beads/` directory
+  [check](verify:beads.tracked-files)
 
 - `bd dolt pull` and `bd dolt push` succeed inside the wrix sandbox using
   staged beads config plus the shared Dolt service, with no fallback to a
